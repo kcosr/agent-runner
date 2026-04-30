@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   SettingsPage,
   SettingsResetButton,
@@ -9,6 +10,7 @@ import {
   type DashboardPreferenceKey,
   type DashboardSortDirection,
   type DashboardSortField,
+  useDaemonAuthToken,
   useDashboardPreferences,
 } from "../lib/settings.js";
 
@@ -70,7 +72,13 @@ const DISPLAY_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
 export function SettingsGeneralRoute() {
   const { preferences, resetPreference, resetPreferences, updatePreferences } =
     useDashboardPreferences();
+  const { clearDaemonToken, daemonToken, saveDaemonToken } = useDaemonAuthToken();
+  const [daemonTokenDraft, setDaemonTokenDraft] = useState(daemonToken ?? "");
   const preferenceRows = [...BOARD_PREFERENCE_ROWS, ...DISPLAY_PREFERENCE_ROWS];
+
+  useEffect(() => {
+    setDaemonTokenDraft(daemonToken ?? "");
+  }, [daemonToken]);
 
   const allDefaults =
     preferenceRows.every(({ key }) => preferences[key] === DEFAULT_DASHBOARD_PREFERENCES[key]) &&
@@ -118,6 +126,39 @@ export function SettingsGeneralRoute() {
       description="These local settings stay in sync with the remaining quick toggles in the runs toolbar."
       title="General"
     >
+      <SettingsSection
+        description="Local browser credentials used when this dashboard talks to an authenticated daemon."
+        title="Daemon access"
+      >
+        <SettingsRow
+          action={
+            <div className="settings-actions">
+              <button
+                className="btn btn-primary"
+                disabled={daemonTokenDraft.trim().length === 0}
+                onClick={() => saveDaemonToken(daemonTokenDraft)}
+                type="button"
+              >
+                Save token
+              </button>
+              <button className="btn" onClick={clearDaemonToken} type="button">
+                Clear token
+              </button>
+            </div>
+          }
+          control={
+            <input
+              aria-label="Daemon token"
+              className="settings-input"
+              onChange={(event) => setDaemonTokenDraft(event.target.value)}
+              type="password"
+              value={daemonTokenDraft}
+            />
+          }
+          description="Stored only in this browser and sent as a bearer token for daemon API and live event requests."
+          title="Daemon token"
+        />
+      </SettingsSection>
       <SettingsSection
         description="Persisted dashboard preferences that shape how the runs board appears by default."
         title="Board preferences"

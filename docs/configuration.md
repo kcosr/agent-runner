@@ -86,11 +86,22 @@ cannot find a git dir fall into an `unknown` bucket.
 | `TASK_RUNNER_CONNECT` | WebSocket URL the CLI should connect to instead of executing embedded |
 | `TASK_RUNNER_CONNECT_HOST` | SSH host the CLI should tunnel through before dialing `TASK_RUNNER_CONNECT` / `--connect` |
 | `TASK_RUNNER_CONNECT_LOCAL_PORT` | Loopback port to bind for `TASK_RUNNER_CONNECT_HOST`; defaults to the daemon port from `TASK_RUNNER_CONNECT` / `--connect` |
+| `TASK_RUNNER_DAEMON_AUTH_ENABLED` | Enable shared bearer-token daemon access protection when set to `true`, `1`, `yes`, or `on` |
+| `TASK_RUNNER_DAEMON_TOKEN` | Server token required when daemon auth is enabled; connected CLI clients also read it and send `Authorization: Bearer <token>` |
 | `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks; by default daemon projections skip those locks to avoid stale-lock stalls |
 
-Both can be overridden on the CLI via `--listen` (on `serve`) and
-`--connect` (on client commands). SSH-assisted connected mode uses
-`--connect-host` and `--connect-local-port`. See [daemon.md](daemon.md).
+Listen and connect URLs can be overridden on the CLI via `--listen` (on
+`serve`) and `--connect` (on client commands). SSH-assisted connected
+mode uses `--connect-host` and `--connect-local-port`. See
+[daemon.md](daemon.md).
+
+Daemon auth is a single shared-token control-plane guard. It protects
+`/api/*`, SSE, and WebSocket JSON-RPC access, but it is not multi-user
+isolation. Anyone with `TASK_RUNNER_DAEMON_TOKEN` has full daemon access.
+Keep the token and Authorization headers out of logs. For non-loopback or
+remote access, use SSH tunnels, HTTPS, WireGuard, Tailscale, a VPN, or an
+equivalent secure transport; the bearer token itself does not encrypt
+traffic.
 
 ### Scheduling
 
@@ -245,6 +256,10 @@ export TASK_RUNNER_PI_BIN=/opt/pi/bin/pi
 
 # Local daemon mode for shared state across terminals.
 export TASK_RUNNER_CONNECT=ws://127.0.0.1:4773/
+# Optional: protect daemon access with one shared token.
+# Use the same TASK_RUNNER_DAEMON_TOKEN in serve and connected CLI environments.
+# export TASK_RUNNER_DAEMON_AUTH_ENABLED=true
+# export TASK_RUNNER_DAEMON_TOKEN='a-long-random-token'
 
 # Optional instead: reach a remote daemon through an invocation-scoped SSH forward.
 # Replace the local TASK_RUNNER_CONNECT above with the remote daemon URL when using this mode.

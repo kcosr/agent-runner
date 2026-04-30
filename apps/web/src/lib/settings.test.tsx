@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DAEMON_TOKEN_STORAGE_KEY } from "./daemon-token.js";
 import {
   DashboardSettingsProvider,
+  useDaemonAuthToken,
   useDashboardPreferences,
   useDashboardViewState,
 } from "./settings.js";
@@ -10,11 +12,13 @@ function SettingsProbe() {
   const { preferences, resetPreference, resetPreferences, updatePreferences } =
     useDashboardPreferences();
   const { viewState, updateViewState } = useDashboardViewState();
+  const { clearDaemonToken, daemonToken, saveDaemonToken } = useDaemonAuthToken();
 
   return (
     <div>
       <pre data-testid="preferences">{JSON.stringify(preferences)}</pre>
       <pre data-testid="view-state">{JSON.stringify(viewState)}</pre>
+      <pre data-testid="daemon-token">{daemonToken ?? ""}</pre>
       <button onClick={() => updatePreferences({ showArchived: true })} type="button">
         Enable archived
       </button>
@@ -115,6 +119,12 @@ function SettingsProbe() {
         type="button"
       >
         Toggle group filter
+      </button>
+      <button onClick={() => saveDaemonToken("  saved-token  ")} type="button">
+        Save daemon token
+      </button>
+      <button onClick={() => clearDaemonToken()} type="button">
+        Clear daemon token
       </button>
     </div>
   );
@@ -226,6 +236,22 @@ describe("DashboardSettingsProvider", () => {
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"detail"');
+  });
+
+  it("hydrates, saves, trims, and clears the daemon token storage key", () => {
+    window.localStorage.setItem(DAEMON_TOKEN_STORAGE_KEY, "  initial-token  ");
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("daemon-token")).toHaveTextContent("initial-token");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save daemon token" }));
+    expect(screen.getByTestId("daemon-token")).toHaveTextContent("saved-token");
+    expect(window.localStorage.getItem(DAEMON_TOKEN_STORAGE_KEY)).toBe("saved-token");
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear daemon token" }));
+    expect(screen.getByTestId("daemon-token")).toHaveTextContent("");
+    expect(window.localStorage.getItem(DAEMON_TOKEN_STORAGE_KEY)).toBeNull();
   });
 
   it("migrates the legacy recent-updates preference while keeping unsaved view-state fields transient", () => {

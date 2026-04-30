@@ -1,4 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import type { AttachmentListEntry } from "@task-runner/core/contracts/attachments.js";
 import type { RunDependencyRef, RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties, ReactNode } from "react";
@@ -6,7 +7,7 @@ import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer
 import { ResumeRunDialog } from "../components/resume-run-dialog.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import type { ReconfigureRunPatch } from "../lib/api-client.js";
-import { isNotFoundError } from "../lib/api-client.js";
+import { isNotFoundError, isUnauthorizedError } from "../lib/api-client.js";
 import type { RunAuditState } from "../lib/run-audit.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import type { DashboardRightSurface, DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
@@ -119,6 +120,7 @@ export function RunDetailPanel({
   auditState: RunAuditState;
   timelineState: RunTimelineState;
 }) {
+  const navigate = useNavigate();
   const drawerStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
   const drawerClassName = drawerFullscreen ? "drawer drawer--fullscreen" : "drawer";
 
@@ -140,6 +142,24 @@ export function RunDetailPanel({
 
   if (detailSettling || selectedRunQuery.isPending) {
     return renderLoadingState();
+  }
+
+  if (selectedRunQuery.isError && isUnauthorizedError(selectedRunQuery.error)) {
+    return (
+      <aside aria-label="Run detail" className={drawerClassName} style={drawerStyle}>
+        <div className="drawer-state">
+          <h3>Daemon token required</h3>
+          <p>Enter the daemon token in Settings to load this run from the daemon.</p>
+          <button
+            className="btn btn-primary"
+            onClick={() => void navigate({ to: "/settings/general" })}
+            type="button"
+          >
+            Open Settings
+          </button>
+        </div>
+      </aside>
+    );
   }
 
   if (selectedRunQuery.isError && !isNotFoundError(selectedRunQuery.error)) {

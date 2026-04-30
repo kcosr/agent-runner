@@ -1,4 +1,5 @@
 import { createReadStream, createWriteStream, rmSync, statSync } from "node:fs";
+import type { ClientRequest, IncomingMessage } from "node:http";
 import { pipeline } from "node:stream/promises";
 import type {
   AttachmentScope,
@@ -55,6 +56,10 @@ export class DaemonRpcError extends Error {
     super(message);
     this.name = "DaemonRpcError";
   }
+}
+
+interface DaemonClientConnectOptions {
+  headers?: Record<string, string>;
 }
 
 type PendingCall = {
@@ -197,23 +202,47 @@ export class DaemonClient {
     });
   }
 
-  static async connect(url: string): Promise<DaemonClient> {
+  static async connect(
+    url: string,
+    options: DaemonClientConnectOptions = {},
+  ): Promise<DaemonClient> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(url, { headers: options.headers });
+      let settled = false;
       const onOpen = () => {
+        settled = true;
         cleanup();
         resolve(new DaemonClient(ws, url));
       };
-      const onError = (err: Error) => {
+      const rejectConnection = (cause: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         cleanup();
-        reject(new DaemonConnectionError(url, err));
+        reject(new DaemonConnectionError(url, cause));
+      };
+      const onError = (err: Error) => {
+        rejectConnection(err);
+      };
+      const onUnexpectedResponse = (_request: ClientRequest, response: IncomingMessage) => {
+        response.destroy();
+        const status = response.statusCode ?? "unknown";
+        rejectConnection(new Error(`Unexpected server response: ${status}`));
+      };
+      const onClose = () => {
+        rejectConnection(new Error("daemon connection closed"));
       };
       const cleanup = () => {
         ws.off("open", onOpen);
         ws.off("error", onError);
+        ws.off("unexpected-response", onUnexpectedResponse);
+        ws.off("close", onClose);
       };
       ws.once("open", onOpen);
       ws.once("error", onError);
+      ws.once("unexpected-response", onUnexpectedResponse);
+      ws.once("close", onClose);
     });
   }
 

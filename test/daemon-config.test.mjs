@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { bearerAuthHeader, resolveDaemonAuthConfig } from "../apps/cli/dist/daemon/auth.js";
 import {
   deriveHttpBaseUrl,
   listenSocketConfig,
@@ -86,4 +87,59 @@ test("daemon config rejects connect-host and local-port misconfigurations", () =
     () => resolveHostMode("ws://example.com:4773/", "prod-box", "70000", {}),
     /--connect-local-port must be an integer between 1 and 65535/,
   );
+});
+
+test("daemon auth config enables only explicit truthy values and trims the token", () => {
+  for (const value of ["true", "TRUE", "1", "yes", "Yes", "on", "ON"]) {
+    assert.deepEqual(
+      resolveDaemonAuthConfig({
+        TASK_RUNNER_DAEMON_AUTH_ENABLED: value,
+        TASK_RUNNER_DAEMON_TOKEN: "  daemon-secret  ",
+      }),
+      {
+        enabled: true,
+        token: "daemon-secret",
+      },
+    );
+  }
+
+  for (const value of [undefined, "", "false", "0", "no", "off", "enabled"]) {
+    assert.deepEqual(
+      resolveDaemonAuthConfig({
+        TASK_RUNNER_DAEMON_AUTH_ENABLED: value,
+        TASK_RUNNER_DAEMON_TOKEN: "",
+      }),
+      { enabled: false },
+    );
+  }
+});
+
+test("daemon auth config requires a non-empty token when enabled without leaking values", () => {
+  assert.throws(
+    () =>
+      resolveDaemonAuthConfig({
+        TASK_RUNNER_DAEMON_AUTH_ENABLED: "true",
+      }),
+    (error) =>
+      error instanceof Error &&
+      error.message.includes("TASK_RUNNER_DAEMON_TOKEN") &&
+      !error.message.includes("daemon-secret"),
+  );
+
+  assert.throws(
+    () =>
+      resolveDaemonAuthConfig({
+        TASK_RUNNER_DAEMON_AUTH_ENABLED: "on",
+        TASK_RUNNER_DAEMON_TOKEN: "   ",
+      }),
+    /TASK_RUNNER_DAEMON_TOKEN/,
+  );
+});
+
+test("daemon bearer auth helper trims client tokens and omits empty headers", () => {
+  assert.deepEqual(bearerAuthHeader("  client-secret  "), {
+    authorization: "Bearer client-secret",
+  });
+  assert.deepEqual(bearerAuthHeader("  "), {});
+  assert.deepEqual(bearerAuthHeader(undefined), {});
 });

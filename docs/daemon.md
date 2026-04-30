@@ -11,8 +11,9 @@
   projections.
 - **Static assets** for the bundled web dashboard out of the same port.
 
-The daemon is local infrastructure, not a multi-user remote service: no
-auth, no CORS, bind to `127.0.0.1` by default.
+The daemon is local infrastructure, not a multi-user remote service. It
+binds to `127.0.0.1` by default and can optionally require one shared
+bearer token for daemon API/WebSocket access.
 
 ## Starting the daemon
 
@@ -26,6 +27,42 @@ task-runner serve [--listen <ws-url>]
 - HTTP base URL is derived from the listen URL by substituting `ws` →
   `http`.
 - Graceful shutdown on `SIGINT` (exit 130) and `SIGTERM` (exit 0).
+
+### Bearer token access
+
+Daemon access protection is opt-in:
+
+```bash
+export TASK_RUNNER_DAEMON_AUTH_ENABLED=true
+export TASK_RUNNER_DAEMON_TOKEN='a-long-random-token'
+task-runner serve
+```
+
+`TASK_RUNNER_DAEMON_AUTH_ENABLED` accepts `true`, `1`, `yes`, or `on`
+after trimming and lowercasing. Other values leave daemon auth disabled.
+When auth is enabled, `TASK_RUNNER_DAEMON_TOKEN` must be non-empty after
+trimming or `task-runner serve` fails before binding.
+
+With auth enabled, every `/api/*` HTTP/SSE request and every WebSocket
+JSON-RPC connection must send:
+
+```http
+Authorization: Bearer <TASK_RUNNER_DAEMON_TOKEN>
+```
+
+For HTTP and SSE, missing, malformed, or wrong tokens return the normal
+JSON error envelope with `code: "UNAUTHENTICATED"` and status 401. SSE
+auth failures happen before event-stream headers are sent, so callers
+receive JSON rather than `data:` frames. WebSocket connections with
+missing or wrong tokens are rejected during the handshake with HTTP 401.
+
+`GET /app-config.json` and static dashboard assets stay public so the web
+app can boot and show a token-required state. Those public routes do not
+grant daemon access.
+
+Anyone with the token has full daemon access. This is not per-user
+isolation or RBAC. Do not log token values or Authorization
+headers.
 
 On startup the daemon mints a short `daemonInstanceId` and exposes it via
 `GET /api/daemon`:
@@ -70,6 +107,11 @@ Connected mode can optionally add an invocation-scoped SSH tunnel:
 
 Connected mode is how multiple terminals can share state and how the web
 UI and CLI stay in sync. `run --detach` only works in connected mode.
+
+If the daemon requires auth, connected CLI invocations read
+`TASK_RUNNER_DAEMON_TOKEN` from the client environment and send it as an
+Authorization bearer header on WebSocket and direct HTTP helper requests.
+The token is not forwarded as a generic daemon environment variable.
 
 Connected clients use JSON-RPC requests/responses for commands. Byte
 streams are JSON-RPC 2.0 notifications whose methods begin with
@@ -532,7 +574,14 @@ reimplementing lifecycle checks locally.
 ## Security model
 
 - Local-only: bind to `127.0.0.1` by default.
-- No authentication. Assumes a trusted local machine.
+- Optional shared bearer token auth protects daemon `/api/*` and
+  WebSocket access. It is daemon access protection only: anyone with the
+  token has full daemon access.
+- The MVP intentionally does not provide per-user isolation or RBAC.
+- Remote daemon access still requires transport security such as SSH
+  tunnels, HTTPS termination, WireGuard, Tailscale, a VPN, or an
+  equivalent trusted channel. The bearer token does not encrypt traffic.
+- Tokens and Authorization headers must not be logged.
 - No CORS headers. Single-origin; the daemon itself serves the web UI.
 - Input validation via Zod schemas. Known control-plane errors return
   HTTP 422; unknown errors return 500.

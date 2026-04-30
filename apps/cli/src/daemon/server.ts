@@ -1,5 +1,5 @@
 import { createReadStream, readFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { type IncomingMessage, createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import {
@@ -120,10 +120,12 @@ import {
 } from "@task-runner/core/util/debug-perf.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
+import { assertDaemonAuthorized, resolveDaemonAuthConfig } from "./auth.js";
 import { deriveAppRuntimeConfig, deriveHttpBaseUrl, listenSocketConfig } from "./config.js";
 import { serveFrontendRequest } from "./frontend.js";
 import { isKnownControlPlaneError } from "./http-errors.js";
 import { handleHttpRequest } from "./http-routes.js";
+import { sendError } from "./http-serializers.js";
 import { type DaemonHandlers, createDaemonOperations } from "./operations.js";
 import {
   type JsonRpcRequest,
@@ -423,6 +425,7 @@ export async function serveDaemon(
   listenUrl: string,
   handlers: Partial<DaemonHandlers> = {},
 ): Promise<DaemonServerHandle> {
+  const daemonAuth = resolveDaemonAuthConfig();
   const { host, port, path } = listenSocketConfig(listenUrl);
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const startedAt = new Date().toISOString();
@@ -2247,6 +2250,12 @@ export async function serveDaemon(
     }
 
     if (pathname === "/api" || pathname.startsWith("/api/")) {
+      try {
+        assertDaemonAuthorized(daemonAuth, req.headers.authorization);
+      } catch (err) {
+        sendError(res, err);
+        return;
+      }
       void handleHttpRequest(req, res, {
         operations,
         httpBaseUrl,
@@ -2268,7 +2277,18 @@ export async function serveDaemon(
 
     serveFrontendRequest(req, res, pathname);
   });
-  const wsServer = new WebSocketServer({ server: httpServer, path });
+  const wsServer = new WebSocketServer({
+    server: httpServer,
+    path,
+    verifyClient: ({ req }: { req: IncomingMessage }, callback) => {
+      try {
+        assertDaemonAuthorized(daemonAuth, req.headers.authorization);
+        callback(true);
+      } catch {
+        callback(false, 401, "Unauthorized");
+      }
+    },
+  });
 
   httpServer.on("connection", (socket) => {
     sockets.add(socket);

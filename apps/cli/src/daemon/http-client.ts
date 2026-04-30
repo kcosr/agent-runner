@@ -3,6 +3,10 @@ import { runAuditHistorySchema, runDetailSchema } from "@task-runner/core/contra
 import type { ReconfigureRunPatch, RunDetail } from "@task-runner/core/contracts/runs.js";
 import { deriveHttpBaseUrl } from "./config.js";
 
+interface DaemonHttpOptions {
+  authHeaders?: Record<string, string>;
+}
+
 interface ErrorEnvelope {
   error?: {
     message?: string;
@@ -51,6 +55,16 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
+function requestHeaders(
+  baseHeaders: Record<string, string>,
+  options: DaemonHttpOptions = {},
+): Record<string, string> {
+  return {
+    ...baseHeaders,
+    ...options.authHeaders,
+  };
+}
+
 function parseRunAuditHistory(value: unknown): RunAuditHistory {
   const record = asRecord(value);
   const parsed = runAuditHistorySchema.safeParse(record?.history);
@@ -73,15 +87,19 @@ export async function daemonReconfigureRun(
   connectUrl: string,
   runId: string,
   patch: ReconfigureRunPatch,
+  options: DaemonHttpOptions = {},
 ): Promise<RunDetail> {
   const response = await fetch(
     joinPath(deriveHttpBaseUrl(connectUrl), `/api/runs/${encodeURIComponent(runId)}/reconfigure`),
     {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-      },
+      headers: requestHeaders(
+        {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        options,
+      ),
       body: JSON.stringify(patch),
     },
   );
@@ -94,7 +112,7 @@ export async function daemonReconfigureRun(
 export async function daemonGetRunAuditHistory(
   connectUrl: string,
   runId: string,
-  options: { limit?: number } = {},
+  options: DaemonHttpOptions & { limit?: number } = {},
 ): Promise<RunAuditHistory> {
   const url = new URL(
     joinPath(deriveHttpBaseUrl(connectUrl), `/api/runs/${encodeURIComponent(runId)}/audit`),
@@ -103,7 +121,7 @@ export async function daemonGetRunAuditHistory(
     url.searchParams.set("limit", String(options.limit));
   }
   const response = await fetch(url, {
-    headers: { accept: "application/json" },
+    headers: requestHeaders({ accept: "application/json" }, options),
   });
   if (!response.ok) {
     return await readError(response);

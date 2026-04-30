@@ -3,6 +3,7 @@ import type { RunAuditEnvelope, RunAuditHistory } from "@task-runner/core/contra
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "./api-client.js";
 import { type ApplyEnvelopeResult, applyCursoredEnvelope } from "./run-timeline.js";
+import { useDaemonAuthToken } from "./settings.js";
 import { subscribeToRunAuditEvents } from "./sse.js";
 
 export interface RunAuditState {
@@ -53,7 +54,8 @@ export function useRunAuditState({
   enabled: boolean;
   runId?: string;
 }): RunAuditState {
-  const api = useMemo(() => createApiClient(config), [config]);
+  const { daemonToken } = useDaemonAuthToken();
+  const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const [state, setState] = useState<Omit<RunAuditState, "reload">>({
     history: null,
     isLoading: false,
@@ -204,6 +206,7 @@ export function useRunAuditState({
     }
 
     const unsubscribe = subscribeToRunAuditEvents(config, runId, {
+      daemonToken,
       onOpen: () => {
         if (disposed) {
           return;
@@ -258,7 +261,7 @@ export function useRunAuditState({
       loadAbortControllerRef.current = null;
       unsubscribe();
     };
-  }, [api, config, enabled, runId]);
+  }, [api, config, daemonToken, enabled, runId]);
 
   return {
     ...state,

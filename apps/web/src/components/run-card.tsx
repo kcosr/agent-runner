@@ -7,7 +7,7 @@ import { createApiClient } from "../lib/api-client.js";
 import { truncateEnd } from "../lib/format.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import type { DashboardStructuredFilters } from "../lib/settings.js";
+import { type DashboardStructuredFilters, useDaemonAuthToken } from "../lib/settings.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import {
   AttachmentIcon,
@@ -133,7 +133,8 @@ export function RunCard({
   const pinPending = actionPending === "pin";
   const cardClassName = ["card", selected ? "selected" : null].filter(Boolean).join(" ");
   const config = useRuntimeConfig();
-  const api = useMemo(() => createApiClient(config), [config]);
+  const { daemonToken } = useDaemonAuthToken();
+  const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const shouldLoadNoteDetail =
     noteDialogOpen || (run.notePresent && notePreviewOpen && !previewFirstNoteMode);
   const noteTitleId = useId();

@@ -38,6 +38,7 @@ import {
   type RunDrawerView,
   hasActiveDashboardStructuredFilters,
   toggleDashboardStructuredFilter,
+  useDaemonAuthToken,
   useDashboardPreferences,
   useDashboardViewState,
 } from "../lib/settings.js";
@@ -400,7 +401,8 @@ async function invalidateIfChangedAndStale(
 
 export function useRunsDashboardState() {
   const config = useRuntimeConfig();
-  const api = useMemo(() => createApiClient(config), [config]);
+  const { daemonToken } = useDaemonAuthToken();
+  const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const { preferences, updatePreferences } = useDashboardPreferences();
   const { viewState, updateViewState } = useDashboardViewState();
   const { streamStale: summaryStreamStale } = useRunEvents();
@@ -695,6 +697,7 @@ export function useRunsDashboardState() {
     }
 
     const unsubscribe = subscribeToRunDetailEvents(config, runId, {
+      daemonToken,
       onOpen: () => {
         if (!detailStreamStaleRef.current) {
           return;
@@ -732,7 +735,7 @@ export function useRunsDashboardState() {
       disposed = true;
       unsubscribe();
     };
-  }, [config, detailRunId]);
+  }, [config, daemonToken, detailRunId]);
 
   const closeRun = () => {
     void navigate({ to: "/" });

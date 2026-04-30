@@ -5,6 +5,7 @@ import type {
 } from "@task-runner/core/contracts/events.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "./api-client.js";
+import { useDaemonAuthToken } from "./settings.js";
 import { subscribeToRunTimelineEvents } from "./sse.js";
 
 export interface RunTimelineState {
@@ -135,7 +136,8 @@ export function useRunTimelineState({
   runId?: string;
   runIsLive: boolean;
 }): RunTimelineState {
-  const api = useMemo(() => createApiClient(config), [config]);
+  const { daemonToken } = useDaemonAuthToken();
+  const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const [state, setState] = useState<RunTimelineState>({
     history: null,
     isLoading: false,
@@ -316,6 +318,7 @@ export function useRunTimelineState({
     }
 
     const unsubscribe = subscribeToRunTimelineEvents(config, runId, {
+      daemonToken,
       onOpen: () => {
         if (disposed) {
           return;
@@ -375,7 +378,7 @@ export function useRunTimelineState({
       loadAbortControllerRef.current = null;
       unsubscribe();
     };
-  }, [api, config, enabled, runId, runIsLive]);
+  }, [api, config, daemonToken, enabled, runId, runIsLive]);
 
   return state;
 }

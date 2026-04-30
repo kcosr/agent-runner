@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient } from "./api-client.js";
+import { ApiError, createApiClient, isUnauthorizedError } from "./api-client.js";
 
 const config = {
   apiBasePath: "/api",
@@ -2263,5 +2263,70 @@ describe("api client", () => {
       text: "# Notes",
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/attachments/att-1/content");
+  });
+
+  it("attaches bearer auth from the configured daemon token to API and attachment requests", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runs: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response("attachment body", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config, { daemonToken: "  web-secret  " });
+
+    await expect(api.listRuns()).resolves.toEqual([]);
+    await expect(api.downloadAttachment("run-1", "att-1")).resolves.toMatchObject({
+      size: 15,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/runs?includeArchived=false", {
+      headers: {
+        accept: "application/json",
+        authorization: "Bearer web-secret",
+      },
+      signal: undefined,
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/runs/run-1/attachments/att-1/content", {
+      headers: {
+        authorization: "Bearer web-secret",
+      },
+    });
+  });
+
+  it("omits bearer auth when no daemon token is configured and recognizes unauthorized errors", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ runs: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "UNAUTHENTICATED",
+              message: "daemon authentication required",
+            },
+          }),
+          { status: 401 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.listRuns()).resolves.toEqual([]);
+    try {
+      await api.getRun("run-1");
+      throw new Error("expected getRun to fail");
+    } catch (error) {
+      expect(isUnauthorizedError(error)).toBe(true);
+    }
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/runs?includeArchived=false", {
+      headers: { accept: "application/json" },
+      signal: undefined,
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/runs/run-1", {
+      headers: { accept: "application/json" },
+      signal: undefined,
+    });
   });
 });
