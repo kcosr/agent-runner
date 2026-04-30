@@ -109,6 +109,7 @@
   `task-runner list tasks`, `task-runner show task <name|path>`, daemon
   `taskDefinitions.list/get` RPC methods, `/api/task-definitions` HTTP
   routes, and browser API client helpers.
+  ([#123](https://github.com/kcosr/task-runner/pull/123))
 - Added `scripts/migrate-manifests-v16.mjs` to promote schema v15
   manifests to schema v16 by backfilling `updatedAt` from
   `endedAt ?? startedAt`.
@@ -291,6 +292,7 @@
 - Resuming a run now preserves `blocked` task status while still resetting
   stale `in_progress` tasks to `pending`; blocked-only runs no longer resume
   implicitly as runnable work.
+  ([#123](https://github.com/kcosr/task-runner/pull/123))
 - `task-runner show agent|assignment|launcher|task` now rejects unsupported
   flags and extra positional arguments instead of ignoring them.
 - The web dashboard now requests and caches only non-archived runs by
