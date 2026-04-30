@@ -246,16 +246,7 @@ function daemonFilesystemLocksEnabled(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 function formatQueuedResumePrompt(messages: readonly QueuedResumeMessage[]): string {
-  const sections = messages.map(
-    (message, index) =>
-      `Queued message ${index + 1}, created at ${message.createdAt}:\n---\n${message.text}\n---`,
-  );
-  return [
-    "The user queued the following follow-up messages while the previous attempt was running.",
-    "",
-    ...sections.flatMap((section) => [section, ""]),
-    "Please continue the run, taking these queued messages into account.",
-  ].join("\n");
+  return messages.map((message) => message.text).join("\n\n");
 }
 
 function daemonExecution(daemonInstanceId: string) {
@@ -2128,6 +2119,7 @@ export async function serveDaemon(
         summary: getProjectedSummary(runId),
         detail: getProjectedDetail(runId),
       });
+      queueScheduleEvaluation?.(runId);
     } catch (error) {
       const errorMessage = resumeAccepted
         ? `task-runner daemon: failed to drain queued resume messages for run ${runId}: ${formatAutoStartError(error)}`
@@ -2141,6 +2133,7 @@ export async function serveDaemon(
           summary: getProjectedSummary(runId),
           detail: getProjectedDetail(runId),
         });
+        queueScheduleEvaluation?.(runId);
       } catch (publishError) {
         console.error(
           `task-runner daemon: failed to publish queued resume recovery for run ${runId}: ${formatAutoStartError(publishError)}`,

@@ -118,10 +118,10 @@ message while a run is live, `task-runner run queued-messages <id|path>`
 prints the current queue, and `task-runner run remove-queued-message
 <id|path> <message-id>` removes one queued message. When a managed run
 finishes and queued messages remain, the daemon starts the next resume
-session with those messages combined into one follow-up prompt. The
-messages are removed from the manifest only after that resume start is
-accepted, so a failed automatic resume keeps the queue available for
-retry or manual cleanup.
+session with those message texts joined by a blank line in one follow-up
+prompt. The messages are removed from the manifest only after that resume
+start is accepted, so a failed automatic resume keeps the queue available
+for retry or manual cleanup.
 
 For ready-start (running a `ready` run with zero prior attempts), the
 stored `manifest.brief` is reused verbatim.

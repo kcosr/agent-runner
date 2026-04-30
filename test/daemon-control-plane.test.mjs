@@ -3381,6 +3381,7 @@ Zero-task daemon work.
         cliVars: {},
         overrides: {},
       });
+      const startedDetail = await client.call("runs.get", { target: started.runId });
       await waitForValue(
         () => (globalThis.__queuedResumeBackendState.invocations.length >= 1 ? true : null),
         "initial backend invocation",
@@ -3403,6 +3404,8 @@ Zero-task daemon work.
         globalThis.__queuedResumeBackendState.invocations[1].resumeSessionId,
         "queued-session-1",
       );
+      const originalSchedule = recurringSchedule(new Date(Date.now() - 60_000));
+      setManifestSchedule(startedDetail.run.workspaceDir, originalSchedule);
       releaseResumeBackend();
       releaseResumeBackend = undefined;
 
@@ -3419,6 +3422,13 @@ Zero-task daemon work.
       );
       assert.equal(drainedAudit.event.fields.messageCount, 1);
       assert.deepEqual(drainedAudit.event.fields.messageIds, [queued.queuedResumeMessage.id]);
+      const advancedSchedule = await waitForValue(() => {
+        const manifest = readManifest(startedDetail.run.workspaceDir);
+        return manifest.schedule?.runAt !== originalSchedule.runAt ? manifest.schedule : null;
+      }, "recurring schedule to advance after queued resume drain");
+      assert.equal(advancedSchedule.enabled, true);
+      assert.equal(advancedSchedule.recurrence.mode, "reuse");
+      assert.ok(new Date(advancedSchedule.runAt).getTime() > Date.now());
     } finally {
       releaseInitialBackend?.();
       releaseResumeBackend?.();
@@ -3516,10 +3526,7 @@ test("daemon drains queued resume messages before evaluating a due schedule", as
         },
       ]);
       assert.equal(resumeMessages.length, 1);
-      assert.match(resumeMessages[0], /Queued message 1, created at /);
-      assert.match(resumeMessages[0], /First queued follow-up\./);
-      assert.match(resumeMessages[0], /Queued message 2, created at /);
-      assert.match(resumeMessages[0], /Second queued follow-up\./);
+      assert.equal(resumeMessages[0], "First queued follow-up.\n\nSecond queued follow-up.");
       assert.doesNotMatch(resumeMessages[0], /Resuming after scheduled delay/);
 
       await sleep(100);
