@@ -6,8 +6,6 @@ export const BUILTIN_BACKEND_IDS = ["claude", "codex", "cursor", "pi", "passive"
 export type BuiltinBackendId = (typeof BUILTIN_BACKEND_IDS)[number];
 export type BackendName = string;
 export const RESERVED_BACKEND_NAMES: ReadonlySet<string> = new Set(BUILTIN_BACKEND_IDS);
-export const BACKEND_IDS = BUILTIN_BACKEND_IDS;
-export type BackendId = BuiltinBackendId;
 
 export type EffortLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -166,6 +164,7 @@ export type ValidateSessionResult = { valid: true } | { valid: false; reason: st
 
 export interface Backend {
   id: BackendName;
+  sourcePath?: string;
   launcherMode?: "applies" | "direct";
   resolveConfig?(ctx: BackendConfigResolutionContext): unknown | Promise<unknown>;
   invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult>;

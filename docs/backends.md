@@ -85,9 +85,10 @@ resolved module path.
 
 Custom backend code is trusted local code. It is loaded into the
 task-runner process without sandboxing and cached for the process
-lifetime; daemon changes require a daemon restart. Dependencies resolve
-normally from the backend file location. Install them under the config
-directory, for example:
+lifetime; daemon changes require a daemon restart, including the first
+creation of the `backends/` root after daemon startup. Dependencies
+resolve normally from the backend file location. Install them under the
+config directory, for example:
 
 ```bash
 cd ~/.config/task-runner

@@ -86,6 +86,57 @@ test("registry: loads custom backend default export", async () => {
   assert.throws(() => resolveBackend("missing-agent"), /my-agent/);
 });
 
+test("registry: rejects custom backend directory with no candidate module", async () => {
+  const configDir = tempConfigDir();
+  mkdirSync(join(configDir, "backends", "empty-agent"), { recursive: true });
+
+  await assert.rejects(
+    () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+    (err) =>
+      err instanceof BackendConfigError &&
+      err.backendName === "empty-agent" &&
+      /expected one of backend\.ts, backend\.mts, backend\.js, backend\.mjs/.test(err.message),
+  );
+});
+
+test("registry: loads the first backend filename candidate by priority", async () => {
+  const configDir = tempConfigDir();
+  writeBackend(
+    configDir,
+    "priority-agent",
+    "backend.js",
+    `export default {
+      id: "priority-agent",
+      async invoke() {
+        return { exitCode: 0, signal: null, timedOut: false, aborted: false, rawStdout: "js", rawStderr: "" };
+      }
+    };`,
+  );
+  writeBackend(
+    configDir,
+    "priority-agent",
+    "backend.ts",
+    `export default {
+      id: "priority-agent",
+      async invoke(): Promise<Record<string, unknown>> {
+        return { exitCode: 0, signal: null, timedOut: false, aborted: false, rawStdout: "ts", rawStderr: "" };
+      }
+    };`,
+  );
+
+  await loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir });
+  const backend = resolveBackend("priority-agent");
+  assert.match(backend.sourcePath, /backend\.ts$/);
+  const result = await backend.invoke({
+    prompt: "",
+    cwd: configDir,
+    env: {},
+    resolvedBackendArgs: [],
+    timeoutSec: 1,
+  });
+  assert.equal(result.rawStdout, "ts");
+});
+
 for (const [ext, source] of [
   [
     "js",

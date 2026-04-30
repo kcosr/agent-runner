@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 16)
+├── run.json               # canonical manifest (schema version 17)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── agent-seed.md          # only when the run started from an agent file

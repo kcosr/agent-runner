@@ -139,7 +139,7 @@ async function loadCustomBackend(name: string, env: NodeJS.ProcessEnv): Promise<
   if (!isRecord(imported) || !("default" in imported)) {
     throw new BackendConfigError(name, sourcePath, formatIssue("default export is required"));
   }
-  return validateCustomBackend(name, sourcePath, imported.default);
+  return { ...validateCustomBackend(name, sourcePath, imported.default), sourcePath };
 }
 
 export async function loadCustomBackends(

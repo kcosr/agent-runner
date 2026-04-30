@@ -1,10 +1,18 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { codexBackend } from "../packages/core/dist/backends/codex.js";
+import { BackendConfigError, loadCustomBackends } from "../packages/core/dist/backends/registry.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readStatus, resetRun, setTask } from "../packages/core/dist/core/commands/service.js";
 import {
@@ -173,6 +181,12 @@ function writeNamedHook(baseDir, name, body) {
   writeFileSync(join(dir, "hook.ts"), body);
 }
 
+function writeCustomBackend(baseDir, name, body, filename = "backend.mjs") {
+  const dir = join(baseDir, "backends", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, filename), body);
+}
+
 function writeNodeScript(baseDir, name, body) {
   const path = join(baseDir, name);
   writeFileSync(path, body);
@@ -221,9 +235,14 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   const backendId = options.backendId ?? "mock";
   const backend = {
     id: backendId,
+    ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
     ...(backendId === "codex" ? { resolveConfig: codexBackend.resolveConfig } : {}),
     ...(options.resolveConfig ? { resolveConfig: options.resolveConfig } : {}),
     ...(options.launcherMode ? { launcherMode: options.launcherMode } : {}),
+    ...(options.validateSessionId ? { validateSessionId: options.validateSessionId } : {}),
+    ...(options.supportsBootstrapSessionImport !== undefined
+      ? { supportsBootstrapSessionImport: options.supportsBootstrapSessionImport }
+      : {}),
     invoke: mockInvoke,
   };
   const capture = createRunEventCapture();
@@ -245,6 +264,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
         callerCwd: options.callerCwd,
         execution: options.execution,
         resume: options.resume,
+        bootstrapBackendSessionId: options.bootstrapBackendSessionId,
         emitEvent: capture.emitEvent,
       });
       return {
@@ -572,6 +592,345 @@ Changed custom agent.
     resolveCallsAfterFirstRun,
     "resume reused frozen backendConfig",
   );
+});
+
+test("resolveConfig errors include backend name and source path", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+  const sourcePath = join(dir, "backends", "claude", "backend.mjs");
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("backend should not invoke after resolveConfig failure");
+        },
+        {},
+        {
+          backendId: "claude",
+          sourcePath,
+          resolveConfig() {
+            throw new Error("bad config");
+          },
+        },
+      ),
+    (err) =>
+      err instanceof BackendConfigError &&
+      err.backendName === "claude" &&
+      err.sourcePath === sourcePath &&
+      /resolveConfig threw: bad config/.test(err.message),
+  );
+});
+
+test("resolveConfig rejects non-persistable return values before manifest write", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+  const sourcePath = join(dir, "backends", "claude", "backend.mjs");
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("backend should not invoke after resolveConfig failure");
+        },
+        {},
+        {
+          backendId: "claude",
+          sourcePath,
+          resolveConfig() {
+            return { when: new Date() };
+          },
+        },
+      ),
+    (err) =>
+      err instanceof BackendConfigError &&
+      err.backendName === "claude" &&
+      err.sourcePath === sourcePath &&
+      /non-persistable/.test(err.message),
+  );
+});
+
+test("prepare hook backend swap re-resolves config, args, launcher, cwd, and session validation", async () => {
+  const dir = tempDir();
+  const evidencePath = join(dir, "custom-evidence.json");
+  writeAgent(
+    dir,
+    "swap-agent",
+    `---
+schemaVersion: 1
+name: swap-agent
+backend: claude
+backendConfig:
+  custom-swap:
+    mode: authored
+backendArgs:
+  custom-swap:
+    extraArgs:
+      - --custom-swap
+      - value
+---
+Swap agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "swap-work",
+    `---
+schemaVersion: 1
+name: swap-work
+hooks:
+  prepare:
+    - name: swap-backend
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  writeNamedHook(
+    dir,
+    "swap-backend",
+    `export default {
+  name: "swap-backend",
+  prepare(ctx) {
+    return {
+      action: "continue",
+      mutate: {
+        run: {
+          backend: "custom-swap",
+          cwd: ctx.run.cwd + "/prepared",
+          model: "hook-model",
+          effort: "low",
+          timeoutSec: 77,
+        },
+      },
+    };
+  },
+};
+`,
+  );
+  writeCustomBackend(
+    dir,
+    "custom-swap",
+    `import { writeFileSync } from "node:fs";
+const evidencePath = ${JSON.stringify(evidencePath)};
+export default {
+  id: "custom-swap",
+  launcherMode: "direct",
+  resolveConfig(ctx) {
+    return { ...ctx.authoredConfig, resolved: true };
+  },
+  async validateSessionId(ctx) {
+    writeFileSync(evidencePath, JSON.stringify({ phase: "validate", ctx }, null, 2));
+    return { valid: true };
+  },
+  async invoke(ctx) {
+    writeFileSync(evidencePath, JSON.stringify({ phase: "invoke", ctx }, null, 2));
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+      sessionId: "custom-swap-session",
+      transcript: "ok",
+      rawStdout: "",
+      rawStderr: ""
+    };
+  }
+};`,
+  );
+
+  await withSharedRuntimeEnv(dir, () => loadCustomBackends(process.env));
+  const result = await runWithMock(
+    dir,
+    async () => {
+      throw new Error("initial backend should not invoke after prepare swap");
+    },
+    {},
+    {
+      agentName: "swap-agent",
+      assignmentName: "swap-work",
+      backendId: "claude",
+    },
+  );
+  const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+
+  assert.equal(evidence.phase, "invoke");
+  assert.equal(evidence.ctx.cwd, join(dir, "prepared"));
+  assert.equal(evidence.ctx.model, "hook-model");
+  assert.equal(evidence.ctx.effort, "low");
+  assert.equal(evidence.ctx.timeoutSec, 77);
+  assert.deepEqual(evidence.ctx.backendConfig, { mode: "authored", resolved: true });
+  assert.deepEqual(evidence.ctx.resolvedBackendArgs, ["--custom-swap", "value"]);
+  assert.deepEqual(evidence.ctx.launcher, { kind: "direct", name: "direct" });
+  assert.equal(result.outcome.manifest.backend, "custom-swap");
+  assert.deepEqual(result.outcome.manifest.backendConfig, { mode: "authored", resolved: true });
+  assert.deepEqual(result.outcome.manifest.resolvedBackendArgs, ["--custom-swap", "value"]);
+  assert.deepEqual(result.outcome.manifest.launcher, { kind: "direct", name: "direct" });
+});
+
+test("prepare hook backend swap validates bootstrap session against final backend state", async () => {
+  const dir = tempDir();
+  const evidencePath = join(dir, "validate-evidence.json");
+  writeAgent(
+    dir,
+    "swap-agent",
+    `---
+schemaVersion: 1
+name: swap-agent
+backend: claude
+backendConfig:
+  validating-swap:
+    mode: authored
+backendArgs:
+  validating-swap:
+    extraArgs:
+      - --validating-swap
+---
+Swap agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "swap-work",
+    `---
+schemaVersion: 1
+name: swap-work
+hooks:
+  prepare:
+    - name: swap-backend
+tasks: []
+---
+Work.
+`,
+  );
+  writeNamedHook(
+    dir,
+    "swap-backend",
+    `export default {
+  name: "swap-backend",
+  prepare(ctx) {
+    return {
+      action: "continue",
+      mutate: { run: { backend: "validating-swap", cwd: ctx.run.cwd + "/prepared" } },
+    };
+  },
+};
+`,
+  );
+  writeCustomBackend(
+    dir,
+    "validating-swap",
+    `import { writeFileSync } from "node:fs";
+const evidencePath = ${JSON.stringify(evidencePath)};
+export default {
+  id: "validating-swap",
+  resolveConfig(ctx) {
+    return { ...ctx.authoredConfig, resolved: true };
+  },
+  async validateSessionId(ctx) {
+    writeFileSync(evidencePath, JSON.stringify(ctx, null, 2));
+    return { valid: true };
+  },
+  async invoke() {
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+      sessionId: "validating-swap-session",
+      transcript: "ok",
+      rawStdout: "",
+      rawStderr: ""
+    };
+  }
+};`,
+  );
+
+  await withSharedRuntimeEnv(dir, () => loadCustomBackends(process.env));
+  await runWithMock(
+    dir,
+    async () => {
+      throw new Error("initial backend should not invoke after prepare swap");
+    },
+    {},
+    {
+      agentName: "swap-agent",
+      assignmentName: "swap-work",
+      backendId: "claude",
+      bootstrapBackendSessionId: "imported-session",
+    },
+  );
+  const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+
+  assert.equal(evidence.sessionId, "imported-session");
+  assert.equal(evidence.cwd, join(dir, "prepared"));
+  assert.deepEqual(evidence.backendConfig, { mode: "authored", resolved: true });
+  assert.deepEqual(evidence.resolvedBackendArgs, ["--validating-swap"]);
+});
+
+test("post-prepare resolveConfig failure removes the fresh workspace", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "swap-agent", THREE_AGENT.replace("name: three", "name: swap-agent"));
+  writeAssignment(
+    dir,
+    "swap-work",
+    `---
+schemaVersion: 1
+name: swap-work
+hooks:
+  prepare:
+    - name: swap-backend
+tasks: []
+---
+Work.
+`,
+  );
+  writeNamedHook(
+    dir,
+    "swap-backend",
+    `export default {
+  name: "swap-backend",
+  prepare() {
+    return { action: "continue", mutate: { run: { backend: "bad-swap" } } };
+  },
+};
+`,
+  );
+  writeCustomBackend(
+    dir,
+    "bad-swap",
+    `export default {
+  id: "bad-swap",
+  resolveConfig() {
+    throw new Error("bad swap config");
+  },
+  async invoke() {
+    throw new Error("bad-swap should not invoke");
+  }
+};`,
+  );
+
+  await withSharedRuntimeEnv(dir, () => loadCustomBackends(process.env));
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("initial backend should not invoke after prepare swap");
+        },
+        {},
+        { agentName: "swap-agent", assignmentName: "swap-work", backendId: "claude" },
+      ),
+    /resolveConfig threw: bad swap config/,
+  );
+
+  const bucket = join(dir, "runs", "unknown");
+  const remaining = existsSync(bucket) ? readdirSync(bucket) : [];
+  assert.deepEqual(remaining, []);
 });
 
 test("passive backendArgs are accepted but freeze as inert empty args", async () => {

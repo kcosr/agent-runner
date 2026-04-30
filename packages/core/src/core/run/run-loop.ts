@@ -1,7 +1,7 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
-import { resolveBackend } from "../../backends/registry.js";
+import { BackendConfigError, resolveBackend } from "../../backends/registry.js";
 import {
   deriveRepoKey,
   resolveRunWorkspaceDirForRepo,
@@ -11,7 +11,11 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
-import { cloneBackendConfig, cloneResolvedBackendArgs } from "../backends/types.js";
+import {
+  cloneBackendConfig,
+  cloneResolvedBackendArgs,
+  isJsonishPersistable,
+} from "../backends/types.js";
 import type {
   Backend,
   BackendEvent,
@@ -611,15 +615,35 @@ async function resolveFreshBackendConfig(
   const backendName = backend.id;
   const authoredConfig = cloneBackendConfig(agentConfig.backendConfig?.[backendName]);
   const overrideConfig = cloneBackendConfig(overrides?.backendConfig?.[backendName]);
-  const resolved = backend.resolveConfig
-    ? await backend.resolveConfig({
-        backendName,
-        authoredConfig,
-        overrideConfig,
-        env: process.env as Record<string, string>,
-        execution,
-      })
-    : (authoredConfig ?? overrideConfig);
+  const sourcePath = backend.sourcePath ?? `<built-in:${backendName}>`;
+  let resolved: unknown;
+  try {
+    resolved = backend.resolveConfig
+      ? await backend.resolveConfig({
+          backendName,
+          authoredConfig,
+          overrideConfig,
+          env: process.env as Record<string, string>,
+          execution,
+        })
+      : (authoredConfig ?? overrideConfig);
+  } catch (error) {
+    if (error instanceof BackendConfigError) {
+      throw error;
+    }
+    throw new BackendConfigError(
+      backendName,
+      sourcePath,
+      `  - resolveConfig threw: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (resolved !== undefined && !isJsonishPersistable(resolved)) {
+    throw new BackendConfigError(
+      backendName,
+      sourcePath,
+      "  - resolveConfig returned non-persistable data",
+    );
+  }
   return cloneBackendConfig(resolved);
 }
 
@@ -631,6 +655,36 @@ function resolveFreshBackendArgs(
     return [];
   }
   return cloneResolvedBackendArgs(agentConfig.backendArgs?.[backendId]?.extraArgs ?? []);
+}
+
+async function validateBootstrapBackendSessionId(
+  sessionId: string,
+  backend: Backend,
+  cwd: string,
+  backendConfig: unknown,
+  resolvedBackendArgs: ResolvedBackendArgs,
+): Promise<void> {
+  if (backend.supportsBootstrapSessionImport === false) {
+    throw new InvalidBackendSessionError(
+      sessionId,
+      `${backend.id} backend-session import is unsupported because public ${backend.id} resume ids are not safely self-validating`,
+    );
+  }
+
+  if (!backend.validateSessionId) {
+    return;
+  }
+
+  const result = await backend.validateSessionId({
+    sessionId,
+    cwd,
+    env: process.env as Record<string, string>,
+    backendConfig: cloneBackendConfig(backendConfig),
+    resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
+  });
+  if (!result.valid) {
+    throw new InvalidBackendSessionError(sessionId, result.reason);
+  }
 }
 
 function resolveManifestBackendConfig(manifest: RunManifest): unknown | undefined {
@@ -1341,34 +1395,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
   }
 
-  if (
-    opts.bootstrapBackendSessionId !== undefined &&
-    currentBackend.supportsBootstrapSessionImport === false
-  ) {
-    throw new InvalidBackendSessionError(
-      opts.bootstrapBackendSessionId,
-      `${backend.id} backend-session import is unsupported because public ${backend.id} resume ids are not safely self-validating`,
-    );
-  }
-
-  // If the caller is importing an existing backend session, validate
-  // it via the backend's read-only check before any workspace
-  // creation. Skipped silently for backends that don't implement
-  // `validateSessionId`. We pass the resolved cwd because both
-  // backends key session storage by it.
-  if (opts.bootstrapBackendSessionId !== undefined && currentBackend.validateSessionId) {
-    const result = await currentBackend.validateSessionId({
-      sessionId: opts.bootstrapBackendSessionId,
-      cwd,
-      env: process.env as Record<string, string>,
-      backendConfig: cloneBackendConfig(backendConfig),
-      resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
-    });
-    if (!result.valid) {
-      throw new InvalidBackendSessionError(opts.bootstrapBackendSessionId, result.reason);
-    }
-  }
-
   const reusingWorkspace = resume !== undefined;
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
   let runGroupId = reusesFrozenSetup
@@ -1568,12 +1594,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     resolvedBackendArgs = resolveFreshBackendArgs(effectiveBackendName, agentConfig);
     prepareState.manifest.resolvedBackendArgs = cloneResolvedBackendArgs(resolvedBackendArgs);
     currentBackend = resolveRuntimeBackend(effectiveBackendName, backend);
-    backendConfig = await resolveFreshBackendConfig(
-      currentBackend,
-      agentConfig,
-      overrides,
-      execution,
-    );
+    try {
+      backendConfig = await resolveFreshBackendConfig(
+        currentBackend,
+        agentConfig,
+        overrides,
+        execution,
+      );
+    } catch (error) {
+      rmSync(workspaceDir, { recursive: true, force: true });
+      throw error;
+    }
     prepareState.manifest.backendConfig = cloneBackendConfig(backendConfig);
     model = prepareState.manifest.model ?? undefined;
     effort = (prepareState.manifest.effort ?? undefined) as RunOverrides["effort"];
@@ -1612,6 +1643,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         assignmentName,
       }),
       injectedVars,
+    );
+  }
+
+  // If the caller is importing an existing backend session, validate it
+  // after prepare hooks so the check sees the same backend, cwd,
+  // backendConfig, and backendArgs that the first invocation will use.
+  if (opts.bootstrapBackendSessionId !== undefined) {
+    await validateBootstrapBackendSessionId(
+      opts.bootstrapBackendSessionId,
+      currentBackend,
+      cwd,
+      backendConfig,
+      resolvedBackendArgs,
     );
   }
 
