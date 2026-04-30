@@ -374,7 +374,6 @@ function buildResumeSessionManifest(
     endedAt: null,
     status: "running",
     exitCode: null,
-    queuedResumeMessages: [],
     maxAttemptsPerSession: overrides.maxAttemptsPerSession,
     execution: overrides.execution,
     finalTasks: {},
@@ -1754,7 +1753,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       endedAt: null,
       status: "running",
       exitCode: null,
-      queuedResumeMessages: [],
       totalSessionCount: 1,
       execution,
     };
@@ -2040,7 +2038,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           endedAt: null,
           status: "running",
           exitCode: null,
-          queuedResumeMessages: [],
           totalSessionCount: 1,
           execution,
         };

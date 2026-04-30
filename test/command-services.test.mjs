@@ -1420,6 +1420,7 @@ test("command services: queued resume messages are live-only, ordered, removable
     assert.match(first.queuedResumeMessage.id, /^qmsg/);
     assert.equal(first.queuedResumeMessage.text, "first follow-up");
     assert.equal(typeof first.queuedResumeMessage.createdAt, "string");
+    assert.equal(first.run.isLive, true);
     assert.deepEqual(
       second.run.queuedResumeMessages.map((message) => message.text),
       ["first follow-up", "second follow-up"],
@@ -1483,6 +1484,7 @@ test("command services: queued resume messages are live-only, ordered, removable
       messageId: newer.queuedResumeMessage.id,
     });
     assert.equal(removedAfterFinish.removedMessageId, newer.queuedResumeMessage.id);
+    assert.equal(removedAfterFinish.run.isLive, false);
     assert.deepEqual(removedAfterFinish.run.queuedResumeMessages, []);
   });
 });

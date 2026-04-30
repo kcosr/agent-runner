@@ -84,6 +84,7 @@ export function isKnownControlPlaneError(err: unknown): boolean {
     err instanceof HookRuntimeError ||
     err instanceof RecursionDepthError ||
     err instanceof InvalidBackendSessionError ||
+    err instanceof QueuedResumeMessageNotFoundError ||
     err instanceof ScheduleValidationError
   );
 }

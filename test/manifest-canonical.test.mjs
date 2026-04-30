@@ -183,7 +183,7 @@ test("manifest schemaVersion is 18, captures repo, initializes updatedAt, and st
   assert.deepEqual(outcome.manifest.queuedResumeMessages, []);
 });
 
-test("manifest reset and resume start with no queued resume messages", async () => {
+test("manifest reset clears queued resume messages while resume preserves them for daemon drain", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -205,8 +205,8 @@ test("manifest reset and resume start with no queued resume messages", async () 
     resume: withSharedRuntimeEnv(dir, () => resolveResumeTarget(initial.workspaceDir, dir)),
     overrides: { message: "continue" },
   });
-  assert.deepEqual(resumed.manifest.queuedResumeMessages, []);
-  assert.deepEqual(readManifest(initial.workspaceDir).queuedResumeMessages, []);
+  assert.deepEqual(resumed.manifest.queuedResumeMessages, queued);
+  assert.deepEqual(readManifest(initial.workspaceDir).queuedResumeMessages, queued);
 
   writeManifest(initial.workspaceDir, {
     ...readManifest(initial.workspaceDir),

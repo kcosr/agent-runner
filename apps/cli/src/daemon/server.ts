@@ -1924,6 +1924,7 @@ export async function serveDaemon(
 
   let drainQueuedResumeMessagesAfterFinish = async (
     _runId: string,
+    _previous: RunDetail | null,
     _detail: RunDetail | null,
   ): Promise<boolean> => false;
 
@@ -2028,7 +2029,11 @@ export async function serveDaemon(
           activeRuns.delete(runId);
           lastTimelineCursorByRun.delete(runId);
           const current = getProjectedDetail(runId);
-          const queuedResumeHandled = await drainQueuedResumeMessagesAfterFinish(runId, current);
+          const queuedResumeHandled = await drainQueuedResumeMessagesAfterFinish(
+            runId,
+            previous,
+            current,
+          );
           if (!queuedResumeHandled) {
             publishMutationResult(runId, {
               summary: getProjectedSummary(runId),
@@ -2086,6 +2091,7 @@ export async function serveDaemon(
 
   drainQueuedResumeMessagesAfterFinish = async (
     runId: string,
+    _previous: RunDetail | null,
     detail: RunDetail | null,
   ): Promise<boolean> => {
     if (
@@ -2099,13 +2105,17 @@ export async function serveDaemon(
     if (pendingQueuedResumeDrains.has(runId)) {
       return true;
     }
+    // Snapshot before resume so an already-starting prompt is stable; drain later skips ids removed meanwhile.
     const messages = detail.queuedResumeMessages.map((message) => ({ ...message }));
     pendingQueuedResumeDrains.add(runId);
+    let resumeAccepted = false;
     try {
       await resumeManagedRun({
         target: runId,
         overrides: { message: formatQueuedResumePrompt(messages) },
       });
+      resumeAccepted = true;
+      await activeRuns.get(runId)?.done;
       app.drainQueuedResumeMessages(
         {
           target: runId,
@@ -2119,9 +2129,13 @@ export async function serveDaemon(
         detail: getProjectedDetail(runId),
       });
     } catch (error) {
-      console.error(
-        `task-runner daemon: failed to start queued resume for run ${runId}: ${formatAutoStartError(error)}`,
-      );
+      const errorMessage = resumeAccepted
+        ? `task-runner daemon: failed to drain queued resume messages for run ${runId}: ${formatAutoStartError(error)}`
+        : `task-runner daemon: failed to start queued resume for run ${runId}: ${formatAutoStartError(error)}`;
+      console.error(errorMessage);
+      if (!resumeAccepted) {
+        return false;
+      }
       try {
         publishMutationResult(runId, {
           summary: getProjectedSummary(runId),

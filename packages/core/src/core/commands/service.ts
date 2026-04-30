@@ -791,7 +791,10 @@ export function queueResumeMessage(
   });
 
   return {
-    run: toRunDetail({ manifest: resolved.manifest, isLive: true }),
+    run: toRunDetail({
+      manifest: resolved.manifest,
+      isLive: resolved.manifest.status === "running",
+    }),
     queuedResumeMessage,
   };
 }
@@ -806,6 +809,7 @@ export function removeQueuedResumeMessage(
 
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    // Allow post-finish cleanup when automatic drain could not consume queued intent.
     const beforeLength = resolved.manifest.queuedResumeMessages.length;
     resolved.manifest.queuedResumeMessages = resolved.manifest.queuedResumeMessages.filter(
       (message) => message.id !== input.messageId,
@@ -826,7 +830,10 @@ export function removeQueuedResumeMessage(
   });
 
   return {
-    run: toRunDetail({ manifest: resolved.manifest, isLive: true }),
+    run: toRunDetail({
+      manifest: resolved.manifest,
+      isLive: resolved.manifest.status === "running",
+    }),
     removedMessageId,
   };
 }

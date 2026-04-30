@@ -473,12 +473,14 @@ audit, and the web dashboard stay synchronized. The web Chat composer
 switches to `Queue` when `RunDetail.isLive` is true, even though live
 runs do not expose normal `canResume` capability.
 
-When the daemon is about to auto-start a run because a schedule is due or
-a dependency-gated run becomes runnable, it drains queued messages before
-starting the backend. Drained messages are combined into the resume
-message for that start and removed from the manifest only after the start
-path accepts them. If automatic start fails before the queued intent is
-accepted, the messages remain queued for retry or manual removal.
+When a daemon-managed run finishes, the daemon checks for queued resume
+messages before it publishes the terminal projection and before it
+evaluates schedule/dependency follow-on work. Drained messages are
+combined into the resume message for the next session and removed from
+the manifest only after the resume start path accepts them. If automatic
+resume fails before the queued intent is accepted, the messages remain
+queued for retry or manual removal and the normal terminal
+schedule/dependency evaluation still runs.
 
 ### Reset
 

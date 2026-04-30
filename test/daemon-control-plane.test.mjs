@@ -22,6 +22,7 @@ import {
   daemonGetRunAuditHistory,
   daemonReconfigureRun,
 } from "../apps/cli/dist/daemon/http-client.js";
+import { RPC_ERROR_COMMAND } from "../apps/cli/dist/daemon/protocol.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
 import {
@@ -132,6 +133,12 @@ function writeLauncher(baseDir, name, body, ext = ".yaml") {
   const dir = join(baseDir, "launchers");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${name}${ext}`), body);
+}
+
+function writeBackend(baseDir, name, body) {
+  const dir = join(baseDir, "backends", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "backend.mjs"), body);
 }
 
 async function initRun(baseDir, agentName = "daemon-agent", options = {}) {
@@ -954,6 +961,32 @@ test("daemon RPC and HTTP queued resume message endpoints publish shared DTOs", 
       );
       assert.equal(missingRemove.status, 404);
       assert.equal(missingRemove.body.error.code, "NOT_FOUND");
+
+      markRunSuccessful(run.workspaceDir);
+      const terminalQueue = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/queued-resume-messages`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message: "too late" }),
+        },
+      );
+      assert.equal(terminalQueue.status, 409);
+      assert.equal(terminalQueue.body.error.code, "CONFLICT");
+      await assert.rejects(
+        () =>
+          client.call("runs.queueResumeMessage", {
+            target: run.runId,
+            message: "too late",
+          }),
+        (error) => {
+          assert.ok(error instanceof DaemonRpcError);
+          assert.equal(error.code, RPC_ERROR_COMMAND);
+          assert.match(error.message, /queue is only available while the run is live/);
+          return true;
+        },
+      );
     } finally {
       await client.close();
       await server.close();
@@ -3257,6 +3290,139 @@ test("daemon auto-starts ready dependency runs after the final dependency succee
       assert.equal(running.runId, dependent.runId);
       assert.deepEqual(resumeTargets, [source.runId, dependent.runId]);
     } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon drains queued resume messages through the real runAgent resume path", async () => {
+  const dir = tempDir();
+  writeBackend(
+    dir,
+    "queued-test",
+    `export default {
+      id: "queued-test",
+      async invoke(ctx) {
+        const state = globalThis.__queuedResumeBackendState;
+        if (!state) {
+          throw new Error("missing queued resume backend state");
+        }
+        state.invocations.push({
+          prompt: ctx.prompt,
+          resumeSessionId: ctx.resumeSessionId ?? null,
+        });
+        const release = state.releases.shift();
+        if (release) {
+          await release;
+        }
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          aborted: false,
+          sessionId: ctx.resumeSessionId ?? "queued-session-1",
+          transcript: "ok",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    };`,
+  );
+  writeAgent(
+    dir,
+    "queued-agent",
+    `---
+schemaVersion: 1
+name: queued-agent
+backend: queued-test
+---
+Queued agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "daemon-work",
+    `---
+schemaVersion: 1
+name: daemon-work
+maxRetries: 0
+---
+Zero-task daemon work.
+`,
+  );
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let releaseInitialBackend;
+  let releaseResumeBackend;
+  globalThis.__queuedResumeBackendState = {
+    invocations: [],
+    releases: [
+      new Promise((resolve) => {
+        releaseInitialBackend = resolve;
+      }),
+      new Promise((resolve) => {
+        releaseResumeBackend = resolve;
+      }),
+    ],
+  };
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const started = await client.call("runs.start", {
+        agent: "queued-agent",
+        assignment: "daemon-work",
+        definitionCwd: dir,
+        callerCwd: dir,
+        cliVars: {},
+        overrides: {},
+      });
+      await waitForValue(
+        () => (globalThis.__queuedResumeBackendState.invocations.length >= 1 ? true : null),
+        "initial backend invocation",
+      );
+      const queued = await client.call("runs.queueResumeMessage", {
+        target: started.runId,
+        message: "Use the queued production path.",
+      });
+
+      releaseInitialBackend();
+      await waitForValue(
+        () => (globalThis.__queuedResumeBackendState.invocations.length >= 2 ? true : null),
+        "queued resume backend invocation",
+      );
+      assert.match(
+        globalThis.__queuedResumeBackendState.invocations[1].prompt,
+        /Use the queued production path\./,
+      );
+      assert.equal(
+        globalThis.__queuedResumeBackendState.invocations[1].resumeSessionId,
+        "queued-session-1",
+      );
+      releaseResumeBackend();
+      releaseResumeBackend = undefined;
+
+      const drained = await waitForValue(async () => {
+        const detail = await httpJson(httpBaseUrl, `/api/runs/${started.runId}`);
+        assert.equal(detail.status, 200);
+        return detail.body.run.queuedResumeMessages.length === 0 ? detail.body.run : null;
+      }, "queued resume messages to drain through real resume");
+      assert.equal(drained.runId, started.runId);
+
+      const audit = await httpJson(httpBaseUrl, `/api/runs/${started.runId}/audit`);
+      const drainedAudit = audit.body.history.events.find(
+        (event) => event.event.type === "run.queued_resume_messages_drained",
+      );
+      assert.equal(drainedAudit.event.fields.messageCount, 1);
+      assert.deepEqual(drainedAudit.event.fields.messageIds, [queued.queuedResumeMessage.id]);
+    } finally {
+      releaseInitialBackend?.();
+      releaseResumeBackend?.();
+      globalThis.__queuedResumeBackendState = undefined;
       await client.close();
       await server.close();
     }
