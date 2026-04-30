@@ -519,10 +519,10 @@ async function runCliAsync(args, opts = {}) {
   return { ...result, stdout, stderr };
 }
 
-async function startCliDaemon(baseDir, listenUrl) {
+async function startCliDaemon(baseDir, listenUrl, opts = {}) {
   const child = spawn("node", [CLI_PATH, "serve", "--listen", listenUrl], {
     cwd: baseDir,
-    env: { ...process.env, ...sharedRuntimeEnv(baseDir) },
+    env: { ...process.env, ...sharedRuntimeEnv(baseDir), ...(opts.env ?? {}) },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -6410,6 +6410,31 @@ test("daemon bearer auth protects HTTP, SSE, and WebSocket while leaving public 
       },
     );
   });
+});
+
+test("connected CLI reports daemon auth failures with token guidance", async () => {
+  const dir = tempDir();
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const token = "daemon-auth-secret";
+  const daemon = await startCliDaemon(dir, listenUrl, {
+    env: {
+      TASK_RUNNER_DAEMON_AUTH_ENABLED: "true",
+      TASK_RUNNER_DAEMON_TOKEN: token,
+    },
+  });
+  try {
+    const missingTokenCli = runCliExpectFail(["status", "--connect", listenUrl], {
+      cwd: dir,
+      env: { TASK_RUNNER_DAEMON_TOKEN: "" },
+    });
+    assert.equal(missingTokenCli.status, 3);
+    assert.match(missingTokenCli.stderr, /set TASK_RUNNER_DAEMON_TOKEN/);
+    assert.doesNotMatch(missingTokenCli.stderr, /serve --listen/);
+    assert.doesNotMatch(missingTokenCli.stderr, new RegExp(token));
+  } finally {
+    await daemon.stop();
+  }
 });
 
 test("daemon direct HTTP helpers send bearer auth when configured", async () => {

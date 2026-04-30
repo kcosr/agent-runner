@@ -473,7 +473,9 @@ When connecting to an auth-enabled daemon, set `TASK_RUNNER_DAEMON_TOKEN`
 in the client environment. Connected CLI requests trim that value and send
 `Authorization: Bearer <token>` on WebSocket handshakes and direct daemon
 HTTP helper requests. Empty or unset client tokens omit Authorization and
-will be rejected by auth-enabled daemons.
+will be rejected by auth-enabled daemons. A 401 WebSocket handshake failure
+prints a hint to set `TASK_RUNNER_DAEMON_TOKEN` instead of the generic
+daemon-start hint.
 
 The token is not a transport security layer. For remote daemons, use
 `--connect-host` SSH forwarding, HTTPS, WireGuard, Tailscale, a VPN, or an

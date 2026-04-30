@@ -100,4 +100,27 @@ describe("SSE subscriptions", () => {
     unsubscribe();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("does not reconnect fetch-based SSE streams after an unauthorized response", async () => {
+    vi.useFakeTimers();
+    const staleChanges: boolean[] = [];
+    const fetchMock = vi.fn().mockResolvedValue(new Response("unauthorized", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const unsubscribe = subscribeToRunSummaryEvents(config, {
+      daemonToken: "wrong-secret",
+      onEvent: vi.fn(),
+      onStaleChange: (stale) => staleChanges.push(stale),
+    });
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+    expect(staleChanges).toEqual([true]);
+
+    await vi.advanceTimersByTimeAsync(9000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
 });

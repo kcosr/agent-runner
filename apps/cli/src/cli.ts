@@ -302,12 +302,24 @@ function daemonUnavailableHint(connectUrl: string): string {
   return `task-runner: cannot connect to daemon at ${connectUrl}\nHint: task-runner serve --listen ${connectUrl}\n`;
 }
 
+function daemonAuthHint(connectUrl: string): string {
+  return `task-runner: cannot connect to daemon at ${connectUrl}\nHint: set ${TASK_RUNNER_DAEMON_TOKEN_ENV} to the daemon's bearer token.\n`;
+}
+
+function isDaemonAuthFailureMessage(message: string): boolean {
+  return /401|Unauthorized/i.test(message);
+}
+
 type DaemonConnectContext = Extract<ResolvedHostMode, { mode: "daemon" }> & {
   authHeaders: Record<string, string>;
 };
 
 function exitCommandFailure(err: unknown, connectUrl?: string): never {
   if (err instanceof DaemonConnectionError) {
+    if (isDaemonAuthFailureMessage(err.message)) {
+      process.stderr.write(daemonAuthHint(connectUrl ?? err.url));
+      process.exit(3);
+    }
     process.stderr.write(daemonUnavailableHint(connectUrl ?? err.url));
     process.exit(3);
   }
@@ -339,6 +351,11 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof RunGroupValidationError
   ) {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
+    process.exit(3);
+  }
+
+  if (connectUrl && err instanceof Error && isDaemonAuthFailureMessage(err.message)) {
+    process.stderr.write(daemonAuthHint(connectUrl));
     process.exit(3);
   }
 

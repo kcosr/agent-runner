@@ -2280,12 +2280,12 @@ export async function serveDaemon(
   const wsServer = new WebSocketServer({
     server: httpServer,
     path,
-    verifyClient: ({ req }: { req: IncomingMessage }) => {
+    verifyClient: ({ req }: { req: IncomingMessage }, callback) => {
       try {
         assertDaemonAuthorized(daemonAuth, req.headers.authorization);
-        return true;
+        callback(true);
       } catch {
-        return false;
+        callback(false, 401, "Unauthorized");
       }
     },
   });

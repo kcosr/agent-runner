@@ -74,16 +74,20 @@ function subscribeToFetchSse<T>(
       controller.signal.addEventListener("abort", onAbort, { once: true });
     });
 
-  const consumeOnce = async () => {
+  const consumeOnce = async (): Promise<boolean> => {
     let buffer = "";
     try {
       const response = await fetch(url, {
         headers: daemonAuthHeaders(options.daemonToken),
         signal: controller.signal,
       });
+      if (response.status === 401) {
+        options.onStaleChange?.(true);
+        return false;
+      }
       if (!response.ok || !response.body) {
         options.onStaleChange?.(true);
-        return;
+        return true;
       }
       options.onOpen?.();
 
@@ -109,19 +113,22 @@ function subscribeToFetchSse<T>(
         }
         options.onStaleChange?.(true);
       }
+      return true;
     } catch {
       if (!controller.signal.aborted) {
         options.onStaleChange?.(true);
       }
+      return true;
     }
   };
 
   const consume = async () => {
     while (!controller.signal.aborted) {
-      await consumeOnce();
-      if (!controller.signal.aborted) {
-        await waitForReconnect();
+      const shouldReconnect = await consumeOnce();
+      if (!shouldReconnect || controller.signal.aborted) {
+        return;
       }
+      await waitForReconnect();
     }
   };
 
