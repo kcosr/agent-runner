@@ -11,6 +11,8 @@ import { runInputSurfaceSchema } from "@task-runner/core/contracts/run-input-sur
 import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surface.js";
 import {
   attachmentListEntrySchema,
+  queueResumeMessageResultSchema,
+  removeQueuedResumeMessageResultSchema,
   runArchiveResultSchema,
   runAttachmentSchema,
   runAuditHistorySchema,
@@ -26,7 +28,9 @@ import {
   runTimelineHistorySchema,
 } from "@task-runner/core/contracts/run-schemas.js";
 import type {
+  QueueResumeMessageResult,
   ReconfigureRunPatch as ReconfigureRunPatchContract,
+  RemoveQueuedResumeMessageResult,
   RunArchiveResult,
   RunBackendSessionResult,
   RunDeleteResult,
@@ -380,6 +384,44 @@ async function readDependenciesResult(
     runDependenciesResultSchema,
     label,
   );
+}
+
+async function readQueueResumeMessageResult(
+  response: Response,
+  label: string,
+): Promise<QueueResumeMessageResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  const parsed = queueResumeMessageResultSchema.safeParse(await parseResponseJson(response, label));
+  if (!parsed.success) {
+    throw invalidResponse(
+      `${label} response payload is invalid`,
+      response.status,
+      parsed.error.flatten(),
+    );
+  }
+  return parsed.data;
+}
+
+async function readRemoveQueuedResumeMessageResult(
+  response: Response,
+  label: string,
+): Promise<RemoveQueuedResumeMessageResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  const parsed = removeQueuedResumeMessageResultSchema.safeParse(
+    await parseResponseJson(response, label),
+  );
+  if (!parsed.success) {
+    throw invalidResponse(
+      `${label} response payload is invalid`,
+      response.status,
+      parsed.error.flatten(),
+    );
+  }
+  return parsed.data;
 }
 
 async function readGroupResult(response: Response, label: string): Promise<RunGroupResult> {
@@ -975,6 +1017,36 @@ export function createApiClient(config: AppRuntimeConfig, options: ApiClientOpti
         },
       );
       await readRunIdResult(response, "Resume run");
+    },
+    async queueResumeMessage(runId: string, message: string): Promise<QueueResumeMessageResult> {
+      const response = await apiFetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/queued-resume-messages`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ message }),
+        },
+      );
+      return await readQueueResumeMessageResult(response, "Queue resume message");
+    },
+    async removeQueuedResumeMessage(
+      runId: string,
+      messageId: string,
+    ): Promise<RemoveQueuedResumeMessageResult> {
+      const response = await apiFetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/queued-resume-messages/${encodeURIComponent(messageId)}`,
+        ),
+        {
+          method: "DELETE",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readRemoveQueuedResumeMessageResult(response, "Remove queued resume message");
     },
     async abortRun(runId: string): Promise<void> {
       const response = await apiFetch(

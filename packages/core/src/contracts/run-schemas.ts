@@ -14,6 +14,9 @@ import type {
   RunTimelineHistory,
 } from "./events.js";
 import type {
+  QueueResumeMessageResult,
+  QueuedResumeMessage,
+  RemoveQueuedResumeMessageResult,
   RunAbortReason,
   RunActiveTask,
   RunArchiveResult,
@@ -146,6 +149,12 @@ const runAttachmentObjectSchema = z.object({
 });
 
 export const runAttachmentSchema: z.ZodType<RunAttachment> = runAttachmentObjectSchema;
+
+export const queuedResumeMessageSchema: z.ZodType<QueuedResumeMessage> = z.object({
+  id: z.string(),
+  text: z.string(),
+  createdAt: z.string(),
+});
 
 const resolvedHookSourceSchema = z
   .object({
@@ -280,6 +289,7 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
   attachmentCount: z.number(),
+  queuedResumeMessageCount: z.number(),
   hookCount: z.number().optional(),
   dependencyState: runDependencyStateSchema,
   schedule: runScheduleSchema.nullable(),
@@ -333,6 +343,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
   attachments: z.array(runAttachmentSchema),
+  queuedResumeMessages: z.array(queuedResumeMessageSchema),
   resolvedHooks: (
     z.array(resolvedHookDescriptorSchema) as z.ZodType<NonNullable<RunDetail["resolvedHooks"]>>
   ).optional(),
@@ -407,6 +418,17 @@ export const runGroupResultSchema: z.ZodType<RunGroupResult> = z.object({
 export const runDeleteResultSchema: z.ZodType<RunDeleteResult> = z.object({
   runId: z.string(),
 });
+
+export const queueResumeMessageResultSchema: z.ZodType<QueueResumeMessageResult> = z.object({
+  run: runDetailSchema,
+  queuedResumeMessage: queuedResumeMessageSchema,
+});
+
+export const removeQueuedResumeMessageResultSchema: z.ZodType<RemoveQueuedResumeMessageResult> =
+  z.object({
+    run: runDetailSchema,
+    removedMessageId: z.string(),
+  });
 
 export const runSummaryStreamEventSchema: z.ZodType<RunSummaryStreamEvent> = z.discriminatedUnion(
   "type",

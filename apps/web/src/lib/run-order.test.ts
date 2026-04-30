@@ -31,6 +31,7 @@ function run(overrides: Partial<RunSummary> & Pick<RunSummary, "runId">): RunSum
     tasksCompleted: 0,
     tasksTotal: 1,
     attachmentCount: 0,
+    queuedResumeMessageCount: 0,
     dependencyState: {
       ready: true,
       total: 0,

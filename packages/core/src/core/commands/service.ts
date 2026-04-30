@@ -28,6 +28,8 @@ import type {
   RunAttachmentRemoveResult,
 } from "../../contracts/attachments.js";
 import {
+  type QueueResumeMessageResult,
+  type RemoveQueuedResumeMessageResult,
   type RunArchiveResult,
   type RunBackendSessionResult,
   type RunDeleteResult,
@@ -102,6 +104,9 @@ import {
   appendRunBackendSessionUpdatedEvent,
   appendRunFinishedEvent,
   appendRunGroupChangedEvent,
+  appendRunQueuedResumeMessageAddedEvent,
+  appendRunQueuedResumeMessageRemovedEvent,
+  appendRunQueuedResumeMessagesDrainedEvent,
   appendRunReadyEvent,
   appendRunRenamedEvent,
   appendRunResetEvent,
@@ -277,6 +282,13 @@ export class TaskNotFoundError extends CommandError {
   }
 }
 
+export class QueuedResumeMessageNotFoundError extends CommandError {
+  constructor(runId: string, messageId: string) {
+    super(`queued resume message "${messageId}" not found in run ${runId}`);
+    this.name = "QueuedResumeMessageNotFoundError";
+  }
+}
+
 export class ScheduleMutationError extends CommandError {
   constructor(message: string) {
     super(message);
@@ -287,6 +299,8 @@ export class ScheduleMutationError extends CommandError {
 type TaskMutationKind = "set" | "append-notes" | "add";
 
 const MAX_TITLE_LENGTH = 200;
+const MAX_QUEUED_RESUME_MESSAGES = 50;
+const MAX_QUEUED_RESUME_MESSAGE_LENGTH = 20_000;
 
 function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
   try {
@@ -363,6 +377,40 @@ function requireGroupMutationAllowed(manifest: RunManifest, verb: "set" | "clear
   if (manifest.status === "running") {
     throw new ConflictError(`cannot ${verb} group for a running run`);
   }
+}
+
+const QUEUE_LIVE_ONLY_MESSAGE = "queue is only available while the run is live; use resume instead";
+
+function requireQueuedResumeMessageAppendAllowed(manifest: RunManifest): void {
+  if (manifest.status !== "running") {
+    throw new ConflictError(QUEUE_LIVE_ONLY_MESSAGE);
+  }
+  if (manifest.queuedResumeMessages.length >= MAX_QUEUED_RESUME_MESSAGES) {
+    throw new ConflictError(
+      `queued resume message limit reached for run ${manifest.runId} (${MAX_QUEUED_RESUME_MESSAGES})`,
+    );
+  }
+}
+
+function normalizeQueuedResumeText(message: string): string {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) {
+    throw new CommandError("queued resume message cannot be empty");
+  }
+  if (trimmed.length > MAX_QUEUED_RESUME_MESSAGE_LENGTH) {
+    throw new CommandError(
+      `queued resume message exceeds ${MAX_QUEUED_RESUME_MESSAGE_LENGTH} characters (${trimmed.length})`,
+    );
+  }
+  return trimmed;
+}
+
+function nextQueuedResumeMessageId(manifest: Pick<RunManifest, "queuedResumeMessages">): string {
+  let id: string;
+  do {
+    id = `qmsg${shortId()}`;
+  } while (manifest.queuedResumeMessages.some((message) => message.id === id));
+  return id;
 }
 
 function readRunGraph(): ReadonlyMap<string, RunManifest> {
@@ -707,6 +755,133 @@ export function readRunSummary(target: string): SummaryCommandResult {
     tasksTotal: summary.tasksTotal,
   });
   return summary;
+}
+
+export function queueResumeMessage(
+  input: { target: string; message: string },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): QueueResumeMessageResult {
+  const resolved = resolveRun(input.target);
+  const text = normalizeQueuedResumeText(input.message);
+  let queuedResumeMessage!: RunManifest["queuedResumeMessages"][number];
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    requireQueuedResumeMessageAppendAllowed(resolved.manifest);
+    queuedResumeMessage = {
+      id: nextQueuedResumeMessageId(resolved.manifest),
+      text,
+      createdAt: new Date().toISOString(),
+    };
+    resolved.manifest.queuedResumeMessages = [
+      ...resolved.manifest.queuedResumeMessages,
+      queuedResumeMessage,
+    ];
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunQueuedResumeMessageAddedEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+        messageId: queuedResumeMessage.id,
+        messageCreatedAt: queuedResumeMessage.createdAt,
+      }),
+    );
+  });
+
+  return {
+    run: toRunDetail({
+      manifest: resolved.manifest,
+      isLive: resolved.manifest.status === "running",
+    }),
+    queuedResumeMessage,
+  };
+}
+
+export function removeQueuedResumeMessage(
+  input: { target: string; messageId: string },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RemoveQueuedResumeMessageResult {
+  const resolved = resolveRun(input.target);
+  let removedMessageId = "";
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    // Allow post-finish cleanup when automatic drain could not consume queued intent.
+    const beforeLength = resolved.manifest.queuedResumeMessages.length;
+    resolved.manifest.queuedResumeMessages = resolved.manifest.queuedResumeMessages.filter(
+      (message) => message.id !== input.messageId,
+    );
+    if (resolved.manifest.queuedResumeMessages.length === beforeLength) {
+      throw new QueuedResumeMessageNotFoundError(resolved.manifest.runId, input.messageId);
+    }
+    removedMessageId = input.messageId;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunQueuedResumeMessageRemovedEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+        messageId: removedMessageId,
+      }),
+    );
+  });
+
+  return {
+    run: toRunDetail({
+      manifest: resolved.manifest,
+      isLive: resolved.manifest.status === "running",
+    }),
+    removedMessageId,
+  };
+}
+
+export function drainQueuedResumeMessages(
+  input: { target: string; messageIds: string[] },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): {
+  run: RunDetail;
+  removedMessageIds: string[];
+} {
+  const resolved = resolveRun(input.target);
+  const snapshotIds = new Set(input.messageIds);
+  const removedMessageIds: string[] = [];
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    resolved.manifest.queuedResumeMessages = resolved.manifest.queuedResumeMessages.filter(
+      (message) => {
+        if (!snapshotIds.has(message.id)) {
+          return true;
+        }
+        removedMessageIds.push(message.id);
+        return false;
+      },
+    );
+    if (removedMessageIds.length === 0) {
+      return;
+    }
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunQueuedResumeMessagesDrainedEvent({
+        manifest: resolved.manifest,
+        context: systemRunEventContext(auditOrigin),
+        messageIds: removedMessageIds,
+      }),
+    );
+  });
+
+  return {
+    run: toRunDetail({
+      manifest: resolved.manifest,
+      isLive: resolved.manifest.status === "running",
+    }),
+    removedMessageIds,
+  };
 }
 
 export function readBrief(target: string): BriefCommandResult {

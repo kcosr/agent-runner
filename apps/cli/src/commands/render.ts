@@ -7,6 +7,9 @@ import type {
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditHistory } from "@task-runner/core/contracts/events.js";
 import type {
+  QueueResumeMessageResult,
+  QueuedResumeMessage,
+  RemoveQueuedResumeMessageResult,
   RunBackendSessionResult,
   RunDependencyRef,
   RunDetail,
@@ -35,6 +38,74 @@ interface SystemStatusResult {
   hostMode: HostMode;
   connectUrl: string | null;
   daemon: DaemonInfo | null;
+}
+
+export interface RunQueuedResumeMessagesResult {
+  runId: string;
+  queuedResumeMessages: QueuedResumeMessage[];
+}
+
+export interface QueueResumeMessageCliResult {
+  runId: string;
+  queuedResumeMessage: QueuedResumeMessage;
+  queuedResumeMessageCount: number;
+}
+
+export interface RemoveQueuedResumeMessageCliResult {
+  runId: string;
+  removedMessageId: string;
+  queuedResumeMessageCount: number;
+}
+
+export function queueResumeMessageCliResult(
+  result: QueueResumeMessageResult,
+): QueueResumeMessageCliResult {
+  return {
+    runId: result.run.runId,
+    queuedResumeMessage: result.queuedResumeMessage,
+    queuedResumeMessageCount: result.run.queuedResumeMessages.length,
+  };
+}
+
+export function removeQueuedResumeMessageCliResult(
+  result: RemoveQueuedResumeMessageResult,
+): RemoveQueuedResumeMessageCliResult {
+  return {
+    runId: result.run.runId,
+    removedMessageId: result.removedMessageId,
+    queuedResumeMessageCount: result.run.queuedResumeMessages.length,
+  };
+}
+
+export function queuedResumeMessagesCliResult(detail: RunDetail): RunQueuedResumeMessagesResult {
+  return {
+    runId: detail.runId,
+    queuedResumeMessages: detail.queuedResumeMessages,
+  };
+}
+
+export function renderRunQueueResumeMessage(result: QueueResumeMessageCliResult): string {
+  return `task-runner: queued message ${result.queuedResumeMessage.id} for run ${result.runId}\n`;
+}
+
+export function renderRunRemoveQueuedResumeMessage(
+  result: RemoveQueuedResumeMessageCliResult,
+): string {
+  return `task-runner: removed queued message ${result.removedMessageId} from run ${result.runId}\n`;
+}
+
+export function renderRunQueuedResumeMessages(result: RunQueuedResumeMessagesResult): string {
+  if (result.queuedResumeMessages.length === 0) {
+    return `No queued resume messages for run ${result.runId}.\n`;
+  }
+  const lines = [`Queued resume messages for run ${result.runId}:`];
+  for (const message of result.queuedResumeMessages) {
+    lines.push(`${message.id}  ${message.createdAt}`);
+    for (const textLine of message.text.split("\n")) {
+      lines.push(`  ${textLine}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function formatRunSessionSummary(label: string, session: RunSessionSummary | null): string {
@@ -443,6 +514,18 @@ function formatRunAuditEventLine(event: RunAuditHistory["events"][number]["event
     case "run.archived":
     case "run.unarchived":
       return event.type;
+    case "run.queued_resume_message_added":
+      return `${event.type}${formatAuditDetails([
+        ["messageId", event.fields.messageId],
+        ["messageCreatedAt", event.fields.messageCreatedAt],
+      ])}`;
+    case "run.queued_resume_message_removed":
+      return `${event.type}${formatAuditDetails([["messageId", event.fields.messageId]])}`;
+    case "run.queued_resume_messages_drained":
+      return `${event.type}${formatAuditDetails([
+        ["messageIds", event.fields.messageIds],
+        ["messageCount", event.fields.messageCount],
+      ])}`;
     case "run.renamed":
       return `${event.type}${formatAuditDetails([
         ["previous", event.fields.previousName],

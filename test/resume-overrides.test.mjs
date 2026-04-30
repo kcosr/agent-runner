@@ -222,18 +222,18 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v17 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v18 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 17);
+  assert.equal(resolved.manifest.schemaVersion, 18);
   assert.equal(resolved.manifest.updatedAt, "2026-04-11T16:05:00Z");
 });
 
-test("resolveResumeTarget rejects a v17 manifest carrying legacy assignment.workspacePath", () => {
+test("resolveResumeTarget rejects a v18 manifest carrying legacy assignment.workspacePath", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "legacy-workspace-path");
   const manifest = baseManifest("legacy-workspace-path", workspaceDir);
@@ -264,7 +264,7 @@ test("resolveResumeTarget rejects a v17 manifest carrying legacy assignment.work
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 17,
+    schemaVersion: 18,
     runId,
     repo: "unknown",
     agent: {
@@ -299,6 +299,7 @@ function baseManifest(runId, workspaceDir) {
     runGroupId: runId,
     dependencies: [],
     schedule: null,
+    queuedResumeMessages: [],
     exitCode: 0,
     totalAttemptCount: 1,
     maxAttemptsPerSession: 4,

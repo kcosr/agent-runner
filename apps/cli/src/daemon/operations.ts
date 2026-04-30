@@ -9,6 +9,7 @@ import type {
   clearRunSchedule,
   createTask,
   deleteArchivedRun,
+  drainQueuedResumeMessages,
   getAttachment,
   getAttachmentList,
   getDefinition,
@@ -23,9 +24,11 @@ import type {
   getTask,
   getTaskList,
   initRun,
+  queueResumeMessage,
   readyRun,
   reconfigureRun,
   removeDependency,
+  removeQueuedResumeMessage,
   removeRunAttachment,
   renameRun,
   reset,
@@ -45,7 +48,9 @@ import type {
   DaemonInfo,
   DefinitionGetParams,
   RunInputSurfaceParams,
+  RunQueueResumeMessageParams,
   RunReadyParams,
+  RunRemoveQueuedResumeMessageParams,
   RunScheduleParams,
   RunSetGroupParams,
   RunsListParams,
@@ -95,6 +100,9 @@ export interface DaemonHandlers {
   createTask: typeof createTask;
   initRun: typeof initRun;
   readyRun: typeof readyRun;
+  queueResumeMessage: typeof queueResumeMessage;
+  removeQueuedResumeMessage: typeof removeQueuedResumeMessage;
+  drainQueuedResumeMessages: typeof drainQueuedResumeMessages;
   startRun: typeof startRun;
   resumeRun: typeof resumeRun;
 }
@@ -146,6 +154,18 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     readyRun(params: RunReadyParams) {
       return { run: ctx.readyRun(params.target, { schedule: params.schedule }) };
+    },
+    queueResumeMessage(params: RunQueueResumeMessageParams) {
+      return ctx.queueResumeMessage({
+        target: params.target,
+        message: params.message,
+      });
+    },
+    removeQueuedResumeMessage(params: RunRemoveQueuedResumeMessageParams) {
+      return ctx.removeQueuedResumeMessage({
+        target: params.target,
+        messageId: params.messageId,
+      });
     },
     startCliRun(request: CliRunsStartParams) {
       return ctx.startManagedRun({

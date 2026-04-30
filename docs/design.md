@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `17`. Older manifest shapes are not
+The current manifest schema is version `18`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -136,6 +136,7 @@ The canonical record is `run.json`. Important persisted fields:
 - `hookState` (hook-owned state bag)
 - `hookAudits` (per-hook execution audit records)
 - attachment metadata
+- queued resume messages (`queuedResumeMessages`)
 - attempt and session history
 - `runtimeVars` (frozen concrete values)
 - `runtimeVarSources` (frozen var provenance for projection-time redaction)
@@ -165,6 +166,12 @@ Scheduling is manifest-canonical. The persisted contract is
 Projection surfaces derive `scheduleState` (`none`, `paused`, `future`,
 or `due`) from `manifest.schedule` and the current time. `scheduleState`
 is not persisted, migrated, or accepted as input.
+
+Queued resume messages are also manifest-canonical. The persisted
+contract is `manifest.queuedResumeMessages`, an ordered array of `{ id,
+text, createdAt }` records. These records represent user intent that
+should be applied to a later resume/start opportunity; they are not
+backend live interrupts and they are not stored in daemon-local memory.
 
 ## Brief and caller instructions
 
@@ -450,6 +457,31 @@ Important rules:
 
 See [resume.md](resume.md).
 
+### Queued resume messages
+
+`task-runner run queue-message <id|path> <text>` appends a normalized
+message to `manifest.queuedResumeMessages`. `task-runner run
+queued-messages <id|path>` reads the existing run detail projection, and
+`task-runner run remove-queued-message <id|path> <message-id>` removes one
+pending message. Daemon HTTP and WebSocket RPC expose the same queue and
+remove mutations.
+
+Queued resume message mutations are allowed only for runs that can accept
+pending resume intent under the shared command service rules. Connected
+CLI mutations route through daemon WebSocket RPC so daemon projections,
+audit, and the web dashboard stay synchronized. The web Chat composer
+switches to `Queue` when `RunDetail.isLive` is true, even though live
+runs do not expose normal `canResume` capability.
+
+When a daemon-managed run finishes, the daemon checks for queued resume
+messages before it publishes the terminal projection and before it
+evaluates schedule/dependency follow-on work. Drained messages are
+combined into the resume message for the next session and removed from
+the manifest only after the resume start path accepts them. If automatic
+resume fails before the queued intent is accepted, the messages remain
+queued for retry or manual removal and the normal terminal
+schedule/dependency evaluation still runs.
+
 ### Reset
 
 `run reset <id|path>` restores the initialized-state seed stored in the
@@ -552,6 +584,7 @@ Rules:
 - `task-runner attachment add|remove`
 - `task-runner run reset|archive|unarchive|delete|set-name|`
   `set-backend-session|clear-backend-session`
+- `task-runner run queue-message|remove-queued-message`
 - `task-runner run schedule [set]|enable|disable|clear`
 - `task-runner run set-group|clear-group`
 - `task-runner run add-dep|remove-dep|clear-deps`
@@ -563,6 +596,10 @@ or dependency projections.
 
 Dependency mutations are only allowed on `initialized` runs. Group
 mutations are allowed only for non-running runs and are cycle-checked.
+
+Queue mutations update `manifest.queuedResumeMessages`, append queue audit
+events, and publish fresh summary/detail projections. They do not create
+an attempt or session by themselves.
 
 ### Daemon surface
 
@@ -582,6 +619,12 @@ Due schedules found during daemon startup are treated as missed/skipped
 instead of being started immediately: one-time schedules are cleared
 with an audit reason, while recurring schedules advance to the next
 eligible occurrence. This avoids replaying stale work after downtime.
+
+The daemon treats queued resume messages as daemon-owned pending user
+intent. It reads them from the manifest, publishes their count on run
+summaries and the full list on run details, drains them at automatic
+start boundaries, and leaves them persisted if the start attempt fails
+before the backend accepts the resume message.
 
 Live subscriptions are split by responsibility instead of sharing one
 mixed event bus:

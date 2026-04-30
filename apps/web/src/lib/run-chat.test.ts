@@ -85,6 +85,7 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
     tasksCompleted: 0,
     tasksTotal: 0,
     attachments: [],
+    queuedResumeMessages: [],
     dependencies: [],
     dependents: [],
     schedule: null,

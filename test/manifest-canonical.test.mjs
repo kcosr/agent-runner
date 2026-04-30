@@ -15,8 +15,12 @@ import {
   loadedAgentFromManifest,
   synthesizeAdHocAgent,
 } from "../packages/core/dist/core/config/loaded.js";
-import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
+import { resolveResumeTarget, writeManifest } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
+import {
+  refreshManifestTaskState,
+  resetWorkspaceRun,
+} from "../packages/core/dist/core/run/workspace-state.js";
 import { sharedRuntimeEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
@@ -126,7 +130,9 @@ function okBackend() {
 async function freshRun(baseDir, opts = {}) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig(opts.agentName ?? "canonical-claude", baseDir);
-    const loadedAssignment = loadAssignmentConfig(opts.assignmentName ?? "canonical-work", baseDir);
+    const loadedAssignment = opts.resume
+      ? undefined
+      : loadAssignmentConfig(opts.assignmentName ?? "canonical-work", baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
     try {
@@ -137,6 +143,7 @@ async function freshRun(baseDir, opts = {}) {
         backend: opts.backend ?? okBackend(),
         initialize: opts.initialize ?? false,
         overrides: opts.overrides,
+        resume: opts.resume,
         callerCwd: opts.callerCwd ?? baseDir,
         stderr: () => {},
         stdout: () => {},
@@ -163,16 +170,74 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 17, captures repo, and initializes updatedAt", async () => {
+test("manifest schemaVersion is 18, captures repo, initializes updatedAt, and starts with no queued resume messages", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 17);
+  assert.equal(outcome.manifest.schemaVersion, 18);
   assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.updatedAt, outcome.manifest.startedAt);
   assert.equal(outcome.manifest.archivedAt, null);
   assert.equal(outcome.manifest.schedule, null);
+  assert.deepEqual(outcome.manifest.queuedResumeMessages, []);
+});
+
+test("manifest reset clears queued resume messages while resume preserves them for daemon drain", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+
+  const initial = await freshRun(dir);
+  const queued = [
+    {
+      id: "qmsg-reset",
+      text: "Follow up after this attempt.",
+      createdAt: "2026-04-30T15:20:00.000Z",
+    },
+  ];
+  writeManifest(initial.workspaceDir, {
+    ...readManifest(initial.workspaceDir),
+    queuedResumeMessages: queued,
+  });
+
+  const resumed = await freshRun(dir, {
+    resume: withSharedRuntimeEnv(dir, () => resolveResumeTarget(initial.workspaceDir, dir)),
+    overrides: { message: "continue" },
+  });
+  assert.deepEqual(resumed.manifest.queuedResumeMessages, queued);
+  assert.deepEqual(readManifest(initial.workspaceDir).queuedResumeMessages, queued);
+
+  writeManifest(initial.workspaceDir, {
+    ...readManifest(initial.workspaceDir),
+    queuedResumeMessages: queued,
+  });
+  const reset = resetWorkspaceRun(initial.workspaceDir);
+  assert.deepEqual(reset.queuedResumeMessages, []);
+  assert.deepEqual(readManifest(initial.workspaceDir).queuedResumeMessages, []);
+});
+
+test("refreshManifestTaskState preserves live queued resume message mutations", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+  const inMemoryManifest = { ...outcome.manifest, queuedResumeMessages: [] };
+  const queued = [
+    {
+      id: "qmsg-live",
+      text: "Please include this.",
+      createdAt: "2026-04-30T15:21:00.000Z",
+    },
+  ];
+
+  writeManifest(outcome.workspaceDir, {
+    ...readManifest(outcome.workspaceDir),
+    queuedResumeMessages: queued,
+  });
+  refreshManifestTaskState(inMemoryManifest);
+
+  assert.deepEqual(inMemoryManifest.queuedResumeMessages, queued);
 });
 
 test("resolveResumeTarget rejects current manifests missing archivedAt", async () => {
@@ -508,7 +573,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 17/);
+        assert.match(err.message, /requires schemaVersion 18/);
         return true;
       },
     );
@@ -559,7 +624,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 17/);
+        assert.match(err.message, /requires schemaVersion 18/);
         return true;
       },
     );
@@ -611,7 +676,7 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 17/);
+        assert.match(err.message, /requires schemaVersion 18/);
         return true;
       },
     );
@@ -663,7 +728,7 @@ test("schemaVersion mismatch: resume rejects a v10 manifest with a clear error",
       () => resolveResumeTarget("stale10", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 10/);
-        assert.match(err.message, /requires schemaVersion 17/);
+        assert.match(err.message, /requires schemaVersion 18/);
         return true;
       },
     );
@@ -684,7 +749,7 @@ test("schemaVersion mismatch: resume rejects a v12 manifest with the v17 migrati
       () => resolveResumeTarget("stale12", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 12/);
-        assert.match(err.message, /requires schemaVersion 17/);
+        assert.match(err.message, /requires schemaVersion 18/);
         return true;
       },
     );
@@ -705,7 +770,7 @@ test("schemaVersion mismatch: resume rejects a v13 manifest with the v17 migrati
       () => resolveResumeTarget("stale13", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 13/);
-        assert.match(err.message, /requires schemaVersion 17/);
+        assert.match(err.message, /requires schemaVersion 18/);
         return true;
       },
     );
@@ -726,7 +791,7 @@ test("schemaVersion mismatch: resume rejects a v15 manifest with the v17 migrati
       () => resolveResumeTarget("stale15", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 15/);
-        assert.match(err.message, /requires schemaVersion 17/);
+        assert.match(err.message, /requires schemaVersion 18/);
         return true;
       },
     );

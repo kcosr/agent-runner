@@ -222,15 +222,20 @@ User bubbles render Markdown independently. Backend notices and diagnostics
 stay out of Chat.
 
 The composer is fixed at the bottom of the Chat panel for a selected
-run. It sends only non-empty trimmed messages through the existing resume
-API, using the same resume mutation path as the Detail Resume dialog.
-The composer submits from the Send button or `Cmd/Ctrl+Enter`. Success
-clears the draft and lets live timeline output appear in Chat; failure
-keeps the draft visible with the daemon error in the panel. No selected
-run disables the text field. Runs that cannot resume and pending resume
-requests keep the draft editable but disable submission. The Detail
-Resume dialog remains available for existing resume flows, including
-resume-without-message where allowed.
+run. For resumable non-live runs, it sends only non-empty trimmed
+messages through the existing resume API, using the same resume mutation
+path as the Detail Resume dialog. For live runs, the composer switches
+to Queue mode and appends normalized text to the run's queued resume
+messages instead of trying to resume an active backend session. The
+queued panel shows the current count and allows removing individual
+queued messages. The composer submits from the Send button or
+`Cmd/Ctrl+Enter`. Success clears the draft and lets live timeline output
+or the queued panel update appear in Chat; failure keeps the draft
+visible with the daemon error in the panel. No selected run disables the
+text field. Runs that cannot resume and pending resume requests keep the
+draft editable but disable submission. The Detail Resume dialog remains
+available for existing resume flows, including resume-without-message
+where allowed.
 
 ## Live projections
 

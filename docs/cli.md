@@ -23,6 +23,7 @@ All commands accept `--help` / `-h`.
 | `run set-name\|set-backend-session\|clear-backend-session` | Metadata mutations |
 | `run set-group\|clear-group` | Run group mutations |
 | `run add-dep\|remove-dep\|clear-deps` | Dependency graph mutations |
+| `run queue-message\|queued-messages\|remove-queued-message` | Queue, inspect, or remove pending resume messages |
 
 ## Global flags
 

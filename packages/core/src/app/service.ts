@@ -16,6 +16,8 @@ import type {
 } from "../contracts/events.js";
 import type { RunInputSurface, RunInputSurfaceParams } from "../contracts/run-input-surface.js";
 import type {
+  QueueResumeMessageResult,
+  RemoveQueuedResumeMessageResult,
   RunArchiveResult,
   RunBackendSessionResult,
   RunDeleteResult,
@@ -46,16 +48,19 @@ import {
   clearRunSchedule as clearRunScheduleCommand,
   deleteRun,
   downloadAttachment,
+  drainQueuedResumeMessages as drainQueuedResumeMessagesCommand,
   listAttachments,
   listDefinitions,
   listRuns,
   listTasks,
   readyRun as markRunReady,
+  queueResumeMessage as queueResumeMessageCommand,
   readAttachment,
   readBrief,
   readRunSummary,
   readStatus,
   removeAttachment,
+  removeQueuedResumeMessage as removeQueuedResumeMessageCommand,
   removeRunDependency,
   resetRun,
   setRunBackendSession,
@@ -326,6 +331,33 @@ export function getRunBrief(target: string): string {
 
 export function getRunList(filter: RunListFilter = {}): RunSummary[] {
   return listRuns(filter);
+}
+
+export function queueResumeMessage(
+  input: { target: string; message: string },
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): QueueResumeMessageResult {
+  return queueResumeMessageCommand(input, auditContext, emitAuditEnvelope);
+}
+
+export function removeQueuedResumeMessage(
+  input: { target: string; messageId: string },
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RemoveQueuedResumeMessageResult {
+  return removeQueuedResumeMessageCommand(input, auditContext, emitAuditEnvelope);
+}
+
+export function drainQueuedResumeMessages(
+  input: { target: string; messageIds: string[] },
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): {
+  run: RunDetail;
+  removedMessageIds: string[];
+} {
+  return drainQueuedResumeMessagesCommand(input, auditContext, emitAuditEnvelope);
 }
 
 export function getTaskList(target: string): RunTaskSummary[] {

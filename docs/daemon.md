@@ -208,6 +208,8 @@ All routes are under `/api/`.
 | `POST` | `/api/runs/:runId/ready` | Promote initialized run to ready |
 | `POST` | `/api/runs/:runId/reconfigure` | Patch vars/message on an initialized run |
 | `POST` | `/api/runs/:runId/resume` | Resume an initialized/terminal run |
+| `POST` | `/api/runs/:runId/queued-resume-messages` | Queue a pending resume message for a live run |
+| `DELETE` | `/api/runs/:runId/queued-resume-messages/:messageId` | Remove a pending resume message |
 | `POST` | `/api/runs/:runId/abort` | Abort an active run |
 | `POST` | `/api/runs/:runId/archive` | Archive |
 | `POST` | `/api/runs/:runId/unarchive` | Unarchive |
@@ -394,6 +396,7 @@ Error codes:
 - `runs.list`, `runs.get`, `runs.brief`, `runs.timelineHistory`
 - `runs.init`, `runs.start`, `runs.ready`, `runs.resume`, `runs.abort`
 - `runs.reconfigure`
+- `runs.queueResumeMessage`, `runs.removeQueuedResumeMessage`
 - `runs.archive`, `runs.unarchive`, `runs.reset`, `runs.delete`
 - `runs.setName`, `runs.setNote`, `runs.setPinned`
 - `runs.setBackendSession`, `runs.clearBackendSession`

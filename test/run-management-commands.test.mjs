@@ -6,6 +6,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
+import { freePort, startCliDaemon as startCliDaemonProcess } from "./helpers/daemon-process.mjs";
 import { sharedRuntimeEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
@@ -125,6 +126,10 @@ function runCliExpectFail(args, opts = {}) {
       stderr: err.stderr?.toString() ?? "",
     };
   }
+}
+
+async function startCliDaemon(baseDir, listenUrl) {
+  return await startCliDaemonProcess(baseDir, listenUrl, CLI_PATH);
 }
 
 function readManifest(workspaceDir) {
@@ -366,6 +371,147 @@ test("run ready promotes initialized runs and returns text and json results", as
 
   manifest = readManifest(second.workspaceDir);
   assert.equal(manifest.status, "ready");
+});
+
+test("run queued resume message commands expose text and json contracts", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+  });
+
+  const queuedJson = JSON.parse(
+    runCli(
+      ["run", "queue-message", outcome.runId, "First line\nSecond line", "--output-format", "json"],
+      { cwd: dir },
+    ),
+  );
+  assert.equal(queuedJson.runId, outcome.runId);
+  assert.equal(queuedJson.queuedResumeMessage.text, "First line\nSecond line");
+  assert.equal(queuedJson.queuedResumeMessageCount, 1);
+
+  const listedText = runCli(["run", "queued-messages", outcome.runId], { cwd: dir });
+  assert.equal(
+    listedText,
+    `Queued resume messages for run ${outcome.runId}:\n${queuedJson.queuedResumeMessage.id}  ${queuedJson.queuedResumeMessage.createdAt}\n  First line\n  Second line\n`,
+  );
+
+  const listedJson = JSON.parse(
+    runCli(["run", "queued-messages", outcome.workspaceDir, "--output-format", "json"], {
+      cwd: dir,
+    }),
+  );
+  assert.deepEqual(listedJson, {
+    runId: outcome.runId,
+    queuedResumeMessages: [queuedJson.queuedResumeMessage],
+  });
+
+  const removedText = runCli(
+    ["run", "remove-queued-message", outcome.runId, queuedJson.queuedResumeMessage.id],
+    { cwd: dir },
+  );
+  assert.equal(
+    removedText,
+    `task-runner: removed queued message ${queuedJson.queuedResumeMessage.id} from run ${outcome.runId}\n`,
+  );
+
+  const emptyText = runCli(["run", "queued-messages", outcome.runId], { cwd: dir });
+  assert.equal(emptyText, `No queued resume messages for run ${outcome.runId}.\n`);
+});
+
+test("run queued resume message commands support connected daemon mutations", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const queuedText = runCli(
+      [
+        "run",
+        "queue-message",
+        outcome.workspaceDir,
+        "Remote queued message",
+        "--connect",
+        listenUrl,
+      ],
+      { cwd: dir },
+    );
+    const queuedId = queuedText.match(/queued message (qmsg[^ ]+) for run/)?.[1];
+    assert.ok(queuedId, queuedText);
+
+    const listedJson = JSON.parse(
+      runCli(
+        [
+          "run",
+          "queued-messages",
+          outcome.workspaceDir,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.deepEqual(
+      listedJson.queuedResumeMessages.map((message) => message.text),
+      ["Remote queued message"],
+    );
+
+    const removedJson = JSON.parse(
+      runCli(
+        [
+          "run",
+          "remove-queued-message",
+          outcome.workspaceDir,
+          queuedId,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.deepEqual(removedJson, {
+      runId: outcome.runId,
+      removedMessageId: queuedId,
+      queuedResumeMessageCount: 0,
+    });
+  } finally {
+    await daemon.stop("SIGTERM");
+  }
+});
+
+test("run queue-message rejects malformed usage with exit code 3", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+  });
+
+  let failure = runCliExpectFail(["run", "queue-message", outcome.runId], { cwd: dir });
+  assert.equal(failure.status, 3);
+  assert.match(failure.stderr, /run queue-message requires message text/);
+
+  failure = runCliExpectFail(
+    ["run", "queue-message", outcome.runId, "--message-file", "message.md"],
+    { cwd: dir },
+  );
+  assert.equal(failure.status, 3);
+  assert.match(failure.stderr, /run queue-message only supports/);
+  assert.match(failure.stderr, /--message-file/);
 });
 
 test("init --message-file stores UTF-8 file content as the run message", () => {

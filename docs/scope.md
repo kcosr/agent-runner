@@ -22,6 +22,11 @@ out of scope. Examples include chat rendering, inline editing,
 conversational refinement, IDE-like surfaces, and upstream planning or
 ideation workflows.
 
+Narrow controls that persist run intent remain in scope even when they
+appear near Chat. For example, queued resume messages for a live run are
+manifest state and daemon-owned pending intent, not an interactive
+backend conversation or live interrupt surface.
+
 Requests to make the core primitives more flexible are also generally
 out of scope: run lifecycle, task-state model, and the task CLI as the
 completion channel are intentional boundaries. Reimplementing

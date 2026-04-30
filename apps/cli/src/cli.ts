@@ -24,9 +24,11 @@ import {
   getTask,
   getTaskList,
   initRun,
+  queueResumeMessage,
   readyRun,
   reconfigureRun,
   removeDependency,
+  removeQueuedResumeMessage,
   removeRunAttachment,
   renameRun,
   reset,
@@ -94,6 +96,9 @@ import { normalizeRunNameMutation } from "@task-runner/core/util/run-name.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import { renderRunEvent } from "./cli/render-run.js";
 import {
+  queueResumeMessageCliResult,
+  queuedResumeMessagesCliResult,
+  removeQueuedResumeMessageCliResult,
   renderAttachmentAdded,
   renderAttachmentDownloaded,
   renderAttachmentList,
@@ -108,8 +113,11 @@ import {
   renderRunClearGroup,
   renderRunDelete,
   renderRunList,
+  renderRunQueueResumeMessage,
+  renderRunQueuedResumeMessages,
   renderRunReady,
   renderRunRemoveDependency,
+  renderRunRemoveQueuedResumeMessage,
   renderRunScheduleCleared,
   renderRunScheduleDisabled,
   renderRunScheduleEnabled,
@@ -146,6 +154,12 @@ Commands:
   run audit <id>          Read the persisted audit history for a run.
   run brief <id>          Print the canonical worker handoff for a run.
   run reconfigure <id>    Patch vars/message for an initialized run.
+  run queue-message <id> <text>
+                          Queue a follow-up message for a live run.
+  run queued-messages <id>
+                          List queued follow-up messages for a run.
+  run remove-queued-message <id> <message-id>
+                          Remove one queued follow-up message.
   run ready <id|path>     Promote an initialized run into ready state.
   run schedule <id|path>  Set a run schedule with --at, --delay, or --cron.
   run schedule enable <id|path>
@@ -823,6 +837,166 @@ async function runRunBrief(parsed: ParsedArgs, connect?: DaemonConnectContext): 
             client.call<{ brief: string }>("runs.brief", { target }).then((r) => r.brief),
           );
     process.stdout.write(`${brief}\n`);
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
+function queuedMessageText(parsed: ParsedArgs): string | undefined {
+  if (parsed.positionals.length < 2) {
+    return undefined;
+  }
+  return parsed.positionals.slice(1).join(" ");
+}
+
+async function runQueueMessageCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
+  try {
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run queue-message only supports <run-id-or-path>, message text, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const target = normalizeTarget(parsed.positionals[0]);
+    if (!target) {
+      process.stderr.write("task-runner: run queue-message requires a run id or path\n");
+      process.stderr.write(
+        "Usage: task-runner run queue-message <run-id-or-path> <message text> [--output-format json]\n",
+      );
+      process.exit(3);
+    }
+    const message = queuedMessageText(parsed);
+    if (message === undefined) {
+      process.stderr.write("task-runner: run queue-message requires message text\n");
+      process.stderr.write(
+        "Usage: task-runner run queue-message <run-id-or-path> <message text> [--output-format json]\n",
+      );
+      process.exit(3);
+    }
+    const result =
+      connect === undefined
+        ? queueResumeMessage({ target, message })
+        : await withDaemonClient(connect, (client) =>
+            client.call<ReturnType<typeof queueResumeMessage>>("runs.queueResumeMessage", {
+              target,
+              message,
+            }),
+          );
+    const output = queueResumeMessageCliResult(result);
+    if (parsed.outputFormat === "json") {
+      writeJson(output);
+    } else {
+      process.stdout.write(renderRunQueueResumeMessage(output));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
+async function runQueuedMessagesCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
+  try {
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run queued-messages only supports <run-id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const target = normalizeTarget(parsed.positionals[0]);
+    if (!target) {
+      process.stderr.write("task-runner: run queued-messages requires a run id or path\n");
+      process.stderr.write(
+        "Usage: task-runner run queued-messages <run-id-or-path> [--output-format json]\n",
+      );
+      process.exit(3);
+    }
+    if (parsed.positionals.length > 1) {
+      process.stderr.write(
+        `task-runner: run queued-messages takes exactly one run id or path; got "${parsed.positionals[1]}"\n`,
+      );
+      process.exit(3);
+    }
+    const detail =
+      connect === undefined
+        ? getRun(target)
+        : await withDaemonClient(connect, (client) =>
+            client
+              .call<{ run: ReturnType<typeof getRun> }>("runs.get", { target })
+              .then((r) => r.run),
+          );
+    const output = queuedResumeMessagesCliResult(detail);
+    if (parsed.outputFormat === "json") {
+      writeJson(output);
+    } else {
+      process.stdout.write(renderRunQueuedResumeMessages(output));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
+async function runRemoveQueuedMessageCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
+  try {
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run remove-queued-message only supports <run-id-or-path>, <message-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const target = normalizeTarget(parsed.positionals[0]);
+    if (!target) {
+      process.stderr.write("task-runner: run remove-queued-message requires a run id or path\n");
+      process.stderr.write(
+        "Usage: task-runner run remove-queued-message <run-id-or-path> <message-id> [--output-format json]\n",
+      );
+      process.exit(3);
+    }
+    const messageId = parsed.positionals[1];
+    if (messageId === undefined) {
+      process.stderr.write("task-runner: run remove-queued-message requires a message id\n");
+      process.stderr.write(
+        "Usage: task-runner run remove-queued-message <run-id-or-path> <message-id> [--output-format json]\n",
+      );
+      process.exit(3);
+    }
+    if (parsed.positionals.length > 2) {
+      process.stderr.write(
+        `task-runner: run remove-queued-message takes exactly two positionals; got extra "${parsed.positionals[2]}"\n`,
+      );
+      process.exit(3);
+    }
+    const result =
+      connect === undefined
+        ? removeQueuedResumeMessage({ target, messageId })
+        : await withDaemonClient(connect, (client) =>
+            client.call<ReturnType<typeof removeQueuedResumeMessage>>(
+              "runs.removeQueuedResumeMessage",
+              {
+                target,
+                messageId,
+              },
+            ),
+          );
+    const output = removeQueuedResumeMessageCliResult(result);
+    if (parsed.outputFormat === "json") {
+      writeJson(output);
+    } else {
+      process.stdout.write(renderRunRemoveQueuedResumeMessage(output));
+    }
     process.exit(0);
   } catch (err) {
     exitCommandFailure(err, connect?.connectUrl);
@@ -2717,6 +2891,15 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "reconfigure") {
       await runReconfigureCommand(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "queue-message") {
+      await runQueueMessageCommand(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "queued-messages") {
+      await runQueuedMessagesCommand(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "remove-queued-message") {
+      await runRemoveQueuedMessageCommand(parsed, daemonConnect);
     }
     if (parsed.subcommand === "reset") {
       await runResetCommand(parsed, daemonConnect);

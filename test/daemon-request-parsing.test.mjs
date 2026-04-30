@@ -5,7 +5,9 @@ import {
   optionalOverrides,
   parseCliStartRunParams,
   parseResumeRunParams,
+  parseRunQueueResumeMessageParams,
   parseRunReadyParams,
+  parseRunRemoveQueuedResumeMessageParams,
   parseRunScheduleParams,
   parseRunsReconfigureParams,
   parseStreamNotification,
@@ -282,6 +284,96 @@ test("parseRunReadyParams accepts schedule and rejects unknown keys", () => {
   assert.throws(
     () => parseRunReadyParams({ target: "run-123", extra: true }, "runs.ready params"),
     /runs\.ready params\.extra is not supported/,
+  );
+});
+
+test("parseRunQueueResumeMessageParams validates target, message, and unknown keys", () => {
+  assert.deepEqual(
+    parseRunQueueResumeMessageParams(
+      {
+        target: "/tmp/run-123",
+        message: "Continue with this context.",
+      },
+      "runs.queueResumeMessage params",
+    ),
+    {
+      target: "/tmp/run-123",
+      message: "Continue with this context.",
+    },
+  );
+
+  assert.throws(
+    () =>
+      parseRunQueueResumeMessageParams(
+        { target: "", message: "Continue." },
+        "runs.queueResumeMessage params",
+      ),
+    /runs\.queueResumeMessage params\.target cannot be empty/,
+  );
+  assert.throws(
+    () =>
+      parseRunQueueResumeMessageParams(
+        { target: "run-123", message: " " },
+        "runs.queueResumeMessage params",
+      ),
+    /runs\.queueResumeMessage params\.message cannot be empty/,
+  );
+  assert.throws(
+    () =>
+      parseRunQueueResumeMessageParams(
+        { target: "run-123", message: 7 },
+        "runs.queueResumeMessage params",
+      ),
+    /runs\.queueResumeMessage params\.message must be a string/,
+  );
+  assert.throws(
+    () =>
+      parseRunQueueResumeMessageParams(
+        { target: "run-123", message: "Continue.", runGroupId: "group-123" },
+        "runs.queueResumeMessage params",
+      ),
+    /runs\.queueResumeMessage params\.runGroupId is not supported/,
+  );
+});
+
+test("parseRunRemoveQueuedResumeMessageParams validates target, messageId, and unknown keys", () => {
+  assert.deepEqual(
+    parseRunRemoveQueuedResumeMessageParams(
+      {
+        target: "run-123",
+        messageId: "qmsg-123",
+      },
+      "runs.removeQueuedResumeMessage params",
+    ),
+    {
+      target: "run-123",
+      messageId: "qmsg-123",
+    },
+  );
+
+  assert.throws(
+    () =>
+      parseRunRemoveQueuedResumeMessageParams(
+        { target: "run-123", messageId: "" },
+        "runs.removeQueuedResumeMessage params",
+      ),
+    /runs\.removeQueuedResumeMessage params\.messageId cannot be empty/,
+  );
+  assert.throws(
+    () =>
+      parseRunRemoveQueuedResumeMessageParams(
+        { target: "run-123", messageId: 7 },
+        "runs.removeQueuedResumeMessage params",
+      ),
+    /runs\.removeQueuedResumeMessage params\.messageId must be a string/,
+  );
+  assert.throws(
+    () =>
+      parseRunRemoveQueuedResumeMessageParams(
+        { target: "run-123", messageId: "qmsg-123", extra: true },
+        "runs.removeQueuedResumeMessage params",
+      ),
+    /runs\.removeQueuedResumeMessage params\.extra is not supported/,
   );
 });
 

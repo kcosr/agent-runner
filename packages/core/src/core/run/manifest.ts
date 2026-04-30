@@ -193,13 +193,19 @@ export interface RunSchedule {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 17 is the current manifest-canonical generation. Manifests written
+export interface QueuedResumeMessage {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+// schemaVersion: 18 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // reinitialize or run an explicit migration if one is added.
 export interface RunManifest {
-  schemaVersion: 17;
+  schemaVersion: 18;
   runId: string;
   repo: string;
   agent: {
@@ -243,6 +249,7 @@ export interface RunManifest {
   dependencies: RunDependencyRef[];
   parentRunId: string | null;
   schedule: RunSchedule | null;
+  queuedResumeMessages: QueuedResumeMessage[];
   exitCode: number | null;
   totalAttemptCount: number;
   maxAttemptsPerSession: number;
@@ -363,6 +370,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
   manifest.maxAttemptsPerSession = seed.maxAttemptsPerSession;
+  manifest.queuedResumeMessages = [];
   manifest.endedAt = null;
   manifest.status = "initialized";
   manifest.exitCode = null;
@@ -497,6 +505,7 @@ function normalizeRunManifest(parsed: RunManifest): RunManifest {
     backendConfig: cloneBackendConfig(parsed.backendConfig),
     launcher: cloneResolvedLauncherConfig(parsed.launcher),
     dependencies: cloneRunDependencyRefs(parsed.dependencies),
+    queuedResumeMessages: parsed.queuedResumeMessages.map((message) => ({ ...message })),
     runtimeVarSources: cloneRuntimeVarSources(parsed.runtimeVarSources),
     resetSeed: {
       ...parsed.resetSeed,
@@ -526,16 +535,16 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 17
+    (parsed as { schemaVersion: number }).schemaVersion !== 18
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
-    if (version === 16) {
+    if (version === 17) {
       throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion 16; this version of task-runner requires schemaVersion 17. Reinitialize the run or use an explicit migration for backendConfig manifests.`,
+        `manifest at ${candidate} has schemaVersion 17; this version of task-runner requires schemaVersion 18. Reinitialize the run or use an explicit migration for queued resume message manifests.`,
       );
     }
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 17.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 18.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -687,7 +696,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 17) return false;
+  if (obj.schemaVersion !== 18) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -707,6 +716,22 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (obj.parentRunId !== null && typeof obj.parentRunId !== "string") return false;
   if (obj.archivedAt !== null && typeof obj.archivedAt !== "string") return false;
   if (!isValidRunSchedule(obj.schedule)) return false;
+  if (!Array.isArray(obj.queuedResumeMessages)) return false;
+  if (
+    obj.queuedResumeMessages.some((message) => {
+      if (!message || typeof message !== "object") {
+        return true;
+      }
+      const queued = message as Record<string, unknown>;
+      return (
+        typeof queued.id !== "string" ||
+        typeof queued.text !== "string" ||
+        typeof queued.createdAt !== "string"
+      );
+    })
+  ) {
+    return false;
+  }
   if (typeof obj.timeoutSec !== "number") return false;
   if (typeof obj.unrestricted !== "boolean") return false;
   if (typeof obj.totalAttemptCount !== "number") return false;

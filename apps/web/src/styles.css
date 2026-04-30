@@ -1100,6 +1100,84 @@ body {
   margin: 10px 12px 0;
 }
 
+.queued-messages-panel {
+  flex: 0 0 auto;
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--muted) 64%, var(--background));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--foreground) 7%, transparent);
+  overflow: hidden;
+}
+
+.queued-messages-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.queued-messages-list__item {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 12px;
+}
+
+.queued-messages-list__item + .queued-messages-list__item {
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.queued-messages-list__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.queued-messages-list__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.queued-messages-list__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: color-mix(in srgb, var(--foreground) 84%, var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.queued-messages-list__body .chat-markdown {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.queued-messages-list__body .chat-markdown p {
+  margin: 0;
+}
+
+.queued-messages-list__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.queued-messages-list__edit,
+.queued-messages-list__remove {
+  color: var(--muted-foreground);
+}
+
+.queued-messages-list__edit svg,
+.queued-messages-list__remove svg {
+  width: 16px;
+  height: 16px;
+}
+
 .chat-state {
   display: grid;
   place-content: center;
@@ -1179,27 +1257,14 @@ body {
   color: var(--foreground);
 }
 
-.chat-bubble--user .chat-markdown,
-.chat-bubble--user .markdown h1,
-.chat-bubble--user .markdown h2,
-.chat-bubble--user .markdown h3,
-.chat-bubble--user .markdown h4,
-.chat-bubble--user .markdown h5,
-.chat-bubble--user .markdown h6,
-.chat-bubble--user .markdown a,
-.chat-bubble--user .markdown code {
+.chat-plain-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat-bubble--user .chat-plain-text {
   color: inherit;
-}
-
-.chat-bubble--user .markdown a {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-}
-
-.chat-bubble--user .markdown code,
-.chat-bubble--user .markdown pre {
-  background: var(--secondary);
 }
 
 .chat-output {

@@ -177,7 +177,7 @@ test("schemaVersion 11 manifest is rejected by current code after v12 migration 
       () => resolveResumeTarget("run-v11", root),
       (err) => {
         assert.match(err.message, /schemaVersion 11/);
-        assert.match(err.message, /requires schemaVersion 17/);
+        assert.match(err.message, /requires schemaVersion 18/);
         return true;
       },
     );

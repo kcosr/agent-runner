@@ -15,6 +15,7 @@ import {
   CloseIcon,
   DependencyIcon,
   GroupIcon,
+  MessageIcon,
   NotepadTextIcon,
   PinIcon,
   RunningIcon,
@@ -112,6 +113,7 @@ export function RunCard({
       ? "meta-indicator meta-indicator--warning"
       : "meta-indicator meta-indicator--success";
   const showAttachmentIndicator = run.attachmentCount > 0;
+  const showQueuedMessageIndicator = run.queuedResumeMessageCount > 0;
   const scheduleIndicatorClass = [
     "meta-indicator",
     run.scheduleState === "due"
@@ -435,6 +437,16 @@ export function RunCard({
                 title={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
               >
                 <AttachmentIcon aria-hidden="true" />
+              </span>
+            ) : null}
+            {showQueuedMessageIndicator ? (
+              <span
+                aria-label={`${run.queuedResumeMessageCount} queued message${run.queuedResumeMessageCount === 1 ? "" : "s"}`}
+                className="meta-indicator meta-indicator--neutral"
+                title={`${run.queuedResumeMessageCount} queued message${run.queuedResumeMessageCount === 1 ? "" : "s"}`}
+              >
+                <MessageIcon aria-hidden="true" />
+                {run.queuedResumeMessageCount}
               </span>
             ) : null}
             {run.schedule !== null && scheduleIndicatorLabel !== null ? (

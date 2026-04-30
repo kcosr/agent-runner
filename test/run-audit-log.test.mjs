@@ -13,7 +13,12 @@ import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { updateTask as updateTaskViaApp } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
-import { readyRun } from "../packages/core/dist/core/commands/service.js";
+import {
+  drainQueuedResumeMessages,
+  queueResumeMessage,
+  readyRun,
+  removeQueuedResumeMessage,
+} from "../packages/core/dist/core/commands/service.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { readRunAuditHistory } from "../packages/core/dist/core/run/run-events.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
@@ -764,6 +769,59 @@ test("command and task mutations append compact records, preserve history on res
   runCli(["run", "archive", init.runId], { cwd: dir });
   runCli(["run", "delete", init.runId], { cwd: dir });
   assert.equal(existsSync(init.workspaceDir), false);
+});
+
+test("queued resume message mutations append compact audit records without message text", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+  patchManifest(init.workspaceDir, (manifest) => {
+    manifest.status = "running";
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const first = queueResumeMessage({
+      target: init.runId,
+      message: "secret queued text one",
+    });
+    const second = queueResumeMessage({
+      target: init.runId,
+      message: "secret queued text two",
+    });
+    removeQueuedResumeMessage({
+      target: init.runId,
+      messageId: first.queuedResumeMessage.id,
+    });
+    drainQueuedResumeMessages({
+      target: init.runId,
+      messageIds: [second.queuedResumeMessage.id],
+    });
+  });
+
+  const records = readAuditRecords(init.workspaceDir);
+  const queueRecords = records.filter((record) => record.eventType.startsWith("run.queued_"));
+  assert.deepEqual(
+    queueRecords.map((record) => record.eventType),
+    [
+      "run.queued_resume_message_added",
+      "run.queued_resume_message_added",
+      "run.queued_resume_message_removed",
+      "run.queued_resume_messages_drained",
+    ],
+  );
+  assert.equal(typeof queueRecords[0].messageId, "string");
+  assert.equal(typeof queueRecords[0].messageCreatedAt, "string");
+  assert.deepEqual(queueRecords[2].messageId, queueRecords[0].messageId);
+  assert.deepEqual(queueRecords[3].messageIds, [queueRecords[1].messageId]);
+  assert.equal(queueRecords[3].messageCount, 1);
+  assert.equal(readAuditRaw(init.workspaceDir).includes("secret queued text"), false);
 });
 
 test("task-transition hooks skip unmatched transitions and append compact run.hook_recorded records with task ids once matched", async () => {

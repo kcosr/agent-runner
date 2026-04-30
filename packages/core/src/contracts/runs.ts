@@ -9,6 +9,7 @@ import {
   resolveDependents,
 } from "../core/run/dependencies.js";
 import type {
+  QueuedResumeMessage,
   RunDependencyRef,
   RunExecution,
   RunSchedule,
@@ -29,6 +30,7 @@ export type {
   RunDependentDetail,
 } from "../core/run/dependencies.js";
 export type { RunDependencyRef } from "../core/run/manifest.js";
+export type { QueuedResumeMessage } from "../core/run/manifest.js";
 export type { RunSchedule, RunScheduleState };
 
 export interface RunActiveTask {
@@ -78,6 +80,7 @@ export interface RunSummary {
   tasksCompleted: number;
   tasksTotal: number;
   attachmentCount: number;
+  queuedResumeMessageCount: number;
   hookCount?: number;
   dependencyState: RunDependencyState;
   schedule: RunSchedule | null;
@@ -178,6 +181,7 @@ export interface RunDetail {
   tasksCompleted: number;
   tasksTotal: number;
   attachments: RunAttachment[];
+  queuedResumeMessages: QueuedResumeMessage[];
   resolvedHooks?: ResolvedHookDescriptor[];
   hookState?: Record<string, unknown>;
   hookAudits?: HookAuditRecord[];
@@ -249,6 +253,16 @@ export interface RunGroupResult {
 
 export interface RunDeleteResult {
   runId: string;
+}
+
+export interface QueueResumeMessageResult {
+  run: RunDetail;
+  queuedResumeMessage: QueuedResumeMessage;
+}
+
+export interface RemoveQueuedResumeMessageResult {
+  run: RunDetail;
+  removedMessageId: string;
 }
 
 export type { RunAttachment, RunAttachmentRemoveResult } from "./attachments.js";
@@ -466,6 +480,7 @@ export function toRunSummary(
     tasksCompleted: entry.manifest.tasksCompleted,
     tasksTotal: entry.manifest.tasksTotal,
     attachmentCount: entry.manifest.attachments.length,
+    queuedResumeMessageCount: entry.manifest.queuedResumeMessages.length,
     hookCount: entry.manifest.resolvedHooks.length,
     dependencyState: resolvedDependencyState,
     schedule: entry.manifest.schedule,
@@ -569,6 +584,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
     attachments: manifest.attachments.map((attachment) => ({ ...attachment })),
+    queuedResumeMessages: manifest.queuedResumeMessages.map((message) => ({ ...message })),
     resolvedHooks: manifest.resolvedHooks.map((descriptor) => ({
       hookId: descriptor.hookId,
       phase: descriptor.phase,

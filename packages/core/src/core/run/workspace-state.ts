@@ -222,6 +222,7 @@ export function refreshManifestTaskState(manifest: RunManifest): Map<string, Tas
   manifest.resetSeed.pinned = latest.resetSeed.pinned;
   manifest.brief = latest.brief;
   manifest.schedule = latest.schedule;
+  manifest.queuedResumeMessages = latest.queuedResumeMessages.map((message) => ({ ...message }));
   manifest.finalTasks = latest.finalTasks;
   manifest.tasksCompleted = latest.tasksCompleted;
   manifest.tasksTotal = latest.tasksTotal;

@@ -118,6 +118,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       args[0] === "brief" ||
       args[0] === "reconfigure" ||
       args[0] === "ready" ||
+      args[0] === "queue-message" ||
+      args[0] === "queued-messages" ||
+      args[0] === "remove-queued-message" ||
       args[0] === "schedule" ||
       args[0] === "reset" ||
       args[0] === "archive" ||
@@ -402,7 +405,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   result.positionals = positional;
-  if (result.command === "run" && result.subcommand === "reconfigure") {
+  if (
+    result.command === "run" &&
+    (result.subcommand === "reconfigure" || result.subcommand === "queue-message")
+  ) {
     if (positional.length > 1) {
       result.message = positional.slice(1).join(" ");
     }

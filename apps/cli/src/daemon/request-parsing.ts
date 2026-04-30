@@ -15,7 +15,9 @@ import type {
   AttachmentsUploadOpenParams,
   CliRunsStartParams,
   RunInputSurfaceParams,
+  RunQueueResumeMessageParams,
   RunReadyParams,
+  RunRemoveQueuedResumeMessageParams,
   RunScheduleParams,
   RunSetBackendSessionParams,
   RunSetGroupParams,
@@ -431,6 +433,40 @@ export function parseResumeRunParams(value: unknown, label: string): RunsResumeP
     target: requiredString(record.target, `${label}.target`),
     parentRunId: optionalRunIdString(record.parentRunId, `${label}.parentRunId`),
     overrides: optionalOverrides(record.overrides),
+  };
+}
+
+export function parseRunQueueResumeMessageParams(
+  value: unknown,
+  label: string,
+): RunQueueResumeMessageParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["target", "message"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    target: requiredNonEmptyString(record.target, `${label}.target`),
+    message: requiredNonEmptyString(record.message, `${label}.message`),
+  };
+}
+
+export function parseRunRemoveQueuedResumeMessageParams(
+  value: unknown,
+  label: string,
+): RunRemoveQueuedResumeMessageParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["target", "messageId"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    target: requiredNonEmptyString(record.target, `${label}.target`),
+    messageId: requiredNonEmptyString(record.messageId, `${label}.messageId`),
   };
 }
 

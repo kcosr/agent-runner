@@ -32,7 +32,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 16,
+    schemaVersion: 18,
     runId: "run123",
     runGroupId: "run123",
     repo: "demo-repo",
@@ -70,6 +70,13 @@ function buildManifest(overrides = {}) {
     dependencies: [],
     parentRunId: null,
     schedule: null,
+    queuedResumeMessages: overrides.queuedResumeMessages ?? [
+      {
+        id: "qmsg-demo",
+        text: "Queued follow-up.",
+        createdAt: "2026-04-12T10:01:00.000Z",
+      },
+    ],
     exitCode: null,
     totalAttemptCount: 0,
     maxAttemptsPerSession: 2,
@@ -175,6 +182,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     tasksCompleted: 1,
     tasksTotal: 2,
     attachmentCount: 0,
+    queuedResumeMessageCount: 1,
     hookCount: 1,
     dependencyState: {
       ready: true,
@@ -300,6 +308,13 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     tasksCompleted: 1,
     tasksTotal: 2,
     attachments: [],
+    queuedResumeMessages: [
+      {
+        id: "qmsg-demo",
+        text: "Queued follow-up.",
+        createdAt: "2026-04-12T10:01:00.000Z",
+      },
+    ],
     resolvedHooks: manifest.resolvedHooks,
     hookState: manifest.hookState,
     hookAudits: [],
