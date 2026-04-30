@@ -108,6 +108,7 @@
 - Added opt-in shared bearer-token protection for daemon `/api/*`,
   WebSocket, SSE, connected CLI, and web dashboard requests, with
   Settings -> General token storage for the dashboard.
+  ([#124](https://github.com/kcosr/task-runner/pull/124))
 - Added read-only reusable task definition inspection with
   `task-runner list tasks`, `task-runner show task <name|path>`, daemon
   `taskDefinitions.list/get` RPC methods, `/api/task-definitions` HTTP
