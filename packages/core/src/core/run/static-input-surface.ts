@@ -1,10 +1,10 @@
+import { knownBackends } from "../../backends/registry.js";
 import type {
   RunInputField,
   RunInputFieldKind,
   RunInputFieldSource,
   RunInputSurface,
 } from "../../contracts/run-input-surface.js";
-import { BACKEND_IDS } from "../backends/types.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
   DEFAULT_AGENT_TIMEOUT_SEC,
@@ -48,7 +48,6 @@ const RUN_SETTING_METADATA: readonly StaticFieldMetadata[] = [
     label: "Backend",
     description: "Agent backend used for run execution.",
     inputKind: "enum",
-    enumValues: [...BACKEND_IDS],
   },
   {
     key: "launcher",
@@ -233,7 +232,12 @@ export function resolveStaticInputSurface(
           locked,
         );
       case "backend":
-        return buildField(metadata, valueField(loaded.config.backend, "agent"), editable, locked);
+        return buildField(
+          { ...metadata, enumValues: knownBackends() },
+          valueField(loaded.config.backend, "agent"),
+          editable,
+          locked,
+        );
       case "launcher":
         return buildField(
           metadata,

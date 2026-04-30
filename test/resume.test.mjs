@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readStatus, readyRun } from "../packages/core/dist/core/commands/service.js";
 import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
@@ -93,6 +94,14 @@ function patchManifest(workspaceDir, mutator) {
 
 function mockBackend(handler) {
   return { id: "mock", invoke: handler };
+}
+
+function codexMockBackend(invoke) {
+  return {
+    id: "codex",
+    resolveConfig: codexBackend.resolveConfig,
+    invoke,
+  };
 }
 
 async function runIn(baseDir, opts) {
@@ -358,71 +367,61 @@ test("resume: codex runs reuse the frozen transport instead of current env", asy
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
   const initialTransport = {
-    codex: {
-      transport: {
-        type: "ws",
-        url: "ws://initial.example/socket",
-      },
+    transport: {
+      type: "ws",
+      url: "ws://initial.example/socket",
     },
   };
 
-  const first = await withEnv(
-    { TASK_RUNNER_CODEX_WS_URL: initialTransport.codex.transport.url },
-    () =>
-      runIn(dir, {
-        backend: {
-          id: "codex",
-          invoke: async (ctx) => {
-            assert.deepEqual(ctx.backendSpecific, initialTransport);
-            updateTasksForPrompt(ctx.prompt, {
-              t1: { status: "blocked", notes: "waiting on dependency" },
-            });
-            return {
-              exitCode: 0,
-              signal: null,
-              timedOut: false,
-              sessionId: "thr-codex",
-              transcript: "blocked",
-              rawStdout: "",
-              rawStderr: "",
-            };
-          },
-        },
+  const first = await withEnv({ TASK_RUNNER_CODEX_WS_URL: initialTransport.transport.url }, () =>
+    runIn(dir, {
+      backend: codexMockBackend(async (ctx) => {
+        assert.deepEqual(ctx.backendConfig, initialTransport);
+        updateTasksForPrompt(ctx.prompt, {
+          t1: { status: "blocked", notes: "waiting on dependency" },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: "thr-codex",
+          transcript: "blocked",
+          rawStdout: "",
+          rawStderr: "",
+        };
       }),
+    }),
   );
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://changed.example/socket" }, () =>
     runIn(dir, {
-      backend: {
-        id: "codex",
-        invoke: async (ctx) => {
-          assert.equal(ctx.resumeSessionId, "thr-codex");
-          assert.deepEqual(ctx.backendSpecific, initialTransport);
-          patchManifest(first.workspaceDir, (manifest) => {
-            manifest.finalTasks.t1.status = "completed";
-            manifest.finalTasks.t2.status = "completed";
-            manifest.finalTasks.t3.status = "completed";
-            manifest.tasksCompleted = 3;
-          });
-          return {
-            exitCode: 0,
-            signal: null,
-            timedOut: false,
-            sessionId: "thr-codex",
-            transcript: "done",
-            rawStdout: "",
-            rawStderr: "",
-          };
-        },
-      },
+      backend: codexMockBackend(async (ctx) => {
+        assert.equal(ctx.resumeSessionId, "thr-codex");
+        assert.deepEqual(ctx.backendConfig, initialTransport);
+        patchManifest(first.workspaceDir, (manifest) => {
+          manifest.finalTasks.t1.status = "completed";
+          manifest.finalTasks.t2.status = "completed";
+          manifest.finalTasks.t3.status = "completed";
+          manifest.tasksCompleted = 3;
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: "thr-codex",
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      }),
       overrides: { message: "dependency is back" },
       resume: target,
     }),
   );
 
-  assert.deepEqual(second.manifest.backendSpecific, initialTransport);
-  assert.deepEqual(second.manifest.resetSeed.backendSpecific, initialTransport);
+  assert.deepEqual(second.manifest.backendConfig, initialTransport);
+  assert.deepEqual(second.manifest.resetSeed.backendConfig, initialTransport);
 });
 
 test("resume: codex UDS runs reuse frozen transport and ignore env drift", async () => {
@@ -431,37 +430,30 @@ test("resume: codex UDS runs reuse frozen transport and ignore env drift", async
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
   const initialTransport = {
-    codex: {
-      transport: {
-        type: "uds",
-        path: "/tmp/initial-codex.sock",
-      },
+    transport: {
+      type: "uds",
+      path: "/tmp/initial-codex.sock",
     },
   };
 
-  const first = await withEnv(
-    { TASK_RUNNER_CODEX_UDS_PATH: initialTransport.codex.transport.path },
-    () =>
-      runIn(dir, {
-        backend: {
-          id: "codex",
-          invoke: async (ctx) => {
-            assert.deepEqual(ctx.backendSpecific, initialTransport);
-            updateTasksForPrompt(ctx.prompt, {
-              t1: { status: "blocked", notes: "waiting on dependency" },
-            });
-            return {
-              exitCode: 0,
-              signal: null,
-              timedOut: false,
-              sessionId: "thr-codex-uds",
-              transcript: "blocked",
-              rawStdout: "",
-              rawStderr: "",
-            };
-          },
-        },
+  const first = await withEnv({ TASK_RUNNER_CODEX_UDS_PATH: initialTransport.transport.path }, () =>
+    runIn(dir, {
+      backend: codexMockBackend(async (ctx) => {
+        assert.deepEqual(ctx.backendConfig, initialTransport);
+        updateTasksForPrompt(ctx.prompt, {
+          t1: { status: "blocked", notes: "waiting on dependency" },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: "thr-codex-uds",
+          transcript: "blocked",
+          rawStdout: "",
+          rawStderr: "",
+        };
       }),
+    }),
   );
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
@@ -472,35 +464,32 @@ test("resume: codex UDS runs reuse frozen transport and ignore env drift", async
     },
     () =>
       runIn(dir, {
-        backend: {
-          id: "codex",
-          invoke: async (ctx) => {
-            assert.equal(ctx.resumeSessionId, "thr-codex-uds");
-            assert.deepEqual(ctx.backendSpecific, initialTransport);
-            patchManifest(first.workspaceDir, (manifest) => {
-              manifest.finalTasks.t1.status = "completed";
-              manifest.finalTasks.t2.status = "completed";
-              manifest.finalTasks.t3.status = "completed";
-              manifest.tasksCompleted = 3;
-            });
-            return {
-              exitCode: 0,
-              signal: null,
-              timedOut: false,
-              sessionId: "thr-codex-uds",
-              transcript: "done",
-              rawStdout: "",
-              rawStderr: "",
-            };
-          },
-        },
+        backend: codexMockBackend(async (ctx) => {
+          assert.equal(ctx.resumeSessionId, "thr-codex-uds");
+          assert.deepEqual(ctx.backendConfig, initialTransport);
+          patchManifest(first.workspaceDir, (manifest) => {
+            manifest.finalTasks.t1.status = "completed";
+            manifest.finalTasks.t2.status = "completed";
+            manifest.finalTasks.t3.status = "completed";
+            manifest.tasksCompleted = 3;
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "thr-codex-uds",
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        }),
         overrides: { message: "dependency is back" },
         resume: target,
       }),
   );
 
-  assert.deepEqual(second.manifest.backendSpecific, initialTransport);
-  assert.deepEqual(second.manifest.resetSeed.backendSpecific, initialTransport);
+  assert.deepEqual(second.manifest.backendConfig, initialTransport);
+  assert.deepEqual(second.manifest.resetSeed.backendConfig, initialTransport);
 });
 
 test("resume: rejects a target already marked running", async () => {

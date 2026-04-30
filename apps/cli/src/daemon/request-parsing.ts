@@ -1,16 +1,7 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import type { AttachmentScope } from "@task-runner/core/contracts/attachments.js";
 import type { RunDependencyRef } from "@task-runner/core/contracts/runs.js";
-import type {
-  BackendSpecificConfig,
-  CodexTransportConfig,
-  CodexTransportEnvValues,
-} from "@task-runner/core/core/backends/types.js";
-import {
-  BACKEND_IDS,
-  isAbsoluteUdsSocketPath,
-  isWsOrWssUrl,
-} from "@task-runner/core/core/backends/types.js";
+import { isJsonishPersistable } from "@task-runner/core/core/backends/types.js";
 import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
 import { isNamedLauncherOverride } from "@task-runner/core/core/config/launchers.js";
 import { RunGroupValidationError, validateRunGroupId } from "@task-runner/core/core/run/groups.js";
@@ -293,124 +284,23 @@ export function parseDependencyRef(value: unknown, label: string): RunDependency
   throw new RequestValidationError(`${label}.type must be "run" or "group"`);
 }
 
-function validateAbsoluteCodexWsUrl(value: string, label: string): string {
-  const trimmed = value.trim();
-  if (!isWsOrWssUrl(trimmed)) {
-    throw new RequestValidationError(`${label} must be an absolute ws:// or wss:// URL`);
-  }
-  return trimmed;
-}
-
-function validateAbsoluteCodexUdsPath(value: string, label: string): string {
-  if (!isAbsoluteUdsSocketPath(value)) {
-    throw new RequestValidationError(`${label} must be an absolute socket path`);
-  }
-  return value.trim();
-}
-
-function optionalCodexTransport(value: unknown, label: string): CodexTransportConfig | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const record = asRecord(value, label);
-  const allowedKeys = new Set(["type", "url", "path"]);
-  for (const key of Object.keys(record)) {
-    if (!allowedKeys.has(key)) {
-      throw new RequestValidationError(`${label}.${key} is not supported`);
-    }
-  }
-
-  const type = requiredString(record.type, `${label}.type`);
-  if (type === "stdio") {
-    if (record.url !== undefined) {
-      throw new RequestValidationError(`${label}.url is not supported for stdio transport`);
-    }
-    if (record.path !== undefined) {
-      throw new RequestValidationError(`${label}.path is not supported for stdio transport`);
-    }
-    return { type: "stdio" };
-  }
-  if (type === "ws") {
-    if (record.path !== undefined) {
-      throw new RequestValidationError(`${label}.path is not supported for ws transport`);
-    }
-    return {
-      type: "ws",
-      url: validateAbsoluteCodexWsUrl(
-        requiredNonEmptyString(record.url, `${label}.url`),
-        `${label}.url`,
-      ),
-    };
-  }
-  if (type === "uds") {
-    if (record.url !== undefined) {
-      throw new RequestValidationError(`${label}.url is not supported for uds transport`);
-    }
-    return {
-      type: "uds",
-      path: validateAbsoluteCodexUdsPath(
-        requiredNonEmptyString(record.path, `${label}.path`),
-        `${label}.path`,
-      ),
-    };
-  }
-  throw new RequestValidationError(`${label}.type must be one of: stdio, ws, uds`);
-}
-
-function optionalBackendSpecific(value: unknown, label: string): BackendSpecificConfig | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const record = asRecord(value, label);
-  const allowedKeys = new Set(["codex"]);
-  for (const key of Object.keys(record)) {
-    if (!allowedKeys.has(key)) {
-      throw new RequestValidationError(`${label}.${key} is not supported`);
-    }
-  }
-
-  if (record.codex === undefined) {
-    return {};
-  }
-  const codex = asRecord(record.codex, `${label}.codex`);
-  const codexAllowedKeys = new Set(["transport"]);
-  for (const key of Object.keys(codex)) {
-    if (!codexAllowedKeys.has(key)) {
-      throw new RequestValidationError(`${label}.codex.${key} is not supported`);
-    }
-  }
-
-  return {
-    codex: {
-      transport: optionalCodexTransport(codex.transport, `${label}.codex.transport`),
-    },
-  };
-}
-
-function optionalCodexTransportEnv(
+function optionalBackendConfig(
   value: unknown,
   label: string,
-): CodexTransportEnvValues | undefined {
+): Partial<Record<string, unknown>> | undefined {
   if (value === undefined) {
     return undefined;
   }
   const record = asRecord(value, label);
-  const allowedKeys = new Set(["udsPath", "wsUrl"]);
-  for (const key of Object.keys(record)) {
-    if (!allowedKeys.has(key)) {
-      throw new RequestValidationError(`${label}.${key} is not supported`);
+  for (const [backendName, backendConfig] of Object.entries(record)) {
+    if (backendName.trim().length === 0) {
+      throw new RequestValidationError(`${label} backend names must be non-empty strings`);
+    }
+    if (!isJsonishPersistable(backendConfig)) {
+      throw new RequestValidationError(`${label}.${backendName} must be JSON-persistable data`);
     }
   }
-  const env: CodexTransportEnvValues = {};
-  const udsPath = optionalNonEmptyString(record.udsPath, `${label}.udsPath`);
-  const wsUrl = optionalNonEmptyString(record.wsUrl, `${label}.wsUrl`);
-  if (udsPath !== undefined) {
-    env.udsPath = validateAbsoluteCodexUdsPath(udsPath, `${label}.udsPath`);
-  }
-  if (wsUrl !== undefined) {
-    env.wsUrl = validateAbsoluteCodexWsUrl(wsUrl, `${label}.wsUrl`);
-  }
-  return env;
+  return record;
 }
 
 function optionalScheduleInput(value: unknown, label: string): ScheduleInput | undefined {
@@ -459,8 +349,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     "unrestricted",
     "maxRetries",
     "addedTasks",
-    "backendSpecific",
-    "codexTransportEnv",
+    "backendConfig",
     "schedule",
   ]);
   for (const key of Object.keys(record)) {
@@ -476,7 +365,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
   }
   return {
     cwd: optionalString(record.cwd, "overrides.cwd"),
-    backend: optionalEnum(record.backend, "overrides.backend", BACKEND_IDS),
+    backend: optionalNonEmptyString(record.backend, "overrides.backend"),
     launcher,
     model: optionalString(record.model, "overrides.model"),
     effort: optionalEnum(record.effort, "overrides.effort", [
@@ -494,11 +383,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     unrestricted: optionalBoolean(record.unrestricted, "overrides.unrestricted"),
     maxRetries: optionalNonNegativeInteger(record.maxRetries, "overrides.maxRetries"),
     addedTasks: optionalStringArray(record.addedTasks, "overrides.addedTasks"),
-    backendSpecific: optionalBackendSpecific(record.backendSpecific, "overrides.backendSpecific"),
-    codexTransportEnv: optionalCodexTransportEnv(
-      record.codexTransportEnv,
-      "overrides.codexTransportEnv",
-    ),
+    backendConfig: optionalBackendConfig(record.backendConfig, "overrides.backendConfig"),
     schedule: optionalScheduleInput(record.schedule, "overrides.schedule"),
   };
 }

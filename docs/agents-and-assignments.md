@@ -46,12 +46,12 @@ instructions.
 ---
 schemaVersion: 1            # required, must be 1
 name: implementer           # required, min 1 char; "ad-hoc" is reserved
-backend: codex              # required: claude | codex | cursor | pi | passive
+backend: codex              # required backend name; built-ins: claude | codex | cursor | pi | passive
 model: gpt-5.4              # optional backend-specific id
 effort: high                # optional: off | minimal | low | medium | high | xhigh | max
 timeoutSec: 3600            # optional positive integer (default 3600)
 unrestricted: true          # optional boolean (default false)
-backendSpecific:            # optional backend-specific runtime config
+backendConfig:              # optional backend-owned runtime config, keyed by backend name
   codex:
     transport:
       type: ws
@@ -77,15 +77,29 @@ prefix". User-authored launcher files live under
 the filename stem, and authored `name`, when present, must match that
 stem exactly.
 
-Only Codex currently defines `backendSpecific`. Its transport contract is
-exactly one of:
+`backend` can name a built-in backend or a custom backend loaded from
+`${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`.
+Custom backend modules are trusted local code, loaded without sandboxing,
+cached for the process lifetime, and daemon changes require a daemon
+restart. Their default export must have an `id` matching the directory
+name; built-in names are reserved. Install custom backend dependencies
+under the config directory, for example
+`cd ~/.config/task-runner && npm install <package>`.
+
+`backendConfig` is generic backend-owned JSON-like data keyed by backend
+name. Fresh/init selects only the active backend's config, lets that
+backend resolve or validate it, and freezes the selected resolved value
+into `manifest.backendConfig`. It is separate from `backendArgs`, which is
+only extra argv token data.
+
+Codex defines this `backendConfig.codex.transport` contract:
 
 - `{ type: "stdio" }`
 - `{ type: "ws", url: "<absolute ws:// or wss:// URL>" }`
 - `{ type: "uds", path: "/absolute/socket/path" }`
 
-Other backends do not accept `backendSpecific`, and this pass does not
-add generic backend-specific env passthrough.
+Other backend config shapes are owned by their selected backend. There is
+no generic backend-specific env passthrough.
 
 `backendArgs` lets an agent append backend-owned CLI flags without adding
 a new task-runner option. It is keyed by backend id, and each entry has an
@@ -117,10 +131,9 @@ backendArgs:
 ---
 ```
 
-Backend keys must be one of `claude`, `codex`, `cursor`, `pi`, or
-`passive`; unknown keys and unknown entry fields are config errors.
-Tokens must be non-empty strings. Dormant entries are allowed, so an
-agent can carry both `claude` and `codex` entries and activate the
+Backend keys can be built-in or custom backend names. Unknown entry fields
+are config errors. Tokens must be non-empty strings. Dormant entries are
+allowed, so an agent can carry multiple backend entries and activate the
 selected one when `--backend` chooses that backend. Passive entries are
 accepted for schema symmetry but inert: passive runs resolve no backend
 argv.
@@ -134,8 +147,9 @@ daemon, and web status DTOs do not expose them.
 
 Frontmatter scalar values are resolved for `${...}` env expressions before
 schema validation. Typed surfaces such as `name`, `backend`, `model`,
-`timeoutSec`, `unrestricted`, `backendSpecific.codex.transport.url`,
-`backendSpecific.codex.transport.path`, and individual
+`timeoutSec`, `unrestricted`, backendConfig string leaves such as
+`backendConfig.codex.transport.url` or
+`backendConfig.codex.transport.path`, and individual
 `backendArgs.<backend>.extraArgs[]` tokens require the whole value to be
 exactly one env expression:
 
@@ -143,7 +157,7 @@ exactly one env expression:
 ---
 name: ${AGENT_NAME}
 timeoutSec: ${AGENT_TIMEOUT:-3600}
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: ws
@@ -154,7 +168,7 @@ backendSpecific:
 Partial `${...}` interpolation is rejected for those typed fields, so
 `name: "agent-${AGENT_NAME}"` and `--flag=${VALUE}` fail at load time.
 `${...}` also cannot replace whole objects or arrays such as
-`backendSpecific` or `backendArgs`.
+`backendConfig` or `backendArgs`.
 
 ### Body
 
@@ -522,14 +536,12 @@ The resolved path is used to derive the `repo` bucket (via the enclosing
 When `backend: codex`, the resolved transport is frozen at fresh-run or
 init time and then reused on resume:
 
-1. Agent frontmatter `backendSpecific.codex.transport`
-2. Connected/daemon-only request override
-   `overrides.backendSpecific.codex.transport`
-3. `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` forwarded by
-   the connected client
-4. `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` from the daemon
-   process environment
-5. `{ type: "stdio" }`
+1. Agent frontmatter `backendConfig.codex.transport`
+2. Request override `overrides.backendConfig.codex.transport` when
+   supplied by a daemon/API caller
+3. `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` from the
+   current process environment
+4. `{ type: "stdio" }`
 
 UDS transport uses WebSocket-over-UDS for Codex app-server, not raw UDS
 bytes, and `path` must be absolute. If both UDS and WS env vars are set

@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
@@ -85,7 +86,12 @@ function writeAgentAndAssignment(baseDir) {
 }
 
 async function runWithMock(baseDir, mockInvoke, overrides = {}) {
-  const backend = { id: overrides.__backendId ?? "claude", invoke: mockInvoke };
+  const backendId = overrides.__backendId ?? "claude";
+  const backend = {
+    id: backendId,
+    ...(backendId === "codex" ? { resolveConfig: codexBackend.resolveConfig } : {}),
+    invoke: mockInvoke,
+  };
   const { __backendId, ...runOverrides } = overrides;
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("three", baseDir);
@@ -479,11 +485,9 @@ test("manifest: codex runs persist the stdio default transport in run metadata a
           t2: { status: "completed" },
           t3: { status: "completed" },
         });
-        assert.deepEqual(ctx.backendSpecific, {
-          codex: {
-            transport: {
-              type: "stdio",
-            },
+        assert.deepEqual(ctx.backendConfig, {
+          transport: {
+            type: "stdio",
           },
         });
         return {
@@ -501,14 +505,12 @@ test("manifest: codex runs persist the stdio default transport in run metadata a
   );
 
   const onDisk = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
-  assert.deepEqual(onDisk.backendSpecific, {
-    codex: {
-      transport: {
-        type: "stdio",
-      },
+  assert.deepEqual(onDisk.backendConfig, {
+    transport: {
+      type: "stdio",
     },
   });
-  assert.deepEqual(onDisk.resetSeed.backendSpecific, onDisk.backendSpecific);
+  assert.deepEqual(onDisk.resetSeed.backendConfig, onDisk.backendConfig);
 });
 
 test("manifest: codex runs persist UDS transport in run metadata and reset seed", async () => {
@@ -527,12 +529,10 @@ test("manifest: codex runs persist UDS transport in run metadata and reset seed"
             t2: { status: "completed" },
             t3: { status: "completed" },
           });
-          assert.deepEqual(ctx.backendSpecific, {
-            codex: {
-              transport: {
-                type: "uds",
-                path: "/tmp/codex.sock",
-              },
+          assert.deepEqual(ctx.backendConfig, {
+            transport: {
+              type: "uds",
+              path: "/tmp/codex.sock",
             },
           });
           return {
@@ -550,18 +550,16 @@ test("manifest: codex runs persist UDS transport in run metadata and reset seed"
   );
 
   const onDisk = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
-  assert.deepEqual(onDisk.backendSpecific, {
-    codex: {
-      transport: {
-        type: "uds",
-        path: "/tmp/codex.sock",
-      },
+  assert.deepEqual(onDisk.backendConfig, {
+    transport: {
+      type: "uds",
+      path: "/tmp/codex.sock",
     },
   });
-  assert.deepEqual(onDisk.resetSeed.backendSpecific, onDisk.backendSpecific);
+  assert.deepEqual(onDisk.resetSeed.backendConfig, onDisk.backendConfig);
 });
 
-test("manifest: malformed persisted UDS transport is rejected", async () => {
+test("manifest: backend-owned malformed persisted UDS transport remains readable", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", CODEX_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
@@ -591,11 +589,10 @@ test("manifest: malformed persisted UDS transport is rejected", async () => {
 
   const manifestPath = join(outcome.workspaceDir, "run.json");
   const onDisk = JSON.parse(readFileSync(manifestPath, "utf8"));
-  onDisk.backendSpecific.codex.transport.path = "relative.sock";
+  onDisk.backendConfig.transport.path = "relative.sock";
   writeFileSync(manifestPath, `${JSON.stringify(onDisk, null, 2)}\n`);
 
-  assert.throws(
-    () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
-    /does not look like a task-runner run\.json/,
-  );
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir));
+  assert.equal(target.manifest.runId, outcome.runId);
+  assert.equal(target.manifest.backendConfig.transport.path, "relative.sock");
 });

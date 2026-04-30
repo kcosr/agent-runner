@@ -116,8 +116,8 @@ traffic.
 |----------|--------|
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary (default `claude`) |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary (default `codex`) |
-| `TASK_RUNNER_CODEX_UDS_PATH` | Fresh Codex runs use this absolute socket path for WebSocket-over-UDS when no explicit `backendSpecific.codex.transport` was authored; daemon-connected CLI calls forward it only as a Codex-specific structured override |
-| `TASK_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendSpecific.codex.transport` was authored; daemon-connected CLI calls forward it only as a Codex-specific structured override |
+| `TASK_RUNNER_CODEX_UDS_PATH` | Fresh Codex runs use this absolute socket path for WebSocket-over-UDS when no explicit `backendConfig.codex.transport` was authored |
+| `TASK_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary (default `cursor-agent`) |
 | `TASK_RUNNER_FULL_ATTEMPT_LOGS` | Keep full stdout in per-attempt log records instead of the default compact stderr/metadata-only capture |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary (default `pi`) |
@@ -125,15 +125,24 @@ traffic.
 
 See [backends.md](backends.md).
 
+Custom backend modules are configuration-root source files under
+`${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`.
+They are trusted local code loaded without sandboxing. The daemon loads
+them at startup and caches them for its process lifetime, so backend code
+or dependency changes require a daemon restart. Install custom backend
+dependencies from the config directory so normal Node/jiti resolution can
+find them.
+
 `TASK_RUNNER_CODEX_UDS_PATH` and `TASK_RUNNER_CODEX_WS_URL` are not
 generic daemon env passthrough knobs. Only Codex reads them, and only
-during fresh-run transport resolution. In connected mode they are
-forwarded for fresh `run` / `init` only; resume reuses the frozen manifest
-transport. Malformed UDS values are rejected unless they are absolute
-socket paths; malformed websocket values are rejected unless they are
-absolute `ws://` or `wss://` URLs. If both env vars are set and no
-higher-precedence transport is authored or explicitly overridden, Task
-Runner fails fast instead of guessing.
+during fresh-run transport resolution by the process that owns the run.
+Connected CLI calls do not forward caller-local Codex transport env; the
+daemon resolves from its own env after authored/request `backendConfig`.
+Resume reuses the frozen manifest transport. Malformed UDS values are
+rejected unless they are absolute socket paths; malformed websocket values
+are rejected unless they are absolute `ws://` or `wss://` URLs. If both
+env vars are set and no higher-precedence transport is authored or
+explicitly overridden, Task Runner fails fast instead of guessing.
 
 The authored Codex transport union is exactly `{ type: "stdio" }`,
 `{ type: "ws", url: "<absolute ws:// or wss:// URL>" }`, or
@@ -170,7 +179,7 @@ values using `runtimeVarSources`.
 
 ## Manifest upgrades
 
-The current manifest schema is version `14`. Older manifests are not
+The current manifest schema is version `17`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
@@ -190,6 +199,18 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   assignment seed path fields from manifests; dry-run by default,
   `--write` to apply, supports repeated `--repo <name>` and `--file
   <path>` filters plus `--root <path>`)
+- `scripts/migrate-manifests-v15.mjs` — v14 → v15 (adds `runGroupId`
+  and typed dependencies; dry-run by default, `--write` to apply,
+  supports repeated `--repo <name>` and `--file <path>` filters plus
+  `--root <path>`)
+- `scripts/migrate-manifests-v16.mjs` — v15 → v16 (adds canonical
+  `updatedAt`; dry-run by default, `--write` to apply, supports repeated
+  `--repo <name>` and `--file <path>` filters plus `--root <path>`)
+- `scripts/migrate-manifests-v17.mjs` — v16 → v17 (renames selected
+  Codex `backendSpecific` data to `backendConfig` and removes obsolete
+  config fields; dry-run by default, `--write` to apply, supports
+  repeated `--repo <name>` and `--file <path>` filters plus `--root
+  <path>`)
 - `scripts/migrate-manifests-v11.mjs` — v10 → v11 (normalizes session
   and attempt records plus hook audits)
 - `scripts/migrate-manifests-v10.mjs` — v9 → v10 (freezes launcher

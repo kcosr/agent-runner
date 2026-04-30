@@ -4,6 +4,11 @@ Tasks are the canonical unit of work. Task state is stored in
 `manifest.finalTasks` and is mutated through the `task-runner task ...`
 CLI, never through workspace files.
 
+Task commands operate on run task state only. They do not expose or
+mutate the run's frozen selected `backendConfig`, custom backend
+selection, or `backendArgs`; those are runtime fields captured when the
+run is created.
+
 Reusable task definition files are a separate authoring surface under
 `${TASK_RUNNER_CONFIG_DIR}/tasks`. Inspect them with
 `task-runner list tasks` and `task-runner show task <name|path>`. Those

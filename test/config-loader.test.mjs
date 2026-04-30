@@ -187,7 +187,7 @@ body
     assert.throws(() => loadAgentConfig("bad", rootDir), AgentConfigError);
   }));
 
-test("loadAgentConfig silently drops `tasks` (which belongs on assignments)", () =>
+test("loadAgentConfig rejects `tasks` (which belongs on assignments)", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
@@ -204,9 +204,14 @@ body
 `,
     );
 
-    const loaded = loadAgentConfig("with-tasks", rootDir);
-    assert.equal(loaded.config.name, "with-tasks");
-    assert.ok(!("tasks" in loaded.config), "tasks stripped from agent config");
+    assert.throws(
+      () => loadAgentConfig("with-tasks", rootDir),
+      (err) => {
+        assert.ok(err instanceof AgentConfigError);
+        assert.match(err.message, /Unrecognized key\(s\) in object: 'tasks'/);
+        return true;
+      },
+    );
   }));
 
 test("loadAgentConfig accepts agent with no tasks/vars/message fields", () =>
@@ -250,7 +255,7 @@ backend: codex
 model: \${AGENT_MODEL}
 timeoutSec: \${AGENT_TIMEOUT}
 unrestricted: \${AGENT_UNRESTRICTED}
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: uds
@@ -266,7 +271,7 @@ backendSpecific:
         assert.equal(loaded.config.model, "gpt-5.4");
         assert.equal(loaded.config.timeoutSec, 90);
         assert.equal(loaded.config.unrestricted, true);
-        assert.deepEqual(loaded.config.backendSpecific, {
+        assert.deepEqual(loaded.config.backendConfig, {
           codex: {
             transport: {
               type: "uds",
@@ -799,7 +804,7 @@ body
 
 for (const { name, writer, load, id, expectedPath, expectedEnv } of [
   {
-    name: "loadAgentConfig rejects env blob replacement for backendSpecific",
+    name: "loadAgentConfig rejects env blob replacement for backendConfig",
     writer: (configDir) =>
       writeAgent(
         configDir,
@@ -808,14 +813,14 @@ for (const { name, writer, load, id, expectedPath, expectedEnv } of [
 schemaVersion: 1
 name: blob-agent
 backend: codex
-backendSpecific: \${CODEX_SETTINGS}
+backendConfig: \${CODEX_SETTINGS}
 ---
 body
 `,
       ),
     load: loadAgentConfig,
     id: "blob-agent",
-    expectedPath: /agent\.backendSpecific/,
+    expectedPath: /agent\.backendConfig/,
     expectedEnv: /CODEX_SETTINGS/,
   },
   {
@@ -905,7 +910,7 @@ body
     ));
 }
 
-test("loadAgentConfig accepts backendSpecific.codex.transport in agent frontmatter", () =>
+test("loadAgentConfig accepts backendConfig.codex.transport in agent frontmatter", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
@@ -914,7 +919,7 @@ test("loadAgentConfig accepts backendSpecific.codex.transport in agent frontmatt
 schemaVersion: 1
 name: codex-transport
 backend: codex
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: ws
@@ -925,7 +930,7 @@ body
     );
 
     const loaded = loadAgentConfig("codex-transport", rootDir);
-    assert.deepEqual(loaded.config.backendSpecific, {
+    assert.deepEqual(loaded.config.backendConfig, {
       codex: {
         transport: {
           type: "ws",
@@ -935,7 +940,7 @@ body
     });
   }));
 
-test("loadAgentConfig accepts UDS backendSpecific.codex.transport in agent frontmatter", () =>
+test("loadAgentConfig accepts UDS backendConfig.codex.transport in agent frontmatter", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
@@ -944,7 +949,7 @@ test("loadAgentConfig accepts UDS backendSpecific.codex.transport in agent front
 schemaVersion: 1
 name: codex-uds-transport
 backend: codex
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: uds
@@ -955,7 +960,7 @@ body
     );
 
     const loaded = loadAgentConfig("codex-uds-transport", rootDir);
-    assert.deepEqual(loaded.config.backendSpecific, {
+    assert.deepEqual(loaded.config.backendConfig, {
       codex: {
         transport: {
           type: "uds",
@@ -985,6 +990,9 @@ backendArgs:
   passive:
     extraArgs:
       - --accepted-but-inert
+  my-agent:
+    extraArgs:
+      - --custom
 ---
 body
 `,
@@ -995,13 +1003,13 @@ body
       claude: { extraArgs: ["--model", "opus"] },
       codex: { extraArgs: ["--experimental-codex-flag"] },
       passive: { extraArgs: ["--accepted-but-inert"] },
+      "my-agent": { extraArgs: ["--custom"] },
     });
   }));
 
 test("loadAgentConfig rejects malformed backendArgs values", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     for (const [name, backendArgs, pattern] of [
-      ["unknown-key", "gemini:\n    extraArgs: [--flag]", /backendArgs/],
       ["missing-extra-args", "claude: {}", /backendArgs\.claude\.extraArgs/],
       ["extra-field", "claude:\n    extraArgs: [--flag]\n    env: {}", /backendArgs\.claude/],
       ["non-array", "claude:\n    extraArgs: --flag", /backendArgs\.claude\.extraArgs/],
@@ -1105,7 +1113,7 @@ body
     }),
   ));
 
-test("loadAgentConfig rejects invalid backendSpecific.codex.transport values", () =>
+test("loadAgentConfig preserves backendConfig for backend-owned validation", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
@@ -1114,7 +1122,7 @@ test("loadAgentConfig rejects invalid backendSpecific.codex.transport values", (
 schemaVersion: 1
 name: bad-transport
 backend: codex
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: ws
@@ -1125,75 +1133,74 @@ body
 `,
     );
 
-    assert.throws(
-      () => loadAgentConfig("bad-transport", rootDir),
-      (err) => {
-        assert.ok(err instanceof AgentConfigError);
-        assert.match(err.message, /backendSpecific\.codex\.transport/);
-        return true;
+    assert.deepEqual(loadAgentConfig("bad-transport", rootDir).config.backendConfig, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "https://example.com/not-ws",
+          extra: true,
+        },
       },
-    );
+    });
   }));
 
-test("loadAgentConfig rejects invalid UDS backendSpecific.codex.transport values", () =>
+test("loadAgentConfig accepts arbitrary backendConfig names and values", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
-    for (const [name, path] of [
-      ["relative-uds", "tmp/codex.sock"],
-      ["home-uds", "~/codex.sock"],
-      ["unix-url-uds", "unix:///tmp/codex.sock"],
-    ]) {
-      writeAgent(
-        configDir,
-        name,
-        `---
+    writeAgent(
+      configDir,
+      "custom-backend-config",
+      `---
 schemaVersion: 1
-name: ${name}
-backend: codex
-backendSpecific:
-  codex:
-    transport:
-      type: uds
-      path: ${path}
+name: custom-backend-config
+backend: my-agent
+backendConfig:
+  my-agent:
+    nested:
+      enabled: true
+      limit: 3
+  another-agent:
+    raw: value
 ---
 body
 `,
-      );
+    );
 
-      assert.throws(
-        () => loadAgentConfig(name, rootDir),
-        (err) => {
-          assert.ok(err instanceof AgentConfigError);
-          assert.match(err.message, /backendSpecific\.codex\.transport/);
-          assert.match(err.message, /absolute socket path/);
-          return true;
+    assert.deepEqual(loadAgentConfig("custom-backend-config", rootDir).config.backendConfig, {
+      "my-agent": {
+        nested: {
+          enabled: true,
+          limit: 3,
         },
-      );
-    }
+      },
+      "another-agent": {
+        raw: "value",
+      },
+    });
+  }));
 
+test("loadAgentConfig rejects removed backendSpecific frontmatter", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
-      "extra-uds",
+      "old-backend-field",
       `---
 schemaVersion: 1
-name: extra-uds
+name: old-backend-field
 backend: codex
 backendSpecific:
   codex:
     transport:
-      type: uds
-      path: /tmp/codex.sock
-      url: ws://127.0.0.1:4773/
+      type: stdio
 ---
 body
 `,
     );
 
     assert.throws(
-      () => loadAgentConfig("extra-uds", rootDir),
+      () => loadAgentConfig("old-backend-field", rootDir),
       (err) => {
         assert.ok(err instanceof AgentConfigError);
-        assert.match(err.message, /backendSpecific\.codex\.transport/);
-        assert.match(err.message, /Unrecognized key/);
+        assert.match(err.message, /backendSpecific/);
         return true;
       },
     );

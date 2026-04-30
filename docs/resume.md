@@ -2,7 +2,9 @@
 
 Resume continues an existing run from its frozen manifest state.
 task-runner does *not* re-read the source agent or assignment files on
-resume — everything the backend needs is in `run.json`.
+resume — everything the backend needs is in `run.json`, including the
+selected backend name, frozen backendConfig, resolved backend args, and
+backend session id.
 
 ## Command
 
@@ -35,6 +37,11 @@ On resume, the following flags are rejected:
 - `--cwd` — sessions are bound to the cwd they were created in.
 - `--name` — cannot be changed on resume; use `run set-name` instead.
 - `--var` — runtime vars are frozen at first write.
+
+For custom backends, resume uses the backend already frozen on the
+manifest. The backend module must still be loadable by that name, but
+current agent frontmatter, current `backendConfig`, and current
+`backendArgs` are not consulted.
 
 Initialized runs are not directly executable. Promote them first:
 

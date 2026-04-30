@@ -30,40 +30,31 @@ test("optionalOverrides accepts structured schedule overrides", () => {
   );
 });
 
-test("optionalOverrides accepts UDS codex transport overrides", () => {
+test("optionalOverrides accepts generic backendConfig overrides without backend-specific normalization", () => {
   assert.deepEqual(
     optionalOverrides({
-      backendSpecific: {
+      backendConfig: {
         codex: {
           transport: {
             type: "uds",
             path: " /tmp/codex.sock ",
           },
         },
+        "my-agent": {
+          nested: ["kept"],
+        },
       },
-    }).backendSpecific,
+    }).backendConfig,
     {
       codex: {
         transport: {
           type: "uds",
-          path: "/tmp/codex.sock",
+          path: " /tmp/codex.sock ",
         },
       },
-    },
-  );
-});
-
-test("optionalOverrides accepts deferred Codex transport env values", () => {
-  assert.deepEqual(
-    optionalOverrides({
-      codexTransportEnv: {
-        udsPath: " /tmp/codex.sock ",
-        wsUrl: " ws://127.0.0.1:4773/ ",
+      "my-agent": {
+        nested: ["kept"],
       },
-    }).codexTransportEnv,
-    {
-      udsPath: "/tmp/codex.sock",
-      wsUrl: "ws://127.0.0.1:4773/",
     },
   );
 });
@@ -82,89 +73,72 @@ test("optionalOverrides rejects backendArgs override surface", () => {
   );
 });
 
-test("optionalOverrides rejects malformed UDS codex transport overrides", () => {
+test("optionalOverrides rejects removed backend override fields", () => {
   assert.throws(
     () =>
       optionalOverrides({
         backendSpecific: {
           codex: {
-            transport: {
-              type: "uds",
-              path: "relative.sock",
-            },
+            transport: { type: "stdio" },
           },
         },
       }),
-    /overrides\.backendSpecific\.codex\.transport\.path must be an absolute socket path/,
+    /overrides\.backendSpecific is not supported/,
   );
   assert.throws(
     () =>
       optionalOverrides({
-        backendSpecific: {
-          codex: {
-            transport: {
-              type: "uds",
-              path: "/tmp/codex.sock",
-              url: "ws://127.0.0.1:4773/",
-            },
-          },
+        codexTransportEnv: {
+          udsPath: "/tmp/codex.sock",
         },
       }),
-    /overrides\.backendSpecific\.codex\.transport\.url is not supported for uds transport/,
-  );
-  assert.throws(
-    () =>
-      optionalOverrides({
-        backendSpecific: {
-          codex: {
-            transport: {
-              type: "ws",
-              url: "ws://127.0.0.1:4773/",
-              path: "/tmp/codex.sock",
-            },
-          },
-        },
-      }),
-    /overrides\.backendSpecific\.codex\.transport\.path is not supported for ws transport/,
+    /overrides\.codexTransportEnv is not supported/,
   );
 });
 
-test("optionalOverrides rejects malformed deferred Codex transport env values", () => {
+test("optionalOverrides rejects non-persistable backendConfig values", () => {
   assert.throws(
     () =>
       optionalOverrides({
-        codexTransportEnv: {
-          udsPath: "",
+        backendConfig: {
+          codex: () => {},
         },
       }),
-    /overrides\.codexTransportEnv\.udsPath cannot be empty/,
+    /overrides\.backendConfig\.codex must be JSON-persistable data/,
   );
   assert.throws(
     () =>
       optionalOverrides({
-        codexTransportEnv: {
-          socketPath: "/tmp/codex.sock",
+        backendConfig: {
+          codex: Number.NaN,
         },
       }),
-    /overrides\.codexTransportEnv\.socketPath is not supported/,
+    /overrides\.backendConfig\.codex must be JSON-persistable data/,
   );
   assert.throws(
     () =>
       optionalOverrides({
-        codexTransportEnv: {
-          udsPath: "relative.sock",
+        backendConfig: {
+          "": {},
         },
       }),
-    /overrides\.codexTransportEnv\.udsPath must be an absolute socket path/,
+    /overrides\.backendConfig backend names must be non-empty strings/,
   );
-  assert.throws(
-    () =>
-      optionalOverrides({
-        codexTransportEnv: {
-          wsUrl: "https://example.com",
-        },
-      }),
-    /overrides\.codexTransportEnv\.wsUrl must be an absolute ws:\/\/ or wss:\/\/ URL/,
+});
+
+test("optionalOverrides accepts shared backendConfig references without treating them as cycles", () => {
+  const shared = { enabled: true };
+  assert.deepEqual(
+    optionalOverrides({
+      backendConfig: {
+        "custom-a": { shared },
+        "custom-b": { shared },
+      },
+    }).backendConfig,
+    {
+      "custom-a": { shared },
+      "custom-b": { shared },
+    },
   );
 });
 

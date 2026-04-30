@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `16`. Older manifest shapes are not
+The current manifest schema is version `17`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -43,13 +43,17 @@ instructions:
 - `timeoutSec`
 - `unrestricted`
 - optional `launcher`
-- optional `backendSpecific` runtime config
-- optional `backendArgs` entries keyed by backend id
+- optional `backendConfig` runtime config keyed by backend name
+- optional `backendArgs` entries keyed by backend name
 - `lockedFields`
 - role instructions (markdown body)
 
 Agents are parsed from `agent.md` files in the config tree or direct
 paths; see [agents-and-assignments.md](agents-and-assignments.md).
+Custom backend modules are parsed from
+`${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`.
+They are trusted local code, loaded without sandboxing, cached for the
+process lifetime, and daemon changes require restart.
 
 ### Launcher
 
@@ -112,7 +116,7 @@ The canonical record is `run.json`. Important persisted fields:
 - frozen agent metadata
 - frozen assignment metadata (or `null` for chat-style runs)
 - `repo`, `cwd`
-- `backend`, `model`, `effort`, `backendSpecific`,
+- `backend`, `model`, `effort`, `backendConfig`,
   `resolvedBackendArgs`, `timeoutSec`, `unrestricted`,
   `maxAttemptsPerSession`, `launcher`
 - `lockedFields` (union of agent and assignment locks)
@@ -300,8 +304,9 @@ blocked with the rest completed or blocked → `blocked`; otherwise
    and applies `default` / `required` only after every source fails
 4. enforces locked fields
 5. captures `repo` from the resolved cwd and creates the run workspace
-6. resolves backend-specific runtime config (for Codex transport:
-   frontmatter → daemon request override → UDS/WS env → stdio default)
+6. resolves selected backendConfig through the backend (for Codex
+   transport: authored backendConfig → request override → current process
+   UDS/WS env → stdio default)
 7. resolves the selected backend's authored `backendArgs` into frozen
    `resolvedBackendArgs` (passive resolves to `[]`)
 8. resolves launcher precedence (`--launcher` override → agent launcher →
@@ -426,9 +431,9 @@ Important rules:
 
 - `--agent`, `--assignment`, `--backend`, `--backend-session-id`,
   `--cwd`, `--name`, and `--var` are forbidden on resume
-- resume reuses the frozen `manifest.backendSpecific` runtime config; it
-  does not re-resolve Codex transport from current env or new daemon
-  request overrides
+- resume reuses the frozen `manifest.backendConfig`; it does not
+  re-resolve Codex transport from current env or new daemon request
+  overrides
 - resume reuses the frozen `manifest.resolvedBackendArgs`; it does not
   re-read current agent `backendArgs`
 - resume reuses the frozen `manifest.launcher`; `--launcher` is
@@ -459,26 +464,24 @@ runtime config captured in the reset seed. Manual reset preserves
 workspace. Only archived runs are eligible, and the workspace is removed
 rather than moved to trash.
 
-## Codex transport freezing
+## Backend config freezing
 
-Codex is the only backend that currently uses persisted
-`backendSpecific`. The run loop resolves exactly one transport shape at
-fresh-run/init time and stores it on both `manifest.backendSpecific` and
-`manifest.resetSeed.backendSpecific`.
+Authored `backendConfig` is keyed by backend name. Fresh-run/init selects
+only the active backend's config, passes it to the selected backend's
+optional `resolveConfig(ctx)`, and stores only the selected resolved value
+on both `manifest.backendConfig` and `manifest.resetSeed.backendConfig`.
+Custom backends own their config shape and receive the final run cwd as
+`ctx.cwd` when invoked.
 
-- Embedded fresh runs resolve:
-  frontmatter `backendSpecific.codex.transport` →
-  `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` →
-  `{ type: "stdio" }`
-- Connected / daemon-owned fresh runs resolve:
-  frontmatter `backendSpecific.codex.transport` →
-  daemon request override
-  `overrides.backendSpecific.codex.transport` →
-  client-provided `TASK_RUNNER_CODEX_UDS_PATH` or
-  `TASK_RUNNER_CODEX_WS_URL` →
-  daemon process `TASK_RUNNER_CODEX_UDS_PATH` or
-  `TASK_RUNNER_CODEX_WS_URL` →
-  `{ type: "stdio" }`
+For Codex, fresh runs resolve:
+
+`backendConfig.codex.transport` → request
+`overrides.backendConfig.codex.transport` → current process
+`TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` →
+`{ type: "stdio" }`.
+
+Connected CLI calls do not forward caller-local Codex transport env; the
+daemon resolves Codex env from the daemon process.
 
 The transport union is exactly `{ type: "stdio" }`, `{ type: "ws", url:
 "<absolute ws:// or wss:// URL>" }`, or `{ type: "uds", path:
@@ -486,7 +489,7 @@ The transport union is exactly `{ type: "stdio" }`, `{ type: "ws", url:
 app-server, not raw socket bytes. If both UDS and WS env vars are set
 without a higher-precedence transport, resolution fails fast.
 
-This is an explicit Codex-only contract. There is no generic
+This is an explicit Codex-only env contract. There is no generic
 backend-specific env passthrough layer for other backends.
 
 ## Backend argument freezing

@@ -1,7 +1,7 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
-import { resolveBackend } from "../../backends/registry.js";
+import { BackendConfigError, resolveBackend } from "../../backends/registry.js";
 import {
   deriveRepoKey,
   resolveRunWorkspaceDirForRepo,
@@ -12,18 +12,15 @@ import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import {
-  type CodexTransportEnvValues,
-  cloneBackendSpecificConfig,
+  cloneBackendConfig,
   cloneResolvedBackendArgs,
-  codexTransportFromEnvValues,
+  isJsonishPersistable,
 } from "../backends/types.js";
 import type {
   Backend,
   BackendEvent,
-  BackendId,
   BackendInvokeResult,
-  BackendSpecificConfig,
-  CodexTransportConfig,
+  BackendName,
   ResolvedBackendArgs,
 } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
@@ -106,12 +103,11 @@ import {
 
 export interface RunOverrides {
   cwd?: string;
-  backend?: BackendId;
+  backend?: BackendName;
   launcher?: string;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  backendSpecific?: BackendSpecificConfig;
-  codexTransportEnv?: CodexTransportEnvValues;
+  backendConfig?: Partial<Record<BackendName, unknown>>;
   message?: string;
   name?: string;
   timeoutSec?: number;
@@ -509,7 +505,7 @@ function buildRecurringCloneManifest(params: {
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 16,
+    schemaVersion: 17,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -527,7 +523,7 @@ function buildRecurringCloneManifest(params: {
     backend: seed.backend,
     model: seed.model,
     effort: seed.effort,
-    backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+    backendConfig: cloneBackendConfig(seed.backendConfig),
     resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(seed.launcher),
     message: seed.message,
@@ -568,7 +564,7 @@ function buildRecurringCloneManifest(params: {
     callerInstructions: sourceManifest.callerInstructions,
     resetSeed: buildRunResetSeed({
       ...seed,
-      backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+      backendConfig: cloneBackendConfig(seed.backendConfig),
       resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(seed.launcher),
       lockedFields: [...seed.lockedFields],
@@ -610,62 +606,49 @@ function captureFullAttemptLogs(env: NodeJS.ProcessEnv = process.env): boolean {
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
-function resolveFreshCodexTransport(
+async function resolveFreshBackendConfig(
+  backend: Backend,
   agentConfig: LoadedAgent["config"],
   overrides: RunOverrides | undefined,
   execution: RunExecution,
-): CodexTransportConfig {
-  const authoredTransport = agentConfig.backendSpecific?.codex?.transport;
-  if (authoredTransport) {
-    return { ...authoredTransport };
-  }
-
-  const overrideTransport =
-    execution.hostMode === "daemon" ? overrides?.backendSpecific?.codex?.transport : undefined;
-  if (overrideTransport) {
-    return { ...overrideTransport };
-  }
-
-  if (execution.hostMode === "daemon" && overrides?.codexTransportEnv) {
-    // Connected clients forward unresolved env pairs only so authored/request
-    // transports can win before codexTransportFromEnvValues reports conflicts.
-    const clientEnvTransport = codexTransportFromEnvValues(overrides.codexTransportEnv);
-    if (clientEnvTransport) {
-      return clientEnvTransport;
+): Promise<unknown | undefined> {
+  const backendName = backend.id;
+  const authoredConfig = cloneBackendConfig(agentConfig.backendConfig?.[backendName]);
+  const overrideConfig = cloneBackendConfig(overrides?.backendConfig?.[backendName]);
+  const sourcePath = backend.sourcePath ?? `<built-in:${backendName}>`;
+  let resolved: unknown;
+  try {
+    resolved = backend.resolveConfig
+      ? await backend.resolveConfig({
+          backendName,
+          authoredConfig,
+          overrideConfig,
+          env: process.env as Record<string, string>,
+          execution,
+        })
+      : (authoredConfig ?? overrideConfig);
+  } catch (error) {
+    if (error instanceof BackendConfigError) {
+      throw error;
     }
+    throw new BackendConfigError(
+      backendName,
+      sourcePath,
+      `  - resolveConfig threw: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-
-  const envTransport = codexTransportFromEnvValues({
-    udsPath: process.env.TASK_RUNNER_CODEX_UDS_PATH,
-    wsUrl: process.env.TASK_RUNNER_CODEX_WS_URL,
-  });
-  if (envTransport) {
-    return envTransport;
+  if (resolved !== undefined && !isJsonishPersistable(resolved)) {
+    throw new BackendConfigError(
+      backendName,
+      sourcePath,
+      "  - resolveConfig returned non-persistable data",
+    );
   }
-
-  return { type: "stdio" };
-}
-
-function resolveFreshBackendSpecific(
-  backendId: BackendId,
-  agentConfig: LoadedAgent["config"],
-  overrides: RunOverrides | undefined,
-  execution: RunExecution,
-): BackendSpecificConfig | undefined {
-  if (backendId !== "codex") {
-    return undefined;
-  }
-
-  const transport = resolveFreshCodexTransport(agentConfig, overrides, execution);
-  return {
-    codex: {
-      transport: { ...transport },
-    },
-  };
+  return cloneBackendConfig(resolved);
 }
 
 function resolveFreshBackendArgs(
-  backendId: BackendId,
+  backendId: BackendName,
   agentConfig: LoadedAgent["config"],
 ): ResolvedBackendArgs {
   if (backendId === "passive") {
@@ -674,21 +657,38 @@ function resolveFreshBackendArgs(
   return cloneResolvedBackendArgs(agentConfig.backendArgs?.[backendId]?.extraArgs ?? []);
 }
 
-function resolveManifestBackendSpecific(manifest: RunManifest): BackendSpecificConfig | undefined {
-  if (manifest.backend !== "codex") {
-    return cloneBackendSpecificConfig(manifest.backendSpecific);
-  }
-  const transport = manifest.backendSpecific?.codex?.transport;
-  if (!transport) {
-    throw new ResumeError(
-      `cannot resume run ${manifest.runId} — frozen manifest has no resolved codex transport`,
+async function validateBootstrapBackendSessionId(
+  sessionId: string,
+  backend: Backend,
+  cwd: string,
+  backendConfig: unknown,
+  resolvedBackendArgs: ResolvedBackendArgs,
+): Promise<void> {
+  if (backend.supportsBootstrapSessionImport === false) {
+    throw new InvalidBackendSessionError(
+      sessionId,
+      `${backend.id} backend-session import is unsupported because public ${backend.id} resume ids are not safely self-validating`,
     );
   }
-  return {
-    codex: {
-      transport: { ...transport },
-    },
-  };
+
+  if (!backend.validateSessionId) {
+    return;
+  }
+
+  const result = await backend.validateSessionId({
+    sessionId,
+    cwd,
+    env: process.env as Record<string, string>,
+    backendConfig: cloneBackendConfig(backendConfig),
+    resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
+  });
+  if (!result.valid) {
+    throw new InvalidBackendSessionError(sessionId, result.reason);
+  }
+}
+
+function resolveManifestBackendConfig(manifest: RunManifest): unknown | undefined {
+  return cloneBackendConfig(manifest.backendConfig);
 }
 
 function emitCallerInstructions(
@@ -1327,7 +1327,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       : null;
   const envRunGroupId =
     !reusesFrozenSetup && explicitRunGroupId === null ? readRunGroupIdFromEnv() : null;
-  let effectiveBackendId = backend.id;
+  let effectiveBackendName = backend.id;
   let currentBackend = backend;
   // When --backend overrides the agent's backend, the agent's `model`
   // is also dropped (since model strings are backend-specific). Pass
@@ -1357,17 +1357,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     ? resume.manifest.cwd
     : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd, runtimeVars);
   let repo = reusesFrozenSetup ? resume.manifest.repo : deriveRepoKey(cwd);
-  const backendSpecific = reusesFrozenSetup
-    ? resolveManifestBackendSpecific(resume.manifest)
-    : resolveFreshBackendSpecific(effectiveBackendId, agentConfig, overrides, execution);
+  let backendConfig = reusesFrozenSetup
+    ? resolveManifestBackendConfig(resume.manifest)
+    : await resolveFreshBackendConfig(currentBackend, agentConfig, overrides, execution);
   let resolvedBackendArgs = reusesFrozenSetup
     ? cloneResolvedBackendArgs(resume.manifest.resolvedBackendArgs)
-    : resolveFreshBackendArgs(effectiveBackendId, agentConfig);
-  const launcher = reusesFrozenSetup
+    : resolveFreshBackendArgs(effectiveBackendName, agentConfig);
+  let launcher = reusesFrozenSetup
     ? cloneResolvedLauncherConfig(resume.manifest.launcher)
     : resolveFreshLauncherConfig({
-        backendId: effectiveBackendId,
-        backendSpecific,
+        backend: currentBackend,
+        backendConfig,
         agentLauncher: loaded.launcher,
         overrideLauncher: overrides?.launcher,
         cwd,
@@ -1392,34 +1392,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       throw new ResumeError(
         `cannot resume run ${resume?.manifest.runId ?? "<unknown>"} — prior sessions captured no backend session id`,
       );
-    }
-  }
-
-  if (
-    opts.bootstrapBackendSessionId !== undefined &&
-    currentBackend.supportsBootstrapSessionImport === false
-  ) {
-    throw new InvalidBackendSessionError(
-      opts.bootstrapBackendSessionId,
-      `${backend.id} backend-session import is unsupported because public ${backend.id} resume ids are not safely self-validating`,
-    );
-  }
-
-  // If the caller is importing an existing backend session, validate
-  // it via the backend's read-only check before any workspace
-  // creation. Skipped silently for backends that don't implement
-  // `validateSessionId`. We pass the resolved cwd because both
-  // backends key session storage by it.
-  if (opts.bootstrapBackendSessionId !== undefined && currentBackend.validateSessionId) {
-    const result = await currentBackend.validateSessionId({
-      sessionId: opts.bootstrapBackendSessionId,
-      cwd,
-      env: process.env as Record<string, string>,
-      backendSpecific: cloneBackendSpecificConfig(backendSpecific),
-      resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
-    });
-    if (!result.valid) {
-      throw new InvalidBackendSessionError(opts.bootstrapBackendSessionId, result.reason);
     }
   }
 
@@ -1517,7 +1489,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 16,
+      schemaVersion: 17,
       runId,
       repo,
       agent: {
@@ -1532,10 +1504,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
             sourcePath: loadedAssignment.sourcePath,
           }
         : null,
-      backend: effectiveBackendId,
+      backend: effectiveBackendName,
       model: model ?? null,
       effort: effort ?? null,
-      backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+      backendConfig: cloneBackendConfig(backendConfig),
       resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(launcher),
       message,
@@ -1575,10 +1547,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       hookAudits: [],
       callerInstructions: null,
       resetSeed: buildRunResetSeed({
-        backend: effectiveBackendId,
+        backend: effectiveBackendName,
         model: model ?? null,
         effort: effort ?? null,
-        backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+        backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs,
         launcher: cloneResolvedLauncherConfig(launcher),
         cwd,
@@ -1618,14 +1590,34 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     tasks = prepareState.tasks;
     cwd = prepareState.manifest.cwd;
     repo = deriveRepoKey(cwd);
-    effectiveBackendId = prepareState.manifest.backend as BackendId;
-    resolvedBackendArgs = resolveFreshBackendArgs(effectiveBackendId, agentConfig);
+    effectiveBackendName = prepareState.manifest.backend as BackendName;
+    resolvedBackendArgs = resolveFreshBackendArgs(effectiveBackendName, agentConfig);
     prepareState.manifest.resolvedBackendArgs = cloneResolvedBackendArgs(resolvedBackendArgs);
-    currentBackend = resolveRuntimeBackend(effectiveBackendId, backend);
+    currentBackend = resolveRuntimeBackend(effectiveBackendName, backend);
+    try {
+      backendConfig = await resolveFreshBackendConfig(
+        currentBackend,
+        agentConfig,
+        overrides,
+        execution,
+      );
+    } catch (error) {
+      rmSync(workspaceDir, { recursive: true, force: true });
+      throw error;
+    }
+    prepareState.manifest.backendConfig = cloneBackendConfig(backendConfig);
     model = prepareState.manifest.model ?? undefined;
     effort = (prepareState.manifest.effort ?? undefined) as RunOverrides["effort"];
     timeoutSec = prepareState.manifest.timeoutSec;
     unrestricted = prepareState.manifest.unrestricted;
+    launcher = resolveFreshLauncherConfig({
+      backend: currentBackend,
+      backendConfig,
+      agentLauncher: loaded.launcher,
+      overrideLauncher: overrides?.launcher,
+      cwd,
+    });
+    prepareState.manifest.launcher = cloneResolvedLauncherConfig(launcher);
     runGroupId = prepareState.manifest.runGroupId;
     runtimeVars = { ...prepareState.manifest.runtimeVars };
     runtimeVarSources = cloneRuntimeVarSources(prepareState.manifest.runtimeVarSources);
@@ -1651,6 +1643,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         assignmentName,
       }),
       injectedVars,
+    );
+  }
+
+  // If the caller is importing an existing backend session, validate it
+  // after prepare hooks so the check sees the same backend, cwd,
+  // backendConfig, and backendArgs that the first invocation will use.
+  if (opts.bootstrapBackendSessionId !== undefined) {
+    await validateBootstrapBackendSessionId(
+      opts.bootstrapBackendSessionId,
+      currentBackend,
+      cwd,
+      backendConfig,
+      resolvedBackendArgs,
     );
   }
 
@@ -1772,7 +1777,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 16,
+      schemaVersion: 17,
       runId,
       repo,
       agent: {
@@ -1791,10 +1796,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
             sourcePath: loadedAssignment.sourcePath,
           }
         : null,
-      backend: effectiveBackendId,
+      backend: effectiveBackendName,
       model: model ?? null,
       effort: effort ?? null,
-      backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+      backendConfig: cloneBackendConfig(backendConfig),
       resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(launcher),
       message,
@@ -1838,10 +1843,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       hookAudits: [],
       callerInstructions: frozenCallerInstructions,
       resetSeed: buildRunResetSeed({
-        backend: effectiveBackendId,
+        backend: effectiveBackendName,
         model: model ?? null,
         effort: effort ?? null,
-        backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+        backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs,
         launcher: cloneResolvedLauncherConfig(launcher),
         cwd,
@@ -2302,6 +2307,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       timeoutSec = manifest.timeoutSec;
       unrestricted = manifest.unrestricted;
       currentBackend = resolveRuntimeBackend(manifest.backend, backend);
+      backendConfig = manifest.backendConfig;
+      resolvedBackendArgs = cloneResolvedBackendArgs(manifest.resolvedBackendArgs);
+      launcher = cloneResolvedLauncherConfig(manifest.launcher);
       if (beforeAttemptResult.status === "block") {
         terminal = { status: "blocked", exitCode: 2 };
         break;
@@ -2337,7 +2345,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         },
         model,
         effort,
-        backendSpecific,
+        backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),
         launcher,
         unrestricted,
@@ -2420,6 +2428,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       timeoutSec = manifest.timeoutSec;
       unrestricted = manifest.unrestricted;
       currentBackend = resolveRuntimeBackend(manifest.backend, backend);
+      backendConfig = manifest.backendConfig;
+      resolvedBackendArgs = cloneResolvedBackendArgs(manifest.resolvedBackendArgs);
+      launcher = cloneResolvedLauncherConfig(manifest.launcher);
       if (afterAttemptResult.status === "block") {
         terminal = { status: "blocked", exitCode: 2 };
         break;

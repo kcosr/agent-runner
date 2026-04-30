@@ -19,9 +19,13 @@ workers mutate it through the `task-runner task ...` CLI.
 
 An agent is a markdown file with YAML frontmatter. The frontmatter declares
 `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, and
-`lockedFields`. The body is the agent's role instructions.
+`lockedFields`. It can also declare backend-owned `backendConfig` and
+separate `backendArgs` for extra argv tokens. The body is the agent's role
+instructions.
 
-Bundled examples live under `agents/`. See
+Bundled examples live under `agents/`. Custom backend modules live under
+`${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`
+and are trusted local code loaded without sandboxing. See
 [agents-and-assignments.md](agents-and-assignments.md) for the full schema.
 
 ## Assignments

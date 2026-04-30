@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseArgs } from "../apps/cli/dist/cli/parse-args.js";
+import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { LockedFieldError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
@@ -70,6 +71,7 @@ function writeAssignment(baseDir, name, body) {
 
 const okBackend = (id) => ({
   id,
+  ...(id === "codex" ? { resolveConfig: codexBackend.resolveConfig } : {}),
   async invoke(ctx) {
     try {
       setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
@@ -111,7 +113,7 @@ async function runIn(baseDir, agentName, overrides) {
   });
 }
 
-test("parseArgs: --backend accepts claude, codex, cursor, and pi", () => {
+test("parseArgs: --backend accepts built-in and custom backend names", () => {
   const a = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "claude"]);
   assert.equal(a.backend, "claude");
   const b = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "codex"]);
@@ -120,12 +122,14 @@ test("parseArgs: --backend accepts claude, codex, cursor, and pi", () => {
   assert.equal(c.backend, "cursor");
   const d = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "pi"]);
   assert.equal(d.backend, "pi");
+  const e = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "my-agent"]);
+  assert.equal(e.backend, "my-agent");
 });
 
-test("parseArgs: --backend rejects unknown values", () => {
+test("parseArgs: --backend rejects empty values", () => {
   assert.throws(
-    () => parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "gpt-4"]),
-    /--backend must be one of/,
+    () => parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "   "]),
+    /--backend cannot be empty/,
   );
 });
 
@@ -139,7 +143,7 @@ test("override: --backend on a claude agent persists in manifest as the override
   assert.equal(outcome.manifest.backend, "codex");
 });
 
-test("override: --backend without --model drops the agent's backend-specific model", async () => {
+test("override: --backend without --model drops the agent's backend-config model", async () => {
   const dir = tempDir();
   writeAgent(dir, "claude-agent", CLAUDE_AGENT);
   writeAssignment(dir, "one-work", ONE_TASK_ASSIGNMENT);

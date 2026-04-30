@@ -3,9 +3,9 @@ import { createConnection } from "node:net";
 import { WebSocket } from "ws";
 import type {
   Backend,
+  BackendConfigResolutionContext,
   BackendInvokeContext,
   BackendInvokeResult,
-  BackendSpecificConfig,
   CodexTransportConfig,
   EffortLevel,
   ValidateSessionContext,
@@ -806,6 +806,10 @@ function cloneCodexTransportConfig(transport: CodexTransportConfig): CodexTransp
   }
 }
 
+export interface CodexBackendConfig {
+  transport: CodexTransportConfig;
+}
+
 export function normalizeCodexWsUrl(url: string): string {
   if (!isWsOrWssUrl(url)) {
     throw new Error(
@@ -823,15 +827,7 @@ export function normalizeCodexUdsPath(path: string): string {
   return trimmed;
 }
 
-export function resolveCodexTransportConfig(ctx: {
-  backendSpecific?: BackendSpecificConfig;
-}): CodexTransportConfig {
-  const transport = ctx.backendSpecific?.codex?.transport;
-  if (!transport) {
-    throw new Error(
-      "codex backend requires backendSpecific.codex.transport to be resolved before invocation",
-    );
-  }
+function normalizeCodexTransportConfig(transport: CodexTransportConfig): CodexTransportConfig {
   if (transport.type === "ws") {
     return {
       type: "ws",
@@ -845,6 +841,128 @@ export function resolveCodexTransportConfig(ctx: {
     };
   }
   return cloneCodexTransportConfig(transport);
+}
+
+function parseCodexTransport(value: unknown, sourceLabel: string): CodexTransportConfig {
+  if (!isRecord(value)) {
+    throw new Error(`${sourceLabel}.transport must be an object`);
+  }
+  if (value.type === "stdio") {
+    const keys = Object.keys(value);
+    if (keys.length !== 1) {
+      throw new Error(`${sourceLabel}.transport stdio config only accepts type`);
+    }
+    return { type: "stdio" };
+  }
+  if (value.type === "ws") {
+    const keys = Object.keys(value);
+    if (keys.some((key) => key !== "type" && key !== "url")) {
+      throw new Error(`${sourceLabel}.transport ws config only accepts type and url`);
+    }
+    if (typeof value.url !== "string" || value.url.trim().length === 0) {
+      throw new Error(`${sourceLabel}.transport.url must be a non-empty string`);
+    }
+    return {
+      type: "ws",
+      url: normalizeCodexWsUrl(value.url),
+    };
+  }
+  if (value.type === "uds") {
+    const keys = Object.keys(value);
+    if (keys.some((key) => key !== "type" && key !== "path")) {
+      throw new Error(`${sourceLabel}.transport uds config only accepts type and path`);
+    }
+    if (typeof value.path !== "string" || value.path.trim().length === 0) {
+      throw new Error(`${sourceLabel}.transport.path must be a non-empty string`);
+    }
+    return {
+      type: "uds",
+      path: normalizeCodexUdsPath(value.path),
+    };
+  }
+  throw new Error(`${sourceLabel}.transport.type must be "stdio", "ws", or "uds"`);
+}
+
+function parseCodexBackendConfig(
+  value: unknown,
+  sourceLabel: string,
+  requireTransport: boolean,
+): CodexBackendConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`${sourceLabel} must be an object`);
+  }
+  const keys = Object.keys(value);
+  if (keys.some((key) => key !== "transport")) {
+    throw new Error(`${sourceLabel} only accepts transport`);
+  }
+  if (value.transport === undefined) {
+    if (requireTransport) {
+      throw new Error(`${sourceLabel}.transport is required`);
+    }
+    return undefined;
+  }
+  return {
+    transport: parseCodexTransport(value.transport, sourceLabel),
+  };
+}
+
+function codexTransportFromEnv(env: Record<string, string>): CodexTransportConfig | undefined {
+  const udsPath = env.TASK_RUNNER_CODEX_UDS_PATH?.trim();
+  const wsUrl = env.TASK_RUNNER_CODEX_WS_URL?.trim();
+  if (udsPath && wsUrl) {
+    throw new Error("TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set");
+  }
+  if (udsPath) {
+    return {
+      type: "uds",
+      path: normalizeCodexUdsPath(udsPath),
+    };
+  }
+  if (!wsUrl) {
+    return undefined;
+  }
+  return {
+    type: "ws",
+    url: normalizeCodexWsUrl(wsUrl),
+  };
+}
+
+export function resolveCodexBackendConfig(ctx: BackendConfigResolutionContext): CodexBackendConfig {
+  const authored = parseCodexBackendConfig(
+    ctx.authoredConfig,
+    `backendConfig.${ctx.backendName}`,
+    false,
+  );
+  if (authored) {
+    return authored;
+  }
+
+  const override = parseCodexBackendConfig(
+    ctx.overrideConfig,
+    `overrides.backendConfig.${ctx.backendName}`,
+    false,
+  );
+  if (override) {
+    return override;
+  }
+
+  const envTransport = codexTransportFromEnv(ctx.env);
+  return {
+    transport: envTransport ?? { type: "stdio" },
+  };
+}
+
+export function resolveCodexTransportConfig(ctx: {
+  backendConfig?: unknown;
+}): CodexTransportConfig {
+  const config = parseCodexBackendConfig(ctx.backendConfig, "backendConfig.codex", true);
+  if (!config) {
+    throw new Error("codex backend requires backendConfig.codex.transport before invocation");
+  }
+  return normalizeCodexTransportConfig(config.transport);
 }
 
 async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
@@ -929,7 +1047,7 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
       prompt: "",
       cwd: ctx.cwd,
       env: ctx.env ?? (process.env as Record<string, string>),
-      backendSpecific: ctx.backendSpecific,
+      backendConfig: ctx.backendConfig,
       resolvedBackendArgs: ctx.resolvedBackendArgs,
       timeoutSec: 60,
     });
@@ -977,7 +1095,7 @@ export async function setCodexThreadName(ctx: {
   threadId: string;
   cwd: string;
   env?: Record<string, string>;
-  backendSpecific?: BackendSpecificConfig;
+  backendConfig?: unknown;
   resolvedBackendArgs: string[];
   name: string | null;
 }): Promise<void> {
@@ -988,7 +1106,7 @@ export async function setCodexThreadName(ctx: {
       prompt: "",
       cwd: ctx.cwd,
       env: ctx.env ?? (process.env as Record<string, string>),
-      backendSpecific: ctx.backendSpecific,
+      backendConfig: ctx.backendConfig,
       resolvedBackendArgs: ctx.resolvedBackendArgs,
       timeoutSec: 60,
     });
@@ -1015,6 +1133,7 @@ export async function setCodexThreadName(ctx: {
 
 export const codexBackend: Backend = {
   id: "codex",
+  resolveConfig: resolveCodexBackendConfig,
   validateSessionId: validateCodexSession,
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const startedAt = Date.now();

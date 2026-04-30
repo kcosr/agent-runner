@@ -6006,12 +6006,9 @@ test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen 
       ),
     );
     const originalManifest = readManifest(initialized.workspaceDir);
-    assert.deepEqual(originalManifest.backendSpecific, {
-      codex: {
-        transport: {
-          type: "ws",
-          url: "ws://127.0.0.1:4773/",
-        },
+    assert.deepEqual(originalManifest.backendConfig, {
+      transport: {
+        type: "stdio",
       },
     });
 
@@ -6039,7 +6036,11 @@ test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen 
 
     const afterCliManifest = readManifest(initialized.workspaceDir);
     assert.equal(afterCliManifest.finalTasks.t1.title, "Handle beta");
-    assert.equal(afterCliManifest.backendSpecific.codex.transport.url, "ws://127.0.0.1:4773/");
+    assert.deepEqual(afterCliManifest.backendConfig, {
+      transport: {
+        type: "stdio",
+      },
+    });
 
     const httpReconfigured = await daemonReconfigureRun(listenUrl, initialized.runId, {
       vars: { target: "gamma" },
@@ -6051,7 +6052,11 @@ test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen 
     const afterHttpManifest = readManifest(initialized.workspaceDir);
     assert.equal(afterHttpManifest.finalTasks.t1.title, "Handle gamma");
     assert.equal(afterHttpManifest.message, "HTTP replacement message");
-    assert.equal(afterHttpManifest.backendSpecific.codex.transport.url, "ws://127.0.0.1:4773/");
+    assert.deepEqual(afterHttpManifest.backendConfig, {
+      transport: {
+        type: "stdio",
+      },
+    });
 
     const rejected = await httpJson(
       deriveHttpBaseUrl(listenUrl),
@@ -6571,7 +6576,7 @@ test("daemon HTTP supports a browser definition-to-init flow with explicit calle
   }
 });
 
-test("daemon HTTP init rejects malformed backendSpecific codex transport overrides", async () => {
+test("daemon HTTP init rejects removed backendSpecific overrides", async () => {
   const dir = tempDir();
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -6587,9 +6592,7 @@ test("daemon HTTP init rejects malformed backendSpecific codex transport overrid
           backendSpecific: {
             codex: {
               transport: {
-                type: "ws",
-                url: "https://example.com/not-ws",
-                extra: true,
+                type: "stdio",
               },
             },
           },
@@ -6598,7 +6601,7 @@ test("daemon HTTP init rejects malformed backendSpecific codex transport overrid
     });
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "INVALID_REQUEST");
-    assert.match(response.body.error.message, /overrides\.backendSpecific\.codex\.transport/);
+    assert.match(response.body.error.message, /overrides\.backendSpecific is not supported/);
   } finally {
     await daemon.stop();
   }
@@ -6663,7 +6666,7 @@ test("daemon init uses the remote caller cwd when the agent omits cwd", async ()
   }
 });
 
-test("daemon RPC start rejects malformed backendSpecific codex transport overrides", async () => {
+test("daemon RPC start rejects removed backendSpecific overrides", async () => {
   const dir = tempDir();
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -6678,7 +6681,6 @@ test("daemon RPC start rejects malformed backendSpecific codex transport overrid
             codex: {
               transport: {
                 type: "stdio",
-                url: "ws://127.0.0.1:4773/",
               },
             },
           },
@@ -6686,10 +6688,7 @@ test("daemon RPC start rejects malformed backendSpecific codex transport overrid
       }),
       (err) => {
         assert.ok(err instanceof DaemonRpcError);
-        assert.match(
-          err.message,
-          /overrides\.backendSpecific\.codex\.transport\.url is not supported/,
-        );
+        assert.match(err.message, /overrides\.backendSpecific is not supported/);
         return true;
       },
     );
@@ -7423,7 +7422,7 @@ test("daemon-target CLI detaches fresh runs without subscribing for events", asy
   }
 });
 
-test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured start override", async () => {
+test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_WS_URL on start requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -7465,14 +7464,7 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
       },
     );
     assert.equal(result.code, 0);
-    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
-      codex: {
-        transport: {
-          type: "ws",
-          url: "ws://127.0.0.1:4773/",
-        },
-      },
-    });
+    assert.equal(requests[0].params.overrides.backendConfig, undefined);
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();
@@ -7635,8 +7627,7 @@ test("daemon-target CLI does not forward local Codex transport env on resume req
       },
     );
     assert.equal(result.code, 0);
-    assert.equal(requests[0].params.overrides.backendSpecific, undefined);
-    assert.equal(requests[0].params.overrides.codexTransportEnv, undefined);
+    assert.equal(requests[0].params.overrides.backendConfig, undefined);
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();
@@ -7696,7 +7687,7 @@ test("daemon-target CLI does not forward TASK_RUNNER_PARENT_RUN_ID on resume req
   }
 });
 
-test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured init override", async () => {
+test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_WS_URL on init requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -7733,14 +7724,7 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
       },
     );
     assert.equal(result.code, 0);
-    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
-      codex: {
-        transport: {
-          type: "ws",
-          url: "ws://127.0.0.1:4773/",
-        },
-      },
-    });
+    assert.equal(requests[0].params.overrides.backendConfig, undefined);
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();
@@ -7749,7 +7733,7 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
   }
 });
 
-test("daemon-target CLI forwards local TASK_RUNNER_CODEX_UDS_PATH as structured run/init overrides", async () => {
+test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_UDS_PATH on run/init/resume requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -7828,18 +7812,9 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_UDS_PATH as structured 
       requests.map((request) => request.method),
       ["runs.start", "runs.resume", "runs.init"],
     );
-    for (const request of [requests[0], requests[2]]) {
-      assert.deepEqual(request.params.overrides.backendSpecific, {
-        codex: {
-          transport: {
-            type: "uds",
-            path: "/tmp/codex.sock",
-          },
-        },
-      });
-    }
-    assert.equal(requests[1].params.overrides.backendSpecific, undefined);
-    assert.equal(requests[1].params.overrides.codexTransportEnv, undefined);
+    assert.equal(requests[0].params.overrides.backendConfig, undefined);
+    assert.equal(requests[1].params.overrides.backendConfig, undefined);
+    assert.equal(requests[2].params.overrides.backendConfig, undefined);
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();
@@ -7848,7 +7823,7 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_UDS_PATH as structured 
   }
 });
 
-test("daemon-target CLI forwards conflicting local Codex transport env for daemon-side precedence resolution", async () => {
+test("daemon-target CLI does not forward conflicting local Codex transport env", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -7893,11 +7868,7 @@ test("daemon-target CLI forwards conflicting local Codex transport env for daemo
 
     assert.equal(result.code, 0);
     assert.equal(result.stderr, "");
-    assert.deepEqual(requests[0].params.overrides.codexTransportEnv, {
-      udsPath: "/tmp/codex.sock",
-      wsUrl: "ws://127.0.0.1:4773/",
-    });
-    assert.equal(requests[0].params.overrides.backendSpecific, undefined);
+    assert.equal(requests[0].params.overrides.backendConfig, undefined);
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();

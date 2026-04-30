@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 16)
+├── run.json               # canonical manifest (schema version 17)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── agent-seed.md          # only when the run started from an agent file
@@ -42,12 +42,12 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `16`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `17`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath }` or `null` |
 | `backend`, `model`, `effort` | resolved runtime config |
-| `backendSpecific`, `resolvedBackendArgs` | frozen backend-specific config and selected backend argv extras |
+| `backendConfig`, `resolvedBackendArgs` | frozen selected backend-owned config and selected backend argv extras |
 | `timeoutSec`, `maxAttemptsPerSession`, `unrestricted` | per-attempt limits |
 | `lockedFields` | union of agent + assignment locks, frozen |
 | `message` | default run message (from CLI positional or assignment) |
@@ -281,7 +281,7 @@ task-runner run schedule clear <id|path>
 
 `run reset` restores the initialized-state seed from `manifest.resetSeed`
 (model, effort, name, run group, dependencies, timeoutSec,
-maxAttemptsPerSession, backend-specific config, resolved backend args,
+maxAttemptsPerSession, selected backendConfig, resolved backend args,
 brief, final task snapshot). Attempt and session history, endedAt,
 exitCode, and the live status are cleared. Existing `run-events.jsonl`
 history is preserved and reset appends one more diagnostic record instead
@@ -295,8 +295,8 @@ part of the reset seed.
 unarchived `initialized` run. The mutation rerenders the composed brief
 and reset seed while preserving frozen identity/runtime fields including
 agent, assignment, backend, cwd, tasks, schedule, launcher, hooks, and
-backend-specific Codex transport, including stdio, websocket, or UDS, plus
-the selected backend's frozen args.
+selected backendConfig, including Codex stdio, websocket, or UDS
+transport, plus the selected backend's frozen args.
 
 The operation is all-or-nothing. Validation failures, required-var
 failures, locked `message` / rendered task fields, and prepare/render

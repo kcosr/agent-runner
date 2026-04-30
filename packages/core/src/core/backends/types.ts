@@ -1,8 +1,11 @@
 import { isAbsolute } from "node:path";
 import type { ResolvedLauncherConfig } from "../config/launchers.js";
+import type { RunExecution } from "../run/manifest.js";
 
-export const BACKEND_IDS = ["claude", "codex", "cursor", "pi", "passive"] as const;
-export type BackendId = (typeof BACKEND_IDS)[number];
+export const BUILTIN_BACKEND_IDS = ["claude", "codex", "cursor", "pi", "passive"] as const;
+export type BuiltinBackendId = (typeof BUILTIN_BACKEND_IDS)[number];
+export type BackendName = string;
+export const RESERVED_BACKEND_NAMES: ReadonlySet<string> = new Set(BUILTIN_BACKEND_IDS);
 
 export type EffortLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -11,22 +14,11 @@ export type CodexTransportConfig =
   | { type: "ws"; url: string }
   | { type: "uds"; path: string };
 
-export interface CodexTransportEnvValues {
-  udsPath?: string;
-  wsUrl?: string;
-}
-
-export interface BackendSpecificConfig {
-  codex?: {
-    transport?: CodexTransportConfig;
-  };
-}
-
 export interface BackendArgsEntry {
   extraArgs: string[];
 }
 
-export type BackendArgsConfig = Partial<Record<BackendId, BackendArgsEntry>>;
+export type BackendArgsConfig = Partial<Record<BackendName, BackendArgsEntry>>;
 export type ResolvedBackendArgs = string[];
 
 export function isWsOrWssUrl(value: string): boolean {
@@ -43,50 +35,54 @@ export function isAbsoluteUdsSocketPath(value: string): boolean {
   return trimmed.length > 0 && isAbsolute(trimmed);
 }
 
-export function codexTransportFromEnvValues(
-  env: CodexTransportEnvValues,
-): CodexTransportConfig | undefined {
-  const udsPath = env.udsPath?.trim();
-  const wsUrl = env.wsUrl?.trim();
-  if (udsPath && wsUrl) {
-    throw new Error("TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set");
-  }
-  if (udsPath) {
-    if (!isAbsoluteUdsSocketPath(udsPath)) {
-      throw new Error("TASK_RUNNER_CODEX_UDS_PATH must be an absolute socket path");
-    }
-    return {
-      type: "uds",
-      path: udsPath,
-    };
-  }
-  if (!wsUrl) {
-    return undefined;
-  }
-  if (!isWsOrWssUrl(wsUrl)) {
-    throw new Error("TASK_RUNNER_CODEX_WS_URL must be an absolute ws:// or wss:// URL");
-  }
-  return {
-    type: "ws",
-    url: wsUrl,
-  };
+export function cloneBackendConfig<T = unknown>(backendConfig: T | undefined): T | undefined {
+  return backendConfig === undefined ? undefined : structuredClone(backendConfig);
 }
 
-export function cloneBackendSpecificConfig(
-  backendSpecific: BackendSpecificConfig | undefined,
-): BackendSpecificConfig | undefined {
-  if (!backendSpecific) {
-    return undefined;
+export function isJsonishPersistable(value: unknown): boolean {
+  return isJsonishPersistableValue(value, new Set<object>());
+}
+
+function isJsonishPersistableValue(value: unknown, stack: Set<object>): boolean {
+  if (value === null) {
+    return true;
   }
-  return {
-    codex: backendSpecific.codex
-      ? {
-          transport: backendSpecific.codex.transport
-            ? { ...backendSpecific.codex.transport }
-            : undefined,
-        }
-      : undefined,
-  };
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return true;
+    case "number":
+      return Number.isFinite(value);
+    case "undefined":
+    case "bigint":
+    case "symbol":
+    case "function":
+      return false;
+    case "object":
+      break;
+  }
+
+  if (stack.has(value)) {
+    return false;
+  }
+  stack.add(value);
+
+  if (Array.isArray(value)) {
+    const valid = value.every((entry) => isJsonishPersistableValue(entry, stack));
+    stack.delete(value);
+    return valid;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    stack.delete(value);
+    return false;
+  }
+  const valid = Object.values(value as Record<string, unknown>).every((entry) =>
+    isJsonishPersistableValue(entry, stack),
+  );
+  stack.delete(value);
+  return valid;
 }
 
 export function cloneBackendArgsConfig(
@@ -96,8 +92,7 @@ export function cloneBackendArgsConfig(
     return undefined;
   }
   const cloned: BackendArgsConfig = {};
-  for (const backendId of BACKEND_IDS) {
-    const entry = backendArgs[backendId];
+  for (const [backendId, entry] of Object.entries(backendArgs)) {
     if (entry) {
       cloned[backendId] = {
         extraArgs: cloneResolvedBackendArgs(entry.extraArgs),
@@ -121,13 +116,21 @@ export type BackendEvent =
       text: string;
     };
 
+export interface BackendConfigResolutionContext {
+  backendName: BackendName;
+  authoredConfig: unknown;
+  overrideConfig?: unknown;
+  env: Record<string, string>;
+  execution: RunExecution;
+}
+
 export interface BackendInvokeContext {
   prompt: string;
   cwd: string;
   env: Record<string, string>;
   model?: string;
   effort?: EffortLevel;
-  backendSpecific?: BackendSpecificConfig;
+  backendConfig?: unknown;
   resolvedBackendArgs: ResolvedBackendArgs;
   launcher?: ResolvedLauncherConfig;
   unrestricted?: boolean;
@@ -153,14 +156,17 @@ export interface ValidateSessionContext {
   sessionId: string;
   cwd: string;
   env?: Record<string, string>;
-  backendSpecific?: BackendSpecificConfig;
+  backendConfig?: unknown;
   resolvedBackendArgs: ResolvedBackendArgs;
 }
 
 export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };
 
 export interface Backend {
-  id: BackendId;
+  id: BackendName;
+  sourcePath?: string;
+  launcherMode?: "applies" | "direct";
+  resolveConfig?(ctx: BackendConfigResolutionContext): unknown | Promise<unknown>;
   invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult>;
   /**
    * Whether `--backend-session-id` bootstrap import is supported for
