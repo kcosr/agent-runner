@@ -423,8 +423,11 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
       if (shutdownTimer) clearTimeout(shutdownTimer);
       if (killTimer) clearTimeout(killTimer);
       ctx.abortSignal?.removeEventListener("abort", onAbort);
-      if (stdoutBuffer.trim().length > 0) {
-        processLine(stdoutBuffer);
+      if (stdoutBuffer.length > 0) {
+        ctx.onRawStdoutLine?.(stdoutBuffer);
+        if (stdoutBuffer.trim().length > 0) {
+          processLine(stdoutBuffer);
+        }
         stdoutBuffer = "";
       }
 
@@ -588,6 +591,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
       while (newlineIndex >= 0) {
         const line = stdoutBuffer.slice(0, newlineIndex);
         stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        ctx.onRawStdoutLine?.(`${line}\n`);
         processLine(line);
         newlineIndex = stdoutBuffer.indexOf("\n");
       }

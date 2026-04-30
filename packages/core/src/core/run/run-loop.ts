@@ -11,6 +11,7 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
+import { appendTextFileDurable } from "../../util/write-file-atomic.js";
 import {
   cloneBackendConfig,
   cloneResolvedBackendArgs,
@@ -43,6 +44,7 @@ import {
   type SessionRecord,
   type TaskSnapshot,
   applyRunResetSeed,
+  attemptStdoutLogRelativePath,
   buildRunResetSeed,
   cloneRunDependencyRefs,
   cloneRuntimeVarSources,
@@ -603,8 +605,8 @@ function resolveFreshRunCwd(
   return resolutionBase;
 }
 
-function captureFullAttemptLogs(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env.TASK_RUNNER_FULL_ATTEMPT_LOGS?.trim().toLowerCase();
+function captureBackendStdout(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.TASK_RUNNER_CAPTURE_BACKEND_STDOUT?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
@@ -2154,7 +2156,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     prompt: string;
     sessionIdAtStart: string | null;
   } | null = null;
-  const includeStdoutInAttemptLog = captureFullAttemptLogs();
+  const captureRawBackendStdout = captureBackendStdout();
   const persistAttemptRecord = (record: {
     attemptNumber: number;
     attemptIndexInSession: number;
@@ -2185,7 +2187,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       attemptIndexInSession: record.attemptIndexInSession,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
-      stdout: includeStdoutInAttemptLog ? record.rawStdout : "",
+      stdout: "",
       stderr: record.rawStderr,
     });
     withTaskStateLock(workspaceDir, () => {
@@ -2336,6 +2338,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         prompt: currentPrompt,
         sessionIdAtStart,
       };
+      const rawStdoutLogPath = captureRawBackendStdout
+        ? join(workspaceDir, attemptStdoutLogRelativePath(globalAttemptNumber))
+        : null;
+      if (rawStdoutLogPath !== null) {
+        appendTextFileDurable(rawStdoutLogPath, "");
+      }
+      const onRawStdoutLine =
+        rawStdoutLogPath === null
+          ? undefined
+          : (line: string): void => {
+              appendTextFileDurable(rawStdoutLogPath, line);
+            };
 
       const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,
@@ -2358,6 +2372,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         name: name ?? undefined,
         abortSignal: opts.abortSignal,
         emit: emitEvent,
+        onRawStdoutLine,
       });
       const attemptEndedAt = new Date().toISOString();
 

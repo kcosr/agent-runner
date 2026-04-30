@@ -354,6 +354,7 @@ test("pi backend launches in rpc mode, captures streamed text, and persists tran
 test("pi backend rejects malformed rpc output", async () => {
   const dir = tempDir();
   const command = writeFakePiAgent(dir);
+  const rawStdoutLines = [];
 
   await assert.rejects(
     () =>
@@ -363,14 +364,16 @@ test("pi backend rejects malformed rpc output", async () => {
           cwd: dir,
           env: {
             ...process.env,
-            PI_TEST_RAW_STDOUT_LINE: "not-json\\n",
+            PI_TEST_RAW_STDOUT_LINE: "not-json\n",
           },
           resolvedBackendArgs: [],
           timeoutSec: 10,
+          onRawStdoutLine: (line) => rawStdoutLines.push(line),
         }),
       ),
     /non-JSON line/,
   );
+  assert.equal(rawStdoutLines[0], "not-json\n");
 });
 
 test("pi backend auto-cancels dialog-style extension ui requests without hanging", async () => {

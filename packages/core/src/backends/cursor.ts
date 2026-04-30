@@ -73,6 +73,7 @@ interface StreamState {
   buffer: string;
   parseError: Error | null;
   onText: (text: string) => void;
+  onRawStdoutLine?: (line: string) => void;
 }
 
 function captureSessionId(state: StreamState, event: Record<string, unknown>): void {
@@ -142,19 +143,20 @@ function processLine(state: StreamState, line: string): void {
 }
 
 function feed(state: StreamState, chunk: string): void {
-  if (state.parseError) return;
   state.buffer += chunk;
   let newlineIdx = state.buffer.indexOf("\n");
   while (newlineIdx >= 0) {
-    processLine(state, state.buffer.slice(0, newlineIdx));
+    const line = state.buffer.slice(0, newlineIdx);
     state.buffer = state.buffer.slice(newlineIdx + 1);
+    state.onRawStdoutLine?.(`${line}\n`);
+    processLine(state, line);
     newlineIdx = state.buffer.indexOf("\n");
   }
 }
 
 function flush(state: StreamState): void {
-  if (state.parseError) return;
   if (state.buffer.length > 0) {
+    state.onRawStdoutLine?.(state.buffer);
     processLine(state, state.buffer);
     state.buffer = "";
   }
@@ -172,6 +174,7 @@ export const cursorBackend: Backend = {
       buffer: "",
       parseError: null,
       onText: (text) => ctx.emit?.({ type: "agent_message_delta", text }),
+      onRawStdoutLine: ctx.onRawStdoutLine,
     };
 
     const result = await runProcess({

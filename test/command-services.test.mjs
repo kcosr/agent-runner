@@ -565,6 +565,8 @@ test("command services: getRunTimelineHistory reads schema v2 attempt logs", asy
       })}\n`,
     );
   }
+  writeFileSync(join(attemptsDir, "01.stdout.log"), "raw sidecar for attempt one\n");
+  writeFileSync(join(attemptsDir, "02.stdout.log"), "{malformed sidecar is ignored");
 
   await withSharedRuntimeEnv(dir, async () => {
     const history = getRunTimelineHistory(outcome.runId);

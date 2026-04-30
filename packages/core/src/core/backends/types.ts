@@ -139,6 +139,7 @@ export interface BackendInvokeContext {
   name?: string;
   abortSignal?: AbortSignal;
   emit?: (event: BackendEvent) => void;
+  onRawStdoutLine?: (line: string) => void;
 }
 
 export interface BackendInvokeResult {

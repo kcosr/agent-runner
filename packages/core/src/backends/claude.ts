@@ -109,6 +109,7 @@ interface StreamState {
   lastMessageId: string | null;
   pendingMessageBoundary: boolean;
   onText: (text: string) => void;
+  onRawStdoutLine?: (line: string) => void;
 }
 
 function captureSessionId(state: StreamState, event: Record<string, unknown>): void {
@@ -214,12 +215,14 @@ function feed(state: StreamState, chunk: string): void {
   while ((newlineIdx = state.buffer.indexOf("\n")) >= 0) {
     const line = state.buffer.slice(0, newlineIdx);
     state.buffer = state.buffer.slice(newlineIdx + 1);
+    state.onRawStdoutLine?.(`${line}\n`);
     processLine(state, line);
   }
 }
 
 function flush(state: StreamState): void {
   if (state.buffer.length > 0) {
+    state.onRawStdoutLine?.(state.buffer);
     processLine(state, state.buffer);
     state.buffer = "";
   }
@@ -263,6 +266,7 @@ export const claudeBackend: Backend = {
       lastMessageId: null,
       pendingMessageBoundary: false,
       onText: (text) => ctx.emit?.({ type: "agent_message_delta", text }),
+      onRawStdoutLine: ctx.onRawStdoutLine,
     };
 
     const command = process.env.TASK_RUNNER_CLAUDE_BIN ?? "claude";

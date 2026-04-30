@@ -323,6 +323,10 @@
 
 ### Changed
 
+- Changed attempt-log persistence so new writes keep `attempts/NN.json`
+  stdout empty and, when `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` is set,
+  write raw backend stdout to local `attempts/NN.stdout.log` sidecars
+  that Task Runner does not read.
 - Resuming a run now preserves `blocked` task status while still resetting
   stale `in_progress` tasks to `pending`; blocked-only runs no longer resume
   implicitly as runnable work.
@@ -542,9 +546,9 @@
 - Changed `task-runner list runs` text output to append each run's exact
   persisted `cwd=...` alongside repo, agent, and assignment metadata.
   ([#73](https://github.com/kcosr/task-runner/pull/73))
-- Changed attempt-log persistence to omit captured stdout by default;
-  set `TASK_RUNNER_FULL_ATTEMPT_LOGS=1` to keep full stdout in
-  per-attempt records for local debugging. ([#73](https://github.com/kcosr/task-runner/pull/73))
+- Removed `TASK_RUNNER_FULL_ATTEMPT_LOGS`; it no longer enables stdout
+  capture. Use `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` for raw
+  `attempts/NN.stdout.log` sidecars.
 - Changed the web run detail drawer to expose read-only `Vars` and
   `Hook state` data in a dedicated `Data` tab with a clearer key/value
   table layout, and moved the mobile note/resume dialogs lower so they

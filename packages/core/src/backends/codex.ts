@@ -136,6 +136,7 @@ function openStdioTransport(
   unrestricted: boolean,
   resolvedBackendArgs: string[],
   launcher: BackendInvokeContext["launcher"],
+  onRawStdoutLine: BackendInvokeContext["onRawStdoutLine"],
 ): Transport {
   const binary = process.env.TASK_RUNNER_CODEX_BIN ?? "codex";
   const launched = buildSpawnCommand({
@@ -155,12 +156,19 @@ function openStdioTransport(
   let closed = false;
   let stdoutBuffer = "";
 
+  const flushRawStdoutBuffer = (): void => {
+    if (stdoutBuffer.length === 0) return;
+    onRawStdoutLine?.(stdoutBuffer);
+    stdoutBuffer = "";
+  };
+
   child.stdout?.on("data", (chunk: Buffer) => {
     stdoutBuffer += chunk.toString("utf8");
     let newlineIdx: number;
     while ((newlineIdx = stdoutBuffer.indexOf("\n")) >= 0) {
       const line = stdoutBuffer.slice(0, newlineIdx);
       stdoutBuffer = stdoutBuffer.slice(newlineIdx + 1);
+      onRawStdoutLine?.(`${line}\n`);
       if (line.trim().length > 0 && messageHandler) {
         messageHandler(line);
       }
@@ -174,11 +182,13 @@ function openStdioTransport(
   child.on("close", (code, signal) => {
     if (closed) return;
     closed = true;
+    flushRawStdoutBuffer();
     closeHandler?.(code, signal ? `signal ${signal}` : "exit");
   });
   child.on("error", (err) => {
     if (closed) return;
     closed = true;
+    flushRawStdoutBuffer();
     closeHandler?.(null, `spawn error: ${err.message}`);
   });
 
@@ -207,6 +217,7 @@ function openStdioTransport(
       // Give it a moment to exit cleanly, then SIGINT, then SIGKILL.
       await new Promise<void>((resolve) => {
         const settled = () => {
+          flushRawStdoutBuffer();
           closed = true;
           resolve();
         };
@@ -979,6 +990,7 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
     ctx.unrestricted ?? false,
     ctx.resolvedBackendArgs,
     ctx.launcher,
+    ctx.onRawStdoutLine,
   );
 }
 
