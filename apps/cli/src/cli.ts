@@ -414,10 +414,10 @@ function getDefinitionListDescriptor(
 }
 
 const DEFINITION_SHOW_DESCRIPTORS = {
-  agent: { rpcMethod: "agents.get", responseKey: "agent" },
-  assignment: { rpcMethod: "assignments.get", responseKey: "assignment" },
-  launcher: { rpcMethod: "launchers.get", responseKey: "launcher" },
-  task: { rpcMethod: "taskDefinitions.get", responseKey: "taskDefinition" },
+  agent: { kind: "agent", rpcMethod: "agents.get", responseKey: "agent" },
+  assignment: { kind: "assignment", rpcMethod: "assignments.get", responseKey: "assignment" },
+  launcher: { kind: "launcher", rpcMethod: "launchers.get", responseKey: "launcher" },
+  task: { kind: "task", rpcMethod: "taskDefinitions.get", responseKey: "taskDefinition" },
 } as const;
 
 type DefinitionShowKind = keyof typeof DEFINITION_SHOW_DESCRIPTORS;
@@ -1048,7 +1048,7 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
     }
     const result =
       connect === undefined
-        ? getDefinition(kindArg as DefinitionShowKind, target, process.cwd())
+        ? getDefinition(definitionDescriptor.kind, target, process.cwd())
         : await withDaemonClient(connect, (client) =>
             client
               .call<Record<string, ReturnType<typeof getDefinition>>>(
@@ -1061,10 +1061,10 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
               .then((r) => r[definitionDescriptor.responseKey])
               .then((detail) => {
                 if (!detail) {
-                  throw new Error(`missing ${kindArg} detail`);
+                  throw new Error(`missing ${definitionDescriptor.kind} detail`);
                 }
-                if (detail.kind !== kindArg) {
-                  throw new Error(`invalid ${kindArg} detail response`);
+                if (detail.kind !== definitionDescriptor.kind) {
+                  throw new Error(`invalid ${definitionDescriptor.kind} detail response`);
                 }
                 return detail;
               }),

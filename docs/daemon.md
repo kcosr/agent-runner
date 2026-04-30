@@ -274,7 +274,10 @@ List routes return the shared `DefinitionListResult` shape with
 `kind`, `entries`, and `warnings`. Agent, assignment, and launcher detail
 routes return the shared `DefinitionDetail` union branch for the requested
 resource kind; task-definition detail routes return the task-specific
-`TaskDefinitionDetail` shape `{ kind: "task", task, sourcePath }`.
+`TaskDefinitionDetail` shape
+`{ kind: "task", task: { id, title, body, hooks }, sourcePath }`. These
+are reusable task-definition fields, not run task-state fields such as
+`status` or `notes`.
 
 ### Tasks
 

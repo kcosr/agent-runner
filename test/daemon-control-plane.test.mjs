@@ -6598,6 +6598,13 @@ Review module boundaries.
     const connectedList = runCli(["list", "tasks", "--connect", listenUrl], { cwd: clientDir });
     assert.equal(connectedList, "  review/architecture\n");
 
+    const connectedShow = runCli(["show", "task", "review/architecture", "--connect", listenUrl], {
+      cwd: clientDir,
+    });
+    assert.match(connectedShow, /Task: review\/architecture/);
+    assert.match(connectedShow, /title:\s+Architecture review/);
+    assert.match(connectedShow, /Review module boundaries\./);
+
     const runTasks = await client.call("tasks.list", { target: init.runId });
     assert.deepEqual(
       runTasks.tasks.map((task) => task.id),

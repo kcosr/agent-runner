@@ -27,8 +27,22 @@ function writeTask(baseDir, name, body) {
   return path;
 }
 
+function writeAgent(baseDir, name, body) {
+  const path = join(baseDir, "agents", name, "agent.md");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, body.replaceAll("__NAME__", name));
+  return path;
+}
+
 function writeAssignment(baseDir, name, body) {
   const path = join(baseDir, "assignments", name, "assignment.md");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, body.replaceAll("__NAME__", name));
+  return path;
+}
+
+function writeLauncher(baseDir, name, body) {
+  const path = join(baseDir, "launchers", `${name}.yaml`);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, body.replaceAll("__NAME__", name));
   return path;
@@ -155,6 +169,19 @@ Bad body.
     assert.match(result.stderr, /task-runner: warning: Invalid task config/);
     assert.match(result.stderr, /must match canonical id "review\/bad"/);
     assert.match(result.stderr, /definition skipped/);
+
+    const json = runCli(["list", "tasks", "--output-format", "json"], { cwd: rootDir });
+    assertCliOk(json);
+    assert.equal(json.stderr, "");
+    const parsed = JSON.parse(json.stdout);
+    assert.equal(parsed.kind, "task");
+    assert.deepEqual(
+      parsed.entries.map((entry) => entry.name),
+      ["good"],
+    );
+    assert.equal(parsed.warnings.length, 1);
+    assert.ok(parsed.warnings[0].includes(badPath));
+    assert.match(parsed.warnings[0], /must match canonical id "review\/bad"/);
   }));
 
 test("CLI show task reports usage and missing task failures", () =>
@@ -170,10 +197,37 @@ test("CLI show task reports usage and missing task failures", () =>
     assert.equal(missingTask.stdout, "");
     assert.match(missingTask.stderr, /Task not found: missing\/task/);
     assert.ok(missingTask.stderr.includes(join(configDir, "tasks", "missing", "task.md")));
+
+    const extraPositional = runCli(["show", "task", "missing/task", "extra"], { cwd: rootDir });
+    assert.equal(extraPositional.status, 3);
+    assert.equal(extraPositional.stdout, "");
+    assert.match(extraPositional.stderr, /show task takes exactly one name or path/);
+
+    const unsupportedFlag = runCli(["show", "task", "missing/task", "--cwd", rootDir], {
+      cwd: rootDir,
+    });
+    assert.equal(unsupportedFlag.status, 3);
+    assert.equal(unsupportedFlag.stdout, "");
+    assert.match(
+      unsupportedFlag.stderr,
+      /show task only supports <name\|path>, --connect, and --output-format/,
+    );
   }));
 
-test("CLI definition renderer still handles existing assignment details", () =>
+test("CLI definition renderer handles existing agent, assignment, and launcher details", () =>
   withRuntimeRoots("task-runner-task-def-cli-", ({ rootDir, configDir }) => {
+    const agentPath = writeAgent(
+      configDir,
+      "renderer-agent",
+      `---
+schemaVersion: 1
+name: __NAME__
+backend: codex
+model: gpt-5.5
+---
+Review implementation details.
+`,
+    );
     const assignmentPath = writeAssignment(
       configDir,
       "review-work",
@@ -187,14 +241,41 @@ tasks:
 Review the work.
 `,
     );
-    const target = `./${relative(rootDir, assignmentPath)}`;
+    const launcherPath = writeLauncher(
+      configDir,
+      "renderer-launcher",
+      `schemaVersion: 1
+name: __NAME__
+command: ssh
+args: [worker, run]
+`,
+    );
 
-    const result = runCli(["show", "assignment", target], { cwd: rootDir });
+    const agent = runCli(["show", "agent", "renderer-agent"], { cwd: rootDir });
+    assertCliOk(agent);
+    assert.equal(agent.stderr, "");
+    assert.match(agent.stdout, /Agent: renderer-agent/);
+    assert.match(agent.stdout, /backend:\s+codex/);
+    assert.match(agent.stdout, /model:\s+gpt-5\.5/);
+    assert.ok(agent.stdout.includes(`source:       ${agentPath}`));
+    assert.match(agent.stdout, /Review implementation details\./);
 
-    assertCliOk(result);
-    assert.equal(result.stderr, "");
-    assert.match(result.stdout, /Assignment: review-work/);
-    assert.match(result.stdout, /tasks:\s+1/);
-    assert.match(result.stdout, /- first: First task/);
-    assert.match(result.stdout, /Review the work\./);
+    const assignment = runCli(["show", "assignment", `./${relative(rootDir, assignmentPath)}`], {
+      cwd: rootDir,
+    });
+    assertCliOk(assignment);
+    assert.equal(assignment.stderr, "");
+    assert.match(assignment.stdout, /Assignment: review-work/);
+    assert.match(assignment.stdout, /tasks:\s+1/);
+    assert.match(assignment.stdout, /- first: First task/);
+    assert.match(assignment.stdout, /Review the work\./);
+
+    const launcher = runCli(["show", "launcher", "renderer-launcher"], { cwd: rootDir });
+    assertCliOk(launcher);
+    assert.equal(launcher.stderr, "");
+    assert.match(launcher.stdout, /Launcher: renderer-launcher/);
+    assert.match(launcher.stdout, /kind:\s+prefix/);
+    assert.match(launcher.stdout, /command:\s+ssh/);
+    assert.match(launcher.stdout, /args:\s+worker run/);
+    assert.ok(launcher.stdout.includes(`source:       ${launcherPath}`));
   }));

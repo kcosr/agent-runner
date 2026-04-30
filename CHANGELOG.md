@@ -288,6 +288,8 @@
 
 ### Changed
 
+- `task-runner show agent|assignment|launcher|task` now rejects unsupported
+  flags and extra positional arguments instead of ignoring them.
 - The web dashboard now requests and caches only non-archived runs by
   default, and drops archived-inclusive list caches when archived runs are
   hidden.

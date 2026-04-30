@@ -310,7 +310,8 @@ task-runner list runs \
   enumerate reusable definitions from `${TASK_RUNNER_CONFIG_DIR}`.
 - `list tasks` lists markdown task definition files under
   `${TASK_RUNNER_CONFIG_DIR}/tasks`; invalid task definitions are warned
-  to stderr and skipped.
+  to stderr in text mode and included in the JSON payload's `warnings`
+  array in JSON mode.
 - `list runs` defaults to the caller's exact cwd.
 - `--cwd <path>` filters by exact persisted cwd.
 - `--repo <name>` filters by repo bucket.
