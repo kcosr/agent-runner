@@ -1,4 +1,9 @@
-import { UnknownBackendError, resolveBackend } from "./backends/registry.js";
+import {
+  BackendConfigError,
+  UnknownBackendError,
+  loadCustomBackends,
+  resolveBackend,
+} from "./backends/registry.js";
 import {
   AgentConfigError,
   AgentNotFoundError,
@@ -154,6 +159,8 @@ function validateInitOverwriteTarget(manifest: RunManifest): string | null {
 }
 
 export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise<RunOutcome> {
+  await loadCustomBackends();
+
   const webVars = opts.webVars ?? {};
   const isInitOverwrite = opts.initialize && opts.resumeRun !== undefined;
 
@@ -251,5 +258,6 @@ export {
   AssignmentConfigError,
   AssignmentNotFoundError,
   ResumeError,
+  BackendConfigError,
   UnknownBackendError,
 };

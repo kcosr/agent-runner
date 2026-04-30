@@ -1901,12 +1901,10 @@ test("command services: setRunName propagates codex thread rename and clear valu
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
-    manifest.backendSpecific = {
-      codex: {
-        transport: {
-          type: "ws",
-          url: codexServer.url,
-        },
+    manifest.backendConfig = {
+      transport: {
+        type: "ws",
+        url: codexServer.url,
       },
     };
     manifest.cwd = dir;
@@ -2017,12 +2015,10 @@ test("command services: setRunName keeps manifest update when codex propagation 
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
-    manifest.backendSpecific = {
-      codex: {
-        transport: {
-          type: "ws",
-          url: codexServer.url,
-        },
+    manifest.backendConfig = {
+      transport: {
+        type: "ws",
+        url: codexServer.url,
       },
     };
     manifest.cwd = dir;
@@ -2059,12 +2055,10 @@ test("command services: setRunName does not hang on codex post-open transport er
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
-    manifest.backendSpecific = {
-      codex: {
-        transport: {
-          type: "ws",
-          url: codexServer.url,
-        },
+    manifest.backendConfig = {
+      transport: {
+        type: "ws",
+        url: codexServer.url,
       },
     };
     manifest.cwd = dir;

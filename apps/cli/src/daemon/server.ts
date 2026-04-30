@@ -46,6 +46,7 @@ import {
   updateTask,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+import { loadCustomBackends } from "@task-runner/core/backends/registry.js";
 import { isPathArg } from "@task-runner/core/config/runtime-paths.js";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type {
@@ -425,6 +426,8 @@ export async function serveDaemon(
   listenUrl: string,
   handlers: Partial<DaemonHandlers> = {},
 ): Promise<DaemonServerHandle> {
+  await loadCustomBackends();
+
   const daemonAuth = resolveDaemonAuthConfig();
   const { host, port, path } = listenSocketConfig(listenUrl);
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);

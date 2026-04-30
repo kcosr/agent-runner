@@ -12,6 +12,7 @@ import {
   codexBackend,
   normalizeCodexUdsPath,
   normalizeCodexWsUrl,
+  resolveCodexBackendConfig,
   resolveCodexTransportConfig,
 } from "../packages/core/dist/backends/codex.js";
 
@@ -66,10 +67,8 @@ test("buildCodexTurnStartPayload: unrestricted restates danger-full-access polic
 test("resolveCodexTransportConfig: uses the explicit stdio transport", () => {
   assert.deepEqual(
     resolveCodexTransportConfig({
-      backendSpecific: {
-        codex: {
-          transport: { type: "stdio" },
-        },
+      backendConfig: {
+        transport: { type: "stdio" },
       },
     }),
     { type: "stdio" },
@@ -79,10 +78,8 @@ test("resolveCodexTransportConfig: uses the explicit stdio transport", () => {
 test("resolveCodexTransportConfig: normalizes explicit websocket transport", () => {
   assert.deepEqual(
     resolveCodexTransportConfig({
-      backendSpecific: {
-        codex: {
-          transport: { type: "ws", url: "ws://127.0.0.1:4773" },
-        },
+      backendConfig: {
+        transport: { type: "ws", url: "ws://127.0.0.1:4773" },
       },
     }),
     { type: "ws", url: "ws://127.0.0.1:4773/" },
@@ -92,10 +89,8 @@ test("resolveCodexTransportConfig: normalizes explicit websocket transport", () 
 test("resolveCodexTransportConfig: normalizes explicit UDS transport", () => {
   assert.deepEqual(
     resolveCodexTransportConfig({
-      backendSpecific: {
-        codex: {
-          transport: { type: "uds", path: " /tmp/codex.sock " },
-        },
+      backendConfig: {
+        transport: { type: "uds", path: " /tmp/codex.sock " },
       },
     }),
     { type: "uds", path: "/tmp/codex.sock" },
@@ -104,8 +99,104 @@ test("resolveCodexTransportConfig: normalizes explicit UDS transport", () => {
 
 test("resolveCodexTransportConfig: rejects missing frozen transport", () => {
   assert.throws(
-    () => resolveCodexTransportConfig({ backendSpecific: undefined }),
-    /backendSpecific\.codex\.transport/,
+    () => resolveCodexTransportConfig({ backendConfig: undefined }),
+    /backendConfig\.codex\.transport/,
+  );
+});
+
+test("resolveCodexBackendConfig: authored config wins over override and env", () => {
+  assert.deepEqual(
+    resolveCodexBackendConfig({
+      backendName: "codex",
+      authoredConfig: {
+        transport: { type: "stdio" },
+      },
+      overrideConfig: {
+        transport: { type: "ws", url: "ws://override.example/socket" },
+      },
+      env: {
+        TASK_RUNNER_CODEX_UDS_PATH: "/tmp/env-codex.sock",
+      },
+    }),
+    {
+      transport: { type: "stdio" },
+    },
+  );
+});
+
+test("resolveCodexBackendConfig: override config wins over env", () => {
+  assert.deepEqual(
+    resolveCodexBackendConfig({
+      backendName: "codex",
+      authoredConfig: undefined,
+      overrideConfig: {
+        transport: { type: "ws", url: "ws://override.example/socket" },
+      },
+      env: {
+        TASK_RUNNER_CODEX_UDS_PATH: "/tmp/env-codex.sock",
+      },
+    }),
+    {
+      transport: { type: "ws", url: "ws://override.example/socket" },
+    },
+  );
+});
+
+test("resolveCodexBackendConfig: env transport wins over stdio default", () => {
+  assert.deepEqual(
+    resolveCodexBackendConfig({
+      backendName: "codex",
+      authoredConfig: undefined,
+      overrideConfig: undefined,
+      env: {
+        TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773",
+      },
+    }),
+    {
+      transport: { type: "ws", url: "ws://127.0.0.1:4773/" },
+    },
+  );
+});
+
+test("resolveCodexBackendConfig: defaults to stdio without config or env", () => {
+  assert.deepEqual(
+    resolveCodexBackendConfig({
+      backendName: "codex",
+      authoredConfig: undefined,
+      overrideConfig: undefined,
+      env: {},
+    }),
+    {
+      transport: { type: "stdio" },
+    },
+  );
+});
+
+test("resolveCodexBackendConfig: rejects malformed and conflicting env transports", () => {
+  assert.throws(
+    () =>
+      resolveCodexBackendConfig({
+        backendName: "codex",
+        authoredConfig: undefined,
+        overrideConfig: undefined,
+        env: {
+          TASK_RUNNER_CODEX_WS_URL: "https://example.com/socket",
+        },
+      }),
+    /codex websocket transport requires an absolute ws:\/\/ or wss:\/\/ URL/,
+  );
+  assert.throws(
+    () =>
+      resolveCodexBackendConfig({
+        backendName: "codex",
+        authoredConfig: undefined,
+        overrideConfig: undefined,
+        env: {
+          TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
+          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        },
+      }),
+    /TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set/,
   );
 });
 
@@ -240,10 +331,8 @@ async function invokeCodexTurnNoiseServer(codexServer) {
   try {
     const result = await codexBackend.invoke({
       ...baseCtx,
-      backendSpecific: {
-        codex: {
-          transport: { type: "ws", url: codexServer.url },
-        },
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
       },
       emit: (event) => emitted.push(event),
     });
@@ -410,10 +499,8 @@ test("codexBackend rejects pending calls when a transport frame is malformed JSO
   try {
     const result = await codexBackend.invoke({
       ...baseCtx,
-      backendSpecific: {
-        codex: {
-          transport: { type: "ws", url: codexServer.url },
-        },
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
       },
     });
 
@@ -433,10 +520,8 @@ test("codexBackend invokes Codex over a Unix domain socket WebSocket transport",
   try {
     const result = await codexBackend.invoke({
       ...baseCtx,
-      backendSpecific: {
-        codex: {
-          transport: { type: "uds", path: codexServer.path },
-        },
+      backendConfig: {
+        transport: { type: "uds", path: codexServer.path },
       },
       emit: (event) => emitted.push(event),
     });
@@ -464,10 +549,8 @@ test("codexBackend surfaces UDS connection failures clearly", async () => {
   try {
     const result = await codexBackend.invoke({
       ...baseCtx,
-      backendSpecific: {
-        codex: {
-          transport: { type: "uds", path: socketPath },
-        },
+      backendConfig: {
+        transport: { type: "uds", path: socketPath },
       },
     });
 

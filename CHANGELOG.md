@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `17`. Runs now freeze selected
+  backend-owned config on `manifest.backendConfig`, and the old
+  per-backend manifest, reset-seed, daemon override, and hook-context config
+  contract is removed. Recreate or migrate older runs before resuming them.
 - Removed connected attachment HTTP client helpers
   (`daemonAddAttachment`, `daemonListAttachments`,
   `daemonRemoveAttachment`, `daemonDownloadAttachment`) from
@@ -105,6 +109,13 @@
 
 ### Added
 
+- Added custom backend modules under
+  `${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`.
+  Modules are trusted local code, are not sandboxed, are cached for the
+  process lifetime, require daemon restart after changes, must default-export
+  a matching backend id without conflicting with built-in names, install their
+  dependencies under the config directory, and receive `ctx.cwd` for native
+  backend cwd handling.
 - Added opt-in shared bearer-token protection for daemon `/api/*`,
   WebSocket, SSE, connected CLI, and web dashboard requests, with
   Settings -> General token storage for the dashboard.
@@ -556,13 +567,15 @@
 - Changed daemon summary/detail publication and healthy-stream web
   mutations to avoid full run-list/detail recomputation and refetches for
   simple note/pin/rename/archive updates. ([#58](https://github.com/kcosr/task-runner/pull/58))
-- Codex transport selection now uses the explicit
-  `backendSpecific.codex.transport` contract, with fresh-run precedence of
-  agent frontmatter → daemon request override → `TASK_RUNNER_CODEX_WS_URL`
-  → stdio default. Runs and reset seeds now freeze the resolved Codex
-  transport so resume ignores later client/daemon env drift. This change
-  is Codex-only and does not add generic env passthrough for other
-  backends. ([#55](https://github.com/kcosr/task-runner/pull/55))
+- Codex transport selection now lives under
+  `backendConfig.codex.transport`, with fresh-run precedence of agent
+  frontmatter -> daemon request override -> the resolving process
+  `TASK_RUNNER_CODEX_WS_URL` -> stdio default. Connected CLI requests no
+  longer forward caller-local Codex transport environment, and
+  `backendArgs` remains separate per-backend argv extras. Runs and reset
+  seeds freeze the resolved Codex config so resume ignores later
+  client/daemon env drift.
+  ([#55](https://github.com/kcosr/task-runner/pull/55))
 - Changed the web run detail drawer summary to promote `Ended` and `Exit code`, widen long metadata rows to use the full summary width, and remove the separate `Timing` tab. ([#54](https://github.com/kcosr/task-runner/pull/54))
 - Changed the web dashboard board so non-success terminal columns appear before `Completed`, and persisted each column's collapse state across reloads. ([#56](https://github.com/kcosr/task-runner/pull/56))
 - Changed web dashboard Escape behavior so a fullscreen detail drawer exits fullscreen first, and only closes on a subsequent Escape. ([#50](https://github.com/kcosr/task-runner/pull/50))

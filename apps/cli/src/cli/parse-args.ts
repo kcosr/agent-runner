@@ -1,5 +1,5 @@
 import type { AttachmentScope } from "@task-runner/core/contracts/attachments.js";
-import { BACKEND_IDS, type BackendId } from "@task-runner/core/core/backends/types.js";
+import type { BackendName } from "@task-runner/core/core/backends/types.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 
 type OutputFormat = "text" | "json";
@@ -20,7 +20,7 @@ export interface ParsedArgs {
   backendSessionId?: string;
   vars: Record<string, string>;
   cwd?: string;
-  backend?: BackendId;
+  backend?: BackendName;
   launcher?: string;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -70,7 +70,6 @@ export interface ParsedArgs {
 
 const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
-const BACKEND_VALUES = BACKEND_IDS;
 const ATTACHMENT_SCOPE_VALUES = ["run", "group"] as const;
 const SCHEDULE_MODE_VALUES = ["reuse", "reset", "clone"] as const;
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -218,10 +217,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (arg === "--backend") {
       const next = args.shift();
       if (next === undefined) throw new Error("--backend requires a value");
-      if (!(BACKEND_VALUES as readonly string[]).includes(next)) {
-        throw new Error(`--backend must be one of: ${BACKEND_VALUES.join(", ")}`);
-      }
-      result.backend = next as BackendId;
+      if (next.trim().length === 0) throw new Error("--backend cannot be empty");
+      result.backend = next;
     } else if (arg === "--launcher") {
       const next = args.shift();
       if (next === undefined) throw new Error("--launcher requires a value");

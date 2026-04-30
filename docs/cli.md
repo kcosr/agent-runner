@@ -83,8 +83,9 @@ Flags:
   run without an assignment is a "chat" run with no tasks.
 - `--cwd <path>` — override the run cwd. Fresh-run precedence is
   `--cwd` → assignment `cwd` → caller cwd.
-- `--backend <id>` — override the agent's backend. Valid ids:
-  `claude`, `codex`, `cursor`, `pi`, `passive`.
+- `--backend <id>` — override the agent's backend. Built-ins are
+  `claude`, `codex`, `cursor`, `pi`, and `passive`; custom backend names
+  are accepted and resolved through the backend registry.
 - `--launcher <name>` — override the agent's launcher by named launcher
   id. Fresh-run/init only; forbidden on resume and ready-start.
   The built-in `direct` launcher is always available.
@@ -365,8 +366,8 @@ brief and reset seed as one atomic mutation. If var validation, required
 inputs, locked fields, or prepare/rendering fail, the existing manifest
 is left unchanged. Reconfigure does not support identity/runtime
 changes: agent, assignment, backend, cwd, tasks, schedule, launcher,
-hooks, and backend-specific Codex transport remain the frozen values
-from the initialized run.
+hooks, selected backendConfig, and selected backend args remain the frozen
+values from the initialized run.
 
 Exit codes are `0` for success, `2` when the run id is not found, `3`
 for invalid input/lifecycle/var/lock/prepare failures, and `4` for

@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { createJiti } from "jiti";
 import {
   hookFilenameCandidates,
+  resolveFirstExistingCandidate,
   resolveNamedHookDir,
   resolveTaskRunnerConfigDir,
 } from "../../config/runtime-paths.js";
+import { importDefaultOrModule } from "../../util/module-loader.js";
 import type { LoadedAssignment } from "../config/loaded.js";
 import type { HookPhase } from "../config/schema.js";
 import { HookConfigError } from "./errors.js";
@@ -18,10 +19,6 @@ import type {
 } from "./types.js";
 
 export { HookConfigError };
-
-const jiti = createJiti(import.meta.url, {
-  interopDefault: true,
-});
 
 function interpolateHookValue(value: unknown, vars: Record<string, unknown>): unknown {
   if (typeof value === "string") {
@@ -44,11 +41,9 @@ function interpolateHookValue(value: unknown, vars: Record<string, unknown>): un
 
 function resolveNamedHookPath(id: string, env: NodeJS.ProcessEnv): string {
   const root = resolveNamedHookDir(id, env);
-  for (const candidate of hookFilenameCandidates()) {
-    const path = resolve(root, candidate);
-    if (existsSync(path)) {
-      return path;
-    }
+  const path = resolveFirstExistingCandidate(root, hookFilenameCandidates());
+  if (path) {
+    return path;
   }
   throw new HookConfigError(
     `hook "${id}" was not found under ${root} (expected one of ${hookFilenameCandidates().join(", ")})`,
@@ -195,11 +190,7 @@ export async function loadHookModule(descriptor: ResolvedHookDescriptor): Promis
       `hook ${hookSourceLabel(descriptor)} did not resolve to a module path`,
     );
   }
-  const imported = (await jiti.import(descriptor.resolvedPath)) as
-    | HookModule
-    | { default?: HookModule };
-  const hook =
-    "default" in imported && imported.default ? imported.default : (imported as HookModule);
+  const hook = await importDefaultOrModule<HookModule>(descriptor.resolvedPath);
   if (!hook || typeof hook !== "object" || typeof hook.name !== "string") {
     throw new HookConfigError(
       `hook ${hookSourceLabel(descriptor)} must export a default hook object with a string name`,

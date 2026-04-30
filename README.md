@@ -159,8 +159,8 @@ task-runner run --resume-run <run-id>
 `run reconfigure` is only for unarchived `initialized` runs. It patches
 runtime vars and/or the initial message, rerenders the brief and reset
 seed all-or-nothing, and preserves frozen identity/runtime fields such
-as agent, assignment, launcher, hooks, tasks, cwd, and backend-specific
-Codex transport, plus selected backend extra args.
+as agent, assignment, launcher, hooks, tasks, cwd, selected
+`backendConfig`, plus selected backend extra args.
 
 ### Schedule a run
 
@@ -238,6 +238,29 @@ The selected backend's args are frozen into local `run.json` at run
 creation; status APIs do not expose them. Codex stdio receives the args
 when launching `app-server`, while Codex websocket/UDS transports connect
 to an already-running server and ignore them.
+
+### Custom backend modules
+
+Named custom backends live under:
+
+```text
+${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)
+```
+
+The module must default-export a backend object whose `id` exactly matches
+the directory name. Built-in names (`claude`, `codex`, `cursor`, `pi`,
+`passive`) are reserved. Custom backend code is trusted local code: it is
+loaded into the task-runner process without sandboxing, cached for the
+process lifetime, and daemon changes require a daemon restart. Install any
+custom backend dependencies under the config directory, for example
+`cd ~/.config/task-runner && npm install <package>`.
+
+Custom backends receive the resolved run `cwd` in `ctx.cwd`; native
+backends are responsible for applying that cwd to any subprocess, RPC, or
+SDK they call. Authored `backendConfig.<backend-name>` is backend-owned
+JSON-like data, kept separate from `backendArgs.<backend-name>.extraArgs`,
+and only the selected backend's resolved config is frozen into the run
+manifest.
 
 ### Passive / externally driven run
 
@@ -358,15 +381,15 @@ real time, which is how the browser UI stays live as commands mutate
 runs. If you want the web dashboard to reflect CLI changes immediately,
 issue those CLI commands through `--connect`.
 
-For Codex runs, embedded and connected mode both resolve an explicit
-transport intent. Connected mode does not forward arbitrary env vars, but
-it does synthesize structured daemon request fields for a small set of
-known caller-local inputs:
+For Codex runs, embedded mode resolves transport from authored
+`backendConfig.codex.transport`, then the current process
+`TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL`, then stdio.
+Connected mode does not forward caller-local Codex transport env vars or
+arbitrary env vars; the daemon resolves Codex transport from its own
+current process env after authored/request `backendConfig`.
+Connected mode only synthesizes structured daemon request fields for
+these caller-local inputs:
 
-- `TASK_RUNNER_CODEX_UDS_PATH` becomes a Codex-only
-  WebSocket-over-UDS transport override
-- `TASK_RUNNER_CODEX_WS_URL` becomes a Codex-only websocket transport
-  override
 - `--parent-run <run-id>` or local `TASK_RUNNER_PARENT_RUN_ID` becomes
   request `parentRunId` for fresh `run` / `init`
 - `--group-id <group-id>` or local `TASK_RUNNER_RUN_GROUP_ID` becomes
@@ -378,11 +401,8 @@ app-server, not raw UDS bytes. `TASK_RUNNER_CODEX_UDS_PATH` must be an
 absolute socket path and `TASK_RUNNER_CODEX_WS_URL` must be an absolute
 `ws://` or `wss://` URL. If both env vars are set and no higher-precedence
 transport was authored or explicitly overridden, task-runner fails fast
-instead of guessing. Connected mode forwards Codex transport env only for
-fresh `run` / `init`; resume reuses the frozen manifest transport. The
-daemon must be able to access the client-provided UDS path from its own
-filesystem namespace, and these env vars remain Codex-specific inputs,
-not generic daemon env passthrough.
+instead of guessing. Resume reuses the frozen manifest transport. These
+env vars remain Codex-specific inputs, not generic daemon env passthrough.
 
 Named launcher lookup follows the same freeze-first model. Fresh runs
 resolve the final launcher once, store it on the manifest and reset
@@ -450,7 +470,7 @@ The rest are focused topic pages:
 | [docs/resume.md](docs/resume.md) | Resume rules, ready-start, retry nudges |
 | [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
 | [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
-| [docs/backends.md](docs/backends.md) | Claude, Codex, Cursor, Pi, Passive |
+| [docs/backends.md](docs/backends.md) | Built-in and custom backends |
 | [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
 | [docs/daemon.md](docs/daemon.md) | Control plane, HTTP/SSE, JSON-RPC |
@@ -482,8 +502,8 @@ The rest are focused topic pages:
 | `TASK_RUNNER_RUN_GROUP_ID` | Default run group for fresh runs when `--group-id` is omitted |
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary |
-| `TASK_RUNNER_CODEX_UDS_PATH` | Default WebSocket-over-UDS transport socket path for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |
-| `TASK_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |
+| `TASK_RUNNER_CODEX_UDS_PATH` | Default WebSocket-over-UDS transport socket path for fresh Codex runs when no explicit `backendConfig.codex.transport` was authored |
+| `TASK_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary |
 | `TASK_RUNNER_FULL_ATTEMPT_LOGS` | Keep full stdout in per-attempt log records |
 | `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC` | Minimum accepted one-time schedule delay (default `300`) |

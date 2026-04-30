@@ -1,11 +1,8 @@
 import { z } from "zod";
 import {
-  BACKEND_IDS,
   type BackendArgsConfig,
-  type BackendSpecificConfig,
-  type CodexTransportConfig,
-  isAbsoluteUdsSocketPath,
-  isWsOrWssUrl,
+  type BackendName,
+  isJsonishPersistable,
 } from "../backends/types.js";
 
 export const HOOK_PHASES = [
@@ -265,44 +262,19 @@ export const scheduleConfigSchema = z
     }
   });
 
-export const codexTransportConfigSchema: z.ZodType<CodexTransportConfig> = z.union([
-  z
-    .object({
-      type: z.literal("stdio"),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("ws"),
-      url: z
-        .string()
-        .trim()
-        .min(1)
-        .refine(isWsOrWssUrl, "url must be an absolute ws:// or wss:// URL"),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("uds"),
-      path: z
-        .string()
-        .trim()
-        .min(1)
-        .refine(isAbsoluteUdsSocketPath, "path must be an absolute socket path"),
-    })
-    .strict(),
-]);
-
-export const backendSpecificConfigSchema: z.ZodType<BackendSpecificConfig> = z
-  .object({
-    codex: z
-      .object({
-        transport: codexTransportConfigSchema.optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
+export const backendConfigSchema: z.ZodType<Partial<Record<BackendName, unknown>>> = z
+  .record(z.string().trim().min(1), z.unknown())
+  .superRefine((value, ctx) => {
+    for (const [backendName, backendConfig] of Object.entries(value)) {
+      if (!isJsonishPersistable(backendConfig)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [backendName],
+          message: "backendConfig values must be JSON-persistable data",
+        });
+      }
+    }
+  });
 
 const backendArgsTokenSchema = z
   .string()
@@ -315,13 +287,10 @@ const backendArgsEntrySchema = z
   })
   .strict();
 
-export const backendArgsConfigSchema: z.ZodType<BackendArgsConfig> = z
-  .object(
-    Object.fromEntries(
-      BACKEND_IDS.map((backendId) => [backendId, backendArgsEntrySchema.optional()]),
-    ),
-  )
-  .strict();
+export const backendArgsConfigSchema: z.ZodType<BackendArgsConfig> = z.record(
+  z.string().trim().min(1),
+  backendArgsEntrySchema,
+);
 
 export const launcherInlineConfigSchema = z
   .object({
@@ -346,19 +315,21 @@ export const agentLauncherSchema = z.union([z.string().trim().min(1), launcherIn
 // No vars, no tasks, no message. Those live on assignments.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const agentConfigSchema = z.object({
-  schemaVersion: z.literal(1),
-  name: z.string().min(1),
-  backend: z.enum(BACKEND_IDS),
-  model: z.string().optional(),
-  effort: z.enum(EFFORT_LEVELS).optional(),
-  launcher: agentLauncherSchema.optional(),
-  backendSpecific: backendSpecificConfigSchema.optional(),
-  backendArgs: backendArgsConfigSchema.optional(),
-  timeoutSec: z.number().int().positive().default(DEFAULT_AGENT_TIMEOUT_SEC),
-  unrestricted: z.boolean().default(DEFAULT_AGENT_UNRESTRICTED),
-  lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
-});
+export const agentConfigSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    name: z.string().min(1),
+    backend: z.string().trim().min(1),
+    model: z.string().optional(),
+    effort: z.enum(EFFORT_LEVELS).optional(),
+    launcher: agentLauncherSchema.optional(),
+    backendConfig: backendConfigSchema.optional(),
+    backendArgs: backendArgsConfigSchema.optional(),
+    timeoutSec: z.number().int().positive().default(DEFAULT_AGENT_TIMEOUT_SEC),
+    unrestricted: z.boolean().default(DEFAULT_AGENT_UNRESTRICTED),
+    lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
+  })
+  .strict();
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 export type AgentLauncherConfig = z.infer<typeof agentLauncherSchema>;

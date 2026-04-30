@@ -5,6 +5,12 @@ shared task definitions under `agents/`, `assignments/`, and `tasks/`.
 Every agent and assignment is a plain markdown file you can copy, read,
 or pass directly via `--agent` / `--assignment`.
 
+Bundled agents use built-in backends. Agents can also select a custom
+backend by name and provide backend-owned `backendConfig.<name>` plus
+separate `backendArgs.<name>.extraArgs` tokens. Custom backend modules
+live under `${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/` and are
+trusted local code, not sandboxed plugin packages.
+
 ## Bundled agents
 
 ### `implementer`

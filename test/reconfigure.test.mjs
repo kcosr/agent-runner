@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { addRunAttachmentFromFile, reconfigureRun } from "../packages/core/dist/app/service.js";
+import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { readRunAuditHistory } from "../packages/core/dist/core/run/run-events.js";
@@ -47,6 +48,7 @@ function writeManifest(workspaceDir, manifest) {
 function mockBackend(id = "claude") {
   return {
     id,
+    ...(id === "codex" ? { resolveConfig: codexBackend.resolveConfig } : {}),
     invoke: async () => {
       throw new Error("backend should not be invoked while reconfiguring initialized runs");
     },
@@ -116,7 +118,7 @@ Assignment for {{target}} on {{branch}}.
 `,
   );
 
-  const initialTransport = { codex: { transport: { type: "ws", url: "ws://initial.example/ws" } } };
+  const initialTransport = { transport: { type: "ws", url: "ws://initial.example/ws" } };
   const init = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://initial.example/ws" }, () =>
     initRunIn(dir, {
       backendId: "codex",
@@ -170,8 +172,8 @@ Assignment for {{target}} on {{branch}}.
     readFileSync(join(init.workspaceDir, manifest.attachments[0].relativePath), "utf8"),
     "keep this attachment\n",
   );
-  assert.deepEqual(manifest.backendSpecific, initialTransport);
-  assert.deepEqual(manifest.resetSeed.backendSpecific, initialTransport);
+  assert.deepEqual(manifest.backendConfig, initialTransport);
+  assert.deepEqual(manifest.resetSeed.backendConfig, initialTransport);
   assert.deepEqual(manifest.resolvedBackendArgs, ["--frozen-codex-arg", "value"]);
   assert.deepEqual(manifest.resetSeed.resolvedBackendArgs, ["--frozen-codex-arg", "value"]);
   assert.equal(reconfigured.event.type, "run.reconfigured");

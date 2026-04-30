@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { loadCustomBackends } from "../packages/core/dist/backends/registry.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveStaticInputSurface } from "../packages/core/dist/core/run/static-input-surface.js";
 import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
@@ -33,6 +34,12 @@ function writeAssignment(baseDir, name, body) {
   const assignmentDir = join(baseDir, "assignments", name);
   mkdirSync(assignmentDir, { recursive: true });
   writeFileSync(join(assignmentDir, "assignment.md"), body);
+}
+
+function writeBackend(baseDir, name, body) {
+  const backendDir = join(baseDir, "backends", name);
+  mkdirSync(backendDir, { recursive: true });
+  writeFileSync(join(backendDir, "backend.mjs"), body);
 }
 
 function fieldByKey(fields, key) {
@@ -136,6 +143,39 @@ test("static input surface: review assignments expose the correct CLI/Web inputs
     assert.ok(
       !directReview.assignmentInputs.some((field) => field.key === "implementation_run_id"),
     );
+  }));
+
+test("static input surface: backend choices include loaded custom backend names", async () =>
+  withRuntimeRoots("task-runner-static-input-backends-", async ({ rootDir, configDir }) => {
+    writeBackend(
+      configDir,
+      "my-agent",
+      `export default {
+        id: "my-agent",
+        async invoke() {
+          return { exitCode: 0, signal: null, timedOut: false, aborted: false };
+        }
+      };`,
+    );
+    writeAgent(
+      configDir,
+      "custom-agent",
+      `---
+schemaVersion: 1
+name: custom-agent
+backend: my-agent
+---
+Custom backend agent.
+`,
+    );
+
+    await loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir });
+    const surface = resolveStaticInputSurface(loadAgentConfig("custom-agent", rootDir));
+    const backend = fieldByKey(surface.runSettings, "backend");
+
+    assert.equal(backend.value, "my-agent");
+    assert.ok(backend.enumValues.includes("my-agent"));
+    assert.ok(backend.enumValues.includes("codex"));
   }));
 
 test("static input surface: launcher path and inline definitions preserve authored values", () =>

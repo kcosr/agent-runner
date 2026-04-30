@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
+import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readStatus, resetRun, setTask } from "../packages/core/dist/core/commands/service.js";
 import {
@@ -103,7 +104,7 @@ const CODEX_STDIO_AGENT = `---
 schemaVersion: 1
 name: codex-stdio-agent
 backend: codex
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: stdio
@@ -217,14 +218,20 @@ function writeAgentAndAssignment(baseDir) {
 }
 
 async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
+  const backendId = options.backendId ?? "mock";
   const backend = {
-    id: options.backendId ?? "mock",
+    id: backendId,
+    ...(backendId === "codex" ? { resolveConfig: codexBackend.resolveConfig } : {}),
+    ...(options.resolveConfig ? { resolveConfig: options.resolveConfig } : {}),
+    ...(options.launcherMode ? { launcherMode: options.launcherMode } : {}),
     invoke: mockInvoke,
   };
   const capture = createRunEventCapture();
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig(options.agentName ?? "three", baseDir);
-    const loadedAssignment = loadAssignmentConfig(options.assignmentName ?? "three-work", baseDir);
+    const loadedAssignment = options.resume
+      ? undefined
+      : loadAssignmentConfig(options.assignmentName ?? "three-work", baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
     try {
@@ -237,6 +244,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
         overrides,
         callerCwd: options.callerCwd,
         execution: options.execution,
+        resume: options.resume,
         emitEvent: capture.emitEvent,
       });
       return {
@@ -384,6 +392,186 @@ test("backend override activates the matching dormant backendArgs entry", async 
   assert.deepEqual(seenArgs, ["--codex-extra", "value"]);
   assert.equal(outcome.manifest.backend, "codex");
   assert.deepEqual(outcome.manifest.resolvedBackendArgs, ["--codex-extra", "value"]);
+});
+
+test("custom backend selection freezes selected config, args, events, and resume state", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "custom-agent",
+    `---
+schemaVersion: 1
+name: custom-agent
+backend: my-agent
+model: custom-model
+effort: high
+timeoutSec: 123
+backendConfig:
+  my-agent:
+    mode: authored
+backendArgs:
+  my-agent:
+    extraArgs:
+      - --custom-flag
+      - value
+---
+Custom agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "custom-work",
+    `---
+schemaVersion: 1
+name: custom-work
+cwd: custom-cwd
+tasks:
+  - id: t1
+    title: First
+---
+Custom work.
+`,
+  );
+
+  const resolveCalls = [];
+  const resolveConfig = (ctx) => {
+    resolveCalls.push({
+      authoredConfig: ctx.authoredConfig,
+      overrideConfig: ctx.overrideConfig,
+      execution: ctx.execution.hostMode,
+    });
+    return {
+      ...ctx.authoredConfig,
+      resolved: true,
+    };
+  };
+
+  let firstCtx;
+  const first = await runWithMock(
+    dir,
+    async (ctx) => {
+      firstCtx = {
+        cwd: ctx.cwd,
+        model: ctx.model,
+        effort: ctx.effort,
+        timeoutSec: ctx.timeoutSec,
+        backendConfig: ctx.backendConfig,
+        resolvedBackendArgs: ctx.resolvedBackendArgs,
+      };
+      ctx.emit?.({ type: "agent_message_delta", text: "custom delta" });
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "blocked", notes: "waiting" },
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "custom-session",
+        transcript: "custom transcript",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    {
+      agentName: "custom-agent",
+      assignmentName: "custom-work",
+      backendId: "my-agent",
+      resolveConfig,
+      launcherMode: "direct",
+    },
+  );
+
+  assert.deepEqual(firstCtx, {
+    cwd: join(dir, "custom-cwd"),
+    model: "custom-model",
+    effort: "high",
+    timeoutSec: 123,
+    backendConfig: { mode: "authored", resolved: true },
+    resolvedBackendArgs: ["--custom-flag", "value"],
+  });
+  assert.match(first.stdout, /custom delta/);
+  assert.equal(first.outcome.manifest.backend, "my-agent");
+  assert.deepEqual(first.outcome.manifest.backendConfig, { mode: "authored", resolved: true });
+  assert.deepEqual(first.outcome.manifest.resetSeed.backendConfig, {
+    mode: "authored",
+    resolved: true,
+  });
+  assert.deepEqual(first.outcome.manifest.resolvedBackendArgs, ["--custom-flag", "value"]);
+  assert.equal(first.outcome.manifest.backendSessionId, "custom-session");
+  assert.equal(first.outcome.manifest.attemptRecords[0].transcript, "custom transcript");
+  const resolveCallsAfterFirstRun = resolveCalls.length;
+  assert.ok(resolveCallsAfterFirstRun >= 1);
+  assert.deepEqual(resolveCalls[0].authoredConfig, { mode: "authored" });
+
+  writeAgent(
+    dir,
+    "custom-agent",
+    `---
+schemaVersion: 1
+name: custom-agent
+backend: my-agent
+backendConfig:
+  my-agent:
+    mode: changed
+backendArgs:
+  my-agent:
+    extraArgs:
+      - --changed
+---
+Changed custom agent.
+`,
+  );
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.outcome.runId, dir));
+  let resumedCtx;
+  const resumed = await runWithMock(
+    dir,
+    async (ctx) => {
+      resumedCtx = {
+        resumeSessionId: ctx.resumeSessionId,
+        backendConfig: ctx.backendConfig,
+        resolvedBackendArgs: ctx.resolvedBackendArgs,
+      };
+      const manifestPath = join(target.workspaceDir, "run.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      manifest.finalTasks.t1.status = "completed";
+      manifest.finalTasks.t1.notes = "done";
+      manifest.tasksCompleted = 1;
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "custom-session",
+        transcript: "resumed transcript",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { message: "resume custom backend" },
+    {
+      agentName: "custom-agent",
+      backendId: "my-agent",
+      resolveConfig,
+      launcherMode: "direct",
+      resume: target,
+    },
+  );
+
+  assert.deepEqual(resumedCtx, {
+    resumeSessionId: "custom-session",
+    backendConfig: { mode: "authored", resolved: true },
+    resolvedBackendArgs: ["--custom-flag", "value"],
+  });
+  assert.equal(resumed.outcome.manifest.status, "success");
+  assert.deepEqual(resumed.outcome.manifest.backendConfig, { mode: "authored", resolved: true });
+  assert.deepEqual(resumed.outcome.manifest.resolvedBackendArgs, ["--custom-flag", "value"]);
+  assert.equal(
+    resolveCalls.length,
+    resolveCallsAfterFirstRun,
+    "resume reused frozen backendConfig",
+  );
 });
 
 test("passive backendArgs are accepted but freeze as inert empty args", async () => {
@@ -2240,7 +2428,7 @@ test("codex embedded runs freeze frontmatter transport ahead of client env", asy
   writeAgent(dir, "codex-stdio-agent", CODEX_STDIO_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
-  let seenBackendSpecific;
+  let seenBackendConfig;
   const { outcome } = await withEnv(
     {
       TASK_RUNNER_CODEX_UDS_PATH: "/tmp/ignored-codex.sock",
@@ -2250,7 +2438,7 @@ test("codex embedded runs freeze frontmatter transport ahead of client env", asy
       runWithMock(
         dir,
         async (ctx) => {
-          seenBackendSpecific = ctx.backendSpecific;
+          seenBackendConfig = ctx.backendConfig;
           setTaskStatusesForPrompt(ctx.prompt, {
             t1: "completed",
             t2: "completed",
@@ -2271,15 +2459,13 @@ test("codex embedded runs freeze frontmatter transport ahead of client env", asy
       ),
   );
 
-  assert.deepEqual(seenBackendSpecific, {
-    codex: {
-      transport: {
-        type: "stdio",
-      },
+  assert.deepEqual(seenBackendConfig, {
+    transport: {
+      type: "stdio",
     },
   });
-  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
-  assert.deepEqual(outcome.manifest.resetSeed.backendSpecific, seenBackendSpecific);
+  assert.deepEqual(outcome.manifest.backendConfig, seenBackendConfig);
+  assert.deepEqual(outcome.manifest.resetSeed.backendConfig, seenBackendConfig);
 });
 
 test("codex daemon runs prefer forwarded transport over daemon env", async () => {
@@ -2287,7 +2473,7 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
   writeAgent(dir, "codex-agent", CODEX_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
-  let seenBackendSpecific;
+  let seenBackendConfig;
   const { outcome } = await withEnv(
     {
       TASK_RUNNER_CODEX_UDS_PATH: "/tmp/daemon-env-codex.sock",
@@ -2297,7 +2483,7 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
       runWithMock(
         dir,
         async (ctx) => {
-          seenBackendSpecific = ctx.backendSpecific;
+          seenBackendConfig = ctx.backendConfig;
           setTaskStatusesForPrompt(ctx.prompt, {
             t1: "completed",
             t2: "completed",
@@ -2314,7 +2500,7 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
           };
         },
         {
-          backendSpecific: {
+          backendConfig: {
             codex: {
               transport: {
                 type: "ws",
@@ -2337,15 +2523,13 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
       ),
   );
 
-  assert.deepEqual(seenBackendSpecific, {
-    codex: {
-      transport: {
-        type: "ws",
-        url: "ws://client.example/socket",
-      },
+  assert.deepEqual(seenBackendConfig, {
+    transport: {
+      type: "ws",
+      url: "ws://client.example/socket",
     },
   });
-  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+  assert.deepEqual(outcome.manifest.backendConfig, seenBackendConfig);
 });
 
 test("codex daemon runs defer conflicting forwarded env until after authored transport precedence", async () => {
@@ -2353,11 +2537,11 @@ test("codex daemon runs defer conflicting forwarded env until after authored tra
   writeAgent(dir, "codex-stdio-agent", CODEX_STDIO_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
-  let seenBackendSpecific;
+  let seenBackendConfig;
   const { outcome } = await runWithMock(
     dir,
     async (ctx) => {
-      seenBackendSpecific = ctx.backendSpecific;
+      seenBackendConfig = ctx.backendConfig;
       setTaskStatusesForPrompt(ctx.prompt, {
         t1: "completed",
         t2: "completed",
@@ -2374,7 +2558,7 @@ test("codex daemon runs defer conflicting forwarded env until after authored tra
       };
     },
     {
-      codexTransportEnv: {
+      backendConfig: {
         udsPath: "/tmp/client-codex.sock",
         wsUrl: "ws://client.example/socket",
       },
@@ -2392,58 +2576,64 @@ test("codex daemon runs defer conflicting forwarded env until after authored tra
     },
   );
 
-  assert.deepEqual(seenBackendSpecific, {
-    codex: {
-      transport: {
-        type: "stdio",
-      },
+  assert.deepEqual(seenBackendConfig, {
+    transport: {
+      type: "stdio",
     },
   });
-  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+  assert.deepEqual(outcome.manifest.backendConfig, seenBackendConfig);
 });
 
-test("codex daemon runs reject conflicting forwarded Codex env without higher precedence", async () => {
+test("codex daemon runs ignore obsolete env-shaped backendConfig keys without higher precedence", async () => {
   const dir = tempDir();
   writeAgent(dir, "codex-agent", CODEX_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
-  let invoked = false;
-  await assert.rejects(
-    runWithMock(
-      dir,
-      async () => {
-        invoked = true;
-        return {
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: null,
-          transcript: "done",
-          rawStdout: "",
-          rawStderr: "",
-        };
+  let seenBackendConfig;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenBackendConfig = ctx.backendConfig;
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {
+      backendConfig: {
+        udsPath: "/tmp/client-codex.sock",
+        wsUrl: "ws://client.example/socket",
       },
-      {
-        codexTransportEnv: {
-          udsPath: "/tmp/client-codex.sock",
-          wsUrl: "ws://client.example/socket",
+    },
+    {
+      agentName: "codex-agent",
+      backendId: "codex",
+      execution: {
+        hostMode: "daemon",
+        controller: {
+          kind: "daemon",
+          daemonInstanceId: "daemon-test",
         },
       },
-      {
-        agentName: "codex-agent",
-        backendId: "codex",
-        execution: {
-          hostMode: "daemon",
-          controller: {
-            kind: "daemon",
-            daemonInstanceId: "daemon-test",
-          },
-        },
-      },
-    ),
-    /TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set/,
+    },
   );
-  assert.equal(invoked, false);
+
+  assert.deepEqual(seenBackendConfig, {
+    transport: {
+      type: "stdio",
+    },
+  });
+  assert.deepEqual(outcome.manifest.backendConfig, seenBackendConfig);
 });
 
 test("codex embedded runs reject malformed TASK_RUNNER_CODEX_WS_URL before freezing transport", async () => {
@@ -2472,7 +2662,7 @@ test("codex embedded runs reject malformed TASK_RUNNER_CODEX_WS_URL before freez
         { agentName: "codex-agent", backendId: "codex" },
       ),
     ),
-    /TASK_RUNNER_CODEX_WS_URL must be an absolute ws:\/\/ or wss:\/\/ URL/,
+    /codex websocket transport requires an absolute ws:\/\/ or wss:\/\/ URL/,
   );
   assert.equal(invoked, false);
 });
@@ -2503,7 +2693,7 @@ test("codex embedded runs reject malformed TASK_RUNNER_CODEX_UDS_PATH before fre
         { agentName: "codex-agent", backendId: "codex" },
       ),
     ),
-    /TASK_RUNNER_CODEX_UDS_PATH must be an absolute socket path/,
+    /codex UDS transport requires an absolute socket path/,
   );
   assert.equal(invoked, false);
 });
@@ -2550,48 +2740,44 @@ test("codex connected mode mirrors embedded mode for the same websocket transpor
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
   const sharedTransport = {
-    codex: {
-      transport: {
-        type: "ws",
-        url: "ws://shared.example/socket",
-      },
+    transport: {
+      type: "ws",
+      url: "ws://shared.example/socket",
     },
   };
 
-  let embeddedBackendSpecific;
-  const embedded = await withEnv(
-    { TASK_RUNNER_CODEX_WS_URL: sharedTransport.codex.transport.url },
-    () =>
-      runWithMock(
-        dir,
-        async (ctx) => {
-          embeddedBackendSpecific = ctx.backendSpecific;
-          setTaskStatusesForPrompt(ctx.prompt, {
-            t1: "completed",
-            t2: "completed",
-            t3: "completed",
-          });
-          return {
-            exitCode: 0,
-            signal: null,
-            timedOut: false,
-            sessionId: null,
-            transcript: "done",
-            rawStdout: "",
-            rawStderr: "",
-          };
-        },
-        {},
-        { agentName: "codex-agent", backendId: "codex" },
-      ),
+  let embeddedBackendConfig;
+  const embedded = await withEnv({ TASK_RUNNER_CODEX_WS_URL: sharedTransport.transport.url }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        embeddedBackendConfig = ctx.backendConfig;
+        setTaskStatusesForPrompt(ctx.prompt, {
+          t1: "completed",
+          t2: "completed",
+          t3: "completed",
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      {},
+      { agentName: "codex-agent", backendId: "codex" },
+    ),
   );
 
-  let connectedBackendSpecific;
+  let connectedBackendConfig;
   const connected = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
     runWithMock(
       dir,
       async (ctx) => {
-        connectedBackendSpecific = ctx.backendSpecific;
+        connectedBackendConfig = ctx.backendConfig;
         setTaskStatusesForPrompt(ctx.prompt, {
           t1: "completed",
           t2: "completed",
@@ -2608,7 +2794,7 @@ test("codex connected mode mirrors embedded mode for the same websocket transpor
         };
       },
       {
-        backendSpecific: sharedTransport,
+        backendConfig: { codex: sharedTransport },
       },
       {
         agentName: "codex-agent",
@@ -2624,11 +2810,11 @@ test("codex connected mode mirrors embedded mode for the same websocket transpor
     ),
   );
 
-  assert.deepEqual(embeddedBackendSpecific, sharedTransport);
-  assert.deepEqual(connectedBackendSpecific, sharedTransport);
-  assert.deepEqual(connectedBackendSpecific, embeddedBackendSpecific);
-  assert.deepEqual(embedded.outcome.manifest.backendSpecific, sharedTransport);
-  assert.deepEqual(connected.outcome.manifest.backendSpecific, sharedTransport);
+  assert.deepEqual(embeddedBackendConfig, sharedTransport);
+  assert.deepEqual(connectedBackendConfig, sharedTransport);
+  assert.deepEqual(connectedBackendConfig, embeddedBackendConfig);
+  assert.deepEqual(embedded.outcome.manifest.backendConfig, sharedTransport);
+  assert.deepEqual(connected.outcome.manifest.backendConfig, sharedTransport);
 });
 
 test("happy path: mock marks all tasks completed in one attempt → exit 0", async () => {
@@ -2914,7 +3100,7 @@ schemaVersion: 1
 name: codex-ws-launcher-agent
 backend: codex
 launcher: shared
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: ws
@@ -2931,7 +3117,7 @@ schemaVersion: 1
 name: codex-uds-launcher-agent
 backend: codex
 launcher: shared
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: uds

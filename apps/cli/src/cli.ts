@@ -60,10 +60,6 @@ import {
 } from "@task-runner/core/config/runtime-paths.js";
 import type { RunDependencyRef } from "@task-runner/core/contracts/runs.js";
 import {
-  type BackendSpecificConfig,
-  codexTransportFromEnvValues,
-} from "@task-runner/core/core/backends/types.js";
-import {
   CommandError,
   type RunListFilter,
   isCommandError,
@@ -89,6 +85,7 @@ import {
   ScheduleValidationError,
 } from "@task-runner/core/core/run/schedule.js";
 import {
+  BackendConfigError,
   ResumeError,
   RunCommandError,
   UnknownBackendError,
@@ -342,6 +339,7 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof TaskNotFoundError ||
     err instanceof TaskConfigError ||
     err instanceof DefinitionListError ||
+    err instanceof BackendConfigError ||
     err instanceof RunCommandError ||
     err instanceof VarResolutionError ||
     err instanceof LockedFieldError ||
@@ -483,46 +481,8 @@ function resolveMessageFile(parsed: ParsedArgs): void {
   }
 }
 
-function synthesizeClientCodexTransportOverrides():
-  | Pick<RunCommandOverrides, "backendSpecific" | "codexTransportEnv">
-  | undefined {
-  const udsPath = process.env.TASK_RUNNER_CODEX_UDS_PATH;
-  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL;
-  const trimmedUdsPath = udsPath?.trim();
-  const trimmedWsUrl = wsUrl?.trim();
-  if (trimmedUdsPath && trimmedWsUrl) {
-    return {
-      codexTransportEnv: {
-        udsPath,
-        wsUrl,
-      },
-    };
-  }
-  let transport: ReturnType<typeof codexTransportFromEnvValues>;
-  try {
-    transport = codexTransportFromEnvValues({ udsPath, wsUrl });
-  } catch (err) {
-    throw new CommandError(err instanceof Error ? err.message : String(err));
-  }
-  if (!transport) {
-    return undefined;
-  }
-  return {
-    backendSpecific: {
-      codex: {
-        transport,
-      },
-    },
-  };
-}
-
 function resolvedDaemonOverrides(parsed: ParsedArgs): RunCommandOverrides {
-  const codexTransportOverrides =
-    parsed.resumeRun === undefined ? synthesizeClientCodexTransportOverrides() : {};
-  return {
-    ...resolvedOverrides(parsed),
-    ...codexTransportOverrides,
-  };
+  return resolvedOverrides(parsed);
 }
 
 function hasScheduleInitFlags(parsed: ParsedArgs): boolean {
@@ -2470,6 +2430,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
   } catch (err) {
     if (
       err instanceof UnknownBackendError ||
+      err instanceof BackendConfigError ||
       err instanceof AgentNotFoundError ||
       err instanceof AgentConfigError ||
       err instanceof AssignmentNotFoundError ||

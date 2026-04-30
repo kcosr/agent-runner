@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
+import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { passiveBackend } from "../packages/core/dist/backends/passive.js";
 import {
   AgentConfigError,
@@ -45,7 +46,7 @@ const CODEX_UDS_AGENT = `---
 schemaVersion: 1
 name: canonical-codex-uds
 backend: codex
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: uds
@@ -58,7 +59,7 @@ const CODEX_WS_AGENT = `---
 schemaVersion: 1
 name: canonical-codex-ws
 backend: codex
-backendSpecific:
+backendConfig:
   codex:
     transport:
       type: ws
@@ -162,12 +163,12 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 16, captures repo, and initializes updatedAt", async () => {
+test("manifest schemaVersion is 17, captures repo, and initializes updatedAt", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 16);
+  assert.equal(outcome.manifest.schemaVersion, 17);
   assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.updatedAt, outcome.manifest.startedAt);
   assert.equal(outcome.manifest.archivedAt, null);
@@ -301,7 +302,7 @@ test("loadedAgentFromManifest reconstructs LoadedAgent from frozen fields", asyn
   assert.equal(loaded.sourcePath, join(dir, "agents", "canonical-claude", "agent.md"));
 });
 
-test("loadedAgentFromManifest reconstructs frozen backendSpecific stdio transport", async () => {
+test("loadedAgentFromManifest reconstructs frozen backendConfig stdio transport", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-codex", CODEX_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -309,12 +310,11 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific stdio transpor
     agentName: "canonical-codex",
     backend: {
       id: "codex",
+      resolveConfig: codexBackend.resolveConfig,
       async invoke(ctx) {
-        assert.deepEqual(ctx.backendSpecific, {
-          codex: {
-            transport: {
-              type: "stdio",
-            },
+        assert.deepEqual(ctx.backendConfig, {
+          transport: {
+            type: "stdio",
           },
         });
         return {
@@ -331,7 +331,7 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific stdio transpor
   });
 
   const loaded = loadedAgentFromManifest(outcome.manifest);
-  assert.deepEqual(loaded.config.backendSpecific, {
+  assert.deepEqual(loaded.config.backendConfig, {
     codex: {
       transport: {
         type: "stdio",
@@ -340,7 +340,7 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific stdio transpor
   });
 });
 
-test("loadedAgentFromManifest reconstructs frozen backendSpecific UDS transport", async () => {
+test("loadedAgentFromManifest reconstructs frozen backendConfig UDS transport", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-codex-uds", CODEX_UDS_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -348,13 +348,12 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific UDS transport"
     agentName: "canonical-codex-uds",
     backend: {
       id: "codex",
+      resolveConfig: codexBackend.resolveConfig,
       async invoke(ctx) {
-        assert.deepEqual(ctx.backendSpecific, {
-          codex: {
-            transport: {
-              type: "uds",
-              path: "/tmp/codex.sock",
-            },
+        assert.deepEqual(ctx.backendConfig, {
+          transport: {
+            type: "uds",
+            path: "/tmp/codex.sock",
           },
         });
         return {
@@ -371,7 +370,7 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific UDS transport"
   });
 
   const loaded = loadedAgentFromManifest(outcome.manifest);
-  assert.deepEqual(loaded.config.backendSpecific, {
+  assert.deepEqual(loaded.config.backendConfig, {
     codex: {
       transport: {
         type: "uds",
@@ -381,7 +380,7 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific UDS transport"
   });
 });
 
-test("loadedAgentFromManifest reconstructs frozen backendSpecific websocket transport", async () => {
+test("loadedAgentFromManifest reconstructs frozen backendConfig websocket transport", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-codex-ws", CODEX_WS_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -389,13 +388,12 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific websocket tran
     agentName: "canonical-codex-ws",
     backend: {
       id: "codex",
+      resolveConfig: codexBackend.resolveConfig,
       async invoke(ctx) {
-        assert.deepEqual(ctx.backendSpecific, {
-          codex: {
-            transport: {
-              type: "ws",
-              url: "ws://127.0.0.1:4773",
-            },
+        assert.deepEqual(ctx.backendConfig, {
+          transport: {
+            type: "ws",
+            url: "ws://127.0.0.1:4773/",
           },
         });
         return {
@@ -412,11 +410,11 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific websocket tran
   });
 
   const loaded = loadedAgentFromManifest(outcome.manifest);
-  assert.deepEqual(loaded.config.backendSpecific, {
+  assert.deepEqual(loaded.config.backendConfig, {
     codex: {
       transport: {
         type: "ws",
-        url: "ws://127.0.0.1:4773",
+        url: "ws://127.0.0.1:4773/",
       },
     },
   });
@@ -510,7 +508,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 16/);
+        assert.match(err.message, /requires schemaVersion 17/);
         return true;
       },
     );
@@ -561,7 +559,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 16/);
+        assert.match(err.message, /requires schemaVersion 17/);
         return true;
       },
     );
@@ -613,7 +611,7 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 16/);
+        assert.match(err.message, /requires schemaVersion 17/);
         return true;
       },
     );
@@ -665,14 +663,14 @@ test("schemaVersion mismatch: resume rejects a v10 manifest with a clear error",
       () => resolveResumeTarget("stale10", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 10/);
-        assert.match(err.message, /requires schemaVersion 16/);
+        assert.match(err.message, /requires schemaVersion 17/);
         return true;
       },
     );
   });
 });
 
-test("schemaVersion mismatch: resume rejects a v12 manifest with the v16 migration chain hint", async () => {
+test("schemaVersion mismatch: resume rejects a v12 manifest with the v17 migration chain hint", async () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "stale12");
   mkdirSync(workspaceDir, { recursive: true });
@@ -686,16 +684,14 @@ test("schemaVersion mismatch: resume rejects a v12 manifest with the v16 migrati
       () => resolveResumeTarget("stale12", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 12/);
-        assert.match(err.message, /requires schemaVersion 16/);
-        assert.match(err.message, /scripts\/migrate-manifests-v16\.mjs/);
-        assert.match(err.message, /migrations in order/);
+        assert.match(err.message, /requires schemaVersion 17/);
         return true;
       },
     );
   });
 });
 
-test("schemaVersion mismatch: resume rejects a v13 manifest with the v16 migration chain hint", async () => {
+test("schemaVersion mismatch: resume rejects a v13 manifest with the v17 migration chain hint", async () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "stale13");
   mkdirSync(workspaceDir, { recursive: true });
@@ -709,16 +705,14 @@ test("schemaVersion mismatch: resume rejects a v13 manifest with the v16 migrati
       () => resolveResumeTarget("stale13", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 13/);
-        assert.match(err.message, /requires schemaVersion 16/);
-        assert.match(err.message, /scripts\/migrate-manifests-v16\.mjs/);
-        assert.match(err.message, /migrations in order/);
+        assert.match(err.message, /requires schemaVersion 17/);
         return true;
       },
     );
   });
 });
 
-test("schemaVersion mismatch: resume rejects a v15 manifest with the v16 migration hint", async () => {
+test("schemaVersion mismatch: resume rejects a v15 manifest with the v17 migration hint", async () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "stale15");
   mkdirSync(workspaceDir, { recursive: true });
@@ -732,8 +726,7 @@ test("schemaVersion mismatch: resume rejects a v15 manifest with the v16 migrati
       () => resolveResumeTarget("stale15", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 15/);
-        assert.match(err.message, /requires schemaVersion 16/);
-        assert.match(err.message, /scripts\/migrate-manifests-v16\.mjs/);
+        assert.match(err.message, /requires schemaVersion 17/);
         return true;
       },
     );

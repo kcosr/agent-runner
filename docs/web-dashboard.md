@@ -45,6 +45,11 @@ isolation. Do not log tokens or Authorization headers. For remote access,
 serve the dashboard over SSH tunnels, HTTPS, WireGuard, Tailscale, a VPN,
 or an equivalent secure transport; the token does not encrypt traffic.
 
+The dashboard gets run-input metadata from the daemon. Backend choices
+include built-ins plus custom backends already loaded by the daemon, but
+normal run detail/status DTOs do not expose the run's frozen
+`backendConfig` or `resolvedBackendArgs`.
+
 ## Views
 
 - `/` — Runs dashboard with Board, Chat, Detail, Notes, and Tasks surfaces.

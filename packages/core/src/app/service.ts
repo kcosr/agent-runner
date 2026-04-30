@@ -31,11 +31,7 @@ import type {
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
 import type { ReconfigureRunPatch } from "../contracts/runs.js";
-import type {
-  BackendId,
-  BackendSpecificConfig,
-  CodexTransportEnvValues,
-} from "../core/backends/types.js";
+import type { BackendName } from "../core/backends/types.js";
 import {
   type RunListFilter,
   addAttachmentFromFile,
@@ -113,12 +109,11 @@ export type DefinitionDetail =
 
 export interface RunCommandOverrides {
   cwd?: string;
-  backend?: BackendId;
+  backend?: BackendName;
   launcher?: string;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  backendSpecific?: BackendSpecificConfig;
-  codexTransportEnv?: CodexTransportEnvValues;
+  backendConfig?: Partial<Record<BackendName, unknown>>;
   message?: string;
   name?: string;
   timeoutSec?: number;

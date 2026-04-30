@@ -125,8 +125,8 @@ Field surfaces are split explicitly:
   whole value. This includes scalar config such as `schemaVersion`,
   `name`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`,
   `cwd`, `maxRetries`, task ids, lock entries, var metadata, individual
-  `backendArgs.<backend>.extraArgs[]` tokens, and Codex transport leaf
-  fields such as `url` and absolute UDS `path`.
+  `backendArgs.<backend>.extraArgs[]` tokens, and backendConfig string
+  leaves such as Codex transport `url` and absolute UDS `path`.
 - String prose fields accept env interpolation only when the entire field
   value is exactly one `${...}` expression. This includes assignment
   `message`, `callerInstructions`, task titles and bodies, var
@@ -134,7 +134,7 @@ Field surfaces are split explicitly:
   instructions. Partial `${...}` inside a larger prose string is left
   literal.
 - Object and array containers do not accept blob replacement. `${...}`
-  cannot inject YAML or JSON into `backendSpecific`, `backendArgs`,
+  cannot inject YAML or JSON into `backendConfig`, `backendArgs`,
   `vars`, `tasks`, or `lockedFields`.
 
 Failures are load-time config errors, not runtime interpolation misses.

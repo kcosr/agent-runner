@@ -1,5 +1,6 @@
+import { resolveCodexTransportConfig } from "../../backends/codex.js";
 import { LauncherConfigError, loadLauncherConfig } from "../../config/loader.js";
-import type { BackendSpecificConfig } from "../backends/types.js";
+import type { Backend } from "../backends/types.js";
 import {
   type AgentLauncherReference,
   DIRECT_LAUNCHER_NAME,
@@ -22,27 +23,27 @@ function resolvePrefixFromNamedReference(reference: string, cwd: string): Resolv
 }
 
 export function launcherAppliesToBackend(
-  backendId: string,
-  backendSpecific: BackendSpecificConfig | undefined,
+  backend: Backend,
+  backendConfig: unknown | undefined,
 ): boolean {
-  if (backendId === "passive") {
+  if (backend.id === "passive" || backend.launcherMode === "direct") {
     return false;
   }
-  if (backendId !== "codex") {
+  if (backend.id !== "codex") {
     return true;
   }
-  const transportType = backendSpecific?.codex?.transport?.type;
+  const transportType = resolveCodexTransportConfig({ backendConfig }).type;
   return transportType !== "ws" && transportType !== "uds";
 }
 
 export function resolveFreshLauncherConfig(args: {
-  backendId: string;
-  backendSpecific: BackendSpecificConfig | undefined;
+  backend: Backend;
+  backendConfig: unknown | undefined;
   agentLauncher: AgentLauncherReference | undefined;
   overrideLauncher: string | undefined;
   cwd: string;
 }): ResolvedLauncherConfig {
-  if (!launcherAppliesToBackend(args.backendId, args.backendSpecific)) {
+  if (!launcherAppliesToBackend(args.backend, args.backendConfig)) {
     return { kind: "direct", name: DIRECT_LAUNCHER_NAME };
   }
 

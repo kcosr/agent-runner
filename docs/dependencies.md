@@ -6,6 +6,11 @@ time they gate execution until every upstream dependency ref is
 satisfied. When a daemon manages the run, it also auto-starts `ready`
 runs whose dependencies have all become satisfied.
 
+Dependencies do not alter runtime identity. A dependent run keeps its
+frozen backend, selected `backendConfig`, custom backend choice, and
+`backendArgs` from initialization; dependency satisfaction only controls
+whether execution may start.
+
 ## Why dependencies
 
 Multi-stage workflows (plan -> review -> implement, or implementation ->

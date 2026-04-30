@@ -7,6 +7,7 @@ import {
   claudeSessionFilePath,
   encodeClaudeProjectDir,
 } from "../packages/core/dist/backends/claude.js";
+import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { encodePiSessionDir, piBackend } from "../packages/core/dist/backends/pi.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readyRun } from "../packages/core/dist/core/commands/service.js";
@@ -214,18 +215,17 @@ test("import (run): codex bootstrap validation receives daemon-forwarded transpo
       captured,
       validate: async (vctx) => {
         validateCalls++;
-        assert.deepEqual(vctx.backendSpecific, {
-          codex: {
-            transport: {
-              type: "ws",
-              url: "ws://client.example/socket",
-            },
+        assert.deepEqual(vctx.backendConfig, {
+          transport: {
+            type: "ws",
+            url: "ws://client.example/socket",
           },
         });
         return { valid: true };
       },
     }),
     id: "codex",
+    resolveConfig: codexBackend.resolveConfig,
   };
 
   const outcome = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
@@ -235,7 +235,7 @@ test("import (run): codex bootstrap validation receives daemon-forwarded transpo
         backend,
         bootstrapBackendSessionId: "imported-codex-thread",
         overrides: {
-          backendSpecific: {
+          backendConfig: {
             codex: {
               transport: {
                 type: "ws",
@@ -258,12 +258,10 @@ test("import (run): codex bootstrap validation receives daemon-forwarded transpo
 
   assert.equal(validateCalls, 1);
   assert.equal(captured.resumeSessionId, "imported-codex-thread");
-  assert.deepEqual(outcome.manifest.backendSpecific, {
-    codex: {
-      transport: {
-        type: "ws",
-        url: "ws://client.example/socket",
-      },
+  assert.deepEqual(outcome.manifest.backendConfig, {
+    transport: {
+      type: "ws",
+      url: "ws://client.example/socket",
     },
   });
 });
@@ -280,18 +278,17 @@ test("import (run): codex bootstrap validation accepts daemon-forwarded UDS tran
       captured,
       validate: async (vctx) => {
         validateCalls++;
-        assert.deepEqual(vctx.backendSpecific, {
-          codex: {
-            transport: {
-              type: "uds",
-              path: "/tmp/client-codex.sock",
-            },
+        assert.deepEqual(vctx.backendConfig, {
+          transport: {
+            type: "uds",
+            path: "/tmp/client-codex.sock",
           },
         });
         return { valid: true };
       },
     }),
     id: "codex",
+    resolveConfig: codexBackend.resolveConfig,
   };
 
   const outcome = await withEnv(
@@ -306,7 +303,7 @@ test("import (run): codex bootstrap validation accepts daemon-forwarded UDS tran
           backend,
           bootstrapBackendSessionId: "imported-codex-thread",
           overrides: {
-            backendSpecific: {
+            backendConfig: {
               codex: {
                 transport: {
                   type: "uds",
@@ -329,12 +326,10 @@ test("import (run): codex bootstrap validation accepts daemon-forwarded UDS tran
 
   assert.equal(validateCalls, 1);
   assert.equal(captured.resumeSessionId, "imported-codex-thread");
-  assert.deepEqual(outcome.manifest.backendSpecific, {
-    codex: {
-      transport: {
-        type: "uds",
-        path: "/tmp/client-codex.sock",
-      },
+  assert.deepEqual(outcome.manifest.backendConfig, {
+    transport: {
+      type: "uds",
+      path: "/tmp/client-codex.sock",
     },
   });
 });

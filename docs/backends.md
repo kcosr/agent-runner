@@ -1,8 +1,9 @@
 # Backends
 
 A backend is the runtime that executes the worker. task-runner ships with
-five backends; each owns its own CLI/RPC shape, session handle, and cwd
-binding semantics.
+five built-in backends and can load trusted local custom backends. Each
+backend owns its own CLI/RPC shape, session handle, and cwd binding
+semantics.
 
 | Backend   | Binary / Transport                   | Session handle        |
 |-----------|--------------------------------------|-----------------------|
@@ -19,7 +20,9 @@ A backend is chosen by (in order of precedence):
 1. `--backend <id>` on the CLI (ad-hoc agent synthesis).
 2. `agent.backend` in the agent frontmatter.
 
-Valid backend ids: `claude`, `codex`, `cursor`, `pi`, `passive`.
+Built-in backend ids: `claude`, `codex`, `cursor`, `pi`, `passive`.
+Custom backend names are any non-empty string that does not conflict with
+a built-in name.
 
 ## Common env and overrides
 
@@ -45,6 +48,56 @@ generated structured flags so duplicate backend-owned flags pass through
 to the underlying tool without task-runner validation. Normal status DTOs
 do not expose the frozen args.
 
+Authored `backendConfig.<backend-name>` is backend-owned JSON-like data.
+Fresh/init selects only the active backend's keyed config, lets that
+backend resolve or validate it, and freezes the resolved selected value
+as `manifest.backendConfig`. This is separate from
+`backendArgs.<backend-name>.extraArgs`, which is only argv-style token
+data.
+
+## Custom backends
+
+Custom backend modules live under the config root:
+
+```text
+${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.ts
+${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.mts
+${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.js
+${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.mjs
+```
+
+When multiple files exist, task-runner uses that order. Missing
+`backends/` means no custom backends; a named backend directory without a
+candidate module is a config error.
+
+The module must default-export a backend object with:
+
+- `id` equal to the backend directory name
+- `invoke(ctx)` as a function
+- optional `resolveConfig(ctx)` as a function
+- optional `validateSessionId(ctx)` as a function
+- optional `supportsBootstrapSessionImport` as a boolean
+- optional `launcherMode` as `"applies"` or `"direct"`
+
+Built-in names (`claude`, `codex`, `cursor`, `pi`, `passive`) are
+reserved. Import and validation errors include the backend name and
+resolved module path.
+
+Custom backend code is trusted local code. It is loaded into the
+task-runner process without sandboxing and cached for the process
+lifetime; daemon changes require a daemon restart. Dependencies resolve
+normally from the backend file location. Install them under the config
+directory, for example:
+
+```bash
+cd ~/.config/task-runner
+npm install <package>
+```
+
+Native backend implementations receive the resolved run cwd as `ctx.cwd`.
+They are responsible for applying that cwd to any subprocess, RPC client,
+or SDK they invoke.
+
 ## `claude`
 
 - Binary: `$TASK_RUNNER_CLAUDE_BIN` or `claude`.
@@ -60,7 +113,7 @@ do not expose the frozen args.
 ## `codex`
 
 - Transport is chosen from the resolved structured
-  `backendSpecific.codex.transport` contract:
+  `backendConfig.codex.transport` contract:
   - `{ type: "stdio" }` spawns `$TASK_RUNNER_CODEX_BIN` (default
     `codex`) with `app-server
     [--dangerously-bypass-approvals-and-sandbox] [extra args...]`.
@@ -70,31 +123,18 @@ do not expose the frozen args.
     app-server over WebSocket-over-Unix-domain-socket, where `path` must
     be an absolute socket path. This is still the Codex app-server
     WebSocket protocol, not raw UDS bytes.
-- Fresh-run precedence:
-  - Embedded CLI: agent frontmatter
-    `backendSpecific.codex.transport` →
-    `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` →
-    stdio default.
-  - Connected / daemon-owned CLI: agent frontmatter
-    `backendSpecific.codex.transport` →
-    daemon request override
-    `overrides.backendSpecific.codex.transport` →
-    client-provided `TASK_RUNNER_CODEX_UDS_PATH` or
-    `TASK_RUNNER_CODEX_WS_URL` →
-    daemon process `TASK_RUNNER_CODEX_UDS_PATH` or
-    `TASK_RUNNER_CODEX_WS_URL` →
-    stdio default.
+- Fresh-run precedence: authored `backendConfig.codex.transport` →
+  request `overrides.backendConfig.codex.transport` when supplied by the
+  daemon/API caller → current process `TASK_RUNNER_CODEX_UDS_PATH` or
+  `TASK_RUNNER_CODEX_WS_URL` → stdio default.
 - `TASK_RUNNER_CODEX_UDS_PATH` and `TASK_RUNNER_CODEX_WS_URL` are
   Codex-specific defaults, not generic daemon env passthrough. If both are
   set and no higher-precedence transport was authored or explicitly
   overridden, the
   run fails fast.
-- The connected CLI only forwards Codex transport intent for fresh
-  `run`/`init`, and only from the caller's local
-  `TASK_RUNNER_CODEX_UDS_PATH` / `TASK_RUNNER_CODEX_WS_URL`. It does not
-  forward transport env on resume because resume reuses the frozen
-  manifest transport. The daemon must be able to access a forwarded UDS
-  socket path from its own filesystem namespace.
+- The connected CLI does not forward caller-local Codex transport env.
+  Daemon-owned runs resolve Codex env from the daemon process. Resume
+  reuses the frozen manifest transport.
 - Codex stdio honors the resolved launcher prefix; Codex websocket and
   UDS keep `direct` because there is no local subprocess to wrap.
 - Codex websocket and UDS connect to an already-running app-server, so
@@ -171,8 +211,8 @@ without perturbing task state.
 |--------------------------------|--------|
 | `TASK_RUNNER_CLAUDE_BIN`       | Claude CLI binary (default `claude`) |
 | `TASK_RUNNER_CODEX_BIN`        | Codex stdio binary (default `codex`) |
-| `TASK_RUNNER_CODEX_UDS_PATH`   | Fresh Codex runs use this absolute socket path as the default WebSocket-over-UDS transport when no explicit `backendSpecific.codex.transport` was authored |
-| `TASK_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendSpecific.codex.transport` was authored |
+| `TASK_RUNNER_CODEX_UDS_PATH`   | Fresh Codex runs use this absolute socket path as the default WebSocket-over-UDS transport when no explicit `backendConfig.codex.transport` was authored |
+| `TASK_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN`       | Cursor CLI binary (default `cursor-agent`) |
 | `TASK_RUNNER_PI_BIN`           | Pi CLI binary (default `pi`) |
 | `PI_HOME`                      | Pi session storage root (default `~/.pi`) |
@@ -193,6 +233,8 @@ Deeper recursion is rejected with a `RecursionDepthError`. See
 - Use `passive` whenever the work is driven externally (outer agent,
   manual operator, external orchestrator). You still get full manifest,
   attachments, dependencies, and audit trail.
-- Use `claude`, `codex`, `cursor`, or `pi` for interactive backend
+- Use `claude`, `codex`, `cursor`, or `pi` for interactive built-in
   invocation. Pick the backend that corresponds to the CLI/app-server you
   have installed and authenticated.
+- Use a custom backend when the runtime is local trusted code that can own
+  its config parsing and invocation semantics.

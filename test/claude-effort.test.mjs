@@ -13,7 +13,6 @@ test("canonical effort enum accepts all 7 values", () => {
     schemaVersion: 1,
     name: "t",
     backend: "claude",
-    tasks: [],
   };
   for (const effort of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
     const result = agentConfigSchema.safeParse({ ...base, effort });
@@ -26,7 +25,6 @@ test("canonical effort enum rejects unknown values", () => {
     schemaVersion: 1,
     name: "t",
     backend: "claude",
-    tasks: [],
   };
   for (const effort of ["none", "medium-high", "extreme", ""]) {
     const result = agentConfigSchema.safeParse({ ...base, effort });
@@ -38,13 +36,12 @@ test("backend enum accepts the supported backend ids", () => {
   const base = {
     schemaVersion: 1,
     name: "t",
-    tasks: [],
   };
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "claude" }).success, true);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "codex" }).success, true);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "cursor" }).success, true);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "passive" }).success, true);
-  assert.equal(agentConfigSchema.safeParse({ ...base, backend: "gemini" }).success, false);
+  assert.equal(agentConfigSchema.safeParse({ ...base, backend: "gemini" }).success, true);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "" }).success, false);
 });
 

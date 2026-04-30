@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
@@ -79,7 +80,11 @@ function writeAgentAndAssignment(baseDir) {
 }
 
 function mockBackend(handler, id = "mock") {
-  return { id, invoke: handler };
+  return {
+    id,
+    ...(id === "codex" ? { resolveConfig: codexBackend.resolveConfig } : {}),
+    invoke: handler,
+  };
 }
 
 function withSharedRuntimeEnv(baseDir, fn) {
@@ -172,15 +177,13 @@ test("init: freezes UDS codex transport into manifest and reset seed", async () 
     initIn(dir, { backendId: "codex" }),
   );
 
-  assert.deepEqual(outcome.manifest.backendSpecific, {
-    codex: {
-      transport: {
-        type: "uds",
-        path: "/tmp/codex.sock",
-      },
+  assert.deepEqual(outcome.manifest.backendConfig, {
+    transport: {
+      type: "uds",
+      path: "/tmp/codex.sock",
     },
   });
-  assert.deepEqual(outcome.manifest.resetSeed.backendSpecific, outcome.manifest.backendSpecific);
+  assert.deepEqual(outcome.manifest.resetSeed.backendConfig, outcome.manifest.backendConfig);
 });
 
 test("init freezes config-time env interpolation into manifest state and runtime var coercion", async () => {

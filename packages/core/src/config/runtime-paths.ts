@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -8,6 +9,12 @@ export const UNKNOWN_REPO_KEY = "unknown";
 
 type DefinitionKind = "agent" | "assignment";
 const HOOK_FILENAME_CANDIDATES = ["hook.ts", "hook.mts", "hook.js", "hook.mjs"] as const;
+const BACKEND_FILENAME_CANDIDATES = [
+  "backend.ts",
+  "backend.mts",
+  "backend.js",
+  "backend.mjs",
+] as const;
 export type StringRef =
   | { kind: "path"; ref: string; path: string }
   | { kind: "name"; ref: string; name: string };
@@ -74,6 +81,10 @@ export function resolveHooksRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveTaskRunnerConfigDir(env), "hooks");
 }
 
+export function resolveBackendsRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveTaskRunnerConfigDir(env), "backends");
+}
+
 export function resolveTasksRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveTaskRunnerConfigDir(env), "tasks");
 }
@@ -86,8 +97,29 @@ export function hookFilenameCandidates(): readonly string[] {
   return HOOK_FILENAME_CANDIDATES;
 }
 
+export function backendFilenameCandidates(): readonly string[] {
+  return BACKEND_FILENAME_CANDIDATES;
+}
+
+export function resolveFirstExistingCandidate(
+  root: string,
+  candidates: readonly string[],
+): string | undefined {
+  for (const candidate of candidates) {
+    const path = resolve(root, candidate);
+    if (existsSync(path)) {
+      return path;
+    }
+  }
+  return undefined;
+}
+
 export function resolveNamedHookDir(id: string, env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveHooksRoot(env), id);
+}
+
+export function resolveNamedBackendDir(name: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveBackendsRoot(env), name);
 }
 
 export function slugifyRepoKey(path: string): string {

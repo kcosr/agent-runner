@@ -12,11 +12,9 @@ import {
 import type { RunAttachment } from "../../contracts/attachments.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import {
-  type BackendSpecificConfig,
-  cloneBackendSpecificConfig,
+  cloneBackendConfig,
   cloneResolvedBackendArgs,
-  isAbsoluteUdsSocketPath,
-  isWsOrWssUrl,
+  isJsonishPersistable,
 } from "../backends/types.js";
 import { type ResolvedLauncherConfig, cloneResolvedLauncherConfig } from "../config/launchers.js";
 import type { LockableField } from "../config/schema.js";
@@ -82,7 +80,7 @@ export interface RunResetSeed {
   backend: string;
   model: string | null;
   effort: string | null;
-  backendSpecific?: BackendSpecificConfig;
+  backendConfig?: unknown;
   resolvedBackendArgs: string[];
   launcher: ResolvedLauncherConfig;
   cwd: string;
@@ -195,13 +193,13 @@ export interface RunSchedule {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 16 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 17 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
-// run the manifest migration.
+// reinitialize or run an explicit migration if one is added.
 export interface RunManifest {
-  schemaVersion: 16;
+  schemaVersion: 17;
   runId: string;
   repo: string;
   agent: {
@@ -219,7 +217,7 @@ export interface RunManifest {
   backend: string;
   model: string | null;
   effort: string | null;
-  backendSpecific?: BackendSpecificConfig;
+  backendConfig?: unknown;
   resolvedBackendArgs: string[];
   launcher: ResolvedLauncherConfig;
   message: string | null;
@@ -325,7 +323,7 @@ export function cloneRunDependencyRefs(
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
-    backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+    backendConfig: cloneBackendConfig(seed.backendConfig),
     resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(seed.launcher),
     lockedFields: [...seed.lockedFields],
@@ -345,7 +343,12 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.backend = seed.backend;
   manifest.model = seed.model;
   manifest.effort = seed.effort;
-  manifest.backendSpecific = cloneBackendSpecificConfig(seed.backendSpecific);
+  const backendConfig = cloneBackendConfig(seed.backendConfig);
+  if (backendConfig === undefined) {
+    manifest.backendConfig = undefined;
+  } else {
+    manifest.backendConfig = backendConfig;
+  }
   manifest.resolvedBackendArgs = cloneResolvedBackendArgs(seed.resolvedBackendArgs);
   manifest.launcher = cloneResolvedLauncherConfig(seed.launcher);
   manifest.cwd = seed.cwd;
@@ -491,11 +494,13 @@ export interface ListedRunManifest {
 function normalizeRunManifest(parsed: RunManifest): RunManifest {
   return {
     ...parsed,
+    backendConfig: cloneBackendConfig(parsed.backendConfig),
     launcher: cloneResolvedLauncherConfig(parsed.launcher),
     dependencies: cloneRunDependencyRefs(parsed.dependencies),
     runtimeVarSources: cloneRuntimeVarSources(parsed.runtimeVarSources),
     resetSeed: {
       ...parsed.resetSeed,
+      backendConfig: cloneBackendConfig(parsed.resetSeed.backendConfig),
       launcher: cloneResolvedLauncherConfig(parsed.resetSeed.launcher),
       resolvedBackendArgs: cloneResolvedBackendArgs(parsed.resetSeed.resolvedBackendArgs),
       dependencies: cloneRunDependencyRefs(parsed.resetSeed.dependencies),
@@ -521,16 +526,16 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 16
+    (parsed as { schemaVersion: number }).schemaVersion !== 17
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
-    if (version === 15) {
+    if (version === 16) {
       throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion 15; this version of task-runner requires schemaVersion 16. Run scripts/migrate-manifests-v16.mjs to migrate existing workspaces.`,
+        `manifest at ${candidate} has schemaVersion 16; this version of task-runner requires schemaVersion 17. Reinitialize the run or use an explicit migration for backendConfig manifests.`,
       );
     }
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 16. Run manifest migrations in order, ending with scripts/migrate-manifests-v16.mjs.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 17.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -682,7 +687,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 16) return false;
+  if (obj.schemaVersion !== 17) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -824,7 +829,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!obj.hookState || typeof obj.hookState !== "object") return false;
   if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
   if (!obj.execution || typeof obj.execution !== "object") return false;
-  if (!isValidPersistedBackendSpecific(obj.backendSpecific, false)) return false;
+  if ("backendConfig" in obj && !isJsonishPersistable(obj.backendConfig)) return false;
   if (!isValidResolvedBackendArgs(obj.resolvedBackendArgs)) return false;
   if (!isValidResolvedLauncherConfig(obj.launcher)) return false;
 
@@ -837,9 +842,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof resetSeed.backend !== "string") return false;
   if (resetSeed.model !== null && typeof resetSeed.model !== "string") return false;
   if (resetSeed.effort !== null && typeof resetSeed.effort !== "string") return false;
-  if (!isValidPersistedBackendSpecific(resetSeed.backendSpecific, false)) {
-    return false;
-  }
+  if ("backendConfig" in resetSeed && !isJsonishPersistable(resetSeed.backendConfig)) return false;
   if (!isValidResolvedBackendArgs(resetSeed.resolvedBackendArgs)) return false;
   if (!isValidResolvedLauncherConfig(resetSeed.launcher)) return false;
   if (typeof resetSeed.cwd !== "string") return false;
@@ -938,60 +941,4 @@ function isValidResolvedLauncherConfig(value: unknown): value is ResolvedLaunche
     (record.name === null || typeof record.name === "string") &&
     (record.source === "builtin" || record.source === "named" || record.source === "inline")
   );
-}
-
-function isValidPersistedBackendSpecific(
-  value: unknown,
-  requireCodexTransport: boolean,
-): value is BackendSpecificConfig | undefined {
-  if (value === undefined) {
-    return !requireCodexTransport;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).some((key) => key !== "codex")) {
-    return false;
-  }
-  if (record.codex === undefined) {
-    return !requireCodexTransport;
-  }
-  if (!record.codex || typeof record.codex !== "object" || Array.isArray(record.codex)) {
-    return false;
-  }
-  const codex = record.codex as Record<string, unknown>;
-  if (Object.keys(codex).some((key) => key !== "transport")) {
-    return false;
-  }
-  if (codex.transport === undefined) {
-    return !requireCodexTransport;
-  }
-  return isValidCodexTransport(codex.transport);
-}
-
-function isValidCodexTransport(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  if (record.type === "stdio") {
-    return Object.keys(record).length === 1;
-  }
-  if (record.type === "ws") {
-    if (Object.keys(record).some((key) => key !== "type" && key !== "url")) {
-      return false;
-    }
-    if (typeof record.url !== "string" || record.url.trim().length === 0) {
-      return false;
-    }
-    return isWsOrWssUrl(record.url);
-  }
-  if (record.type === "uds") {
-    if (Object.keys(record).some((key) => key !== "type" && key !== "path")) {
-      return false;
-    }
-    return typeof record.path === "string" && isAbsoluteUdsSocketPath(record.path);
-  }
-  return false;
 }

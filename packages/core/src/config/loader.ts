@@ -202,20 +202,12 @@ function classifyAgentSurface(path: PathSegment[]): InterpolationSurface {
   }
 
   if (
-    path.length === 4 &&
-    path[0] === "backendSpecific" &&
-    path[1] === "codex" &&
-    path[2] === "transport" &&
-    typeof path[3] === "string"
+    path.length >= 3 &&
+    path[0] === "backendConfig" &&
+    typeof path[1] === "string" &&
+    (typeof path.at(-1) === "string" || typeof path.at(-1) === "number")
   ) {
-    switch (path[3]) {
-      case "type":
-      case "url":
-      case "path":
-        return { mode: "exact", scalarKind: "string", allowLiteral: false };
-      default:
-        return { mode: "disabled" };
-    }
+    return { mode: "exact", scalarKind: "string", allowLiteral: false };
   }
 
   if (
