@@ -9,6 +9,7 @@
   per-backend manifest, reset-seed, daemon override, and hook-context config
   contract is removed. Use `scripts/migrate-manifests-v17.mjs` before
   resuming schema v16 runs.
+  ([#125](https://github.com/kcosr/task-runner/pull/125))
 - Removed connected attachment HTTP client helpers
   (`daemonAddAttachment`, `daemonListAttachments`,
   `daemonRemoveAttachment`, `daemonDownloadAttachment`) from
@@ -117,9 +118,11 @@
   a matching backend id without conflicting with built-in names, install their
   dependencies under the config directory, and receive `ctx.cwd` for native
   backend cwd handling.
+  ([#125](https://github.com/kcosr/task-runner/pull/125))
 - Added `scripts/migrate-manifests-v17.mjs` to promote schema v16
   manifests to schema v17 by moving selected Codex `backendSpecific` data to
   `backendConfig` and removing obsolete per-backend config fields.
+  ([#125](https://github.com/kcosr/task-runner/pull/125))
 - Added opt-in shared bearer-token protection for daemon `/api/*`,
   WebSocket, SSE, connected CLI, and web dashboard requests, with
   Settings -> General token storage for the dashboard.
@@ -579,7 +582,7 @@
   `backendArgs` remains separate per-backend argv extras. Runs and reset
   seeds freeze the resolved Codex config so resume ignores later
   client/daemon env drift.
-  ([#55](https://github.com/kcosr/task-runner/pull/55))
+  ([#125](https://github.com/kcosr/task-runner/pull/125))
 - Changed the web run detail drawer summary to promote `Ended` and `Exit code`, widen long metadata rows to use the full summary width, and remove the separate `Timing` tab. ([#54](https://github.com/kcosr/task-runner/pull/54))
 - Changed the web dashboard board so non-success terminal columns appear before `Completed`, and persisted each column's collapse state across reloads. ([#56](https://github.com/kcosr/task-runner/pull/56))
 - Changed web dashboard Escape behavior so a fullscreen detail drawer exits fullscreen first, and only closes on a subsequent Escape. ([#50](https://github.com/kcosr/task-runner/pull/50))

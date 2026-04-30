@@ -83,6 +83,71 @@ Built-in names (`claude`, `codex`, `cursor`, `pi`, `passive`) are
 reserved. Import and validation errors include the backend name and
 resolved module path.
 
+Built-ins and custom backends use the same `Backend` contract. The run
+loop resolves a backend object, passes the same invoke context shape, and
+persists the same invoke result fields for both built-in and custom
+backends. A backend can stream visible assistant text with
+`ctx.emit({ type: "agent_message_delta", text })`, capture a resumable
+backend session by returning `sessionId`, and receive that id on the next
+invoke as `ctx.resumeSessionId`.
+
+Minimal direct SDK-style backend:
+
+```js
+const backend = {
+  id: "my-backend",
+  launcherMode: "direct",
+  supportsBootstrapSessionImport: false,
+
+  resolveConfig(ctx) {
+    return {
+      ...recordOrEmpty(ctx.authoredConfig),
+      ...recordOrEmpty(ctx.overrideConfig),
+    };
+  },
+
+  async invoke(ctx) {
+    // Apply ctx.cwd yourself when calling an SDK, RPC client, or subprocess.
+    const text = await callMyModel({
+      prompt: ctx.prompt,
+      cwd: ctx.cwd,
+      model: ctx.model,
+      effort: ctx.effort,
+      config: ctx.backendConfig,
+      resumeSessionId: ctx.resumeSessionId,
+      signal: ctx.abortSignal,
+    });
+
+    ctx.emit?.({ type: "agent_message_delta", text });
+
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: ctx.abortSignal?.aborted === true,
+      sessionId: null,
+      transcript: text,
+      rawStdout: text,
+      rawStderr: "",
+    };
+  },
+};
+
+function recordOrEmpty(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+export default backend;
+```
+
+For resumable backends, return a stable non-null `sessionId` from
+`invoke()`. Task-runner persists it as the run's backend session id and
+passes it back as `ctx.resumeSessionId` on resume. Implement
+`validateSessionId(ctx)` when the backend can cheaply verify imported
+`--backend-session-id` values before the first invocation. Set
+`supportsBootstrapSessionImport: false` when public resume ids are not
+self-validating enough to import safely.
+
 Custom backend code is trusted local code. It is loaded into the
 task-runner process without sandboxing and cached for the process
 lifetime; daemon changes require a daemon restart, including the first
@@ -98,6 +163,25 @@ npm install <package>
 Native backend implementations receive the resolved run cwd as `ctx.cwd`.
 They are responsible for applying that cwd to any subprocess, RPC client,
 or SDK they invoke.
+
+Use built-ins as reference implementations, but do not treat their helper
+imports as public API for custom modules:
+
+- [`passive`](../packages/core/src/backends/passive.ts) is the smallest
+  backend result shape.
+- [`claude`](../packages/core/src/backends/claude.ts) and
+  [`cursor`](../packages/core/src/backends/cursor.ts) show subprocess
+  backend patterns.
+- [`codex`](../packages/core/src/backends/codex.ts) shows backend-owned
+  `resolveConfig()` and config validation.
+- [`pi`](../packages/core/src/backends/pi.ts) shows backend session
+  validation and resume id handling.
+
+A few built-in names have product policy outside the generic backend
+contract: `passive` has externally driven run behavior, `codex` has
+transport-specific launcher applicability, and `codex`/`pi` have built-in
+session rename helpers. Custom backends still receive the same invoke
+context and return the same invoke result shape.
 
 ## `claude`
 
