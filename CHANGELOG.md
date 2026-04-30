@@ -323,6 +323,7 @@
 - Added `scripts/migrate-attempt-stdout-field.mjs` to migrate
   schemaVersion 2 attempt JSON logs to schemaVersion 3 by stripping `stdout`
   after raw backend stdout moved to opt-in sidecars.
+  ([#126](https://github.com/kcosr/task-runner/pull/126))
 
 ### Changed
 
@@ -330,6 +331,7 @@
   `attempts/NN.json` and, when `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` is
   set, write raw backend stdout to local `attempts/NN.stdout.log` sidecars
   that Task Runner does not read.
+  ([#126](https://github.com/kcosr/task-runner/pull/126))
 - Resuming a run now preserves `blocked` task status while still resetting
   stale `in_progress` tasks to `pending`; blocked-only runs no longer resume
   implicitly as runnable work.
