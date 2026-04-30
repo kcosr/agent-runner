@@ -288,6 +288,9 @@
 
 ### Changed
 
+- Resuming a run now preserves `blocked` task status while still resetting
+  stale `in_progress` tasks to `pending`; blocked-only runs no longer resume
+  implicitly as runnable work.
 - `task-runner show agent|assignment|launcher|task` now rejects unsupported
   flags and extra positional arguments instead of ignoring them.
 - The web dashboard now requests and caches only non-archived runs by

@@ -67,7 +67,7 @@ import {
 } from "./recursion-guard.js";
 import {
   IMPLICIT_RESUME_MESSAGE,
-  hasIncompleteTasks,
+  hasRunnableTasks,
   missingResumeInputMessage,
 } from "./resume-policy.js";
 import {
@@ -1096,7 +1096,7 @@ function formatUnhandledAttemptError(error: unknown): string {
 }
 
 function normalizeResumeStatus(status: TaskStatus): TaskStatus {
-  return status === "completed" ? "completed" : "pending";
+  return status === "in_progress" ? "pending" : status;
 }
 
 function normalizeTerminalTaskStatus(status: TaskStatus): TaskStatus {
@@ -1384,7 +1384,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (isResume) {
     const hasMessage = Boolean(message && message.trim().length > 0);
     const hasAddedTasks = addedTitles.length > 0;
-    const canResumeImplicitly = hasIncompleteTasks(resume?.manifest.finalTasks ?? {});
+    const canResumeImplicitly = hasRunnableTasks(resume?.manifest.finalTasks ?? {});
     if (!hasMessage && !hasAddedTasks && !canResumeImplicitly) {
       throw new ResumeError(missingResumeInputMessage());
     }
@@ -1661,7 +1661,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume &&
     trimmedMessage.length === 0 &&
     addedTitles.length === 0 &&
-    hasIncompleteTasks(resume?.manifest.finalTasks ?? {});
+    hasRunnableTasks(resume?.manifest.finalTasks ?? {});
 
   // Run name resolution: fresh `run` / `init` may set it via the
   // CLI override, while resume and ready-start always reuse

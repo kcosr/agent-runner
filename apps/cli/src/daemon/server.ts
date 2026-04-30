@@ -94,7 +94,7 @@ import {
   resolveResumeTarget,
   writeManifest,
 } from "@task-runner/core/core/run/manifest.js";
-import { hasIncompleteTasks } from "@task-runner/core/core/run/resume-policy.js";
+import { hasRunnableTasks } from "@task-runner/core/core/run/resume-policy.js";
 import {
   type ScheduleDecisionReason,
   appendRunScheduleAdvancedEvent,
@@ -1125,7 +1125,7 @@ export async function serveDaemon(
   };
 
   const scheduledResumeOverrides = (manifest: RunManifest) =>
-    hasIncompleteTasks(manifest.finalTasks) ? {} : { message: SCHEDULED_RESUME_MESSAGE };
+    hasRunnableTasks(manifest.finalTasks) ? {} : { message: SCHEDULED_RESUME_MESSAGE };
 
   const mutateDueOneTimeSchedule = (
     entry: ListedRunManifest,
