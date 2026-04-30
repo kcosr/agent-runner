@@ -17,7 +17,8 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ├── agent-seed.md          # only when the run started from an agent file
 ├── attempts/
 │   ├── 00.json
-│   └── 01.json
+│   ├── 01.json
+│   └── 01.stdout.log      # optional, when TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1
 └── attachments/
     └── <attachment-id>/
         └── <file>

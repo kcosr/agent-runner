@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +15,12 @@ import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { updateTasksForPrompt, withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  resolveRunFromPrompt,
+  updateTasksForPrompt,
+  withEnv,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -247,6 +253,40 @@ test("manifest: TASK_RUNNER_CAPTURE_BACKEND_STDOUT writes raw stdout sidecars", 
   assert.equal(attemptRecord.logPath, "attempts/01.json");
   assert.equal(attemptRecord.rawStdout, undefined);
   assert.equal(attemptRecord.stdoutLogPath, undefined);
+});
+
+test("manifest: stdout sidecar append failures do not fail the attempt", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const outcome = await withEnv({ TASK_RUNNER_CAPTURE_BACKEND_STDOUT: "1" }, () =>
+    runWithMock(dir, async (ctx) => {
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
+      const resolved = resolveRunFromPrompt(ctx.prompt, dir);
+      const sidecarPath = join(resolved.workspaceDir, "attempts", "01.stdout.log");
+      rmSync(sidecarPath);
+      mkdirSync(sidecarPath);
+      ctx.onRawStdoutLine?.("write should be downgraded to a notice\n");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-sidecar-write-failed",
+        transcript: "all three done after sidecar write failure",
+        rawStdout: "returned stdout text",
+        rawStderr: "raw stderr text",
+      };
+    }),
+  );
+
+  assert.equal(outcome.manifest.status, "success");
+  const log = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
+  assert.equal(log.stdout, "");
+  assert.equal(log.stderr, "raw stderr text");
 });
 
 test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS no longer enables stdout capture", async () => {

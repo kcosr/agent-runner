@@ -690,7 +690,8 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/
 ├── run.json
 ├── assignment-seed.md
 ├── attempts/
-│   └── 01.json
+│   ├── 01.json
+│   └── 01.stdout.log      # optional, when TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1
 └── attachments/
     └── <attachment-id>/
 ```

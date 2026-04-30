@@ -610,6 +610,53 @@ function captureBackendStdout(env: NodeJS.ProcessEnv = process.env): boolean {
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
+function formatSidecarWriteError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function prepareAttemptStdoutSidecar({
+  workspaceDir,
+  attemptNumber,
+  captureRawBackendStdout,
+  emit,
+}: {
+  workspaceDir: string;
+  attemptNumber: number;
+  captureRawBackendStdout: boolean;
+  emit: (event: BackendEvent) => void;
+}): ((line: string) => void) | undefined {
+  if (!captureRawBackendStdout) {
+    return undefined;
+  }
+
+  const relativePath = attemptStdoutLogRelativePath(attemptNumber);
+  const rawStdoutLogPath = join(workspaceDir, relativePath);
+  let disabled = false;
+  const disableCapture = (error: unknown): void => {
+    disabled = true;
+    emit({
+      type: "backend_notice",
+      text: `Disabling backend stdout sidecar capture for ${relativePath}: ${formatSidecarWriteError(error)}\n`,
+    });
+  };
+
+  try {
+    appendTextFileDurable(rawStdoutLogPath, "");
+  } catch (error) {
+    disableCapture(error);
+    return undefined;
+  }
+
+  return (line: string): void => {
+    if (disabled) return;
+    try {
+      appendTextFileDurable(rawStdoutLogPath, line);
+    } catch (error) {
+      disableCapture(error);
+    }
+  };
+}
+
 async function resolveFreshBackendConfig(
   backend: Backend,
   agentConfig: LoadedAgent["config"],
@@ -2338,18 +2385,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         prompt: currentPrompt,
         sessionIdAtStart,
       };
-      const rawStdoutLogPath = captureRawBackendStdout
-        ? join(workspaceDir, attemptStdoutLogRelativePath(globalAttemptNumber))
-        : null;
-      if (rawStdoutLogPath !== null) {
-        appendTextFileDurable(rawStdoutLogPath, "");
-      }
-      const onRawStdoutLine =
-        rawStdoutLogPath === null
-          ? undefined
-          : (line: string): void => {
-              appendTextFileDurable(rawStdoutLogPath, line);
-            };
+      const onRawStdoutLine = prepareAttemptStdoutSidecar({
+        workspaceDir,
+        attemptNumber: globalAttemptNumber,
+        captureRawBackendStdout,
+        emit: emitEvent,
+      });
 
       const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,

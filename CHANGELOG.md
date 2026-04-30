@@ -516,6 +516,8 @@
 
 ### Removed
 
+- Removed `TASK_RUNNER_FULL_ATTEMPT_LOGS`; use
+  `TASK_RUNNER_CAPTURE_BACKEND_STDOUT` for raw backend stdout sidecars.
 - Removed live family grouping contracts: `familyRootRunId`,
   `familyOf=<run-id>`, and attachment `scope=family`.
 - Removed the live run-only dependency array contract from current
@@ -546,9 +548,6 @@
 - Changed `task-runner list runs` text output to append each run's exact
   persisted `cwd=...` alongside repo, agent, and assignment metadata.
   ([#73](https://github.com/kcosr/task-runner/pull/73))
-- Removed `TASK_RUNNER_FULL_ATTEMPT_LOGS`; it no longer enables stdout
-  capture. Use `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` for raw
-  `attempts/NN.stdout.log` sidecars.
 - Changed the web run detail drawer to expose read-only `Vars` and
   `Hook state` data in a dedicated `Data` tab with a clearer key/value
   table layout, and moved the mobile note/resume dialogs lower so they

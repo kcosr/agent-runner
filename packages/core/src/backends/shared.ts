@@ -9,6 +9,43 @@ export function normalizeBackendModel(model: string): string {
   return stripped.length > 0 ? stripped : model;
 }
 
+export interface LineFeeder {
+  feed(chunk: string): void;
+  flush(): void;
+}
+
+export function createLineFeeder({
+  onLine,
+  onPartial,
+  onRawSegment,
+}: {
+  onLine: (line: string) => void;
+  onPartial?: (partial: string) => void;
+  onRawSegment?: (segment: string) => void;
+}): LineFeeder {
+  let buffer = "";
+
+  return {
+    feed(chunk) {
+      buffer += chunk;
+      let newlineIdx: number;
+      while ((newlineIdx = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newlineIdx);
+        buffer = buffer.slice(newlineIdx + 1);
+        onRawSegment?.(`${line}\n`);
+        onLine(line);
+      }
+    },
+    flush() {
+      if (buffer.length === 0) return;
+      const partial = buffer;
+      buffer = "";
+      onRawSegment?.(partial);
+      onPartial?.(partial);
+    },
+  };
+}
+
 /**
  * Compute a paragraph-break separator to insert before `delta` so that
  * two adjacent streamed message bodies don't get glued together.
