@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
+import { useDaemonAuthToken } from "../lib/settings.js";
 
 type FieldDraftValue = string;
 type FieldDrafts = Record<string, FieldDraftValue>;
@@ -145,7 +146,8 @@ function buildStartPayload(
 
 export function useNewRunState() {
   const config = useRuntimeConfig();
-  const api = useMemo(() => createApiClient(config), [config]);
+  const { daemonToken } = useDaemonAuthToken();
+  const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const navigate = useNavigate();
   const [selectedAgent, setSelectedAgent] = useState("");
   const [selectedAssignment, setSelectedAssignment] = useState("");

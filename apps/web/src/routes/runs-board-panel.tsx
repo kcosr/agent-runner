@@ -1,9 +1,11 @@
 import type { UseQueryResult } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EmptyPanel } from "../components/empty-states.js";
 import type { RunCardMotion } from "../components/run-card.js";
 import { type BoardColumn, RunColumn } from "../components/run-column.js";
+import { isUnauthorizedError } from "../lib/api-client.js";
 import type { DashboardStructuredFilters } from "../lib/settings.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
@@ -86,6 +88,7 @@ export function RunsBoardPanel({
   structuredFilters: DashboardStructuredFilters;
   visibleRuns: RunSummary[];
 }) {
+  const navigate = useNavigate();
   const boardRef = useRef<HTMLElement | null>(null);
   const columnRefs = useRef(new Map<string, HTMLElement>());
   const columnRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
@@ -435,6 +438,26 @@ export function RunsBoardPanel({
   }
 
   if (runsQuery.isError) {
+    if (isUnauthorizedError(runsQuery.error)) {
+      return (
+        <section className="board board-error">
+          <EmptyPanel
+            action={
+              <button
+                className="btn btn-primary"
+                onClick={() => void navigate({ to: "/settings/general" })}
+                type="button"
+              >
+                Open Settings
+              </button>
+            }
+            body="Enter the daemon token in Settings to load runs from this daemon."
+            title="Daemon token required"
+          />
+        </section>
+      );
+    }
+
     return (
       <section className="board board-error">
         <EmptyPanel

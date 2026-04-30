@@ -8,6 +8,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.js";
+import { DAEMON_TOKEN_STORAGE_KEY } from "./lib/daemon-token.js";
 import { queryClient, runQueryKeys } from "./lib/query.js";
 import { runBelongsInListCache } from "./lib/run-list-cache.js";
 import { router } from "./router.js";
@@ -107,6 +108,10 @@ function setStoredDashboardViewState(overrides: Partial<typeof DEFAULT_DASHBOARD
       ...overrides,
     }),
   );
+}
+
+function requestHeader(init: RequestInit | undefined, key: string): string | null {
+  return new Headers(init?.headers).get(key);
 }
 
 function abortReasonForStatus(status: RunSummary["status"] | RunDetail["status"]) {
@@ -6107,6 +6112,140 @@ describe("web app", () => {
       expect(screen.queryByRole("heading", { name: "Keybindings" })).not.toBeInTheDocument();
     });
     expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
+  });
+
+  it("saves and clears the daemon token from Settings while refreshing active run requests", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).includes("/api/runs") && requestHeader(init, "authorization") === null,
+        ),
+      ).toBe(true);
+    });
+
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "General" });
+
+    await user.type(screen.getByLabelText("Daemon token"), "  saved-token  ");
+    await user.click(screen.getByRole("button", { name: "Save token" }));
+
+    expect(window.localStorage.getItem(DAEMON_TOKEN_STORAGE_KEY)).toBe("saved-token");
+    const beforeTokenReturn = fetchMock.mock.calls.length;
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls
+          .slice(beforeTokenReturn)
+          .some(
+            ([url, init]) =>
+              String(url).includes("/api/runs") &&
+              requestHeader(init, "authorization") === "Bearer saved-token",
+          ),
+      ).toBe(true);
+    });
+
+    const beforeClear = fetchMock.mock.calls.length;
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "General" });
+    await user.click(screen.getByRole("button", { name: "Clear token" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
+
+    expect(window.localStorage.getItem(DAEMON_TOKEN_STORAGE_KEY)).toBeNull();
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls
+          .slice(beforeClear)
+          .some(
+            ([url, init]) =>
+              String(url).includes("/api/runs") && requestHeader(init, "authorization") === null,
+          ),
+      ).toBe(true);
+    });
+  });
+
+  it("routes run-list unauthorized responses to daemon token Settings", async () => {
+    installFetchMock(
+      {
+        runs: [],
+        details: {},
+      },
+      {
+        handleRequest: (url, init) => {
+          const parsed = new URL(url, "http://task-runner.test");
+          if (parsed.pathname === "/api/runs" && (!init?.method || init.method === "GET")) {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: "UNAUTHENTICATED",
+                  message: "daemon authentication required",
+                },
+              }),
+              { status: 401 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    expect(
+      await screen.findByText("Daemon token required", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Settings" }));
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Daemon token")).toBeInTheDocument();
+  });
+
+  it("routes run-detail unauthorized responses to daemon token Settings", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          const parsed = new URL(url, "http://task-runner.test");
+          if (parsed.pathname === "/api/runs/run-1" && (!init?.method || init.method === "GET")) {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: "UNAUTHENTICATED",
+                  message: "daemon authentication required",
+                },
+              }),
+              { status: 401 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    expect(
+      await screen.findByText("Daemon token required", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Settings" }));
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Daemon token")).toBeInTheDocument();
   });
 
   it("persists the detail drawer width after resizing it from the keyboard separator", async () => {

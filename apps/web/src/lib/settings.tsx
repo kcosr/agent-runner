@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DAEMON_TOKEN_STORAGE_KEY,
+  normalizeDaemonToken,
+  readStoredDaemonToken,
+} from "./daemon-token.js";
+import { queryClient } from "./query.js";
 import {
   type DashboardSortDirection,
   type DashboardSortField,
@@ -139,8 +145,15 @@ interface DashboardViewStateContextValue {
   ) => void;
 }
 
+interface DaemonAuthTokenContextValue {
+  daemonToken: string | null;
+  saveDaemonToken: (value: string) => void;
+  clearDaemonToken: () => void;
+}
+
 const DashboardPreferencesContext = createContext<DashboardPreferencesContextValue | null>(null);
 const DashboardViewStateContext = createContext<DashboardViewStateContextValue | null>(null);
+const DaemonAuthTokenContext = createContext<DaemonAuthTokenContextValue | null>(null);
 
 function loadDashboardPreferences(): DashboardPreferences {
   if (typeof window === "undefined") {
@@ -302,6 +315,8 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
     loadDashboardPreferences(),
   );
   const [viewState, setViewState] = useState<DashboardViewState>(() => loadDashboardViewState());
+  const [daemonToken, setDaemonToken] = useState<string | null>(() => readStoredDaemonToken());
+  const previousDaemonTokenRef = useRef(daemonToken);
 
   useEffect(() => {
     window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
@@ -317,6 +332,14 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
       }),
     );
   }, [viewState.activeRightSurface, viewState.collapsedColumnKeys, viewState.drawerWidth]);
+
+  useEffect(() => {
+    if (previousDaemonTokenRef.current === daemonToken) {
+      return;
+    }
+    previousDaemonTokenRef.current = daemonToken;
+    void queryClient.invalidateQueries();
+  }, [daemonToken]);
 
   const preferencesValue = useMemo<DashboardPreferencesContextValue>(
     () => ({
@@ -353,12 +376,35 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
     [viewState],
   );
 
+  const daemonAuthValue = useMemo<DaemonAuthTokenContextValue>(
+    () => ({
+      daemonToken,
+      saveDaemonToken: (value) => {
+        const normalized = normalizeDaemonToken(value);
+        if (!normalized) {
+          window.localStorage.removeItem(DAEMON_TOKEN_STORAGE_KEY);
+          setDaemonToken(null);
+          return;
+        }
+        window.localStorage.setItem(DAEMON_TOKEN_STORAGE_KEY, normalized);
+        setDaemonToken(normalized);
+      },
+      clearDaemonToken: () => {
+        window.localStorage.removeItem(DAEMON_TOKEN_STORAGE_KEY);
+        setDaemonToken(null);
+      },
+    }),
+    [daemonToken],
+  );
+
   return (
-    <DashboardPreferencesContext.Provider value={preferencesValue}>
-      <DashboardViewStateContext.Provider value={viewStateValue}>
-        {children}
-      </DashboardViewStateContext.Provider>
-    </DashboardPreferencesContext.Provider>
+    <DaemonAuthTokenContext.Provider value={daemonAuthValue}>
+      <DashboardPreferencesContext.Provider value={preferencesValue}>
+        <DashboardViewStateContext.Provider value={viewStateValue}>
+          {children}
+        </DashboardViewStateContext.Provider>
+      </DashboardPreferencesContext.Provider>
+    </DaemonAuthTokenContext.Provider>
   );
 }
 
@@ -374,6 +420,14 @@ export function useDashboardViewState() {
   const context = useContext(DashboardViewStateContext);
   if (!context) {
     throw new Error("Dashboard view state context is unavailable");
+  }
+  return context;
+}
+
+export function useDaemonAuthToken() {
+  const context = useContext(DaemonAuthTokenContext);
+  if (!context) {
+    throw new Error("Daemon auth token context is unavailable");
   }
   return context;
 }

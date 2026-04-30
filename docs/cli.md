@@ -183,6 +183,12 @@ task-runner serve [--listen <ws-url>]
   `TASK_RUNNER_LISTEN`).
 - Rejects `--connect`, `--connect-host`, and `--connect-local-port`.
 
+Set `TASK_RUNNER_DAEMON_AUTH_ENABLED=true` and
+`TASK_RUNNER_DAEMON_TOKEN=<token>` in the daemon environment to require a
+shared bearer token for daemon `/api/*` and WebSocket access. This is
+daemon access protection only; anyone with the token has full daemon
+access.
+
 See [daemon.md](daemon.md).
 
 ## `status`
@@ -452,6 +458,7 @@ Recognized by the CLI:
 - `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC`,
   `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
 - `TASK_RUNNER_CALL_DEPTH`, `TASK_RUNNER_MAX_CALL_DEPTH`
+- `TASK_RUNNER_DAEMON_AUTH_ENABLED`, `TASK_RUNNER_DAEMON_TOKEN`
 
 See [configuration.md](configuration.md).
 
@@ -461,6 +468,17 @@ Every client command (except `serve`) can run embedded (no daemon) or
 route through a daemon with `--connect <ws-url>` or
 `TASK_RUNNER_CONNECT`. Daemon-routed commands use the same WebSocket
 JSON-RPC surface that the web dashboard uses.
+
+When connecting to an auth-enabled daemon, set `TASK_RUNNER_DAEMON_TOKEN`
+in the client environment. Connected CLI requests trim that value and send
+`Authorization: Bearer <token>` on WebSocket handshakes and direct daemon
+HTTP helper requests. Empty or unset client tokens omit Authorization and
+will be rejected by auth-enabled daemons.
+
+The token is not a transport security layer. For remote daemons, use
+`--connect-host` SSH forwarding, HTTPS, WireGuard, Tailscale, a VPN, or an
+equivalent secure channel, and keep tokens and Authorization headers out
+of logs. The MVP does not provide per-user isolation.
 
 `run --detach` is daemon-only: the CLI dispatches the run and exits
 after the daemon accepts it.

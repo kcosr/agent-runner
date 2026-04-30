@@ -128,11 +128,16 @@ import {
   renderTaskDetails,
   renderTaskList,
 } from "./commands/render.js";
+import { bearerAuthHeader } from "./daemon/auth.js";
 import { DaemonClient, DaemonConnectionError, DaemonRpcError } from "./daemon/client.js";
 import { type ResolvedHostMode, resolveHostMode, resolveListenUrl } from "./daemon/config.js";
 import { SshTunnelSetupError, openSshTunnel } from "./daemon/connect-host.js";
 import { DaemonHttpError, daemonGetRunAuditHistory } from "./daemon/http-client.js";
-import { type DaemonInfo, RPC_ERROR_COMMAND } from "./daemon/protocol.js";
+import {
+  type DaemonInfo,
+  RPC_ERROR_COMMAND,
+  TASK_RUNNER_DAEMON_TOKEN_ENV,
+} from "./daemon/protocol.js";
 import { serveDaemon } from "./daemon/server.js";
 
 const HELP = `Usage: task-runner <run|init|serve|status|task|attachment|list|show> [options] [args]
@@ -297,7 +302,9 @@ function daemonUnavailableHint(connectUrl: string): string {
   return `task-runner: cannot connect to daemon at ${connectUrl}\nHint: task-runner serve --listen ${connectUrl}\n`;
 }
 
-type DaemonConnectContext = Extract<ResolvedHostMode, { mode: "daemon" }>;
+type DaemonConnectContext = Extract<ResolvedHostMode, { mode: "daemon" }> & {
+  authHeaders: Record<string, string>;
+};
 
 function exitCommandFailure(err: unknown, connectUrl?: string): never {
   if (err instanceof DaemonConnectionError) {
@@ -616,7 +623,9 @@ async function withDaemonClient<T>(
   connect: DaemonConnectContext,
   fn: (client: DaemonClient) => Promise<T>,
 ): Promise<T> {
-  const client = await DaemonClient.connect(connect.effectiveConnectUrl);
+  const client = await DaemonClient.connect(connect.effectiveConnectUrl, {
+    headers: connect.authHeaders,
+  });
   try {
     return await fn(client);
   } finally {
@@ -781,6 +790,7 @@ async function runRunAudit(parsed: ParsedArgs, connect?: DaemonConnectContext): 
       connect === undefined
         ? getRunAuditHistory(target, { limit: parsed.limit })
         : await daemonGetRunAuditHistory(connect.effectiveConnectUrl, target, {
+            authHeaders: connect.authHeaders,
             limit: parsed.limit,
           });
     if (parsed.outputFormat === "json") {
@@ -2683,7 +2693,10 @@ async function main(): Promise<void> {
       parsed.connectLocalPort,
     );
     if (resolvedHostMode.mode === "daemon") {
-      daemonConnect = resolvedHostMode;
+      daemonConnect = {
+        ...resolvedHostMode,
+        authHeaders: bearerAuthHeader(process.env[TASK_RUNNER_DAEMON_TOKEN_ENV]),
+      };
     }
   } catch (err) {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);

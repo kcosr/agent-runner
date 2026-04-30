@@ -18,6 +18,33 @@ tells the UI where to reach the API (`apiBasePath`) and summary event
 stream (`runSummaryEventsPath`). All other endpoints are derived from
 those plus the active run id.
 
+## Daemon Token
+
+If the daemon was started with `TASK_RUNNER_DAEMON_AUTH_ENABLED=true`,
+open Settings -> General and enter the shared daemon token. The dashboard
+stores the trimmed value in `localStorage` under
+`task-runner.daemonToken`. Save updates future API, attachment, and SSE
+requests without a page reload; Clear removes the stored value and future
+requests omit Authorization.
+
+The web client sends the token as:
+
+```http
+Authorization: Bearer <token>
+```
+
+It never puts daemon tokens in URLs or query strings. `/app-config.json`
+and static assets remain public so the app can load, but `/api/*`,
+attachment content, and header-capable SSE requests require the bearer
+token when daemon auth is enabled. Unauthorized run-list or run-detail
+responses show a token-required state with navigation to Settings.
+
+This is daemon access protection only. Anyone with the token has full
+daemon access, and the MVP intentionally does not provide per-user
+isolation. Do not log tokens or Authorization headers. For remote access,
+serve the dashboard over SSH tunnels, HTTPS, WireGuard, Tailscale, a VPN,
+or an equivalent secure transport; the token does not encrypt traffic.
+
 ## Views
 
 - `/` — Runs dashboard with Board, Chat, Detail, Notes, and Tasks surfaces.
@@ -340,15 +367,18 @@ is no standalone web server in the shipped runtime.
 ## Data flow summary
 
 1. App boots and fetches `/app-config.json` for the API paths.
-2. Subscribes to the global summary stream; mutations arrive as
+2. Reads the optional Settings -> General daemon token and attaches it as
+   an Authorization bearer header on API, attachment, and fetch-backed SSE
+   requests.
+3. Subscribes to the global summary stream; mutations arrive as
    `summary_upsert` / `summary_removed` events and update the
    TanStack React Query cache. Board sorting is recomputed from cached
    canonical summary timestamps.
-3. Selecting a run subscribes to its detail stream; opening Attempts or
+4. Selecting a run subscribes to its detail stream; opening Attempts or
    Audit starts the corresponding history load and live stream, which remain
    active while that run stays selected.
-4. User actions call the HTTP API; responses feed the cache and the
+5. User actions call the HTTP API; responses feed the cache and the
    daemon broadcasts matching detail/summary updates back to all
    subscribers.
-5. `RunCapabilities` on each projection decides which buttons are
+6. `RunCapabilities` on each projection decides which buttons are
    enabled, which keeps the UI consistent with the CLI and daemon.

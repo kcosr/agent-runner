@@ -72,11 +72,11 @@ export function App() {
   return (
     <RuntimeConfigContext.Provider value={bootState.config}>
       <QueryClientProvider client={queryClient}>
-        <RunEventsProvider config={bootState.config}>
-          <DashboardSettingsProvider>
+        <DashboardSettingsProvider>
+          <RunEventsProvider config={bootState.config}>
             <RouterProvider router={router} />
-          </DashboardSettingsProvider>
-        </RunEventsProvider>
+          </RunEventsProvider>
+        </DashboardSettingsProvider>
       </QueryClientProvider>
     </RuntimeConfigContext.Provider>
   );

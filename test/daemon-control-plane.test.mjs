@@ -18,7 +18,10 @@ import { test } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 import { DaemonClient, DaemonRpcError } from "../apps/cli/dist/daemon/client.js";
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
-import { daemonReconfigureRun } from "../apps/cli/dist/daemon/http-client.js";
+import {
+  daemonGetRunAuditHistory,
+  daemonReconfigureRun,
+} from "../apps/cli/dist/daemon/http-client.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
 import {
@@ -304,8 +307,8 @@ async function freePort() {
   });
 }
 
-async function openRawWebSocket(listenUrl) {
-  const ws = new WebSocket(listenUrl);
+async function openRawWebSocket(listenUrl, options = {}) {
+  const ws = new WebSocket(listenUrl, options);
   await new Promise((resolve, reject) => {
     ws.once("open", resolve);
     ws.once("error", reject);
@@ -344,10 +347,10 @@ async function httpJson(baseUrl, path, opts = {}) {
   };
 }
 
-async function openSse(baseUrl, path) {
+async function openSse(baseUrl, path, options = {}) {
   const controller = new AbortController();
   const response = await fetch(new URL(path, baseUrl), {
-    headers: { accept: "text/event-stream" },
+    headers: { accept: "text/event-stream", ...(options.headers ?? {}) },
     signal: controller.signal,
   });
   assert.equal(response.status, 200);
@@ -6275,6 +6278,180 @@ test("serve exposes HTTP/SSE alongside the existing WebSocket RPC transport", as
   } finally {
     await daemon.stop();
   }
+});
+
+test("serve fails before binding when daemon auth is enabled without a token", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  await withEnv(
+    {
+      TASK_RUNNER_DAEMON_AUTH_ENABLED: "true",
+      TASK_RUNNER_DAEMON_TOKEN: "",
+    },
+    async () => {
+      await assert.rejects(
+        () => serveDaemon(listenUrl),
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("TASK_RUNNER_DAEMON_TOKEN") &&
+          !error.message.includes("secret-value"),
+      );
+    },
+  );
+
+  const server = await serveDaemon(listenUrl);
+  await server.close();
+});
+
+test("daemon bearer auth protects HTTP, SSE, and WebSocket while leaving public web routes open", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const token = "daemon-auth-secret";
+  const authHeaders = { authorization: `Bearer ${token}` };
+
+  await withSeededFrontendDist(async ({ assetPath }) => {
+    await withEnv(
+      {
+        ...sharedRuntimeEnv(dir),
+        TASK_RUNNER_DAEMON_AUTH_ENABLED: "yes",
+        TASK_RUNNER_DAEMON_TOKEN: `  ${token}  `,
+      },
+      async () => {
+        const server = await serveDaemon(listenUrl);
+        try {
+          for (const [label, headers] of [
+            ["missing", undefined],
+            ["malformed", { authorization: "Bearer" }],
+            ["unsupported", { authorization: token }],
+            ["wrong", { authorization: "Bearer wrong-secret" }],
+          ]) {
+            const response = await httpJson(httpBaseUrl, "/api/daemon", { headers });
+            assert.equal(response.status, 401, label);
+            assert.deepEqual(response.body, {
+              error: {
+                code: "UNAUTHENTICATED",
+                message: "daemon authentication required",
+              },
+            });
+            assert.equal(response.headers.get("www-authenticate"), null);
+            assert.doesNotMatch(JSON.stringify(response.body), /wrong-secret/);
+          }
+
+          const authorized = await httpJson(httpBaseUrl, "/api/daemon", {
+            headers: authHeaders,
+          });
+          assert.equal(authorized.status, 200);
+          assert.equal(authorized.body.daemon.listenUrl, listenUrl);
+
+          const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
+          assert.equal(appConfig.status, 200);
+          assert.equal(appConfig.body.apiBasePath, "/api");
+          assert.equal(appConfig.headers.get("www-authenticate"), null);
+
+          const staticAsset = await fetch(
+            new URL(`/assets/${assetPath.split("/").at(-1)}`, httpBaseUrl),
+          );
+          assert.equal(staticAsset.status, 200);
+          assert.equal(staticAsset.headers.get("www-authenticate"), null);
+
+          for (const path of [
+            "/api/events/run-summaries",
+            `/api/runs/${init.runId}/events/detail`,
+            `/api/runs/${init.runId}/events/audit`,
+            `/api/runs/${init.runId}/events/timeline`,
+          ]) {
+            const response = await fetch(new URL(path, httpBaseUrl));
+            const text = await response.text();
+            assert.equal(response.status, 401, path);
+            assert.match(response.headers.get("content-type") ?? "", /application\/json/);
+            assert.doesNotMatch(text, /data:/);
+            assert.deepEqual(JSON.parse(text), {
+              error: {
+                code: "UNAUTHENTICATED",
+                message: "daemon authentication required",
+              },
+            });
+          }
+
+          const events = await openSse(httpBaseUrl, "/api/events/run-summaries", {
+            headers: authHeaders,
+          });
+          await events.close();
+
+          await assert.rejects(
+            () => openRawWebSocket(listenUrl),
+            /Unexpected server response: 401|socket hang up/,
+          );
+          await assert.rejects(
+            () =>
+              openRawWebSocket(listenUrl, {
+                headers: { authorization: "Bearer wrong-secret" },
+              }),
+            /Unexpected server response: 401|socket hang up/,
+          );
+
+          const client = await DaemonClient.connect(listenUrl, { headers: authHeaders });
+          try {
+            const info = await client.call("daemon.info");
+            assert.equal(info.listenUrl, listenUrl);
+          } finally {
+            await client.close();
+          }
+        } finally {
+          await server.close();
+        }
+      },
+    );
+  });
+});
+
+test("daemon direct HTTP helpers send bearer auth when configured", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const token = "direct-helper-secret";
+  const authHeaders = { authorization: `Bearer ${token}` };
+
+  await withEnv(
+    {
+      ...sharedRuntimeEnv(dir),
+      TASK_RUNNER_DAEMON_AUTH_ENABLED: "true",
+      TASK_RUNNER_DAEMON_TOKEN: token,
+    },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        await assert.rejects(
+          () => daemonGetRunAuditHistory(listenUrl, init.runId),
+          /daemon authentication required/,
+        );
+
+        const history = await daemonGetRunAuditHistory(listenUrl, init.runId, { authHeaders });
+        assert.equal(history.runId, init.runId);
+
+        const reconfigured = await daemonReconfigureRun(
+          listenUrl,
+          init.runId,
+          { message: "updated message" },
+          { authHeaders },
+        );
+        assert.equal(reconfigured.runId, init.runId);
+      } finally {
+        await server.close();
+      }
+    },
+  );
 });
 
 test("serve exits cleanly on SIGTERM", async () => {

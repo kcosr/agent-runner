@@ -48,6 +48,7 @@ import {
 } from "@task-runner/core/core/config/schema.js";
 import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 import { z } from "zod";
+import { daemonAuthHeaders, normalizeDaemonToken } from "./daemon-token.js";
 
 export type { ReconfigureRunPatch } from "@task-runner/core/contracts/runs.js";
 
@@ -84,6 +85,10 @@ type RunsStartRequest = Pick<
 
 interface RequestOptions {
   signal?: AbortSignal;
+}
+
+interface ApiClientOptions {
+  daemonToken?: string | null;
 }
 
 interface ListRunsOptions extends RequestOptions {
@@ -520,6 +525,24 @@ async function readAbortResult(response: Response): Promise<void> {
   }
 }
 
+function resolveDaemonToken(options: ApiClientOptions): string | null {
+  return normalizeDaemonToken(options.daemonToken);
+}
+
+function requestHeaders(
+  headers: HeadersInit | undefined,
+  token: string | null,
+): HeadersInit | undefined {
+  const authHeaders = daemonAuthHeaders(token);
+  if (Object.keys(authHeaders).length === 0) {
+    return headers;
+  }
+  return {
+    ...(headers as Record<string, string> | undefined),
+    ...authHeaders,
+  };
+}
+
 function joinPath(basePath: string, path: string): string {
   return `${basePath.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
 }
@@ -585,10 +608,21 @@ function runInputSurfacePath(
   return joinPath(config.apiBasePath, `/run-input-surface?${params.toString()}`);
 }
 
-export function createApiClient(config: AppRuntimeConfig) {
+export function createApiClient(config: AppRuntimeConfig, options: ApiClientOptions = {}) {
+  const apiFetch: typeof fetch = (input, init) => {
+    const headers = requestHeaders(init?.headers, resolveDaemonToken(options));
+    if (!headers && init === undefined) {
+      return fetch(input);
+    }
+    return fetch(input, {
+      ...init,
+      ...(headers ? { headers } : {}),
+    });
+  };
+
   return {
     async listAgents(): Promise<DefinitionListResult> {
-      const response = await fetch(definitionPath(config, "agents"), {
+      const response = await apiFetch(definitionPath(config, "agents"), {
         headers: { accept: "application/json" },
       });
       return await readDefinitionList(response, "agents", "Agent list", "agent");
@@ -597,14 +631,14 @@ export function createApiClient(config: AppRuntimeConfig) {
       target: string,
       options: DefinitionRequestOptions = {},
     ): Promise<DefinitionDetail> {
-      const response = await fetch(definitionPath(config, "agents", target, options.cwd), {
+      const response = await apiFetch(definitionPath(config, "agents", target, options.cwd), {
         headers: { accept: "application/json" },
         signal: options.signal,
       });
       return await readDefinitionDetail(response, "agent", "Agent detail", "agent");
     },
     async listAssignments(): Promise<DefinitionListResult> {
-      const response = await fetch(definitionPath(config, "assignments"), {
+      const response = await apiFetch(definitionPath(config, "assignments"), {
         headers: { accept: "application/json" },
       });
       return await readDefinitionList(response, "assignments", "Assignment list", "assignment");
@@ -613,14 +647,14 @@ export function createApiClient(config: AppRuntimeConfig) {
       target: string,
       options: DefinitionRequestOptions = {},
     ): Promise<DefinitionDetail> {
-      const response = await fetch(definitionPath(config, "assignments", target, options.cwd), {
+      const response = await apiFetch(definitionPath(config, "assignments", target, options.cwd), {
         headers: { accept: "application/json" },
         signal: options.signal,
       });
       return await readDefinitionDetail(response, "assignment", "Assignment detail", "assignment");
     },
     async listLaunchers(): Promise<DefinitionListResult> {
-      const response = await fetch(definitionPath(config, "launchers"), {
+      const response = await apiFetch(definitionPath(config, "launchers"), {
         headers: { accept: "application/json" },
       });
       return await readDefinitionList(response, "launchers", "Launcher list", "launcher");
@@ -629,14 +663,14 @@ export function createApiClient(config: AppRuntimeConfig) {
       target: string,
       options: DefinitionRequestOptions = {},
     ): Promise<DefinitionDetail> {
-      const response = await fetch(definitionPath(config, "launchers", target, options.cwd), {
+      const response = await apiFetch(definitionPath(config, "launchers", target, options.cwd), {
         headers: { accept: "application/json" },
         signal: options.signal,
       });
       return await readDefinitionDetail(response, "launcher", "Launcher detail", "launcher");
     },
     async listTaskDefinitions(): Promise<DefinitionListResult> {
-      const response = await fetch(definitionPath(config, "task-definitions"), {
+      const response = await apiFetch(definitionPath(config, "task-definitions"), {
         headers: { accept: "application/json" },
       });
       return await readDefinitionList(response, "taskDefinitions", "Task definition list", "task");
@@ -645,7 +679,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       target: string,
       options: DefinitionRequestOptions = {},
     ): Promise<DefinitionDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         definitionPath(config, "task-definitions", target, options.cwd),
         {
           headers: { accept: "application/json" },
@@ -667,7 +701,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       },
       options: RequestOptions = {},
     ): Promise<RunInputSurface> {
-      const response = await fetch(runInputSurfacePath(config, input), {
+      const response = await apiFetch(runInputSurfacePath(config, input), {
         headers: { accept: "application/json" },
         signal: options.signal,
       });
@@ -680,14 +714,14 @@ export function createApiClient(config: AppRuntimeConfig) {
       if (options.runGroupId) {
         params.set("runGroupId", options.runGroupId);
       }
-      const response = await fetch(joinPath(config.apiBasePath, `/runs?${params.toString()}`), {
+      const response = await apiFetch(joinPath(config.apiBasePath, `/runs?${params.toString()}`), {
         headers: { accept: "application/json" },
         signal: options.signal,
       });
       return await readRuns(response);
     },
     async getRun(runId: string, options: RequestOptions = {}): Promise<RunDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}`),
         {
           headers: { accept: "application/json" },
@@ -700,7 +734,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       runId: string,
       options: RequestOptions = {},
     ): Promise<RunTimelineHistory> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/timeline`),
         {
           headers: { accept: "application/json" },
@@ -717,7 +751,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       if (options.limit !== undefined) {
         params.set("limit", String(options.limit));
       }
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(
           config.apiBasePath,
           `/runs/${encodeURIComponent(runId)}/audit${params.size > 0 ? `?${params.toString()}` : ""}`,
@@ -737,7 +771,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       if (options.scope !== undefined) {
         params.set("scope", options.scope);
       }
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(
           config.apiBasePath,
           `/runs/${encodeURIComponent(runId)}/attachments${params.size > 0 ? `?${params.toString()}` : ""}`,
@@ -756,7 +790,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       if (file.type) {
         headers["content-type"] = file.type;
       }
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/attachments`),
         {
           method: "POST",
@@ -770,7 +804,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       runId: string,
       attachmentId: string,
     ): Promise<RunAttachmentRemoveResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(
           config.apiBasePath,
           `/runs/${encodeURIComponent(runId)}/attachments/${encodeURIComponent(attachmentId)}`,
@@ -784,7 +818,7 @@ export function createApiClient(config: AppRuntimeConfig) {
     },
     async downloadAttachment(runId: string, attachmentId: string): Promise<Blob> {
       const response = await readAttachmentContentResponse(
-        fetch(attachmentContentPath(config, runId, attachmentId)),
+        apiFetch(attachmentContentPath(config, runId, attachmentId)),
       );
       return await response.blob();
     },
@@ -793,7 +827,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       attachmentId: string,
     ): Promise<AttachmentContentResult> {
       const response = await readAttachmentContentResponse(
-        fetch(attachmentContentPath(config, runId, attachmentId)),
+        apiFetch(attachmentContentPath(config, runId, attachmentId)),
       );
       return {
         mediaType: normalizeResponseMediaType(response.headers.get("content-type")),
@@ -801,7 +835,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       };
     },
     async archiveRun(runId: string): Promise<RunArchiveResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/archive`),
         {
           method: "POST",
@@ -811,7 +845,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readArchiveResult(response, "Archive run");
     },
     async unarchiveRun(runId: string): Promise<RunArchiveResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/unarchive`),
         {
           method: "POST",
@@ -821,7 +855,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readArchiveResult(response, "Unarchive run");
     },
     async resetRun(runId: string): Promise<RunDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/reset`),
         {
           method: "POST",
@@ -831,7 +865,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRun(response);
     },
     async reconfigureRun(runId: string, patch: ReconfigureRunPatchContract): Promise<RunDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/reconfigure`),
         {
           method: "POST",
@@ -845,7 +879,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRun(response);
     },
     async readyRun(runId: string): Promise<RunDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/ready`),
         {
           method: "POST",
@@ -855,7 +889,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRun(response);
     },
     async setRunSchedule(runId: string, schedule: ScheduleInput): Promise<RunDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/schedule`),
         {
           method: "PUT",
@@ -869,7 +903,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRun(response);
     },
     async clearRunSchedule(runId: string): Promise<RunDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/schedule`),
         {
           method: "DELETE",
@@ -879,7 +913,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRun(response);
     },
     async setRunScheduleEnabled(runId: string, enabled: boolean): Promise<RunDetail> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(
           config.apiBasePath,
           `/runs/${encodeURIComponent(runId)}/schedule/${enabled ? "enable" : "disable"}`,
@@ -892,7 +926,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRun(response);
     },
     async initRun(input: RunsStartRequest, options: RequestOptions = {}): Promise<RunDetail> {
-      const response = await fetch(joinPath(config.apiBasePath, "/runs/init"), {
+      const response = await apiFetch(joinPath(config.apiBasePath, "/runs/init"), {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -904,7 +938,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRun(response);
     },
     async startRun(input: RunsStartRequest, options: RequestOptions = {}): Promise<string> {
-      const response = await fetch(joinPath(config.apiBasePath, "/runs"), {
+      const response = await apiFetch(joinPath(config.apiBasePath, "/runs"), {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -916,7 +950,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRunIdResult(response, "Start run");
     },
     async deleteRun(runId: string): Promise<RunDeleteResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}`),
         {
           method: "DELETE",
@@ -927,7 +961,7 @@ export function createApiClient(config: AppRuntimeConfig) {
     },
     async resumeRun(runId: string, message?: string): Promise<void> {
       const normalizedMessage = message?.trim().length ? message : undefined;
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/resume`),
         {
           method: "POST",
@@ -943,7 +977,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       await readRunIdResult(response, "Resume run");
     },
     async abortRun(runId: string): Promise<void> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/abort`),
         {
           method: "POST",
@@ -953,7 +987,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       await readAbortResult(response);
     },
     async setRunName(runId: string, name: string | null): Promise<RunNameResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/name`),
         {
           method: "POST",
@@ -967,7 +1001,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readNameResult(response, "Rename run");
     },
     async setRunNote(runId: string, note: string | null): Promise<RunNoteResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/note`),
         {
           method: "POST",
@@ -981,7 +1015,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readNoteResult(response, "Set run note");
     },
     async setRunPinned(runId: string, pinned: boolean): Promise<RunPinnedResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/pinned`),
         {
           method: "POST",
@@ -998,7 +1032,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       runId: string,
       backendSessionId: string,
     ): Promise<RunBackendSessionResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/backend-session`),
         {
           method: "POST",
@@ -1012,7 +1046,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readBackendSessionResult(response, "Set backend session");
     },
     async clearBackendSession(runId: string): Promise<RunBackendSessionResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/backend-session/clear`),
         {
           method: "POST",
@@ -1022,7 +1056,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readBackendSessionResult(response, "Clear backend session");
     },
     async setRunGroup(runId: string, runGroupId: string): Promise<RunGroupResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/group`),
         {
           method: "POST",
@@ -1036,7 +1070,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readGroupResult(response, "Set run group");
     },
     async clearRunGroup(runId: string): Promise<RunGroupResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/group/clear`),
         {
           method: "POST",
@@ -1049,7 +1083,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       runId: string,
       dependency: RunDependencyRef,
     ): Promise<RunDependenciesResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/dependencies`),
         {
           method: "POST",
@@ -1066,7 +1100,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       runId: string,
       dependency: RunDependencyRef,
     ): Promise<RunDependenciesResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/dependencies`),
         {
           method: "DELETE",
@@ -1080,7 +1114,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readDependenciesResult(response, "Remove dependency");
     },
     async clearDependencies(runId: string): Promise<RunDependenciesResult> {
-      const response = await fetch(
+      const response = await apiFetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/dependencies/clear`),
         {
           method: "POST",
@@ -1094,4 +1128,8 @@ export function createApiClient(config: AppRuntimeConfig) {
 
 export function isNotFoundError(error: unknown): error is ApiError {
   return error instanceof ApiError && error.status === 404;
+}
+
+export function isUnauthorizedError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 401;
 }

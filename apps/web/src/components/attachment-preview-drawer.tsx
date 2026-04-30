@@ -3,10 +3,17 @@ import type {
   AttachmentListEntry,
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes, formatTimestamp } from "../lib/format.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
+import { useDaemonAuthToken } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
@@ -75,7 +82,8 @@ export function AttachmentPreviewDrawer({
 }) {
   const drawerRef = useRef<HTMLElement | null>(null);
   const config = useRuntimeConfig();
-  const api = createApiClient(config);
+  const { daemonToken } = useDaemonAuthToken();
+  const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const resize = useDrawerResize();
   const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const downloadPending = actionPending === "download-attachment";

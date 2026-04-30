@@ -57,6 +57,10 @@ export class DaemonRpcError extends Error {
   }
 }
 
+interface DaemonClientConnectOptions {
+  headers?: Record<string, string>;
+}
+
 type PendingCall = {
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
@@ -197,9 +201,12 @@ export class DaemonClient {
     });
   }
 
-  static async connect(url: string): Promise<DaemonClient> {
+  static async connect(
+    url: string,
+    options: DaemonClientConnectOptions = {},
+  ): Promise<DaemonClient> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(url, { headers: options.headers });
       const onOpen = () => {
         cleanup();
         resolve(new DaemonClient(ws, url));

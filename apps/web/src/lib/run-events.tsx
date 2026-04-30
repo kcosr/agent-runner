@@ -6,6 +6,7 @@ import {
   updateRunListCacheQueries,
   upsertRunSummaryInListCache,
 } from "./run-list-cache.js";
+import { useDaemonAuthToken } from "./settings.js";
 import { subscribeToRunSummaryEvents } from "./sse.js";
 
 interface RunEventsState {
@@ -23,6 +24,7 @@ export function RunEventsProvider({
   children: ReactNode;
   config: AppRuntimeConfig;
 }) {
+  const { daemonToken } = useDaemonAuthToken();
   const [streamStale, setStreamStale] = useState(false);
   const streamStaleRef = useRef(streamStale);
 
@@ -47,6 +49,7 @@ export function RunEventsProvider({
     }
 
     const unsubscribe = subscribeToRunSummaryEvents(config, {
+      daemonToken,
       onOpen: () => {
         if (!streamStaleRef.current) {
           return;
@@ -91,7 +94,7 @@ export function RunEventsProvider({
       disposed = true;
       unsubscribe();
     };
-  }, [config]);
+  }, [config, daemonToken]);
 
   return <RunEventsContext.Provider value={{ streamStale }}>{children}</RunEventsContext.Provider>;
 }
