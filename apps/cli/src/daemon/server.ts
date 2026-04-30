@@ -458,6 +458,7 @@ export async function serveDaemon(
   const pendingDependencyAutoStarts = new Set<string>();
   // V1 daemon-local guard: queued messages remain in the manifest if this process restarts mid-drain.
   const pendingQueuedResumeDrains = new Set<string>();
+  const projectedDrainedQueuedResumeMessageIds = new Map<string, Set<string>>();
   const pendingScheduleStarts = new Set<string>();
   const scheduleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingScheduleEvaluationTargets = new Set<string>();
@@ -671,10 +672,14 @@ export async function serveDaemon(
         relatedManifests,
       });
     }
-    return withDaemonDetailProjection(run, activeRuns);
+    return applyProjectedQueuedResumeDrainToDetail(withDaemonDetailProjection(run, activeRuns));
   };
   const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
-    app.getRunList(opts).map((run: RunSummary) => withDaemonAbortCapability(run, activeRuns));
+    app
+      .getRunList(opts)
+      .map((run: RunSummary) =>
+        applyProjectedQueuedResumeDrainToSummary(withDaemonAbortCapability(run, activeRuns)),
+      );
 
   const dependencyGraphFromIndex = (): Map<string, RunManifest> =>
     new Map(
@@ -694,13 +699,17 @@ export async function serveDaemon(
 
   const getDaemonRunSummary = (target: string): RunSummary => {
     if (app.getRunSummary !== getRunSummary) {
-      return withDaemonAbortCapability(app.getRunSummary(target), activeRuns);
+      return applyProjectedQueuedResumeDrainToSummary(
+        withDaemonAbortCapability(app.getRunSummary(target), activeRuns),
+      );
     }
     try {
       const summary = useDaemonFilesystemLocks
         ? app.getRunSummary(target)
         : getIndexedRunSummary(target);
-      return withDaemonAbortCapability(summary, activeRuns);
+      return applyProjectedQueuedResumeDrainToSummary(
+        withDaemonAbortCapability(summary, activeRuns),
+      );
     } catch (error) {
       if (!(error instanceof RunNotFoundError) || app.getRunList === getRunList) {
         throw error;
@@ -709,8 +718,68 @@ export async function serveDaemon(
       if (!summary) {
         throw error;
       }
-      return withDaemonAbortCapability(summary, activeRuns);
+      return applyProjectedQueuedResumeDrainToSummary(
+        withDaemonAbortCapability(summary, activeRuns),
+      );
     }
+  };
+
+  const projectedQueuedResumeMessageIds = (runId: string): Set<string> | undefined => {
+    const ids = projectedDrainedQueuedResumeMessageIds.get(runId);
+    return ids && ids.size > 0 ? ids : undefined;
+  };
+
+  const queueProjectedQueuedResumeDrain = (runId: string, messageIds: readonly string[]): void => {
+    const current = projectedDrainedQueuedResumeMessageIds.get(runId) ?? new Set<string>();
+    for (const messageId of messageIds) {
+      current.add(messageId);
+    }
+    if (current.size > 0) {
+      projectedDrainedQueuedResumeMessageIds.set(runId, current);
+    }
+  };
+
+  const clearProjectedQueuedResumeDrain = (runId: string): void => {
+    projectedDrainedQueuedResumeMessageIds.delete(runId);
+  };
+
+  const applyProjectedQueuedResumeDrainToDetail = (detail: RunDetail): RunDetail => {
+    const messageIds = projectedQueuedResumeMessageIds(detail.runId);
+    if (!messageIds) {
+      return detail;
+    }
+    const queuedResumeMessages = detail.queuedResumeMessages.filter(
+      (message) => !messageIds.has(message.id),
+    );
+    if (queuedResumeMessages.length === detail.queuedResumeMessages.length) {
+      return detail;
+    }
+    return { ...detail, queuedResumeMessages };
+  };
+
+  const projectedQueuedResumeMessageCount = (runId: string, fallbackCount: number): number => {
+    const messageIds = projectedQueuedResumeMessageIds(runId);
+    if (!messageIds) {
+      return fallbackCount;
+    }
+    try {
+      return refreshManifestIndexEntry(runId).manifest.queuedResumeMessages.filter(
+        (message) => !messageIds.has(message.id),
+      ).length;
+    } catch {
+      return Math.max(0, fallbackCount - messageIds.size);
+    }
+  };
+
+  const applyProjectedQueuedResumeDrainToSummary = (summary: RunSummary): RunSummary => {
+    const count = projectedQueuedResumeMessageCount(
+      summary.runId,
+      summary.queuedResumeMessageCount,
+    );
+    if (count === summary.queuedResumeMessageCount) {
+      return summary;
+    }
+    return { ...summary, queuedResumeMessageCount: count };
   };
 
   const getProjectedSummary = (runId: string): RunSummary | null => {
@@ -2106,6 +2175,14 @@ export async function serveDaemon(
         overrides: { message: formatQueuedResumePrompt(messages) },
       });
       resumeAccepted = true;
+      queueProjectedQueuedResumeDrain(
+        runId,
+        messages.map((message) => message.id),
+      );
+      publishMutationResult(runId, {
+        summary: getProjectedSummary(runId),
+        detail: getProjectedDetail(runId),
+      });
       await activeRuns.get(runId)?.done;
       app.drainQueuedResumeMessages(
         {
@@ -2115,6 +2192,7 @@ export async function serveDaemon(
         mutationAuditContext,
         publishAudit,
       );
+      clearProjectedQueuedResumeDrain(runId);
       publishMutationResult(runId, {
         summary: getProjectedSummary(runId),
         detail: getProjectedDetail(runId),
@@ -2128,6 +2206,7 @@ export async function serveDaemon(
       if (!resumeAccepted) {
         return false;
       }
+      clearProjectedQueuedResumeDrain(runId);
       try {
         publishMutationResult(runId, {
           summary: getProjectedSummary(runId),

@@ -2104,7 +2104,7 @@ describe("web app", () => {
       runs: [makeRun()],
       details: {
         "run-1": makeDetail({
-          message: "Initial dashboard request",
+          message: "Initial **dashboard** request",
         }),
       },
       timelineHistories: {
@@ -2134,8 +2134,9 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const chat = await screen.findByLabelText("Run chat");
-    const userMessage = await within(chat).findByText("Initial dashboard request");
+    const userMessage = await within(chat).findByText("Initial **dashboard** request");
     expect(userMessage.closest(".chat-bubble--user")).not.toBeNull();
+    expect(userMessage.closest(".chat-bubble--user")?.querySelector("strong")).toBeNull();
     expect(within(chat).queryByText(/Prompt with/)).not.toBeInTheDocument();
     expect(within(chat).queryByText("Notices and diagnostics")).not.toBeInTheDocument();
     expect(within(chat).queryByText("backend notice")).not.toBeInTheDocument();
@@ -2366,6 +2367,36 @@ describe("web app", () => {
     });
   });
 
+  it("disables the Chat composer for archived runs", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [
+        makeRun({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          capabilities: { canResume: true },
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          capabilities: { canResume: true },
+          isLive: false,
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    expect(message).toBeDisabled();
+    await user.click(message);
+    expect(message).not.toHaveFocus();
+    await user.type(message, "archived draft");
+    expect(message).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
   it("queues Chat composer messages for live runs and removes queued messages", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     let queueBody: { message?: string } | undefined;
@@ -2417,17 +2448,9 @@ describe("web app", () => {
     });
 
     const queuedPanel = await screen.findByLabelText("Queued messages");
-    const toggle = within(queuedPanel).getByRole("button", { name: /1 queued message/i });
-    expect(within(queuedPanel).getByText("1 queued")).toBeInTheDocument();
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(queuedPanel).getByText("Check the live logs")).toBeInTheDocument();
     expect(screen.getAllByLabelText("1 queued message").length).toBeGreaterThan(0);
 
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(within(queuedPanel).queryByText("Check the live logs")).not.toBeInTheDocument();
-
-    await user.click(toggle);
     await user.click(
       await within(queuedPanel).findByRole("button", { name: /remove queued message qmsg1/i }),
     );
@@ -2439,6 +2462,60 @@ describe("web app", () => {
       expect(screen.queryByLabelText("Queued messages")).not.toBeInTheDocument();
     });
     expect(screen.queryAllByLabelText("1 queued message")).toHaveLength(0);
+  });
+
+  it("edits queued Chat composer messages by restoring the draft and removing the queue item", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    let removedMessageId: string | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun({ capabilities: { canResume: false }, queuedResumeMessageCount: 0 })],
+        details: {
+          "run-1": makeDetail({
+            capabilities: { canResume: false },
+            isLive: true,
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          const removeMatch = /\/api\/runs\/run-1\/queued-resume-messages\/([^/]+)$/.exec(url);
+          if (removeMatch && init?.method === "DELETE") {
+            removedMessageId = decodeURIComponent(removeMatch[1] ?? "");
+            return undefined;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "Queued edit text");
+    await user.click(screen.getByRole("button", { name: "Queue" }));
+    await waitFor(() => {
+      expect(message).toHaveValue("");
+    });
+
+    await user.type(message, "draft to replace");
+    const queuedPanel = await screen.findByLabelText("Queued messages");
+    await user.click(
+      await within(queuedPanel).findByRole("button", { name: /edit queued message qmsg1/i }),
+    );
+
+    expect(message).toHaveValue("Queued edit text");
+    expect(message).toHaveFocus();
+    await waitFor(() => {
+      expect(removedMessageId).toBe("qmsg1");
+    });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Queued messages")).not.toBeInTheDocument();
+    });
   });
 
   it("preserves the Chat composer draft and shows the API error after queue failure", async () => {

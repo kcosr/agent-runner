@@ -3406,20 +3406,24 @@ Zero-task daemon work.
       );
       const originalSchedule = recurringSchedule(new Date(Date.now() - 60_000));
       setManifestSchedule(startedDetail.run.workspaceDir, originalSchedule);
-      releaseResumeBackend();
-      releaseResumeBackend = undefined;
-
       const drained = await waitForValue(async () => {
         const detail = await httpJson(httpBaseUrl, `/api/runs/${started.runId}`);
         assert.equal(detail.status, 200);
-        return detail.body.run.queuedResumeMessages.length === 0 ? detail.body.run : null;
-      }, "queued resume messages to drain through real resume");
+        return detail.body.run.queuedResumeMessages.length === 0 && detail.body.run.isLive
+          ? detail.body.run
+          : null;
+      }, "queued resume messages to drain after accepted resume");
       assert.equal(drained.runId, started.runId);
 
-      const audit = await httpJson(httpBaseUrl, `/api/runs/${started.runId}/audit`);
-      const drainedAudit = audit.body.history.events.find(
-        (event) => event.event.type === "run.queued_resume_messages_drained",
-      );
+      releaseResumeBackend();
+      releaseResumeBackend = undefined;
+      const drainedAudit = await waitForValue(async () => {
+        const response = await httpJson(httpBaseUrl, `/api/runs/${started.runId}/audit`);
+        assert.equal(response.status, 200);
+        return response.body.history.events.find(
+          (event) => event.event.type === "run.queued_resume_messages_drained",
+        );
+      }, "queued resume drain audit");
       assert.equal(drainedAudit.event.fields.messageCount, 1);
       assert.deepEqual(drainedAudit.event.fields.messageIds, [queued.queuedResumeMessage.id]);
       const advancedSchedule = await waitForValue(() => {

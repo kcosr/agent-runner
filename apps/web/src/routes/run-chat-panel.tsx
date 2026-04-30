@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { CloseIcon, SendIcon } from "../components/icons.js";
+import { MessageIcon, PencilIcon, SendIcon, TrashIcon } from "../components/icons.js";
 import { MarkdownContent } from "../components/markdown.js";
 import { formatTimestamp } from "../lib/format.js";
 import {
@@ -64,7 +64,7 @@ function ChatRow({ row }: { row: RunChatRow }) {
     return (
       <article className="chat-row chat-row--user">
         <div className="chat-bubble chat-bubble--user">
-          <MarkdownContent className="chat-markdown chat-markdown--user" text={row.text} />
+          <p className="chat-plain-text chat-plain-text--user">{row.text}</p>
         </div>
       </article>
     );
@@ -127,8 +127,8 @@ export function RunChatView({
 }) {
   const [draft, setDraft] = useState("");
   const [chatError, setChatError] = useState<string>();
-  const [queueExpanded, setQueueExpanded] = useState(true);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const resetRunIdRef = useRef(selectedRunId);
   const stickToBottomRef = useRef(true);
   const selectedRun = selectedRunQuery.data;
@@ -141,11 +141,12 @@ export function RunChatView({
   const trimmedDraft = draft.trim();
   const queueMode = selectedRun?.isLive === true;
   const submitPending = queueMode ? queuePending : resumePending;
+  const composerDisabled = !selectedRun || selectedRun.archivedAt !== null;
   const submitDisabled =
-    !selectedRun ||
+    composerDisabled ||
     trimmedDraft.length === 0 ||
     submitPending ||
-    (!queueMode && !selectedRun.capabilities.canResume);
+    (!queueMode && selectedRun?.capabilities.canResume !== true);
   const composerActivityVisible = selectedRun?.isLive === true;
   const submitLabel = queueMode ? "Queue" : "Send";
   const submitPendingLabel = queueMode ? "Queueing..." : "Sending...";
@@ -157,7 +158,6 @@ export function RunChatView({
     resetRunIdRef.current = selectedRunId;
     setDraft("");
     setChatError(undefined);
-    setQueueExpanded(true);
     stickToBottomRef.current = true;
   }, [selectedRunId]);
 
@@ -223,6 +223,15 @@ export function RunChatView({
       }
       setChatError(error instanceof Error ? error.message : "Remove queued message failed.");
     }
+  }
+
+  async function editQueuedMessage(message: RunDetail["queuedResumeMessages"][number]) {
+    if (!selectedRun || composerDisabled) {
+      return;
+    }
+    setDraft(message.text);
+    composerRef.current?.focus();
+    await removeQueuedMessage(message.id);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -291,32 +300,32 @@ export function RunChatView({
       return null;
     }
 
-    const count = selectedRun.queuedResumeMessages.length;
-    const label = `${count} queued`;
     return (
       <section aria-label="Queued messages" className="queued-messages-panel">
-        <button
-          aria-expanded={queueExpanded}
-          aria-label={`${count} queued message${count === 1 ? "" : "s"}`}
-          className="queued-messages-panel__toggle"
-          onClick={() => setQueueExpanded((current) => !current)}
-          type="button"
-        >
-          <span>{label}</span>
-          <span aria-hidden="true" className="queued-messages-panel__chevron">
-            {queueExpanded ? "Hide" : "Show"}
-          </span>
-        </button>
-        {queueExpanded ? (
-          <ul className="queued-messages-list">
-            {selectedRun.queuedResumeMessages.map((message) => (
-              <li className="queued-messages-list__item" key={message.id}>
-                <div className="queued-messages-list__body">
-                  <span className="queued-messages-list__meta">
-                    {formatTimestamp(message.createdAt)}
-                  </span>
-                  <MarkdownContent className="chat-markdown" text={message.text} />
-                </div>
+        <ul className="queued-messages-list">
+          {selectedRun.queuedResumeMessages.map((message) => (
+            <li
+              className="queued-messages-list__item"
+              key={message.id}
+              title={`Queued ${formatTimestamp(message.createdAt)}`}
+            >
+              <span className="queued-messages-list__icon">
+                <MessageIcon aria-hidden="true" />
+              </span>
+              <div className="queued-messages-list__body">
+                <MarkdownContent className="chat-markdown" text={message.text} />
+              </div>
+              <div className="queued-messages-list__actions">
+                <button
+                  aria-label={`Edit queued message ${message.id}`}
+                  className="icon-btn icon-btn--small queued-messages-list__edit"
+                  disabled={removingQueuedMessageId === message.id || composerDisabled}
+                  onClick={() => void editQueuedMessage(message)}
+                  title="Edit queued message"
+                  type="button"
+                >
+                  <PencilIcon aria-hidden="true" />
+                </button>
                 <button
                   aria-label={`Remove queued message ${message.id}`}
                   className="icon-btn icon-btn--small queued-messages-list__remove"
@@ -325,12 +334,12 @@ export function RunChatView({
                   title="Remove queued message"
                   type="button"
                 >
-                  <CloseIcon aria-hidden="true" />
+                  <TrashIcon aria-hidden="true" />
                 </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
       </section>
     );
   }
@@ -347,22 +356,23 @@ export function RunChatView({
           <span className="notice__message">{chatError}</span>
         </div>
       ) : null}
-      {renderQueuedMessages()}
       <div className="chat-view__body">{renderBody()}</div>
       <form
         className={`chat-composer${composerActivityVisible ? " chat-composer--active" : ""}`}
         onSubmit={handleSubmit}
       >
+        {renderQueuedMessages()}
         <label className="sr-only" htmlFor="run-chat-message">
           Message
         </label>
         <div className="chat-composer__surface">
           <textarea
             aria-keyshortcuts="Meta+Enter Ctrl+Enter Escape"
-            disabled={!selectedRun}
+            disabled={composerDisabled}
             id="run-chat-message"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleMessageKeyDown}
+            ref={composerRef}
             rows={3}
             value={draft}
           />
