@@ -11,7 +11,9 @@ import type {
 } from "../core/backends/types.js";
 import { runProcess } from "../util/spawn.js";
 import {
+  type LineFeeder,
   composePersistedTranscript,
+  createLineFeeder,
   isRecord,
   normalizeBackendModel,
   silentTranscriptFallback,
@@ -99,7 +101,6 @@ interface StreamState {
   assistantEventText: string;
   streamedText: string;
   sawDelta: boolean;
-  buffer: string;
   /**
    * The `id` of the most recently observed message_start event. When a
    * later message_start arrives with a different id, we insert a
@@ -208,21 +209,12 @@ function processLine(state: StreamState, line: string): void {
   }
 }
 
-function feed(state: StreamState, chunk: string): void {
-  state.buffer += chunk;
-  let newlineIdx: number;
-  while ((newlineIdx = state.buffer.indexOf("\n")) >= 0) {
-    const line = state.buffer.slice(0, newlineIdx);
-    state.buffer = state.buffer.slice(newlineIdx + 1);
-    processLine(state, line);
-  }
+function feed(lineFeeder: LineFeeder, chunk: string): void {
+  lineFeeder.feed(chunk);
 }
 
-function flush(state: StreamState): void {
-  if (state.buffer.length > 0) {
-    processLine(state, state.buffer);
-    state.buffer = "";
-  }
+function flush(lineFeeder: LineFeeder): void {
+  lineFeeder.flush();
 }
 
 export function isResumeFailure(stderr: string, exitCode: number | null): boolean {
@@ -259,11 +251,15 @@ export const claudeBackend: Backend = {
       assistantEventText: "",
       streamedText: "",
       sawDelta: false,
-      buffer: "",
       lastMessageId: null,
       pendingMessageBoundary: false,
       onText: (text) => ctx.emit?.({ type: "agent_message_delta", text }),
     };
+    const lineFeeder = createLineFeeder({
+      onLine: (line) => processLine(state, line),
+      onPartial: (partial) => processLine(state, partial),
+      onRawSegment: ctx.onRawStdoutLine,
+    });
 
     const command = process.env.TASK_RUNNER_CLAUDE_BIN ?? "claude";
 
@@ -275,10 +271,10 @@ export const claudeBackend: Backend = {
       env: ctx.env,
       timeoutMs: ctx.timeoutSec * 1000,
       abortSignal: ctx.abortSignal,
-      onStdout: (chunk) => feed(state, chunk.toString("utf8")),
+      onStdout: (chunk) => feed(lineFeeder, chunk.toString("utf8")),
       onStderr: (chunk) => ctx.emit?.({ type: "backend_notice", text: chunk.toString("utf8") }),
     });
-    flush(state);
+    flush(lineFeeder);
 
     const finalText = state.assistantEventText.trim() || state.resultText.trim() || null;
     const transcript = composePersistedTranscript(state.streamedText, finalText);

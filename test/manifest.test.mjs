@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +15,12 @@ import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { updateTasksForPrompt, withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  resolveRunFromPrompt,
+  updateTasksForPrompt,
+  withEnv,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -164,12 +170,13 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   const logPath = join(outcome.workspaceDir, "attempts", "01.json");
   assert.ok(existsSync(logPath), "attempts/01.json exists");
   const log = JSON.parse(readFileSync(logPath, "utf8"));
-  assert.equal(log.schemaVersion, 2);
+  assert.equal(log.schemaVersion, 3);
   assert.equal(log.runId, outcome.runId);
   assert.equal(log.attemptNumber, 1);
   assert.equal(log.attemptIndexInSession, 0);
-  assert.equal(log.stdout, "");
+  assert.equal("stdout" in log, false);
   assert.equal(log.stderr, "raw stderr text");
+  assert.equal(existsSync(join(outcome.workspaceDir, "attempts", "01.stdout.log")), false);
 });
 
 test("manifest: current manifests missing parentRunId are rejected on resume", async () => {
@@ -210,32 +217,106 @@ test("manifest: current manifests missing parentRunId are rejected on resume", a
   );
 });
 
-test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS opt-in preserves stdout in attempt logs", async () => {
+test("manifest: TASK_RUNNER_CAPTURE_BACKEND_STDOUT writes raw stdout sidecars", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
-  const outcome = await withEnv({ TASK_RUNNER_FULL_ATTEMPT_LOGS: "yes" }, () =>
+  const outcome = await withEnv({ TASK_RUNNER_CAPTURE_BACKEND_STDOUT: "yes" }, () =>
     runWithMock(dir, async (ctx) => {
       updateTasksForPrompt(ctx.prompt, {
         t1: { status: "completed" },
         t2: { status: "completed" },
         t3: { status: "completed" },
       });
+      ctx.onRawStdoutLine?.("raw line 1\n");
+      ctx.onRawStdoutLine?.("raw trailing partial");
       return {
         exitCode: 0,
         signal: null,
         timedOut: false,
         sessionId: "sess-full-log",
         transcript: "all three done with stdout",
-        rawStdout: "raw stdout text",
+        rawStdout: "returned stdout text",
         rawStderr: "raw stderr text",
       };
     }),
   );
 
   const log = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
-  assert.equal(log.stdout, "raw stdout text");
+  assert.equal("stdout" in log, false);
   assert.equal(log.stderr, "raw stderr text");
+  assert.equal(
+    readFileSync(join(outcome.workspaceDir, "attempts", "01.stdout.log"), "utf8"),
+    "raw line 1\nraw trailing partial",
+  );
+  const attemptRecord = outcome.manifest.attemptRecords[0];
+  assert.equal(attemptRecord.logPath, "attempts/01.json");
+  assert.equal(attemptRecord.rawStdout, undefined);
+  assert.equal(attemptRecord.stdoutLogPath, undefined);
+});
+
+test("manifest: stdout sidecar append failures do not fail the attempt", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const outcome = await withEnv({ TASK_RUNNER_CAPTURE_BACKEND_STDOUT: "1" }, () =>
+    runWithMock(dir, async (ctx) => {
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
+      const resolved = resolveRunFromPrompt(ctx.prompt, dir);
+      const sidecarPath = join(resolved.workspaceDir, "attempts", "01.stdout.log");
+      rmSync(sidecarPath);
+      mkdirSync(sidecarPath);
+      ctx.onRawStdoutLine?.("write should be downgraded to a notice\n");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-sidecar-write-failed",
+        transcript: "all three done after sidecar write failure",
+        rawStdout: "returned stdout text",
+        rawStderr: "raw stderr text",
+      };
+    }),
+  );
+
+  assert.equal(outcome.manifest.status, "success");
+  const log = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
+  assert.equal("stdout" in log, false);
+  assert.equal(log.stderr, "raw stderr text");
+});
+
+test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS no longer enables stdout capture", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const outcome = await withEnv({ TASK_RUNNER_FULL_ATTEMPT_LOGS: "1" }, () =>
+    runWithMock(dir, async (ctx) => {
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
+      ctx.onRawStdoutLine?.("old env should not capture\n");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-old-env",
+        transcript: "all three done without sidecar",
+        rawStdout: "old env stdout",
+        rawStderr: "old env stderr",
+      };
+    }),
+  );
+
+  const log = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
+  assert.equal("stdout" in log, false);
+  assert.equal(log.stderr, "old env stderr");
+  assert.equal(existsSync(join(outcome.workspaceDir, "attempts", "01.stdout.log")), false);
 });
 
 test("manifest: attempt records capture attempt logs and session ids", async () => {
@@ -273,8 +354,8 @@ test("manifest: attempt records capture attempt logs and session ids", async () 
   assert.equal(m.attemptRecords[1].logPath, "attempts/02.json");
   const log1 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
   const log2 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "02.json"), "utf8"));
-  assert.equal(log1.stdout, "");
-  assert.equal(log2.stdout, "");
+  assert.equal("stdout" in log1, false);
+  assert.equal("stdout" in log2, false);
   assert.equal(log1.attemptNumber, 1);
   assert.equal(log2.attemptNumber, 2);
 
@@ -439,7 +520,7 @@ test("manifest: thrown backend launch errors still settle the run as error", asy
   assert.equal(onDisk.sessions[0].lastAttemptNumber, 1);
 
   const log = JSON.parse(readFileSync(join(workspaceDir, "attempts", "01.json"), "utf8"));
-  assert.equal(log.stdout, "");
+  assert.equal("stdout" in log, false);
   assert.match(log.stderr, /spawn claude ENOENT/);
 });
 

@@ -1,7 +1,9 @@
 import type { Backend, BackendInvokeContext, BackendInvokeResult } from "../core/backends/types.js";
 import { runProcess } from "../util/spawn.js";
 import {
+  type LineFeeder,
   composePersistedTranscript,
+  createLineFeeder,
   isRecord,
   normalizeBackendModel,
   silentTranscriptFallback,
@@ -70,7 +72,6 @@ interface StreamState {
   resultText: string | null;
   streamedText: string;
   pendingBoundary: boolean;
-  buffer: string;
   parseError: Error | null;
   onText: (text: string) => void;
 }
@@ -141,23 +142,12 @@ function processLine(state: StreamState, line: string): void {
   }
 }
 
-function feed(state: StreamState, chunk: string): void {
-  if (state.parseError) return;
-  state.buffer += chunk;
-  let newlineIdx = state.buffer.indexOf("\n");
-  while (newlineIdx >= 0) {
-    processLine(state, state.buffer.slice(0, newlineIdx));
-    state.buffer = state.buffer.slice(newlineIdx + 1);
-    newlineIdx = state.buffer.indexOf("\n");
-  }
+function feed(lineFeeder: LineFeeder, chunk: string): void {
+  lineFeeder.feed(chunk);
 }
 
-function flush(state: StreamState): void {
-  if (state.parseError) return;
-  if (state.buffer.length > 0) {
-    processLine(state, state.buffer);
-    state.buffer = "";
-  }
+function flush(lineFeeder: LineFeeder): void {
+  lineFeeder.flush();
 }
 
 export const cursorBackend: Backend = {
@@ -169,10 +159,14 @@ export const cursorBackend: Backend = {
       resultText: null,
       streamedText: "",
       pendingBoundary: false,
-      buffer: "",
       parseError: null,
       onText: (text) => ctx.emit?.({ type: "agent_message_delta", text }),
     };
+    const lineFeeder = createLineFeeder({
+      onLine: (line) => processLine(state, line),
+      onPartial: (partial) => processLine(state, partial),
+      onRawSegment: ctx.onRawStdoutLine,
+    });
 
     const result = await runProcess({
       command: process.env.TASK_RUNNER_CURSOR_BIN ?? "cursor-agent",
@@ -182,10 +176,10 @@ export const cursorBackend: Backend = {
       env: ctx.env,
       timeoutMs: ctx.timeoutSec * 1000,
       abortSignal: ctx.abortSignal,
-      onStdout: (chunk) => feed(state, chunk.toString("utf8")),
+      onStdout: (chunk) => feed(lineFeeder, chunk.toString("utf8")),
       onStderr: (chunk) => ctx.emit?.({ type: "backend_notice", text: chunk.toString("utf8") }),
     });
-    flush(state);
+    flush(lineFeeder);
 
     if (state.parseError) {
       throw state.parseError;

@@ -12,7 +12,9 @@ import type {
 } from "../core/backends/types.js";
 import { buildSpawnCommand } from "../util/spawn.js";
 import {
+  type LineFeeder,
   composePersistedTranscript,
+  createLineFeeder,
   isRecord,
   silentTranscriptFallback,
   streamBoundarySeparator,
@@ -357,7 +359,6 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
     const stderrChunks: Buffer[] = [];
     const pending = new Map<number, PendingRequest>();
     let nextId = 1;
-    let stdoutBuffer = "";
     let timedOut = false;
     let aborted = false;
     let closed = false;
@@ -423,10 +424,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
       if (shutdownTimer) clearTimeout(shutdownTimer);
       if (killTimer) clearTimeout(killTimer);
       ctx.abortSignal?.removeEventListener("abort", onAbort);
-      if (stdoutBuffer.trim().length > 0) {
-        processLine(stdoutBuffer);
-        stdoutBuffer = "";
-      }
+      lineFeeder.flush();
 
       if (pending.size > 0 || !state.agentEnded) {
         settleRequestsWithError(
@@ -581,16 +579,19 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
       handlePiEvent(parsed, state, send, emitBackendNotice, resolveAgentEnd);
     };
 
+    const lineFeeder: LineFeeder = createLineFeeder({
+      onLine: processLine,
+      onPartial: (partial) => {
+        if (partial.trim().length > 0) {
+          processLine(partial);
+        }
+      },
+      onRawSegment: ctx.onRawStdoutLine,
+    });
+
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutChunks.push(chunk);
-      stdoutBuffer += chunk.toString("utf8");
-      let newlineIndex = stdoutBuffer.indexOf("\n");
-      while (newlineIndex >= 0) {
-        const line = stdoutBuffer.slice(0, newlineIndex);
-        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-        processLine(line);
-        newlineIndex = stdoutBuffer.indexOf("\n");
-      }
+      lineFeeder.feed(chunk.toString("utf8"));
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -602,11 +603,6 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
       child.once("error", (error) => {
         settleRequestsWithError(error);
         finalizeProcess(child.exitCode, child.signalCode);
-        resolveExit(requireExitResult());
-      });
-
-      child.once("exit", (exitCode, signal) => {
-        finalizeProcess(exitCode, signal);
         resolveExit(requireExitResult());
       });
 

@@ -471,7 +471,7 @@ async function startCodexRenameServer(options = {}) {
   };
 }
 
-test("command services: getRunTimelineHistory reads schema v2 attempt logs", async () => {
+test("command services: getRunTimelineHistory reads schema v3 attempt logs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -552,19 +552,20 @@ test("command services: getRunTimelineHistory reads schema v2 attempt logs", asy
     writeFileSync(
       join(attemptsDir, `${String(attemptNumber).padStart(2, "0")}.json`),
       `${JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         runId: outcome.runId,
         attemptNumber,
         sessionIndex: 0,
         attemptIndexInSession: attemptNumber - 1,
         prompt: `Attempt ${["one", "two", "three"][attemptNumber - 1]}`,
-        stdout: "",
         stderr: "",
         transcript: `${["First", "Second", "Third"][attemptNumber - 1]} output`,
         notices: "",
       })}\n`,
     );
   }
+  writeFileSync(join(attemptsDir, "01.stdout.log"), "raw sidecar for attempt one\n");
+  writeFileSync(join(attemptsDir, "02.stdout.log"), "{malformed sidecar is ignored");
 
   await withSharedRuntimeEnv(dir, async () => {
     const history = getRunTimelineHistory(outcome.runId);
@@ -878,13 +879,12 @@ test("command services: readStatus and timeline history resolve bare run ids acr
   writeFileSync(
     join(relocatedWorkspaceDir, "attempts", "01.json"),
     `${JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId: outcome.runId,
       attemptNumber: 1,
       sessionIndex: 0,
       attemptIndexInSession: 0,
       prompt: "Attempt one",
-      stdout: "",
       stderr: "",
       transcript: "First output",
       notices: "",

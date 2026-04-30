@@ -340,27 +340,29 @@ test("execute-after-init appends ordered created/started/attempt/finished record
   const attemptLog = JSON.parse(
     readFileSync(join(resumed.workspaceDir, resumed.manifest.attemptRecords[0].logPath), "utf8"),
   );
-  assert.equal(attemptLog.stdout, "");
+  assert.equal("stdout" in attemptLog, false);
   assert.equal(attemptLog.stderr, "stderr-secret");
 });
 
-test("attempt logs include stdout only when TASK_RUNNER_FULL_ATTEMPT_LOGS is enabled", async () => {
+test("stdout sidecars stay out of compact audit records and attempt JSON", async () => {
   const dir = tempDir();
   writeAuditBundle(dir);
 
-  const outcome = await withEnv({ TASK_RUNNER_FULL_ATTEMPT_LOGS: "true" }, () =>
+  const outcome = await withEnv({ TASK_RUNNER_CAPTURE_BACKEND_STDOUT: "true" }, () =>
     runIn(dir, {
       agentName: "audit-active",
       assignmentName: "audit-active-work",
       backend: mockBackend(async (ctx) => {
         completeAllTasksFromPrompt(ctx.prompt, dir);
+        ctx.onRawStdoutLine?.("stdout-secret\n");
+        ctx.onRawStdoutLine?.("stdout-partial-secret");
         return {
           exitCode: 0,
           signal: null,
           timedOut: false,
           sessionId: "session-with-stdout",
           transcript: "secret transcript",
-          rawStdout: "stdout-secret",
+          rawStdout: "returned-stdout-secret",
           rawStderr: "stderr-secret",
         };
       }),
@@ -370,8 +372,16 @@ test("attempt logs include stdout only when TASK_RUNNER_FULL_ATTEMPT_LOGS is ena
   const attemptLog = JSON.parse(
     readFileSync(join(outcome.workspaceDir, outcome.manifest.attemptRecords[0].logPath), "utf8"),
   );
-  assert.equal(attemptLog.stdout, "stdout-secret");
+  assert.equal("stdout" in attemptLog, false);
   assert.equal(attemptLog.stderr, "stderr-secret");
+  assert.equal(
+    readFileSync(join(outcome.workspaceDir, "attempts", "01.stdout.log"), "utf8"),
+    "stdout-secret\nstdout-partial-secret",
+  );
+  const rawAudit = readAuditRaw(outcome.workspaceDir);
+  assert.equal(rawAudit.includes("stdout-secret"), false);
+  assert.equal(rawAudit.includes("stdout-partial-secret"), false);
+  assert.equal(rawAudit.includes("returned-stdout-secret"), false);
 });
 
 test("hook executions append compact run.hook_recorded records for prepare and attempt phases", async () => {

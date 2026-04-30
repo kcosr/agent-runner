@@ -914,13 +914,12 @@ test("run reset: json output restores initialized state and removes attempt arti
   writeFileSync(
     join(outcome.workspaceDir, "attempts", "01.json"),
     `${JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId: outcome.runId,
       attemptNumber: 1,
       sessionIndex: 0,
       attemptIndexInSession: 0,
       prompt: outcome.manifest.brief,
-      stdout: "",
       stderr: "",
       transcript: "attempt 1",
       notices: "",

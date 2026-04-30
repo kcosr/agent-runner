@@ -11,6 +11,7 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
+import { appendTextFileDurable } from "../../util/write-file-atomic.js";
 import {
   cloneBackendConfig,
   cloneResolvedBackendArgs,
@@ -43,6 +44,7 @@ import {
   type SessionRecord,
   type TaskSnapshot,
   applyRunResetSeed,
+  attemptStdoutLogRelativePath,
   buildRunResetSeed,
   cloneRunDependencyRefs,
   cloneRuntimeVarSources,
@@ -603,9 +605,56 @@ function resolveFreshRunCwd(
   return resolutionBase;
 }
 
-function captureFullAttemptLogs(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env.TASK_RUNNER_FULL_ATTEMPT_LOGS?.trim().toLowerCase();
+function captureBackendStdout(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.TASK_RUNNER_CAPTURE_BACKEND_STDOUT?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+}
+
+function formatSidecarWriteError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function prepareAttemptStdoutSidecar({
+  workspaceDir,
+  attemptNumber,
+  captureRawBackendStdout,
+  emit,
+}: {
+  workspaceDir: string;
+  attemptNumber: number;
+  captureRawBackendStdout: boolean;
+  emit: (event: BackendEvent) => void;
+}): ((line: string) => void) | undefined {
+  if (!captureRawBackendStdout) {
+    return undefined;
+  }
+
+  const relativePath = attemptStdoutLogRelativePath(attemptNumber);
+  const rawStdoutLogPath = join(workspaceDir, relativePath);
+  let disabled = false;
+  const disableCapture = (error: unknown): void => {
+    disabled = true;
+    emit({
+      type: "backend_notice",
+      text: `Disabling backend stdout sidecar capture for ${relativePath}: ${formatSidecarWriteError(error)}\n`,
+    });
+  };
+
+  try {
+    appendTextFileDurable(rawStdoutLogPath, "");
+  } catch (error) {
+    disableCapture(error);
+    return undefined;
+  }
+
+  return (line: string): void => {
+    if (disabled) return;
+    try {
+      appendTextFileDurable(rawStdoutLogPath, line);
+    } catch (error) {
+      disableCapture(error);
+    }
+  };
 }
 
 async function resolveFreshBackendConfig(
@@ -2154,7 +2203,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     prompt: string;
     sessionIdAtStart: string | null;
   } | null = null;
-  const includeStdoutInAttemptLog = captureFullAttemptLogs();
+  const captureRawBackendStdout = captureBackendStdout();
   const persistAttemptRecord = (record: {
     attemptNumber: number;
     attemptIndexInSession: number;
@@ -2178,14 +2227,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       | undefined;
   }): void => {
     const logPath = writeAttemptLog(workspaceDir, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId,
       attemptNumber: record.attemptNumber,
       sessionIndex,
       attemptIndexInSession: record.attemptIndexInSession,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
-      stdout: includeStdoutInAttemptLog ? record.rawStdout : "",
       stderr: record.rawStderr,
     });
     withTaskStateLock(workspaceDir, () => {
@@ -2336,6 +2384,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         prompt: currentPrompt,
         sessionIdAtStart,
       };
+      const onRawStdoutLine = prepareAttemptStdoutSidecar({
+        workspaceDir,
+        attemptNumber: globalAttemptNumber,
+        captureRawBackendStdout,
+        emit: emitEvent,
+      });
 
       const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,
@@ -2358,6 +2412,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         name: name ?? undefined,
         abortSignal: opts.abortSignal,
         emit: emitEvent,
+        onRawStdoutLine,
       });
       const attemptEndedAt = new Date().toISOString();
 

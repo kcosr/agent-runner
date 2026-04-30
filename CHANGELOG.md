@@ -320,9 +320,18 @@
 - Added previous/next navigation for attachment previews in the web detail drawer, including fullscreen left/right keyboard navigation while previewing attachments. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added a populated Keybindings settings page in the web dashboard so the current shortcut set is visible in the UI with keycap styling. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added a `Visible focus indicators` display preference in Settings > General for toggling dashboard focus-ring styling. ([#54](https://github.com/kcosr/task-runner/pull/54))
+- Added `scripts/migrate-attempt-stdout-field.mjs` to migrate
+  schemaVersion 2 attempt JSON logs to schemaVersion 3 by stripping `stdout`
+  after raw backend stdout moved to opt-in sidecars.
+  ([#126](https://github.com/kcosr/task-runner/pull/126))
 
 ### Changed
 
+- Changed attempt-log persistence to schemaVersion 3 so new writes omit stdout from
+  `attempts/NN.json` and, when `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` is
+  set, write raw backend stdout to local `attempts/NN.stdout.log` sidecars
+  that Task Runner does not read.
+  ([#126](https://github.com/kcosr/task-runner/pull/126))
 - Resuming a run now preserves `blocked` task status while still resetting
   stale `in_progress` tasks to `pending`; blocked-only runs no longer resume
   implicitly as runnable work.
@@ -512,6 +521,8 @@
 
 ### Removed
 
+- Removed `TASK_RUNNER_FULL_ATTEMPT_LOGS`; use
+  `TASK_RUNNER_CAPTURE_BACKEND_STDOUT` for raw backend stdout sidecars.
 - Removed live family grouping contracts: `familyRootRunId`,
   `familyOf=<run-id>`, and attachment `scope=family`.
 - Removed the live run-only dependency array contract from current
@@ -542,9 +553,6 @@
 - Changed `task-runner list runs` text output to append each run's exact
   persisted `cwd=...` alongside repo, agent, and assignment metadata.
   ([#73](https://github.com/kcosr/task-runner/pull/73))
-- Changed attempt-log persistence to omit captured stdout by default;
-  set `TASK_RUNNER_FULL_ATTEMPT_LOGS=1` to keep full stdout in
-  per-attempt records for local debugging. ([#73](https://github.com/kcosr/task-runner/pull/73))
 - Changed the web run detail drawer to expose read-only `Vars` and
   `Hook state` data in a dedicated `Data` tab with a clearer key/value
   table layout, and moved the mobile note/resume dialogs lower so they

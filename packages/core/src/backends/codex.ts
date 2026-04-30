@@ -16,6 +16,7 @@ import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { buildSpawnCommand } from "../util/spawn.js";
 import {
   composePersistedTranscript,
+  createLineFeeder,
   isRecord,
   normalizeBackendModel,
   silentTranscriptFallback,
@@ -136,6 +137,7 @@ function openStdioTransport(
   unrestricted: boolean,
   resolvedBackendArgs: string[],
   launcher: BackendInvokeContext["launcher"],
+  onRawStdoutLine: BackendInvokeContext["onRawStdoutLine"],
 ): Transport {
   const binary = process.env.TASK_RUNNER_CODEX_BIN ?? "codex";
   const launched = buildSpawnCommand({
@@ -153,18 +155,17 @@ function openStdioTransport(
   let stderrHandler: ((text: string) => void) | null = null;
   let closeHandler: ((code: number | null, reason: string) => void) | null = null;
   let closed = false;
-  let stdoutBuffer = "";
-
-  child.stdout?.on("data", (chunk: Buffer) => {
-    stdoutBuffer += chunk.toString("utf8");
-    let newlineIdx: number;
-    while ((newlineIdx = stdoutBuffer.indexOf("\n")) >= 0) {
-      const line = stdoutBuffer.slice(0, newlineIdx);
-      stdoutBuffer = stdoutBuffer.slice(newlineIdx + 1);
+  const lineFeeder = createLineFeeder({
+    onLine: (line) => {
       if (line.trim().length > 0 && messageHandler) {
         messageHandler(line);
       }
-    }
+    },
+    onRawSegment: onRawStdoutLine,
+  });
+
+  child.stdout?.on("data", (chunk: Buffer) => {
+    lineFeeder.feed(chunk.toString("utf8"));
   });
 
   child.stderr?.on("data", (chunk: Buffer) => {
@@ -174,11 +175,13 @@ function openStdioTransport(
   child.on("close", (code, signal) => {
     if (closed) return;
     closed = true;
+    lineFeeder.flush();
     closeHandler?.(code, signal ? `signal ${signal}` : "exit");
   });
   child.on("error", (err) => {
     if (closed) return;
     closed = true;
+    lineFeeder.flush();
     closeHandler?.(null, `spawn error: ${err.message}`);
   });
 
@@ -207,6 +210,7 @@ function openStdioTransport(
       // Give it a moment to exit cleanly, then SIGINT, then SIGKILL.
       await new Promise<void>((resolve) => {
         const settled = () => {
+          lineFeeder.flush();
           closed = true;
           resolve();
         };
@@ -979,6 +983,7 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
     ctx.unrestricted ?? false,
     ctx.resolvedBackendArgs,
     ctx.launcher,
+    ctx.onRawStdoutLine,
   );
 }
 

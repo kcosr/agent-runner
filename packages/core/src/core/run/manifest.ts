@@ -39,15 +39,19 @@ export function attemptLogRelativePath(attemptNumber: number): string {
   return `${ATTEMPT_LOG_DIR}/${padded}.json`;
 }
 
+export function attemptStdoutLogRelativePath(attemptNumber: number): string {
+  const padded = String(attemptNumber).padStart(2, "0");
+  return `${ATTEMPT_LOG_DIR}/${padded}.stdout.log`;
+}
+
 export interface AttemptLog {
-  schemaVersion: 2;
+  schemaVersion: 3;
   runId: string;
   attemptNumber: number;
   sessionIndex: number;
   attemptIndexInSession: number;
   startedAt: string;
   endedAt: string;
-  stdout: string;
   stderr: string;
 }
 

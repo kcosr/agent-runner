@@ -119,7 +119,7 @@ traffic.
 | `TASK_RUNNER_CODEX_UDS_PATH` | Fresh Codex runs use this absolute socket path for WebSocket-over-UDS when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary (default `cursor-agent`) |
-| `TASK_RUNNER_FULL_ATTEMPT_LOGS` | Keep full stdout in per-attempt log records instead of the default compact stderr/metadata-only capture |
+| `TASK_RUNNER_CAPTURE_BACKEND_STDOUT` | Write raw backend stdout sidecars to `attempts/NN.stdout.log` for local debugging |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary (default `pi`) |
 | `PI_HOME` | Pi session storage root (default `~/.pi`) |
 
@@ -150,9 +150,13 @@ The authored Codex transport union is exactly `{ type: "stdio" }`,
 app-server WebSocket protocol over the Unix-domain socket rather than raw
 UDS bytes.
 
-`TASK_RUNNER_FULL_ATTEMPT_LOGS` is an opt-in local debugging knob. When
-unset, per-attempt records keep stderr and structured metadata but omit
-captured stdout to reduce noisy manifest-side log output.
+`TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` is an opt-in local debugging
+knob. It writes raw backend stdout to `attempts/NN.stdout.log` sidecars
+as Task Runner observes it. Sidecars are local debug artifacts: Task
+Runner does not read them for timeline, history, API, daemon, or web
+surfaces. Attempt JSON schemaVersion 3 omits stdout; stderr remains in
+`attempts/NN.json` because timeline and history project it as attempt notices. The removed
+`TASK_RUNNER_FULL_ATTEMPT_LOGS` variable no longer enables capture.
 
 ### Recursion guard
 
@@ -211,6 +215,11 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   config fields; dry-run by default, `--write` to apply, supports
   repeated `--repo <name>` and `--file <path>` filters plus `--root
   <path>`)
+- `scripts/migrate-attempt-stdout-field.mjs` — migrates schemaVersion 2
+  `attempts/NN.json` logs to schemaVersion 3 by removing `stdout` after
+  raw stdout moved to opt-in sidecars; dry-run by default, `--write` to apply,
+  supports repeated `--repo <name>` and `--file <path>` filters plus
+  `--root <path>`
 - `scripts/migrate-manifests-v11.mjs` — v10 → v11 (normalizes session
   and attempt records plus hook audits)
 - `scripts/migrate-manifests-v10.mjs` — v9 → v10 (freezes launcher

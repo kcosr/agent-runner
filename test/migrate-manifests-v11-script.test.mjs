@@ -238,11 +238,11 @@ test("migrate-manifests-v11 writes v10 manifest and attempt log promotion", () =
   assert.equal(manifest.hookAudits[0].attemptNumber, 1);
   assert.equal("attempt" in manifest.hookAudits[0], false);
   const log = readJson(join(runDir, "attempts", "02.json"));
-  assert.equal(log.schemaVersion, 2);
+  assert.equal(log.schemaVersion, 3);
   assert.equal(log.runId, "run-v10");
   assert.equal(log.attemptNumber, 2);
   assert.equal(log.attemptIndexInSession, 1);
-  assert.equal(log.stdout, "stdout-2");
+  assert.equal("stdout" in log, false);
   assert.equal(log.stderr, "stderr-2");
 });
 

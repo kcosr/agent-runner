@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import {
   resolveCodexBackendConfig,
   resolveCodexTransportConfig,
 } from "../packages/core/dist/backends/codex.js";
+import { withEnv } from "./helpers/runtime-paths.mjs";
 
 const baseCtx = {
   cwd: "/repo",
@@ -23,6 +24,87 @@ const baseCtx = {
   resolvedBackendArgs: [],
   timeoutSec: 60,
 };
+
+function writeFakeCodexBin(baseDir) {
+  const path = join(baseDir, "fake-codex.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+import { createInterface } from "node:readline";
+
+const mode = process.env.CODEX_TEST_MODE ?? "normal";
+const rl = createInterface({ input: process.stdin });
+
+if (mode === "normal") {
+  process.stdout.write("\\n");
+  process.stdout.write("   \\n");
+}
+
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+
+function notify(method, params) {
+  send({ jsonrpc: "2.0", method, params });
+}
+
+rl.on("line", (line) => {
+  if (mode === "malformed") {
+    process.stdout.write("{not-json\\n");
+    process.stdout.write("raw-after-malformed\\n");
+    process.stdout.write("tail-after-malformed");
+    setImmediate(() => process.exit(0));
+    return;
+  }
+
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ jsonrpc: "2.0", id: message.id, result: {} });
+    return;
+  }
+  if (message.method === "initialized") {
+    return;
+  }
+  if (message.method === "thread/start") {
+    send({ jsonrpc: "2.0", id: message.id, result: { thread: { id: "stdio-thread" } } });
+    return;
+  }
+  if (message.method === "turn/start") {
+    send({ jsonrpc: "2.0", id: message.id, result: { turn: { id: "stdio-turn" } } });
+    setTimeout(() => {
+      notify("item/agentMessage/delta", {
+        threadId: "stdio-thread",
+        turnId: "stdio-turn",
+        itemId: "stdio-message",
+        delta: "stdio output",
+      });
+      notify("item/completed", {
+        threadId: "stdio-thread",
+        turnId: "stdio-turn",
+        item: { type: "agentMessage", text: "stdio final" },
+      });
+      notify("turn/completed", {
+        threadId: "stdio-thread",
+        turn: { id: "stdio-turn", status: "completed" },
+      });
+      process.stdout.write("tail-partial");
+      setImmediate(() => process.exit(0));
+    }, 10);
+    return;
+  }
+  if (message.method === "turn/interrupt") {
+    send({ jsonrpc: "2.0", id: message.id, result: {} });
+  }
+});
+
+rl.on("close", () => {
+  process.exit(0);
+});
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
 
 test("buildCodexAppServerArgs: default stdio launch uses app-server only", () => {
   assert.deepEqual(buildCodexAppServerArgs(false, []), ["app-server"]);
@@ -510,6 +592,80 @@ test("codexBackend rejects pending calls when a transport frame is malformed JSO
     assert.match(result.rawStderr, /Unexpected token|Expected property name/);
   } finally {
     await codexServer.close();
+  }
+});
+
+test("codexBackend captures raw stdio stdout without outgoing frames or prefixes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-stdio-"));
+  const command = writeFakeCodexBin(dir);
+  const rawStdoutLines = [];
+
+  try {
+    const result = await withEnv({ TASK_RUNNER_CODEX_BIN: command }, () =>
+      codexBackend.invoke({
+        ...baseCtx,
+        cwd: dir,
+        env: {
+          ...process.env,
+          CODEX_TEST_MODE: "normal",
+        },
+        backendConfig: {
+          transport: { type: "stdio" },
+        },
+        onRawStdoutLine: (line) => rawStdoutLines.push(line),
+      }),
+    );
+
+    assert.equal(result.exitCode, 0, `${result.rawStderr}\n${result.rawStdout}`);
+    assert.equal(result.sessionId, "stdio-thread");
+    assert.match(result.transcript, /stdio output/);
+    assert.match(result.transcript, /stdio final/);
+    assert.equal(rawStdoutLines[0], "\n");
+    assert.equal(rawStdoutLines[1], "   \n");
+    assert.equal(rawStdoutLines.at(-1), "tail-partial");
+    const captured = rawStdoutLines.join("");
+    assert.match(captured, /"thread":\{"id":"stdio-thread"\}/);
+    assert.doesNotMatch(captured, /^> /m);
+    assert.doesNotMatch(captured, /^< /m);
+    assert.doesNotMatch(captured, /"method":"initialize"/);
+    assert.doesNotMatch(captured, /"method":"thread\/start"/);
+    assert.doesNotMatch(captured, /"method":"turn\/start"/);
+    assert.doesNotMatch(captured, /ignored/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codexBackend captures raw stdio stdout on JSON-RPC parse errors", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-stdio-malformed-"));
+  const command = writeFakeCodexBin(dir);
+  const rawStdoutLines = [];
+
+  try {
+    const result = await withEnv({ TASK_RUNNER_CODEX_BIN: command }, () =>
+      codexBackend.invoke({
+        ...baseCtx,
+        cwd: dir,
+        env: {
+          ...process.env,
+          CODEX_TEST_MODE: "malformed",
+        },
+        backendConfig: {
+          transport: { type: "stdio" },
+        },
+        onRawStdoutLine: (line) => rawStdoutLines.push(line),
+      }),
+    );
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.rawStderr, /malformed JSON-RPC/);
+    assert.deepEqual(rawStdoutLines, [
+      "{not-json\n",
+      "raw-after-malformed\n",
+      "tail-after-malformed",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

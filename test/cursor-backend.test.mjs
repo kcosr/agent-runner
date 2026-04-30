@@ -128,6 +128,7 @@ test("cursor backend merges streamed and final transcripts when they differ", as
 test("cursor backend rejects malformed stream-json output", async () => {
   const dir = tempDir();
   const command = writeFakeCursorAgent(dir);
+  const rawStdoutLines = [];
 
   await assert.rejects(
     () =>
@@ -137,14 +138,16 @@ test("cursor backend rejects malformed stream-json output", async () => {
           cwd: dir,
           env: {
             ...process.env,
-            CURSOR_TEST_STDOUT_JSON: JSON.stringify(["not-json\n"]),
+            CURSOR_TEST_STDOUT_JSON: JSON.stringify(["not-json\n", "still-raw\n", "tail"]),
           },
           resolvedBackendArgs: [],
           timeoutSec: 10,
+          onRawStdoutLine: (line) => rawStdoutLines.push(line),
         }),
       ),
     /non-JSON line/,
   );
+  assert.deepEqual(rawStdoutLines, ["not-json\n", "still-raw\n", "tail"]);
 });
 
 test("cursor backend rejects successful runs without a final result.result string", async () => {
