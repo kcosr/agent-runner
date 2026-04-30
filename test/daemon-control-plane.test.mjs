@@ -34,15 +34,24 @@ import {
   WebSocketStreamError,
   WebSocketStreamRegistry,
 } from "../apps/cli/dist/daemon/stream.js";
-import { getRun as getRunDetail } from "../packages/core/dist/app/service.js";
+import {
+  getRun as getRunDetail,
+  queueResumeMessage as queueResumeMessageCommand,
+  removeQueuedResumeMessage as removeQueuedResumeMessageCommand,
+} from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { ResumeError } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { withTaskStateLock } from "../packages/core/dist/core/run/workspace-state.js";
+import { freePort, startCliDaemon as startCliDaemonProcess } from "./helpers/daemon-process.mjs";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
 const CLI_WEB_ROOT = resolvePath(new URL("../apps/cli/dist/web", import.meta.url).pathname);
+
+function startCliDaemon(baseDir, listenUrl, opts = {}) {
+  return startCliDaemonProcess(baseDir, listenUrl, CLI_PATH, opts);
+}
 
 const AGENT = `---
 schemaVersion: 1
@@ -289,24 +298,6 @@ async function withSeededFrontendDist(fn) {
   }
 }
 
-async function freePort() {
-  return await new Promise((resolve, reject) => {
-    const server = createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("failed to allocate a test port"));
-        return;
-      }
-      const { port } = address;
-      server.close((err) => {
-        if (err) reject(err);
-        else resolve(port);
-      });
-    });
-  });
-}
-
 async function openRawWebSocket(listenUrl, options = {}) {
   const ws = new WebSocket(listenUrl, options);
   await new Promise((resolve, reject) => {
@@ -517,38 +508,6 @@ async function runCliAsync(args, opts = {}) {
     child.once("exit", (code, signal) => resolve({ code, signal })),
   );
   return { ...result, stdout, stderr };
-}
-
-async function startCliDaemon(baseDir, listenUrl, opts = {}) {
-  const child = spawn("node", [CLI_PATH, "serve", "--listen", listenUrl], {
-    cwd: baseDir,
-    env: { ...process.env, ...sharedRuntimeEnv(baseDir), ...(opts.env ?? {}) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  let stderr = "";
-  await new Promise((resolve, reject) => {
-    const onExit = (code, signal) =>
-      reject(new Error(`daemon exited before ready (code=${code} signal=${signal})`));
-    child.once("exit", onExit);
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-      if (stderr.includes("serving on")) {
-        child.off("exit", onExit);
-        resolve();
-      }
-    });
-  });
-
-  return {
-    child,
-    async stop(signal = "SIGINT") {
-      child.kill(signal);
-      return await new Promise((resolve) =>
-        child.once("exit", (code, exitSignal) => resolve({ code, signal: exitSignal })),
-      );
-    },
-  };
 }
 
 function sleep(ms) {
@@ -905,6 +864,96 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
 
       const assignment = await client.call("assignments.get", { target: "daemon-work", cwd: dir });
       assert.equal(assignment.assignment.config.name, "daemon-work");
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon RPC and HTTP queued resume message endpoints publish shared DTOs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  markRunRunning(run.workspaceDir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const rpcQueued = await client.call("runs.queueResumeMessage", {
+        target: run.runId,
+        message: "  queued over rpc  ",
+      });
+      assert.equal(rpcQueued.run.runId, run.runId);
+      assert.equal(rpcQueued.queuedResumeMessage.text, "queued over rpc");
+      assert.equal(rpcQueued.run.queuedResumeMessages.length, 1);
+
+      const httpQueued = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/queued-resume-messages`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message: "queued over http" }),
+        },
+      );
+      assert.equal(httpQueued.status, 200);
+      assert.equal(httpQueued.body.run.runId, run.runId);
+      assert.equal(httpQueued.body.queuedResumeMessage.text, "queued over http");
+
+      const detail = await client.call("runs.get", { target: run.runId });
+      assert.deepEqual(
+        detail.run.queuedResumeMessages.map((message) => message.text),
+        ["queued over rpc", "queued over http"],
+      );
+      const summary = (await client.call("runs.list", {})).runs.find(
+        (candidate) => candidate.runId === run.runId,
+      );
+      assert.equal(summary?.queuedResumeMessageCount, 2);
+
+      const rpcRemoved = await client.call("runs.removeQueuedResumeMessage", {
+        target: run.runId,
+        messageId: rpcQueued.queuedResumeMessage.id,
+      });
+      assert.equal(rpcRemoved.removedMessageId, rpcQueued.queuedResumeMessage.id);
+      assert.deepEqual(
+        rpcRemoved.run.queuedResumeMessages.map((message) => message.id),
+        [httpQueued.body.queuedResumeMessage.id],
+      );
+
+      const httpRemoved = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/queued-resume-messages/${httpQueued.body.queuedResumeMessage.id}`,
+        { method: "DELETE" },
+      );
+      assert.equal(httpRemoved.status, 200);
+      assert.equal(httpRemoved.body.removedMessageId, httpQueued.body.queuedResumeMessage.id);
+      assert.deepEqual(httpRemoved.body.run.queuedResumeMessages, []);
+
+      const emptyMessage = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/queued-resume-messages`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message: " " }),
+        },
+      );
+      assert.equal(emptyMessage.status, 400);
+      assert.equal(emptyMessage.body.error.code, "INVALID_REQUEST");
+
+      const missingRemove = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/queued-resume-messages/missing-qmsg`,
+        { method: "DELETE" },
+      );
+      assert.equal(missingRemove.status, 404);
+      assert.equal(missingRemove.body.error.code, "NOT_FOUND");
     } finally {
       await client.close();
       await server.close();
@@ -3208,6 +3257,171 @@ test("daemon auto-starts ready dependency runs after the final dependency succee
       assert.equal(running.runId, dependent.runId);
       assert.deepEqual(resumeTargets, [source.runId, dependent.runId]);
     } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon drains queued resume messages before evaluating a due schedule", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  const dependent = await initRun(dir);
+  setManifestSchedule(run.workspaceDir, oneTimeSchedule(new Date(Date.now() - 1_000)));
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let releaseInitialRun;
+  let resolveQueuedResume;
+  const queuedResumeStarted = new Promise((resolve) => {
+    resolveQueuedResume = resolve;
+  });
+  const resumeMessages = [];
+  const resumeTargets = [];
+  let firstQueuedMessageId;
+  let newerQueuedMessageId;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async startRun({ emitEvent }) {
+        markRunRunning(run.workspaceDir);
+        emitRunStarted(emitEvent, run.runId, dir);
+        await new Promise((resolve) => {
+          releaseInitialRun = resolve;
+        });
+        markRunSuccessful(run.workspaceDir);
+        emitRunFinished(emitEvent, run.runId);
+        return { runId: run.runId };
+      },
+      async resumeRun({ target, overrides, emitEvent }) {
+        resumeTargets.push(target);
+        assert.equal(target, run.runId);
+        resumeMessages.push(overrides.message ?? "");
+        markRunRunning(run.workspaceDir);
+        removeQueuedResumeMessageCommand({
+          target,
+          messageId: firstQueuedMessageId,
+        });
+        const newerQueued = queueResumeMessageCommand({
+          target,
+          message: "Newer queued follow-up.",
+        });
+        newerQueuedMessageId = newerQueued.queuedResumeMessage.id;
+        emitRunStarted(emitEvent, target, dir);
+        resolveQueuedResume();
+        return { runId: target };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.addDependency", {
+        target: dependent.runId,
+        dependency: { type: "run", runId: run.runId },
+      });
+      await client.call("runs.ready", { target: dependent.runId });
+      await client.call("runs.start", { cliVars: {}, overrides: {} });
+      const firstQueued = await client.call("runs.queueResumeMessage", {
+        target: run.runId,
+        message: "First queued follow-up.",
+      });
+      firstQueuedMessageId = firstQueued.queuedResumeMessage.id;
+      await httpJson(httpBaseUrl, `/api/runs/${run.runId}/queued-resume-messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "Second queued follow-up." }),
+      });
+
+      releaseInitialRun();
+      await queuedResumeStarted;
+      const drained = await waitForValue(async () => {
+        const detail = await httpJson(httpBaseUrl, `/api/runs/${run.runId}`);
+        assert.equal(detail.status, 200);
+        return detail.body.run.queuedResumeMessages.length === 1 ? detail.body.run : null;
+      }, "queued resume messages to drain");
+      assert.equal(drained.runId, run.runId);
+      assert.deepEqual(drained.queuedResumeMessages, [
+        {
+          id: newerQueuedMessageId,
+          text: "Newer queued follow-up.",
+          createdAt: drained.queuedResumeMessages[0].createdAt,
+        },
+      ]);
+      assert.equal(resumeMessages.length, 1);
+      assert.match(resumeMessages[0], /Queued message 1, created at /);
+      assert.match(resumeMessages[0], /First queued follow-up\./);
+      assert.match(resumeMessages[0], /Queued message 2, created at /);
+      assert.match(resumeMessages[0], /Second queued follow-up\./);
+      assert.doesNotMatch(resumeMessages[0], /Resuming after scheduled delay/);
+
+      await sleep(100);
+      assert.deepEqual(resumeTargets, [run.runId]);
+      assert.equal(resumeMessages.length, 1);
+      const audit = await httpJson(httpBaseUrl, `/api/runs/${run.runId}/audit`);
+      const drainedAudit = audit.body.history.events.find(
+        (event) => event.event.type === "run.queued_resume_messages_drained",
+      );
+      assert.equal(drainedAudit.event.fields.messageCount, 1);
+      assert.equal(JSON.stringify(audit.body).includes("queued follow-up"), false);
+    } finally {
+      releaseInitialRun?.();
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon keeps queued resume messages when automatic resume start fails", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let releaseInitialRun;
+  let resumeCalls = 0;
+  const originalConsoleError = console.error;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async startRun({ emitEvent }) {
+        markRunRunning(run.workspaceDir);
+        emitRunStarted(emitEvent, run.runId, dir);
+        await new Promise((resolve) => {
+          releaseInitialRun = resolve;
+        });
+        markRunSuccessful(run.workspaceDir);
+        emitRunFinished(emitEvent, run.runId);
+        return { runId: run.runId };
+      },
+      async resumeRun() {
+        resumeCalls += 1;
+        throw new Error("queued resume backend unavailable");
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    console.error = () => undefined;
+    try {
+      await client.call("runs.start", { cliVars: {}, overrides: {} });
+      const queued = await client.call("runs.queueResumeMessage", {
+        target: run.runId,
+        message: "Preserve this queued intent.",
+      });
+      releaseInitialRun();
+      const preserved = await waitForValue(async () => {
+        const detail = await httpJson(httpBaseUrl, `/api/runs/${run.runId}`);
+        assert.equal(detail.status, 200);
+        return detail.body.run.status === "success" ? detail.body.run : null;
+      }, "original run to finish");
+      assert.equal(resumeCalls, 1);
+      assert.deepEqual(preserved.queuedResumeMessages, [queued.queuedResumeMessage]);
+    } finally {
+      console.error = originalConsoleError;
+      releaseInitialRun?.();
       await client.close();
       await server.close();
     }

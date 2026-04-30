@@ -8,8 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { SendIcon } from "../components/icons.js";
+import { CloseIcon, SendIcon } from "../components/icons.js";
 import { MarkdownContent } from "../components/markdown.js";
+import { formatTimestamp } from "../lib/format.js";
 import {
   type RunChatAssistantEmptyState,
   type RunChatAssistantRow,
@@ -103,14 +104,22 @@ function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
 
 export function RunChatView({
   detailSettling,
+  onQueueMessage,
+  onRemoveQueuedMessage,
   onSubmitResume,
+  queuePending,
+  removingQueuedMessageId,
   resumePending,
   selectedRunId,
   selectedRunQuery,
   timelineState,
 }: {
   detailSettling: boolean;
+  onQueueMessage: (runId: string, message: string) => Promise<void>;
+  onRemoveQueuedMessage: (runId: string, messageId: string) => Promise<void>;
   onSubmitResume: (runId: string, message: string) => Promise<void>;
+  queuePending: boolean;
+  removingQueuedMessageId?: string;
   resumePending: boolean;
   selectedRunId: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
@@ -118,6 +127,7 @@ export function RunChatView({
 }) {
   const [draft, setDraft] = useState("");
   const [chatError, setChatError] = useState<string>();
+  const [queueExpanded, setQueueExpanded] = useState(true);
   const listRef = useRef<HTMLDivElement | null>(null);
   const resetRunIdRef = useRef(selectedRunId);
   const stickToBottomRef = useRef(true);
@@ -129,12 +139,16 @@ export function RunChatView({
     [selectedRun, timelineHistory],
   );
   const trimmedDraft = draft.trim();
+  const queueMode = selectedRun?.isLive === true;
+  const submitPending = queueMode ? queuePending : resumePending;
   const submitDisabled =
     !selectedRun ||
     trimmedDraft.length === 0 ||
-    resumePending ||
-    !selectedRun.capabilities.canResume;
+    submitPending ||
+    (!queueMode && !selectedRun.capabilities.canResume);
   const composerActivityVisible = selectedRun?.isLive === true;
+  const submitLabel = queueMode ? "Queue" : "Send";
+  const submitPendingLabel = queueMode ? "Queueing..." : "Sending...";
 
   useEffect(() => {
     if (resetRunIdRef.current === selectedRunId) {
@@ -143,6 +157,7 @@ export function RunChatView({
     resetRunIdRef.current = selectedRunId;
     setDraft("");
     setChatError(undefined);
+    setQueueExpanded(true);
     stickToBottomRef.current = true;
   }, [selectedRunId]);
 
@@ -173,7 +188,11 @@ export function RunChatView({
     const runId = selectedRun.runId;
     try {
       setChatError(undefined);
-      await onSubmitResume(runId, trimmedDraft);
+      if (queueMode) {
+        await onQueueMessage(runId, trimmedDraft);
+      } else {
+        await onSubmitResume(runId, trimmedDraft);
+      }
       if (resetRunIdRef.current !== runId) {
         return;
       }
@@ -183,7 +202,26 @@ export function RunChatView({
       if (resetRunIdRef.current !== runId) {
         return;
       }
-      setChatError(error instanceof Error ? error.message : "Resume failed.");
+      setChatError(
+        error instanceof Error ? error.message : queueMode ? "Queue failed." : "Resume failed.",
+      );
+    }
+  }
+
+  async function removeQueuedMessage(messageId: string) {
+    if (!selectedRun) {
+      return;
+    }
+
+    const runId = selectedRun.runId;
+    try {
+      setChatError(undefined);
+      await onRemoveQueuedMessage(runId, messageId);
+    } catch (error) {
+      if (resetRunIdRef.current !== runId) {
+        return;
+      }
+      setChatError(error instanceof Error ? error.message : "Remove queued message failed.");
     }
   }
 
@@ -248,6 +286,55 @@ export function RunChatView({
     );
   }
 
+  function renderQueuedMessages() {
+    if (!selectedRun || selectedRun.queuedResumeMessages.length === 0) {
+      return null;
+    }
+
+    const count = selectedRun.queuedResumeMessages.length;
+    const label = `${count} queued`;
+    return (
+      <section aria-label="Queued messages" className="queued-messages-panel">
+        <button
+          aria-expanded={queueExpanded}
+          aria-label={`${count} queued message${count === 1 ? "" : "s"}`}
+          className="queued-messages-panel__toggle"
+          onClick={() => setQueueExpanded((current) => !current)}
+          type="button"
+        >
+          <span>{label}</span>
+          <span aria-hidden="true" className="queued-messages-panel__chevron">
+            {queueExpanded ? "Hide" : "Show"}
+          </span>
+        </button>
+        {queueExpanded ? (
+          <ul className="queued-messages-list">
+            {selectedRun.queuedResumeMessages.map((message) => (
+              <li className="queued-messages-list__item" key={message.id}>
+                <div className="queued-messages-list__body">
+                  <span className="queued-messages-list__meta">
+                    {formatTimestamp(message.createdAt)}
+                  </span>
+                  <MarkdownContent className="chat-markdown" text={message.text} />
+                </div>
+                <button
+                  aria-label={`Remove queued message ${message.id}`}
+                  className="icon-btn icon-btn--small queued-messages-list__remove"
+                  disabled={removingQueuedMessageId === message.id}
+                  onClick={() => void removeQueuedMessage(message.id)}
+                  title="Remove queued message"
+                  type="button"
+                >
+                  <CloseIcon aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <section aria-label="Run chat" className="chat-view">
       {timelineState.error ? (
@@ -260,6 +347,7 @@ export function RunChatView({
           <span className="notice__message">{chatError}</span>
         </div>
       ) : null}
+      {renderQueuedMessages()}
       <div className="chat-view__body">{renderBody()}</div>
       <form
         className={`chat-composer${composerActivityVisible ? " chat-composer--active" : ""}`}
@@ -279,10 +367,10 @@ export function RunChatView({
             value={draft}
           />
           <button
-            aria-label="Send"
+            aria-label={submitLabel}
             className="chat-composer__send"
             disabled={submitDisabled}
-            title={resumePending ? "Sending..." : "Send"}
+            title={submitPending ? submitPendingLabel : submitLabel}
             type="submit"
           >
             <SendIcon aria-hidden="true" />

@@ -6,7 +6,9 @@ execution, active backend invocation, passive sidecar operation, a local
 daemon, a browser dashboard, resumable runs, attachments, dependencies,
 scheduled runs, launcher prefixes for subprocess backends, a first-class
 `run brief` surface for handing a run to a worker, and `task-runner run
-audit` for reading durable run audit history.
+audit` for reading durable run audit history. Live runs can also hold
+queued resume messages as daemon-owned pending user intent for the next
+runnable resume opportunity.
 
 - Task state is canonical in `run.json`.
 - `run-events.jsonl` is a per-run append-only audit trail with monotonic
@@ -162,6 +164,20 @@ seed all-or-nothing, and preserves frozen identity/runtime fields such
 as agent, assignment, launcher, hooks, tasks, cwd, selected
 `backendConfig`, plus selected backend extra args.
 
+### Queue a message for a live run
+
+```bash
+task-runner run queue-message <run-id-or-path> "Check the logs before continuing"
+task-runner run queued-messages <run-id-or-path>
+task-runner run remove-queued-message <run-id-or-path> <message-id>
+```
+
+Queued resume messages are persisted on the run. Connected CLI mutations
+route through the daemon with `--connect`, so the web dashboard and other
+daemon clients see the updated queued-message count immediately. The web
+Chat composer uses `Queue` for live runs and keeps `Send` for non-live
+resumable runs.
+
 ### Schedule a run
 
 ```bash
@@ -294,7 +310,9 @@ drawer exposes the next run time plus enable/disable controls and
 one-time schedule clearing. The dashboard also includes a dedicated
 full-screen `New Run` flow at `/runs/new` that resolves the static run
 input surface from the daemon before enabling `Initialize` and `Start
-now`.
+now`. In Chat, live runs queue submitted messages instead of starting a
+resume immediately; queued messages appear in an expandable panel with
+remove controls, and run cards show the queued-message count.
 
 ### Hooked assignment
 
@@ -424,6 +442,7 @@ root.
 | `list agents\|assignments\|launchers\|tasks\|runs` | Enumerate definitions and runs |
 | `show agent\|assignment\|launcher\|task` | Render a single definition |
 | `run reconfigure` | Patch vars/message on an unarchived initialized run |
+| `run queue-message\|queued-messages\|remove-queued-message` | Manage queued resume messages for live runs |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
 | `run set-name` | Set/clear persisted display name |
@@ -443,6 +462,8 @@ Key rules:
 - `run audit --output-format json` returns `{ runId, events, lastCursor }`; text output renders the persisted audit envelopes chronologically.
 - `run status --output-format json` returns the shared `RunDetail` DTO, including full `note` text plus `pinned`.
 - Text `run status` surfaces note/pin metadata compactly (`Pinned: yes`, `Note: present`) and never prints the note body.
+- `run queued-messages` reads the existing run detail surface; queue and
+  remove mutations update the run manifest and daemon projections.
 - Run notes are human metadata only: they persist on the run but are not auto-injected into worker briefs or backend prompts.
 - `--message-file <path>` reads UTF-8 message text for fresh `run`,
   `init`, `run --resume-run`, and `run reconfigure`; it cannot be

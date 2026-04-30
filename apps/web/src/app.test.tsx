@@ -3,7 +3,11 @@ import { join } from "node:path";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surface.js";
-import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
+import type {
+  QueuedResumeMessage,
+  RunDetail,
+  RunSummary,
+} from "@task-runner/core/contracts/runs.js";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -183,6 +187,7 @@ function makeRun(
     tasksCompleted: 1,
     tasksTotal: 4,
     attachmentCount: 0,
+    queuedResumeMessageCount: 0,
     dependencyState: {
       ready: true,
       total: 0,
@@ -342,6 +347,7 @@ function makeDetail(
     tasksCompleted: 1,
     tasksTotal: 4,
     attachments: [],
+    queuedResumeMessages: [],
     dependencies: [],
     dependents: [],
     schedule: null,
@@ -642,7 +648,13 @@ function installFetchMock(
       return;
     }
     state.runs = state.runs.map((run) =>
-      run.runId === runId ? { ...run, attachmentCount: detail.attachments.length } : run,
+      run.runId === runId
+        ? {
+            ...run,
+            attachmentCount: detail.attachments.length,
+            queuedResumeMessageCount: detail.queuedResumeMessages.length,
+          }
+        : run,
     );
   }
 
@@ -691,6 +703,7 @@ function installFetchMock(
             schedule: detail.schedule,
             scheduleState: detail.scheduleState,
             attachmentCount: detail.attachments.length,
+            queuedResumeMessageCount: detail.queuedResumeMessages.length,
             activeTask: detail.activeTask,
             execution: detail.execution,
             capabilities: detail.capabilities,
@@ -861,6 +874,49 @@ function installFetchMock(
         lastCursor: 0,
       };
       return new Response(JSON.stringify({ history }), { status: 200 });
+    }
+
+    const queuedResumeMessagesMatch = /\/api\/runs\/([^/]+)\/queued-resume-messages$/.exec(url);
+    if (queuedResumeMessagesMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(queuedResumeMessagesMatch[1] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { message?: string })
+          : {};
+      const queuedResumeMessage: QueuedResumeMessage = {
+        id: `qmsg${detail.queuedResumeMessages.length + 1}`,
+        text: body.message ?? "",
+        createdAt: "2026-04-30T15:20:00.000Z",
+      };
+      detail.queuedResumeMessages = [...detail.queuedResumeMessages, queuedResumeMessage];
+      syncRunSummary(runId);
+      return new Response(JSON.stringify({ run: detail, queuedResumeMessage }), { status: 200 });
+    }
+
+    const removeQueuedResumeMessageMatch =
+      /\/api\/runs\/([^/]+)\/queued-resume-messages\/([^/]+)$/.exec(url);
+    if (removeQueuedResumeMessageMatch && init?.method === "DELETE") {
+      const runId = decodeURIComponent(removeQueuedResumeMessageMatch[1] ?? "");
+      const messageId = decodeURIComponent(removeQueuedResumeMessageMatch[2] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      detail.queuedResumeMessages = detail.queuedResumeMessages.filter(
+        (message) => message.id !== messageId,
+      );
+      syncRunSummary(runId);
+      return new Response(JSON.stringify({ run: detail, removedMessageId: messageId }), {
+        status: 200,
+      });
     }
 
     const scheduleToggleMatch = /\/api\/runs\/([^/]+)\/schedule\/(enable|disable)$/.exec(url);
@@ -2272,7 +2328,7 @@ describe("web app", () => {
     installFetchMock(
       {
         runs: [makeRun()],
-        details: { "run-1": makeDetail() },
+        details: { "run-1": makeDetail({ isLive: false }) },
       },
       {
         handleRequest: (url, init) => {
@@ -2310,13 +2366,165 @@ describe("web app", () => {
     });
   });
 
+  it("queues Chat composer messages for live runs and removes queued messages", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    let queueBody: { message?: string } | undefined;
+    let removedMessageId: string | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun({ capabilities: { canResume: false }, queuedResumeMessageCount: 0 })],
+        details: {
+          "run-1": makeDetail({
+            capabilities: { canResume: false },
+            isLive: true,
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1/queued-resume-messages") && init?.method === "POST") {
+            queueBody =
+              typeof init.body === "string" && init.body.length > 0
+                ? (JSON.parse(init.body) as { message?: string })
+                : undefined;
+            return undefined;
+          }
+          const removeMatch = /\/api\/runs\/run-1\/queued-resume-messages\/([^/]+)$/.exec(url);
+          if (removeMatch && init?.method === "DELETE") {
+            removedMessageId = decodeURIComponent(removeMatch[1] ?? "");
+            return undefined;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "  Check the live logs  ");
+    await user.click(screen.getByRole("button", { name: "Queue" }));
+
+    await waitFor(() => {
+      expect(queueBody).toEqual({ message: "Check the live logs" });
+    });
+    await waitFor(() => {
+      expect(message).toHaveValue("");
+    });
+
+    const queuedPanel = await screen.findByLabelText("Queued messages");
+    const toggle = within(queuedPanel).getByRole("button", { name: /1 queued message/i });
+    expect(within(queuedPanel).getByText("1 queued")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(queuedPanel).getByText("Check the live logs")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("1 queued message").length).toBeGreaterThan(0);
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(queuedPanel).queryByText("Check the live logs")).not.toBeInTheDocument();
+
+    await user.click(toggle);
+    await user.click(
+      await within(queuedPanel).findByRole("button", { name: /remove queued message qmsg1/i }),
+    );
+
+    await waitFor(() => {
+      expect(removedMessageId).toBe("qmsg1");
+    });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Queued messages")).not.toBeInTheDocument();
+    });
+    expect(screen.queryAllByLabelText("1 queued message")).toHaveLength(0);
+  });
+
+  it("preserves the Chat composer draft and shows the API error after queue failure", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock(
+      {
+        runs: [makeRun({ capabilities: { canResume: false } })],
+        details: {
+          "run-1": makeDetail({
+            capabilities: { canResume: false },
+            isLive: true,
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/queued-resume-messages") || init?.method !== "POST") {
+            return undefined;
+          }
+          return new Response(JSON.stringify({ error: { message: "queue temporarily failed" } }), {
+            status: 500,
+          });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "retry queue");
+    await user.click(screen.getByRole("button", { name: "Queue" }));
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findAllByText("queue temporarily failed")).not.toHaveLength(0);
+    expect(message).toHaveValue("retry queue");
+  });
+
+  it("clears queued Chat messages when the detail stream delivers an empty queue", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const queuedResumeMessage = {
+      id: "qmsg1",
+      text: "Already queued",
+      createdAt: "2026-04-30T15:20:00.000Z",
+    };
+    installFetchMock({
+      runs: [makeRun({ capabilities: { canResume: false }, queuedResumeMessageCount: 1 })],
+      details: {
+        "run-1": makeDetail({
+          capabilities: { canResume: false },
+          isLive: true,
+          queuedResumeMessages: [queuedResumeMessage],
+        }),
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    expect(await screen.findByLabelText("Queued messages")).toBeInTheDocument();
+    expect(screen.getByText("Already queued")).toBeInTheDocument();
+
+    findEventSource("/api/runs/run-1/events/detail").emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        capabilities: { canResume: false },
+        isLive: true,
+        queuedResumeMessages: [],
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Queued messages")).not.toBeInTheDocument();
+    });
+    expect(screen.queryAllByLabelText("1 queued message")).toHaveLength(0);
+  });
+
   it("submits Chat composer messages with Command+Enter", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resumeBody: { overrides?: { message?: string } } | undefined;
     installFetchMock(
       {
         runs: [makeRun()],
-        details: { "run-1": makeDetail() },
+        details: { "run-1": makeDetail({ isLive: false }) },
       },
       {
         handleRequest: (url, init) => {
@@ -2387,6 +2595,7 @@ describe("web app", () => {
         runs: [makeRun()],
         details: {
           "run-1": makeDetail({
+            isLive: false,
             capabilities: {
               canResume: false,
             },
@@ -2425,7 +2634,7 @@ describe("web app", () => {
     installFetchMock(
       {
         runs: [makeRun()],
-        details: { "run-1": makeDetail() },
+        details: { "run-1": makeDetail({ isLive: false }) },
       },
       {
         handleRequest: (url, init) => {
@@ -2464,8 +2673,8 @@ describe("web app", () => {
           makeRun({ runId: "run-2", name: "Second run", assignmentName: "Second run" }),
         ],
         details: {
-          "run-1": makeDetail({ runId: "run-1", name: "First run" }),
-          "run-2": makeDetail({ runId: "run-2", name: "Second run" }),
+          "run-1": makeDetail({ runId: "run-1", name: "First run", isLive: false }),
+          "run-2": makeDetail({ runId: "run-2", name: "Second run", isLive: false }),
         },
       },
       {

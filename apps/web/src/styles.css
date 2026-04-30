@@ -1100,6 +1100,83 @@ body {
   margin: 10px 12px 0;
 }
 
+.queued-messages-panel {
+  flex: 0 0 auto;
+  margin: 10px 12px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--card) 94%, var(--background));
+  overflow: hidden;
+}
+
+.queued-messages-panel__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.queued-messages-panel__toggle:hover {
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+
+.queued-messages-panel__toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.queued-messages-panel__chevron {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.queued-messages-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.queued-messages-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 10px;
+}
+
+.queued-messages-list__item + .queued-messages-list__item {
+  border-top: 1px solid var(--border);
+}
+
+.queued-messages-list__body {
+  min-width: 0;
+}
+
+.queued-messages-list__meta {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted-foreground);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.queued-messages-list__remove {
+  align-self: start;
+}
+
 .chat-state {
   display: grid;
   place-content: center;

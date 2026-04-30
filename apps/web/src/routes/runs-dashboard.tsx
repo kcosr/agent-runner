@@ -357,7 +357,11 @@ export function RunsDashboardRoute() {
                 chatSurface={
                   <RunChatView
                     detailSettling={state.detailSettling}
+                    onRemoveQueuedMessage={state.runActions.removeQueuedResumeMessage}
+                    onQueueMessage={state.runActions.queueResumeMessage}
                     onSubmitResume={state.runActions.resume}
+                    queuePending={state.queueResumeMessagePendingRunId === state.selectedRunId}
+                    removingQueuedMessageId={state.removeQueuedResumeMessagePendingId}
                     resumePending={state.resumePendingRunId === state.selectedRunId}
                     selectedRunId={state.selectedRunId}
                     selectedRunQuery={state.selectedRunQuery}

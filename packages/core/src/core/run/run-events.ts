@@ -42,6 +42,9 @@ const RUN_EVENT_TYPES = [
   "run.schedule_failed",
   "run.schedule_advanced",
   "run.schedule_consumed",
+  "run.queued_resume_message_added",
+  "run.queued_resume_message_removed",
+  "run.queued_resume_messages_drained",
   "task.added",
   "task.updated",
 ] as const;
@@ -831,6 +834,57 @@ export function appendRunScheduleConsumedEvent(params: {
   return appendRunScheduleEvent({
     ...params,
     eventType: "run.schedule_consumed",
+  });
+}
+
+export function appendRunQueuedResumeMessageAddedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  messageId: string;
+  messageCreatedAt: string;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.queued_resume_message_added",
+    context: params.context,
+    fields: {
+      messageId: params.messageId,
+      messageCreatedAt: params.messageCreatedAt,
+    },
+  });
+}
+
+export function appendRunQueuedResumeMessageRemovedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  messageId: string;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.queued_resume_message_removed",
+    context: params.context,
+    fields: {
+      messageId: params.messageId,
+    },
+  });
+}
+
+export function appendRunQueuedResumeMessagesDrainedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  messageIds: string[];
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.queued_resume_messages_drained",
+    context: params.context,
+    fields: {
+      messageIds: [...params.messageIds],
+      messageCount: params.messageIds.length,
+    },
   });
 }
 

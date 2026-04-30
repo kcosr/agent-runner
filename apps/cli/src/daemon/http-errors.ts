@@ -11,6 +11,7 @@ import {
 import {
   CommandError,
   ConflictError,
+  QueuedResumeMessageNotFoundError,
   TaskNotFoundError,
 } from "@task-runner/core/core/commands/service.js";
 import { HookRuntimeError } from "@task-runner/core/core/hooks/runtime.js";
@@ -101,6 +102,7 @@ export function toHttpError(err: unknown): HttpError {
     err instanceof TaskDefinitionNotFoundError ||
     err instanceof RunNotFoundError ||
     err instanceof TaskNotFoundError ||
+    err instanceof QueuedResumeMessageNotFoundError ||
     err instanceof AttachmentNotFoundError
   ) {
     return new HttpError(404, "NOT_FOUND", "resource not found", err);

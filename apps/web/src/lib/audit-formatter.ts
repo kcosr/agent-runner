@@ -383,6 +383,32 @@ export function formatAuditEvent(
       return {
         message: [text("Unarchived run.")],
       };
+    case "run.queued_resume_message_added":
+      return {
+        message: [
+          text("Queued resume message "),
+          code(fields.messageId ?? "unknown"),
+          text(" created at "),
+          code(fields.messageCreatedAt ?? "unknown"),
+          text("."),
+        ],
+      };
+    case "run.queued_resume_message_removed":
+      return {
+        message: [
+          text("Removed queued resume message "),
+          code(fields.messageId ?? "unknown"),
+          text("."),
+        ],
+      };
+    case "run.queued_resume_messages_drained":
+      return {
+        message: [
+          text("Drained "),
+          code(fields.messageCount ?? 0),
+          text(" queued resume messages."),
+        ],
+      };
     case "run.renamed":
       return {
         message: [

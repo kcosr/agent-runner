@@ -36,6 +36,7 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
     tasksCompleted: 1,
     tasksTotal: 4,
     attachmentCount: 0,
+    queuedResumeMessageCount: 0,
     dependencyState: {
       ready: true,
       total: 0,

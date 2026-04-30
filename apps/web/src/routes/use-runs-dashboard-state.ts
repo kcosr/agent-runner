@@ -64,6 +64,8 @@ export type RunActionPending =
   | "delete"
   | "ready"
   | "resume"
+  | "queue-message"
+  | "remove-queued-message"
   | "abort"
   | "rename"
   | "note"
@@ -358,6 +360,7 @@ function syncRunSummaryFromDetail(detail: RunDetail) {
     schedule: detail.schedule,
     scheduleState: detail.scheduleState,
     attachmentCount: detail.attachments.length,
+    queuedResumeMessageCount: detail.queuedResumeMessages.length,
     runGroupId: detail.runGroupId,
     activeTask: detail.activeTask,
     execution: detail.execution,
@@ -807,6 +810,40 @@ export function useRunsDashboardState() {
       void invalidateRunQueries(runId);
     },
   });
+  const queueResumeMessageMutation = useMutation({
+    mutationFn: ({ message, runId }: { runId: string; message: string }) =>
+      api.queueResumeMessage(runId, message),
+    onSuccess: async (result) => {
+      queryClient.setQueryData(runQueryKeys.detail(result.run.runId), result.run);
+      syncRunSummaryFromDetail(result.run);
+      if (
+        shouldInvalidateSimpleRunMutation(result.run.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.run.runId);
+      }
+    },
+  });
+  const removeQueuedResumeMessageMutation = useMutation({
+    mutationFn: ({ messageId, runId }: { runId: string; messageId: string }) =>
+      api.removeQueuedResumeMessage(runId, messageId),
+    onSuccess: async (result) => {
+      queryClient.setQueryData(runQueryKeys.detail(result.run.runId), result.run);
+      syncRunSummaryFromDetail(result.run);
+      if (
+        shouldInvalidateSimpleRunMutation(result.run.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.run.runId);
+      }
+    },
+  });
   const abortMutation = useRunActionMutation(api.abortRun, setActionError);
   const renameMutation = useMutation({
     mutationFn: ({ name, runId }: { runId: string; name: string | null }) =>
@@ -1070,36 +1107,46 @@ export function useRunsDashboardState() {
             ? "delete"
             : resumeMutation.isPending
               ? "resume"
-              : abortMutation.isPending
-                ? "abort"
-                : renameMutation.isPending
-                  ? "rename"
-                  : noteMutation.isPending
-                    ? "note"
-                    : pinnedMutation.isPending
-                      ? "pin"
-                      : backendSessionMutation.isPending
-                        ? "backend-session"
-                        : setGroupMutation.isPending
-                          ? "set-group"
-                          : scheduleMutation.isPending
-                            ? "schedule"
-                            : reconfigureMutation.isPending
-                              ? "reconfigure"
-                              : uploadAttachmentMutation.isPending
-                                ? "upload-attachment"
-                                : removeAttachmentMutation.isPending
-                                  ? "remove-attachment"
-                                  : downloadAttachmentMutation.isPending
-                                    ? "download-attachment"
-                                    : addDependencyMutation.isPending
-                                      ? "add-dependency"
-                                      : removeDependencyMutation.isPending
-                                        ? "remove-dependency"
-                                        : clearDependenciesMutation.isPending
-                                          ? "clear-dependencies"
-                                          : undefined;
+              : queueResumeMessageMutation.isPending
+                ? "queue-message"
+                : removeQueuedResumeMessageMutation.isPending
+                  ? "remove-queued-message"
+                  : abortMutation.isPending
+                    ? "abort"
+                    : renameMutation.isPending
+                      ? "rename"
+                      : noteMutation.isPending
+                        ? "note"
+                        : pinnedMutation.isPending
+                          ? "pin"
+                          : backendSessionMutation.isPending
+                            ? "backend-session"
+                            : setGroupMutation.isPending
+                              ? "set-group"
+                              : scheduleMutation.isPending
+                                ? "schedule"
+                                : reconfigureMutation.isPending
+                                  ? "reconfigure"
+                                  : uploadAttachmentMutation.isPending
+                                    ? "upload-attachment"
+                                    : removeAttachmentMutation.isPending
+                                      ? "remove-attachment"
+                                      : downloadAttachmentMutation.isPending
+                                        ? "download-attachment"
+                                        : addDependencyMutation.isPending
+                                          ? "add-dependency"
+                                          : removeDependencyMutation.isPending
+                                            ? "remove-dependency"
+                                            : clearDependenciesMutation.isPending
+                                              ? "clear-dependencies"
+                                              : undefined;
   const resumePendingRunId = resumeMutation.isPending ? resumeMutation.variables?.runId : undefined;
+  const queueResumeMessagePendingRunId = queueResumeMessageMutation.isPending
+    ? queueResumeMessageMutation.variables?.runId
+    : undefined;
+  const removeQueuedResumeMessagePendingId = removeQueuedResumeMessageMutation.isPending
+    ? removeQueuedResumeMessageMutation.variables?.messageId
+    : undefined;
   const selectedRunDetailReady =
     detailRunId !== undefined &&
     detailRunId === selectedRunId &&
@@ -1331,6 +1378,8 @@ export function useRunsDashboardState() {
     resumeDialogOpen,
     selectedRunResumeRequiresMessage,
     resumePendingRunId,
+    queueResumeMessagePendingRunId,
+    removeQueuedResumeMessagePendingId,
     resumeMessageDraft,
     resumeMessageExpanded,
     runActions: {
@@ -1373,6 +1422,12 @@ export function useRunsDashboardState() {
       },
       resume: async (runId: string, message?: string) => {
         await resumeMutation.mutateAsync({ runId, message });
+      },
+      queueResumeMessage: async (runId: string, message: string) => {
+        await queueResumeMessageMutation.mutateAsync({ runId, message });
+      },
+      removeQueuedResumeMessage: async (runId: string, messageId: string) => {
+        await removeQueuedResumeMessageMutation.mutateAsync({ runId, messageId });
       },
       setBackendSession: async (runId: string, backendSessionId: string) => {
         await backendSessionMutation.mutateAsync({ runId, backendSessionId });

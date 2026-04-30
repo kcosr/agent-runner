@@ -202,6 +202,23 @@ test("parseArgs: run reconfigure joins message tokens after the run id", () => {
   assert.equal(parsed.message, "replace the brief");
 });
 
+test("parseArgs: queued resume run subcommands parse as grouped commands", () => {
+  const queued = parseArgs(argv("run", "queue-message", "abc123", "check", "logs"));
+  assert.equal(queued.command, "run");
+  assert.equal(queued.subcommand, "queue-message");
+  assert.deepEqual(queued.positionals, ["abc123", "check", "logs"]);
+  assert.equal(queued.message, "check logs");
+
+  const listed = parseArgs(argv("run", "queued-messages", "abc123", "--output-format", "json"));
+  assert.equal(listed.subcommand, "queued-messages");
+  assert.deepEqual(listed.positionals, ["abc123"]);
+  assert.equal(listed.outputFormat, "json");
+
+  const removed = parseArgs(argv("run", "remove-queued-message", "abc123", "qmsg123"));
+  assert.equal(removed.subcommand, "remove-queued-message");
+  assert.deepEqual(removed.positionals, ["abc123", "qmsg123"]);
+});
+
 test("parseArgs: run audit parses grouped subcommand and --limit", () => {
   const parsed = parseArgs(
     argv("run", "audit", "abc123", "--limit", "25", "--output-format", "json"),

@@ -13,6 +13,8 @@ import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
 import type {
+  RunQueueResumeMessageParams,
+  RunRemoveQueuedResumeMessageParams,
   RunScheduleParams,
   RunSetBackendSessionParams,
   RunSetGroupParams,
@@ -34,6 +36,8 @@ import {
   parseBooleanQueryValue,
   parseDependencyRef,
   parseRunInputSurfaceQuery,
+  parseRunQueueResumeMessageParams,
+  parseRunRemoveQueuedResumeMessageParams,
   parseRunScheduleParams,
   parseRunSetBackendSessionParams,
   parseRunSetGroupParams,
@@ -216,6 +220,38 @@ const routes: RouteDefinition[] = [
           target: routeParam(params, "runId"),
           overrides: body.overrides,
         }),
+      );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "queued-resume-messages"],
+    handler: async (req, res, ctx, params) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.queueResumeMessage(
+          await parseRunQueueResumeMessageBody(req, routeParam(params, "runId")),
+        ),
+      );
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: ["api", "runs", ":runId", "queued-resume-messages", ":messageId"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.removeQueuedResumeMessage(
+          parseRunRemoveQueuedResumeMessageParams(
+            {
+              target: routeParam(params, "runId"),
+              messageId: routeParam(params, "messageId"),
+            },
+            "request params",
+          ),
+        ),
       );
     },
   },
@@ -657,6 +693,20 @@ async function parseResumeRunBody(req: IncomingMessage): Promise<ResumeRunBody> 
   return {
     overrides: optionalOverrides(body.overrides),
   };
+}
+
+async function parseRunQueueResumeMessageBody(
+  req: IncomingMessage,
+  runId: string,
+): Promise<RunQueueResumeMessageParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  const allowedKeys = new Set(["message"]);
+  for (const key of Object.keys(body)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`request body.${key} is not supported`);
+    }
+  }
+  return parseRunQueueResumeMessageParams({ ...body, target: runId }, "request body");
 }
 
 async function parseRunSetNameBody(req: IncomingMessage, runId: string): Promise<RunSetNameParams> {

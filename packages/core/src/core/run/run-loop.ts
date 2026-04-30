@@ -374,6 +374,7 @@ function buildResumeSessionManifest(
     endedAt: null,
     status: "running",
     exitCode: null,
+    queuedResumeMessages: [],
     maxAttemptsPerSession: overrides.maxAttemptsPerSession,
     execution: overrides.execution,
     finalTasks: {},
@@ -411,6 +412,7 @@ function refreshMutableManifestMetadata(manifest: RunManifest): void {
   manifest.note = latest.note;
   manifest.pinned = latest.pinned;
   manifest.schedule = latest.schedule;
+  manifest.queuedResumeMessages = latest.queuedResumeMessages.map((message) => ({ ...message }));
   manifest.resetSeed.name = latest.resetSeed.name;
   manifest.resetSeed.note = latest.resetSeed.note;
   manifest.resetSeed.pinned = latest.resetSeed.pinned;
@@ -505,7 +507,7 @@ function buildRecurringCloneManifest(params: {
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 17,
+    schemaVersion: 18,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -544,6 +546,7 @@ function buildRecurringCloneManifest(params: {
     dependencies: cloneRunDependencyRefs(seed.dependencies),
     parentRunId: seed.parentRunId,
     schedule: cloneRunSchedule(schedule),
+    queuedResumeMessages: [],
     exitCode: null,
     totalAttemptCount: 0,
     maxAttemptsPerSession: seed.maxAttemptsPerSession,
@@ -1489,7 +1492,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 17,
+      schemaVersion: 18,
       runId,
       repo,
       agent: {
@@ -1528,6 +1531,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       dependencies: [],
       parentRunId,
       schedule: initialSchedule,
+      queuedResumeMessages: [],
       exitCode: null,
       totalAttemptCount: 0,
       maxAttemptsPerSession,
@@ -1750,6 +1754,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       endedAt: null,
       status: "running",
       exitCode: null,
+      queuedResumeMessages: [],
       totalSessionCount: 1,
       execution,
     };
@@ -1777,7 +1782,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 17,
+      schemaVersion: 18,
       runId,
       repo,
       agent: {
@@ -1820,6 +1825,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       dependencies: [],
       parentRunId,
       schedule: initialSchedule,
+      queuedResumeMessages: [],
       exitCode: null,
       totalAttemptCount: 0,
       maxAttemptsPerSession,
@@ -2034,6 +2040,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           endedAt: null,
           status: "running",
           exitCode: null,
+          queuedResumeMessages: [],
           totalSessionCount: 1,
           execution,
         };

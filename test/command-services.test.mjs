@@ -32,14 +32,17 @@ import {
   clearRunGroup,
   clearRunSchedule,
   downloadAttachment,
+  drainQueuedResumeMessages,
   isCommandError,
   listAttachments,
   listDefinitions,
   listRuns,
   listTasks,
+  queueResumeMessage,
   readStatus,
   readyRun,
   removeAttachment,
+  removeQueuedResumeMessage,
   removeRunDependency,
   setRunBackendSession,
   setRunGroup,
@@ -1388,6 +1391,129 @@ test("command services: readyRun promotes initialized runs and tightens task and
       (err) =>
         err instanceof CommandError &&
         new RegExp(`cannot add dependencies unless run ${target.runId} is initialized`).test(
+          err.message,
+        ),
+    );
+  });
+});
+
+test("command services: queued resume messages are live-only, ordered, removable, and drain by snapshot id", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  patchManifest(target.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.endedAt = null;
+    manifest.exitCode = null;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const first = queueResumeMessage({
+      target: target.runId,
+      message: "  first follow-up  ",
+    });
+    const second = queueResumeMessage({
+      target: target.runId,
+      message: "second follow-up",
+    });
+
+    assert.match(first.queuedResumeMessage.id, /^qmsg/);
+    assert.equal(first.queuedResumeMessage.text, "first follow-up");
+    assert.equal(typeof first.queuedResumeMessage.createdAt, "string");
+    assert.deepEqual(
+      second.run.queuedResumeMessages.map((message) => message.text),
+      ["first follow-up", "second follow-up"],
+    );
+    assert.deepEqual(
+      readStatus(target.runId).queuedResumeMessages.map((message) => message.text),
+      ["first follow-up", "second follow-up"],
+    );
+
+    assert.throws(
+      () => queueResumeMessage({ target: target.runId, message: "   " }),
+      (err) =>
+        err instanceof CommandError && /queued resume message cannot be empty/.test(err.message),
+    );
+    assert.throws(
+      () => removeQueuedResumeMessage({ target: target.runId, messageId: "missing-qmsg" }),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`queued resume message "missing-qmsg" not found in run ${target.runId}`).test(
+          err.message,
+        ),
+    );
+
+    const removed = removeQueuedResumeMessage({
+      target: target.runId,
+      messageId: first.queuedResumeMessage.id,
+    });
+    assert.equal(removed.removedMessageId, first.queuedResumeMessage.id);
+    assert.deepEqual(
+      removed.run.queuedResumeMessages.map((message) => message.id),
+      [second.queuedResumeMessage.id],
+    );
+
+    const newer = queueResumeMessage({
+      target: target.runId,
+      message: "newer follow-up",
+    });
+    const drained = drainQueuedResumeMessages({
+      target: target.runId,
+      messageIds: [second.queuedResumeMessage.id, "already-removed"],
+    });
+    assert.deepEqual(drained.removedMessageIds, [second.queuedResumeMessage.id]);
+    assert.deepEqual(
+      drained.run.queuedResumeMessages.map((message) => message.id),
+      [newer.queuedResumeMessage.id],
+    );
+
+    patchManifest(target.workspaceDir, (manifest) => {
+      manifest.status = "success";
+      manifest.endedAt = "2026-04-30T15:30:00.000Z";
+      manifest.exitCode = 0;
+    });
+    assert.throws(
+      () => queueResumeMessage({ target: target.runId, message: "too late" }),
+      (err) =>
+        err instanceof CommandError &&
+        err.message === "queue is only available while the run is live; use resume instead",
+    );
+    const removedAfterFinish = removeQueuedResumeMessage({
+      target: target.runId,
+      messageId: newer.queuedResumeMessage.id,
+    });
+    assert.equal(removedAfterFinish.removedMessageId, newer.queuedResumeMessage.id);
+    assert.deepEqual(removedAfterFinish.run.queuedResumeMessages, []);
+  });
+});
+
+test("command services: queued resume message limits bound manifest and prompt growth", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  patchManifest(target.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.endedAt = null;
+    manifest.exitCode = null;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => queueResumeMessage({ target: target.runId, message: "x".repeat(20_001) }),
+      (err) =>
+        err instanceof CommandError &&
+        /queued resume message exceeds 20000 characters/.test(err.message),
+    );
+
+    for (let index = 0; index < 50; index += 1) {
+      queueResumeMessage({ target: target.runId, message: `queued ${index}` });
+    }
+    assert.equal(readStatus(target.runId).queuedResumeMessages.length, 50);
+    assert.throws(
+      () => queueResumeMessage({ target: target.runId, message: "one too many" }),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`queued resume message limit reached for run ${target.runId} \\(50\\)`).test(
           err.message,
         ),
     );

@@ -50,6 +50,7 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
     attachments: [],
     dependencies: [],
     dependents: [],
+    queuedResumeMessages: [],
     schedule: null,
     scheduleState: "none",
     tasks: [
@@ -153,6 +154,7 @@ describe("api client", () => {
                   tasksCompleted: 1,
                   tasksTotal: 4,
                   attachmentCount: 0,
+                  queuedResumeMessageCount: 0,
                   dependencyState: {
                     ready: true,
                     total: 0,
@@ -263,6 +265,7 @@ describe("api client", () => {
                   tasksCompleted: 1,
                   tasksTotal: 4,
                   attachmentCount: 0,
+                  queuedResumeMessageCount: 0,
                   dependencyState: {
                     ready: false,
                     total: 2,
@@ -505,6 +508,7 @@ describe("api client", () => {
               attachments: [],
               dependencies: [],
               dependents: [],
+              queuedResumeMessages: [],
               schedule: null,
               scheduleState: "none",
               tasks: [],
@@ -601,6 +605,7 @@ describe("api client", () => {
                 attachments: [],
                 dependencies: [],
                 dependents: [],
+                queuedResumeMessages: [],
                 schedule: null,
                 scheduleState: "none",
                 tasks: [],
@@ -744,6 +749,7 @@ describe("api client", () => {
                 ],
                 dependencies: [],
                 dependents: [],
+                queuedResumeMessages: [],
                 schedule: null,
                 scheduleState: "none",
                 tasks: [],
@@ -833,6 +839,65 @@ describe("api client", () => {
     });
   });
 
+  it("queues and removes queued resume messages", async () => {
+    const queuedRun = makeRunDetail({
+      queuedResumeMessages: [
+        {
+          id: "qmsg1",
+          text: "Check the worker logs",
+          createdAt: "2026-04-30T15:20:00.000Z",
+        },
+      ],
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            run: queuedRun,
+            queuedResumeMessage: queuedRun.queuedResumeMessages[0],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            run: makeRunDetail({ queuedResumeMessages: [] }),
+            removedMessageId: "qmsg1",
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.queueResumeMessage("run-1", "Check the worker logs")).resolves.toEqual({
+      run: queuedRun,
+      queuedResumeMessage: queuedRun.queuedResumeMessages[0],
+    });
+    await expect(api.removeQueuedResumeMessage("run-1", "qmsg1")).resolves.toMatchObject({
+      removedMessageId: "qmsg1",
+      run: {
+        queuedResumeMessages: [],
+      },
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/runs/run-1/queued-resume-messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({ message: "Check the worker logs" }),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/runs/run-1/queued-resume-messages/qmsg1", {
+      method: "DELETE",
+      headers: { accept: "application/json" },
+    });
+  });
+
   it("posts reset requests and parses the returned run detail", async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -875,6 +940,7 @@ describe("api client", () => {
               attachments: [],
               dependencies: [],
               dependents: [],
+              queuedResumeMessages: [],
               schedule: null,
               scheduleState: "none",
               tasks: [],
@@ -2088,6 +2154,7 @@ describe("api client", () => {
               attachments: [],
               dependencies: [],
               dependents: [],
+              queuedResumeMessages: [],
               schedule: null,
               scheduleState: "none",
               tasks: [],

@@ -16,6 +16,8 @@ import type {
   RunInputSurfaceResult,
 } from "@task-runner/core/contracts/run-input-surface.js";
 import type {
+  QueueResumeMessageResult,
+  RemoveQueuedResumeMessageResult,
   RunArchiveResult,
   RunBackendSessionResult,
   RunDependenciesResult,
@@ -139,6 +141,14 @@ interface RunTargetParams {
 
 export interface RunReadyParams extends RunTargetParams {
   schedule?: ScheduleInput;
+}
+
+export interface RunQueueResumeMessageParams extends RunTargetParams {
+  message: string;
+}
+
+export interface RunRemoveQueuedResumeMessageParams extends RunTargetParams {
+  messageId: string;
 }
 
 export interface RunsReconfigureParams extends RunTargetParams {
@@ -439,6 +449,12 @@ export interface RunBackendSessionRpcResult {
 export interface RunDependenciesRpcResult {
   result: RunDependenciesResult;
 }
+
+/** @protocol */
+export interface RunQueueResumeMessageRpcResult extends QueueResumeMessageResult {}
+
+/** @protocol */
+export interface RunRemoveQueuedResumeMessageRpcResult extends RemoveQueuedResumeMessageResult {}
 
 /** @protocol */
 export interface RunGroupRpcResult {
