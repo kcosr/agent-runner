@@ -49,6 +49,8 @@ import {
   DefinitionListError,
   LauncherConfigError,
   LauncherNotFoundError,
+  TaskConfigError,
+  TaskNotFoundError,
 } from "@task-runner/core/config/loader.js";
 import {
   isPathArg,
@@ -194,9 +196,9 @@ Commands:
                           Remove one attachment from a run.
   attachment download <id> <attachment-id> <output-path>
                           Download one attachment from a run.
-  list <agents|assignments|launchers|runs>
+  list <agents|assignments|launchers|tasks|runs>
                           Enumerate definitions or runs.
-  show <agent|assignment|launcher> <name|path>
+  show <agent|assignment|launcher|task> <name|path>
                           Print details of a specific definition.
 
 Arguments:
@@ -318,6 +320,8 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof AssignmentConfigError ||
     err instanceof LauncherNotFoundError ||
     err instanceof LauncherConfigError ||
+    err instanceof TaskNotFoundError ||
+    err instanceof TaskConfigError ||
     err instanceof DefinitionListError ||
     err instanceof RunCommandError ||
     err instanceof VarResolutionError ||
@@ -385,6 +389,46 @@ function normalizeRunIdTarget(target: string | undefined, commandName: string): 
     throw new CommandError(`${commandName} accepts a run id, not a path`);
   }
   return target;
+}
+
+const DEFINITION_LIST_DESCRIPTORS = {
+  agents: { kind: "agent", rpcMethod: "agents.list", responseKey: "agents" },
+  assignments: {
+    kind: "assignment",
+    rpcMethod: "assignments.list",
+    responseKey: "assignments",
+  },
+  launchers: { kind: "launcher", rpcMethod: "launchers.list", responseKey: "launchers" },
+  tasks: { kind: "task", rpcMethod: "taskDefinitions.list", responseKey: "taskDefinitions" },
+} as const;
+
+type DefinitionListSubcommand = keyof typeof DEFINITION_LIST_DESCRIPTORS;
+
+function getDefinitionListDescriptor(
+  kind: string | undefined,
+): (typeof DEFINITION_LIST_DESCRIPTORS)[DefinitionListSubcommand] | undefined {
+  if (kind !== undefined && kind in DEFINITION_LIST_DESCRIPTORS) {
+    return DEFINITION_LIST_DESCRIPTORS[kind as DefinitionListSubcommand];
+  }
+  return undefined;
+}
+
+const DEFINITION_SHOW_DESCRIPTORS = {
+  agent: { kind: "agent", rpcMethod: "agents.get", responseKey: "agent" },
+  assignment: { kind: "assignment", rpcMethod: "assignments.get", responseKey: "assignment" },
+  launcher: { kind: "launcher", rpcMethod: "launchers.get", responseKey: "launcher" },
+  task: { kind: "task", rpcMethod: "taskDefinitions.get", responseKey: "taskDefinition" },
+} as const;
+
+type DefinitionShowKind = keyof typeof DEFINITION_SHOW_DESCRIPTORS;
+
+function getDefinitionShowDescriptor(
+  kind: string | undefined,
+): (typeof DEFINITION_SHOW_DESCRIPTORS)[DefinitionShowKind] | undefined {
+  if (kind !== undefined && kind in DEFINITION_SHOW_DESCRIPTORS) {
+    return DEFINITION_SHOW_DESCRIPTORS[kind as DefinitionShowKind];
+  }
+  return undefined;
 }
 
 function resolveParentRunId(parsed: ParsedArgs): string | undefined {
@@ -871,17 +915,13 @@ async function runReconfigureCommand(
 
 async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const kindArg = parsed.subcommand;
-  if (
-    kindArg !== "agents" &&
-    kindArg !== "assignments" &&
-    kindArg !== "launchers" &&
-    kindArg !== "runs"
-  ) {
+  const definitionDescriptor = getDefinitionListDescriptor(kindArg);
+  if (definitionDescriptor === undefined && kindArg !== "runs") {
     process.stderr.write(
-      `task-runner: list requires a kind: agents, assignments, launchers, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `task-runner: list requires a kind: agents, assignments, launchers, tasks, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner list <agents|assignments|launchers|runs> [--cwd <path> | --repo <name> | --global | --group-id <group-id>] [--include-archived] [--output-format json]\n",
+      "Usage: task-runner list <agents|assignments|launchers|tasks|runs> [--cwd <path> | --repo <name> | --global | --group-id <group-id>] [--include-archived] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -928,34 +968,24 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
       );
       process.exit(3);
     }
-    const definitionKind =
-      kindArg === "agents" ? "agent" : kindArg === "assignments" ? "assignment" : "launcher";
+    if (definitionDescriptor === undefined) {
+      throw new Error(`missing definition descriptor for ${kindArg}`);
+    }
     const result =
       connect === undefined
-        ? getDefinitionList(definitionKind)
+        ? getDefinitionList(definitionDescriptor.kind)
         : await withDaemonClient(connect, (client) =>
             client
-              .call<{
-                agents?: ReturnType<typeof getDefinitionList>;
-                assignments?: ReturnType<typeof getDefinitionList>;
-                launchers?: ReturnType<typeof getDefinitionList>;
-              }>(
-                kindArg === "agents"
-                  ? "agents.list"
-                  : kindArg === "assignments"
-                    ? "assignments.list"
-                    : "launchers.list",
+              .call<Record<string, ReturnType<typeof getDefinitionList>>>(
+                definitionDescriptor.rpcMethod,
               )
-              .then((r) =>
-                kindArg === "agents"
-                  ? r.agents
-                  : kindArg === "assignments"
-                    ? r.assignments
-                    : r.launchers,
-              )
+              .then((r) => r[definitionDescriptor.responseKey])
               .then((detail) => {
                 if (!detail) {
-                  throw new Error(`missing ${definitionKind} list`);
+                  throw new Error(`missing ${definitionDescriptor.kind} list`);
+                }
+                if (detail.kind !== definitionDescriptor.kind) {
+                  throw new Error(`invalid ${definitionDescriptor.kind} list response`);
                 }
                 return detail;
               }),
@@ -968,7 +998,7 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
       }
       process.stdout.write(
         renderDefinitionList({
-          kind: definitionKind,
+          kind: definitionDescriptor.kind,
           entries: result.entries,
           warnings: result.warnings,
         }),
@@ -982,56 +1012,59 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
 
 async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const kindArg = parsed.subcommand;
-  if (kindArg !== "agent" && kindArg !== "assignment" && kindArg !== "launcher") {
+  const definitionDescriptor = getDefinitionShowDescriptor(kindArg);
+  if (definitionDescriptor === undefined) {
     process.stderr.write(
-      `task-runner: show requires a kind: agent, assignment, or launcher${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `task-runner: show requires a kind: agent, assignment, launcher, or task${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment|launcher> <name|path> [--connect <ws-url>] [--output-format json]\n",
+      "Usage: task-runner show <agent|assignment|launcher|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
 
-  const target = normalizeTarget(parsed.positionals[0]);
+  const target = parsed.positionals[0];
   if (!target) {
     process.stderr.write(`task-runner: show ${kindArg} requires a name or path\n`);
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment|launcher> <name|path> [--connect <ws-url>] [--output-format json]\n",
+      "Usage: task-runner show <agent|assignment|launcher|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
 
   try {
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: show ${kindArg} only supports <name|path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    if (parsed.positionals.length > 1) {
+      process.stderr.write(
+        `task-runner: show ${kindArg} takes exactly one name or path; got "${parsed.positionals[1]}"\n`,
+      );
+      process.exit(3);
+    }
     const result =
       connect === undefined
-        ? getDefinition(kindArg, target, process.cwd())
+        ? getDefinition(definitionDescriptor.kind, target, process.cwd())
         : await withDaemonClient(connect, (client) =>
             client
-              .call<{
-                agent?: ReturnType<typeof getDefinition>;
-                assignment?: ReturnType<typeof getDefinition>;
-                launcher?: ReturnType<typeof getDefinition>;
-              }>(
-                kindArg === "agent"
-                  ? "agents.get"
-                  : kindArg === "assignment"
-                    ? "assignments.get"
-                    : "launchers.get",
+              .call<Record<string, ReturnType<typeof getDefinition>>>(
+                definitionDescriptor.rpcMethod,
                 {
                   target,
                   cwd: process.cwd(),
                 },
               )
-              .then((r) =>
-                kindArg === "agent"
-                  ? r.agent
-                  : kindArg === "assignment"
-                    ? r.assignment
-                    : r.launcher,
-              )
+              .then((r) => r[definitionDescriptor.responseKey])
               .then((detail) => {
                 if (!detail) {
-                  throw new Error(`missing ${kindArg} detail`);
+                  throw new Error(`missing ${definitionDescriptor.kind} detail`);
+                }
+                if (detail.kind !== definitionDescriptor.kind) {
+                  throw new Error(`invalid ${definitionDescriptor.kind} detail response`);
                 }
                 return detail;
               }),
@@ -1039,7 +1072,7 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
     if (parsed.outputFormat === "json") {
       writeJson(result);
     } else {
-      process.stdout.write(renderDefinitionDetails(result as never));
+      process.stdout.write(renderDefinitionDetails(result));
     }
     process.exit(0);
   } catch (err) {

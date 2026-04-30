@@ -14,9 +14,11 @@ import {
   listAgentDefinitions,
   listAssignmentDefinitions,
   listLaunchers,
+  listTaskDefinitions,
   loadAgentConfig,
   loadAssignmentConfig,
   loadLauncherConfig,
+  loadTaskConfig,
 } from "../../config/loader.js";
 import { isPathArg } from "../../config/runtime-paths.js";
 import type {
@@ -58,7 +60,7 @@ import { startDebugPerfTimer } from "../../util/debug-perf.js";
 import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import type { LoadedLauncherDefinition } from "../config/launchers.js";
-import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
+import type { LoadedAgent, LoadedAssignment, LoadedTaskDefinition } from "../config/loaded.js";
 import { createHookExecutionState, runTaskTransitionHooks } from "../hooks/runtime.js";
 import {
   AttachmentError,
@@ -153,6 +155,10 @@ export type DefinitionDetailsResult =
   | {
       kind: "launcher";
       loaded: LoadedLauncherDefinition;
+    }
+  | {
+      kind: "task";
+      loaded: LoadedTaskDefinition;
     };
 
 export interface RunResetResult {
@@ -726,6 +732,14 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
       warnings: result.warnings,
     };
   }
+  if (kind === "task") {
+    const result = listTaskDefinitions();
+    return {
+      kind,
+      entries: result.entries,
+      warnings: result.warnings,
+    };
+  }
   const result = listAssignmentDefinitions();
   return {
     kind,
@@ -814,6 +828,12 @@ export function showDefinition(
     return {
       kind,
       loaded: loadAgentConfig(target, cwd),
+    };
+  }
+  if (kind === "task") {
+    return {
+      kind,
+      loaded: loadTaskConfig(target, cwd),
     };
   }
   return {

@@ -44,6 +44,7 @@ import {
   agentConfigSchema,
   assignmentConfigSchema,
   launcherDefinitionSchema,
+  taskDefSchema,
 } from "@task-runner/core/core/config/schema.js";
 import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 import { z } from "zod";
@@ -109,7 +110,7 @@ interface SafeParseSchema<T> {
 }
 
 const INVALID_RESPONSE_CODE = "INVALID_RESPONSE";
-const DEFINITION_KINDS = ["agent", "assignment", "launcher"] as const;
+const DEFINITION_KINDS = ["agent", "assignment", "launcher", "task"] as const;
 
 const definitionEntrySchema = z.object({
   name: z.string(),
@@ -162,10 +163,17 @@ const launcherDefinitionDetailSchema = z.object({
   ]),
 });
 
+const taskDefinitionDetailSchema = z.object({
+  kind: z.literal("task"),
+  task: taskDefSchema,
+  sourcePath: z.string(),
+});
+
 const definitionDetailSchema = z.union([
   agentDefinitionDetailSchema,
   assignmentDefinitionDetailSchema,
   launcherDefinitionDetailSchema,
+  taskDefinitionDetailSchema,
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -447,36 +455,46 @@ async function readRunIdResult(response: Response, label: string): Promise<strin
 
 async function readDefinitionList(
   response: Response,
-  key: "agents" | "assignments" | "launchers",
+  key: "agents" | "assignments" | "launchers" | "taskDefinitions",
   label: string,
+  expectedKind: (typeof DEFINITION_KINDS)[number],
 ): Promise<DefinitionListResult> {
   if (!response.ok) {
     return await readError(response);
   }
-  return parseField(
+  const result = parseField(
     await parseResponseJson(response, label),
     response.status,
     key,
     definitionListResultSchema as SafeParseSchema<DefinitionListResult>,
     label,
   );
+  if (result.kind !== expectedKind) {
+    throw invalidResponse(`${label} response payload is invalid`, response.status);
+  }
+  return result;
 }
 
 async function readDefinitionDetail(
   response: Response,
-  key: "agent" | "assignment" | "launcher",
+  key: "agent" | "assignment" | "launcher" | "taskDefinition",
   label: string,
+  expectedKind: (typeof DEFINITION_KINDS)[number],
 ): Promise<DefinitionDetail> {
   if (!response.ok) {
     return await readError(response);
   }
-  return parseField(
+  const result = parseField(
     await parseResponseJson(response, label),
     response.status,
     key,
     definitionDetailSchema as SafeParseSchema<DefinitionDetail>,
     label,
   );
+  if (result.kind !== expectedKind) {
+    throw invalidResponse(`${label} response payload is invalid`, response.status);
+  }
+  return result;
 }
 
 async function readRunInputSurface(response: Response): Promise<RunInputSurface> {
@@ -534,7 +552,7 @@ function attachmentContentPath(
 
 function definitionPath(
   config: AppRuntimeConfig,
-  kind: "agents" | "assignments" | "launchers",
+  kind: "agents" | "assignments" | "launchers" | "task-definitions",
   target?: string,
   cwd?: string,
 ): string {
@@ -573,7 +591,7 @@ export function createApiClient(config: AppRuntimeConfig) {
       const response = await fetch(definitionPath(config, "agents"), {
         headers: { accept: "application/json" },
       });
-      return await readDefinitionList(response, "agents", "Agent list");
+      return await readDefinitionList(response, "agents", "Agent list", "agent");
     },
     async getAgent(
       target: string,
@@ -583,13 +601,13 @@ export function createApiClient(config: AppRuntimeConfig) {
         headers: { accept: "application/json" },
         signal: options.signal,
       });
-      return await readDefinitionDetail(response, "agent", "Agent detail");
+      return await readDefinitionDetail(response, "agent", "Agent detail", "agent");
     },
     async listAssignments(): Promise<DefinitionListResult> {
       const response = await fetch(definitionPath(config, "assignments"), {
         headers: { accept: "application/json" },
       });
-      return await readDefinitionList(response, "assignments", "Assignment list");
+      return await readDefinitionList(response, "assignments", "Assignment list", "assignment");
     },
     async getAssignment(
       target: string,
@@ -599,13 +617,13 @@ export function createApiClient(config: AppRuntimeConfig) {
         headers: { accept: "application/json" },
         signal: options.signal,
       });
-      return await readDefinitionDetail(response, "assignment", "Assignment detail");
+      return await readDefinitionDetail(response, "assignment", "Assignment detail", "assignment");
     },
     async listLaunchers(): Promise<DefinitionListResult> {
       const response = await fetch(definitionPath(config, "launchers"), {
         headers: { accept: "application/json" },
       });
-      return await readDefinitionList(response, "launchers", "Launcher list");
+      return await readDefinitionList(response, "launchers", "Launcher list", "launcher");
     },
     async getLauncher(
       target: string,
@@ -615,7 +633,31 @@ export function createApiClient(config: AppRuntimeConfig) {
         headers: { accept: "application/json" },
         signal: options.signal,
       });
-      return await readDefinitionDetail(response, "launcher", "Launcher detail");
+      return await readDefinitionDetail(response, "launcher", "Launcher detail", "launcher");
+    },
+    async listTaskDefinitions(): Promise<DefinitionListResult> {
+      const response = await fetch(definitionPath(config, "task-definitions"), {
+        headers: { accept: "application/json" },
+      });
+      return await readDefinitionList(response, "taskDefinitions", "Task definition list", "task");
+    },
+    async getTaskDefinition(
+      target: string,
+      options: DefinitionRequestOptions = {},
+    ): Promise<DefinitionDetail> {
+      const response = await fetch(
+        definitionPath(config, "task-definitions", target, options.cwd),
+        {
+          headers: { accept: "application/json" },
+          signal: options.signal,
+        },
+      );
+      return await readDefinitionDetail(
+        response,
+        "taskDefinition",
+        "Task definition detail",
+        "task",
+      );
     },
     async getRunInputSurface(
       input: {

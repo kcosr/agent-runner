@@ -255,6 +255,8 @@ it with an empty message. `null` is rejected.
 | `GET` | `/api/assignments/:target` | Read one assignment. Returns `{ assignment: DefinitionDetail }` |
 | `GET` | `/api/launchers` | List launchers. Returns `{ launchers: DefinitionListResult }` |
 | `GET` | `/api/launchers/:target` | Read one launcher. Returns `{ launcher: DefinitionDetail }` |
+| `GET` | `/api/task-definitions` | List reusable task definitions. Returns `{ taskDefinitions: DefinitionListResult }` |
+| `GET` | `/api/task-definitions/:target` | Read one reusable task definition. Returns `{ taskDefinition: TaskDefinitionDetail }` |
 
 Definition routes share the same payloads as the WebSocket RPC methods:
 HTTP is the browser-facing transport, while connected CLI clients keep
@@ -264,13 +266,18 @@ Definition detail routes accept:
 
 - `:target` as either a named definition (for example `planner`) or a
   percent-encoded direct path target (for example
-  `./agents/planner/agent.md`).
+  `./agents/planner/agent.md` or `./tasks/review/check.md`).
 - Optional `?cwd=<path>` when a relative direct path needs an explicit
   resolution base.
 
 List routes return the shared `DefinitionListResult` shape with
-`kind`, `entries`, and `warnings`. Detail routes return the shared
-`DefinitionDetail` union for the requested resource kind.
+`kind`, `entries`, and `warnings`. Agent, assignment, and launcher detail
+routes return the shared `DefinitionDetail` union branch for the requested
+resource kind; task-definition detail routes return the task-specific
+`TaskDefinitionDetail` shape
+`{ kind: "task", task: { id, title, body, hooks }, sourcePath }`. These
+are reusable task-definition fields, not run task-state fields such as
+`status` or `notes`.
 
 ### Tasks
 
@@ -368,6 +375,7 @@ callers set schedules through the explicit schedule routes.
 - `agents.list`, `agents.get`
 - `assignments.list`, `assignments.get`
 - `launchers.list`, `launchers.get`
+- `taskDefinitions.list`, `taskDefinitions.get`
 
 **Attachments**
 

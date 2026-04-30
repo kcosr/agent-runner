@@ -8,7 +8,7 @@ import {
   type LoadedLauncherDefinition,
 } from "../core/config/launchers.js";
 import { AD_HOC_AGENT_NAME } from "../core/config/loaded.js";
-import type { LoadedAgent, LoadedAssignment } from "../core/config/loaded.js";
+import type { LoadedAgent, LoadedAssignment, LoadedTaskDefinition } from "../core/config/loaded.js";
 import {
   type AuthoredAssignmentConfig,
   type LauncherDefinitionConfig,
@@ -31,7 +31,7 @@ type PathSegment = string | number;
 type AuthoredDefinitionKind = "agent" | "assignment" | "task";
 type NamedDefinitionKind = "agent" | "assignment";
 type CanonicalDefinitionKind = AuthoredDefinitionKind | "launcher";
-export type DefinitionKind = NamedDefinitionKind | "launcher";
+export type DefinitionKind = NamedDefinitionKind | "launcher" | "task";
 type ExactScalarKind = "string" | "number" | "boolean";
 type InterpolationSurface =
   | { mode: "exact"; scalarKind: ExactScalarKind; allowLiteral: boolean }
@@ -103,13 +103,23 @@ export class AssignmentConfigError extends Error {
   }
 }
 
-class TaskConfigError extends Error {
+export class TaskConfigError extends Error {
   constructor(
     public readonly sourcePath: string,
     public readonly issues: string,
   ) {
     super(`Invalid task config at ${sourcePath}:\n${issues}`);
     this.name = "TaskConfigError";
+  }
+}
+
+export class TaskNotFoundError extends Error {
+  constructor(
+    public readonly arg: string,
+    public readonly searched: string[],
+  ) {
+    super(`Task not found: ${arg}\n  searched:\n${searched.map((s) => `    - ${s}`).join("\n")}`);
+    this.name = "TaskNotFoundError";
   }
 }
 
@@ -978,6 +988,14 @@ function resolveTaskPath(ref: string, assignmentSourcePath: string): string {
   return path;
 }
 
+function resolveTaskDefinitionPath(arg: string, cwd: string): { path: string; searched: string[] } {
+  const resolved = resolveStringRef(arg, cwd);
+  if (resolved.kind === "path") {
+    return { path: resolved.path, searched: [resolved.path] };
+  }
+  return resolveNamedTaskPath(resolved.name);
+}
+
 function loadTaskDefinitionFromPath(
   sourcePath: string,
   options: { strictIdentity: boolean },
@@ -1127,6 +1145,17 @@ export function loadAssignmentConfig(arg: string, cwd: string = process.cwd()): 
   return loadAssignmentDefinitionFromPath(sourcePath, { strictIdentity: true });
 }
 
+export function loadTaskConfig(arg: string, cwd: string = process.cwd()): LoadedTaskDefinition {
+  const { path, searched } = resolveTaskDefinitionPath(arg, cwd);
+  if (!path || !existsSync(path)) {
+    throw new TaskNotFoundError(arg, searched);
+  }
+  return {
+    task: loadTaskDefinitionFromPath(path, { strictIdentity: true }),
+    sourcePath: path,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Definition catalog — enumerate available definitions from the
 // TASK_RUNNER_CONFIG_DIR / XDG config root. Used by `list` and `show`.
@@ -1226,6 +1255,34 @@ export function listAgentDefinitions(): DefinitionListWarnings {
 
 export function listAssignmentDefinitions(): DefinitionListWarnings {
   return listNamedDefinitions("assignment");
+}
+
+export function listTaskDefinitions(): DefinitionListWarnings {
+  const entries: DefinitionEntry[] = [];
+  const warnings: string[] = [];
+  const sourcePaths = discoverDefinitionSourcePaths(
+    resolveTasksRoot(),
+    (name) => extname(name) === ".md",
+  );
+
+  for (const sourcePath of sourcePaths) {
+    try {
+      const task = loadTaskDefinitionFromPath(sourcePath, { strictIdentity: false });
+      entries.push({
+        name: task.id,
+        path: sourcePath,
+        root: "config",
+      });
+    } catch (error) {
+      if (error instanceof TaskConfigError) {
+        warnings.push(error.message);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return { entries, warnings };
 }
 
 export function listAgents(): DefinitionEntry[] {

@@ -399,10 +399,10 @@ root.
 | `serve` | Start the local daemon (WS JSON-RPC + HTTP/SSE + web UI) |
 | `status` | Print system/environment status |
 | `run status\|brief\|audit` | Print run state, the composed worker handoff, or persisted audit history |
-| `task list\|show\|set\|append-notes\|add` | Task inspection and mutation |
+| `task list\|show\|set\|append-notes\|add` | Run task-state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
-| `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
-| `show agent\|assignment\|launcher` | Render a single definition |
+| `list agents\|assignments\|launchers\|tasks\|runs` | Enumerate definitions and runs |
+| `show agent\|assignment\|launcher\|task` | Render a single definition |
 | `run reconfigure` | Patch vars/message on an unarchived initialized run |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
@@ -510,6 +510,9 @@ Shared task definitions (under `tasks/`):
 
 - reusable `review/architecture` through `review/docs-drift`
   code-review dimensions used by both code-review assignments
+- inspect reusable task definitions with `task-runner list tasks` and
+  `task-runner show task <name|path>`; these are read-only definition
+  surfaces, distinct from `task-runner task ...` run task-state commands
 
 Walkthrough in [docs/examples.md](docs/examples.md).
 

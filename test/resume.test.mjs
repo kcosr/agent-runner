@@ -601,16 +601,13 @@ test("resume: start refreshes the latest initialized task state before claiming 
   assert.equal(resumed.manifest.finalTasks.t3.status, "completed");
 });
 
-test("resume: non-completed tasks normalized to pending, notes preserved", async () => {
+test("resume: blocked stays blocked while stale in_progress resets to pending", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      updateTasksForPrompt(ctx.prompt, {
-        t1: { status: "completed", notes: "first done" },
-        t2: { status: "blocked", notes: "blocked because X" },
-      });
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -622,7 +619,17 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
       };
     }),
   });
-  assert.equal(first.manifest.status, "blocked");
+  assert.equal(first.manifest.status, "success");
+  patchManifest(first.workspaceDir, (manifest) => {
+    manifest.status = "blocked";
+    manifest.exitCode = 2;
+    manifest.finalTasks.t1.notes = "first done";
+    manifest.finalTasks.t2.status = "blocked";
+    manifest.finalTasks.t2.notes = "blocked because X";
+    manifest.finalTasks.t3.status = "in_progress";
+    manifest.finalTasks.t3.notes = "stale work claim";
+    manifest.tasksCompleted = 1;
+  });
 
   // Resume — inspect the in-memory state after normalization by reading tasks.md
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
@@ -631,8 +638,10 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
       const manifest = JSON.parse(readFileSync(join(first.workspaceDir, "run.json"), "utf8"));
       assert.equal(manifest.finalTasks.t1.status, "completed");
       assert.equal(manifest.finalTasks.t1.notes, "first done");
-      assert.equal(manifest.finalTasks.t2.status, "pending");
+      assert.equal(manifest.finalTasks.t2.status, "blocked");
       assert.equal(manifest.finalTasks.t2.notes, "blocked because X");
+      assert.equal(manifest.finalTasks.t3.status, "pending");
+      assert.equal(manifest.finalTasks.t3.notes, "stale work claim");
       patchManifest(first.workspaceDir, (next) => {
         next.finalTasks.t2.status = "completed";
         next.finalTasks.t3.status = "completed";
@@ -754,6 +763,51 @@ test("resume: unfinished tasks can resume with an implicit continue prompt", asy
   assert.equal(second.manifest.sessions.at(-1)?.message, null);
 });
 
+test("resume: blocked-only task state does not resume implicitly", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      completeAllTasksFromPrompt(ctx.prompt);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-blocked-only",
+        transcript: "blocked",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  assert.equal(first.manifest.status, "success");
+  patchManifest(first.workspaceDir, (manifest) => {
+    manifest.status = "blocked";
+    manifest.exitCode = 2;
+    manifest.finalTasks.t1.status = "blocked";
+    manifest.finalTasks.t1.notes = "waiting on approval";
+    manifest.tasksCompleted = 2;
+  });
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
+  await assert.rejects(
+    () =>
+      runIn(dir, {
+        backend: mockBackend(async () => {
+          throw new Error("backend should not be invoked");
+        }),
+        overrides: {},
+        resume: target,
+      }),
+    (err) =>
+      err instanceof ResumeError &&
+      /no runnable tasks/.test(err.message) &&
+      /follow-up message/.test(err.message),
+  );
+});
+
 test("resume: missing both message and --add-task is still a hard error once all tasks are complete", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
@@ -785,7 +839,7 @@ test("resume: missing both message and --add-task is still a hard error once all
       }),
     (err) =>
       err instanceof ResumeError &&
-      /no incomplete tasks/.test(err.message) &&
+      /no runnable tasks/.test(err.message) &&
       /follow-up message/.test(err.message),
   );
 });

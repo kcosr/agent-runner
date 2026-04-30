@@ -275,6 +275,14 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
         launcher: ctx.getDefinition("launcher", params.target, params.cwd),
       };
     },
+    listTaskDefinitions() {
+      return { taskDefinitions: ctx.getDefinitionList("task") };
+    },
+    getTaskDefinition(params: DefinitionGetParams) {
+      return {
+        taskDefinition: ctx.getDefinition("task", params.target, params.cwd),
+      };
+    },
     getRunInputSurface(params: RunInputSurfaceParams) {
       return {
         inputSurface: ctx.getRunInputSurface(params),

@@ -14,10 +14,10 @@ All commands accept `--help` / `-h`.
 | `serve` | Start the local daemon / control plane |
 | `status` | Print system/environment status |
 | `run status\|brief\|audit` | Print run state, the composed worker handoff, or persisted audit history |
-| `task list\|show\|set\|append-notes\|add` | Task state inspection and mutation |
+| `task list\|show\|set\|append-notes\|add` | Run task-state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
-| `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
-| `show agent\|assignment\|launcher` | Render a single definition |
+| `list agents\|assignments\|launchers\|tasks\|runs` | Enumerate definitions and runs |
+| `show agent\|assignment\|launcher\|task` | Render a single definition |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
 | `run set-name\|set-backend-session\|clear-backend-session` | Metadata mutations |
@@ -37,8 +37,9 @@ All commands accept `--help` / `-h`.
 Commands reject flags they do not consume — unknown flag combinations
 error out rather than being silently ignored.
 
-Reusable named task definitions are not a first-class CLI kind in this
-pass. They are loaded through assignment `tasks:` refs only.
+Reusable task definition inspection uses top-level `list tasks` and
+`show task <name|path>`. Run task state remains under
+`task-runner task ...`.
 
 `--connect-host` requires connected mode via `--connect` or
 `TASK_RUNNER_CONNECT`. When present, the CLI keeps the logical daemon URL
@@ -298,12 +299,19 @@ See [attachments.md](attachments.md).
 task-runner list agents
 task-runner list assignments
 task-runner list launchers
+task-runner list tasks
 task-runner list runs \
   [--cwd <path> | --repo <name> | --global] \
   [--group-id <group-id>] \
   [--include-archived]
 ```
 
+- `list agents`, `list assignments`, `list launchers`, and `list tasks`
+  enumerate reusable definitions from `${TASK_RUNNER_CONFIG_DIR}`.
+- `list tasks` lists markdown task definition files under
+  `${TASK_RUNNER_CONFIG_DIR}/tasks`; invalid task definitions are warned
+  to stderr in text mode and included in the JSON payload's `warnings`
+  array in JSON mode.
 - `list runs` defaults to the caller's exact cwd.
 - `--cwd <path>` filters by exact persisted cwd.
 - `--repo <name>` filters by repo bucket.
@@ -318,10 +326,14 @@ task-runner list runs \
 task-runner show agent <name|path>
 task-runner show assignment <name|path>
 task-runner show launcher <name|path>
+task-runner show task <name|path>
 ```
 
-Renders the parsed frontmatter, declared vars (for assignments), and
-task list.
+Renders the parsed frontmatter, declared vars (for assignments), task
+lists, launcher definitions, or reusable task definition title/body/hooks.
+For `show task`, bare strings are named ids under
+`${TASK_RUNNER_CONFIG_DIR}/tasks`; absolute paths and strings beginning
+with `./` or `../` are direct markdown file paths.
 
 ## `run` groupings
 

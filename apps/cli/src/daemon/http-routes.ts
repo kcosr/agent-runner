@@ -144,6 +144,20 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "GET",
+    pattern: ["api", "task-definitions"],
+    handler: (_req, res, ctx) => {
+      sendJson(res, 200, ctx.operations.listTaskDefinitions());
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "task-definitions", ":target"],
+    handler: (_req, res, ctx, params, url) => {
+      sendJson(res, 200, ctx.operations.getTaskDefinition(parseDefinitionQuery(params, url)));
+    },
+  },
+  {
+    method: "GET",
     pattern: ["api", "runs"],
     handler: (_req, res, ctx, _params, url) => {
       sendJson(res, 200, ctx.operations.listRuns(parseRunListQuery(url)));

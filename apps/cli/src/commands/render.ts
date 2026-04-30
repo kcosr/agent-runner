@@ -1,3 +1,4 @@
+import type { DefinitionDetail } from "@task-runner/core/app/service.js";
 import type {
   AttachmentListEntry,
   RunAttachment,
@@ -15,7 +16,6 @@ import type {
   RunSessionSummary,
 } from "@task-runner/core/contracts/runs.js";
 import type {
-  DefinitionDetailsResult,
   DefinitionListResult,
   RunArchiveResult,
   RunDeleteResult,
@@ -246,9 +246,9 @@ export function renderDefinitionList(result: DefinitionListResult): string {
   return `${result.entries.map((entry) => `  ${entry.name}`).join("\n")}\n`;
 }
 
-export function renderDefinitionDetails(result: DefinitionDetailsResult): string {
+export function renderDefinitionDetails(result: DefinitionDetail): string {
   if (result.kind === "launcher") {
-    const { loaded } = result;
+    const loaded = result.definition;
     const lines: string[] = [];
     lines.push(`Launcher: ${loaded.name}`);
     if (loaded.kind === "direct") {
@@ -265,54 +265,74 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
   }
 
   if (result.kind === "agent") {
-    const { loaded } = result;
     const lines: string[] = [];
-    lines.push(`Agent: ${loaded.config.name}`);
-    lines.push(`  backend:      ${loaded.config.backend}`);
-    if (loaded.config.model) lines.push(`  model:        ${loaded.config.model}`);
-    if (loaded.config.effort) lines.push(`  effort:       ${loaded.config.effort}`);
-    if (loaded.config.launcher !== undefined) {
+    lines.push(`Agent: ${result.config.name}`);
+    lines.push(`  backend:      ${result.config.backend}`);
+    if (result.config.model) lines.push(`  model:        ${result.config.model}`);
+    if (result.config.effort) lines.push(`  effort:       ${result.config.effort}`);
+    if (result.config.launcher !== undefined) {
       lines.push(
-        `  launcher:     ${typeof loaded.config.launcher === "string" ? loaded.config.launcher : loaded.config.launcher.command}`,
+        `  launcher:     ${typeof result.config.launcher === "string" ? result.config.launcher : result.config.launcher.command}`,
       );
     }
-    lines.push(`  timeoutSec:   ${loaded.config.timeoutSec}`);
-    lines.push(`  unrestricted: ${loaded.config.unrestricted}`);
-    if (loaded.config.lockedFields.length > 0) {
-      lines.push(`  lockedFields: ${loaded.config.lockedFields.join(", ")}`);
+    lines.push(`  timeoutSec:   ${result.config.timeoutSec}`);
+    lines.push(`  unrestricted: ${result.config.unrestricted}`);
+    if (result.config.lockedFields.length > 0) {
+      lines.push(`  lockedFields: ${result.config.lockedFields.join(", ")}`);
     }
-    lines.push(`  source:       ${loaded.sourcePath}`);
-    if (loaded.instructions) {
+    lines.push(`  source:       ${result.sourcePath}`);
+    if (result.instructions) {
       lines.push("");
-      lines.push(loaded.instructions);
+      lines.push(result.instructions);
     }
     return `${lines.join("\n")}\n`;
   }
 
-  const { loaded } = result;
-  const lines: string[] = [];
-  lines.push(`Assignment: ${loaded.config.name}`);
-  if (loaded.config.cwd !== undefined) {
-    lines.push(`  cwd:          ${loaded.config.cwd}`);
+  if (result.kind === "task") {
+    const lines: string[] = [];
+    lines.push(`Task: ${result.task.id}`);
+    lines.push(`  title:        ${result.task.title}`);
+    lines.push(`  hooks:        ${result.task.hooks.length}`);
+    for (const hook of result.task.hooks) {
+      if (hook.builtin !== undefined) {
+        lines.push(`    - builtin: ${hook.builtin}`);
+      } else if (hook.name !== undefined) {
+        lines.push(`    - name: ${hook.name}`);
+      } else if (hook.path !== undefined) {
+        lines.push(`    - path: ${hook.path}`);
+      }
+    }
+    lines.push(`  source:       ${result.sourcePath}`);
+    if (result.task.body) {
+      lines.push("");
+      lines.push(result.task.body);
+    }
+    return `${lines.join("\n")}\n`;
   }
-  lines.push(`  maxRetries:   ${loaded.config.maxRetries}`);
-  if (loaded.config.tasks.length > 0) {
-    lines.push(`  tasks:        ${loaded.config.tasks.length}`);
-    for (const task of loaded.config.tasks) {
+
+  const lines: string[] = [];
+  lines.push(`Assignment: ${result.config.name}`);
+  if (result.config.cwd !== undefined) {
+    lines.push(`  cwd:          ${result.config.cwd}`);
+  }
+  lines.push(`  maxRetries:   ${result.config.maxRetries}`);
+  if (result.config.tasks.length > 0) {
+    lines.push(`  tasks:        ${result.config.tasks.length}`);
+    for (const task of result.config.tasks) {
       lines.push(`    - ${task.id}: ${task.title}`);
     }
   }
-  const varNames = Object.keys(loaded.config.vars);
+  const varNames = Object.keys(result.config.vars);
   if (varNames.length > 0) {
     lines.push(`  vars:         ${varNames.join(", ")}`);
   }
-  if (loaded.config.lockedFields.length > 0) {
-    lines.push(`  lockedFields: ${loaded.config.lockedFields.join(", ")}`);
+  if (result.config.lockedFields.length > 0) {
+    lines.push(`  lockedFields: ${result.config.lockedFields.join(", ")}`);
   }
-  lines.push(`  source:       ${loaded.sourcePath}`);
-  if (loaded.instructions) {
+  lines.push(`  source:       ${result.sourcePath}`);
+  if (result.instructions) {
     lines.push("");
-    lines.push(loaded.instructions);
+    lines.push(result.instructions);
   }
   return `${lines.join("\n")}\n`;
 }

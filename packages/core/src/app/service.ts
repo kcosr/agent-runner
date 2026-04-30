@@ -75,7 +75,7 @@ import {
   unarchiveRun,
 } from "../core/commands/service.js";
 import type { LoadedLauncherDefinition } from "../core/config/launchers.js";
-import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
+import type { AgentConfig, AssignmentConfig, TaskDef } from "../core/config/schema.js";
 import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
 import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
 import { reconfigureInitializedRun } from "../core/run/reconfigure.js";
@@ -104,6 +104,11 @@ export type DefinitionDetail =
   | {
       kind: "launcher";
       definition: LoadedLauncherDefinition;
+    }
+  | {
+      kind: "task";
+      task: TaskDef;
+      sourcePath: string;
     };
 
 export interface RunCommandOverrides {
@@ -158,6 +163,13 @@ export interface MutationAuditContext extends RunEventOrigin {}
 type AuditEnvelopeEmitter = (envelope: RunAuditEnvelope) => void;
 
 function toDefinitionDetail(result: ReturnType<typeof showDefinition>): DefinitionDetail {
+  if (result.kind === "task") {
+    return {
+      kind: "task",
+      task: result.loaded.task,
+      sourcePath: result.loaded.sourcePath,
+    };
+  }
   if (result.kind === "launcher") {
     return {
       kind: "launcher",
@@ -364,13 +376,13 @@ export function getAttachment(
 }
 
 export function getDefinitionList(
-  kind: "agent" | "assignment" | "launcher",
+  kind: "agent" | "assignment" | "launcher" | "task",
 ): ReturnType<typeof listDefinitions> {
   return listDefinitions(kind);
 }
 
 export function getDefinition(
-  kind: "agent" | "assignment" | "launcher",
+  kind: "agent" | "assignment" | "launcher" | "task",
   target: string,
   cwd?: string,
 ): DefinitionDetail {
