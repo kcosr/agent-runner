@@ -170,11 +170,11 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   const logPath = join(outcome.workspaceDir, "attempts", "01.json");
   assert.ok(existsSync(logPath), "attempts/01.json exists");
   const log = JSON.parse(readFileSync(logPath, "utf8"));
-  assert.equal(log.schemaVersion, 2);
+  assert.equal(log.schemaVersion, 3);
   assert.equal(log.runId, outcome.runId);
   assert.equal(log.attemptNumber, 1);
   assert.equal(log.attemptIndexInSession, 0);
-  assert.equal(log.stdout, "");
+  assert.equal("stdout" in log, false);
   assert.equal(log.stderr, "raw stderr text");
   assert.equal(existsSync(join(outcome.workspaceDir, "attempts", "01.stdout.log")), false);
 });
@@ -243,7 +243,7 @@ test("manifest: TASK_RUNNER_CAPTURE_BACKEND_STDOUT writes raw stdout sidecars", 
   );
 
   const log = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
-  assert.equal(log.stdout, "");
+  assert.equal("stdout" in log, false);
   assert.equal(log.stderr, "raw stderr text");
   assert.equal(
     readFileSync(join(outcome.workspaceDir, "attempts", "01.stdout.log"), "utf8"),
@@ -285,7 +285,7 @@ test("manifest: stdout sidecar append failures do not fail the attempt", async (
 
   assert.equal(outcome.manifest.status, "success");
   const log = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
-  assert.equal(log.stdout, "");
+  assert.equal("stdout" in log, false);
   assert.equal(log.stderr, "raw stderr text");
 });
 
@@ -314,7 +314,7 @@ test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS no longer enables stdout capture",
   );
 
   const log = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
-  assert.equal(log.stdout, "");
+  assert.equal("stdout" in log, false);
   assert.equal(log.stderr, "old env stderr");
   assert.equal(existsSync(join(outcome.workspaceDir, "attempts", "01.stdout.log")), false);
 });
@@ -354,8 +354,8 @@ test("manifest: attempt records capture attempt logs and session ids", async () 
   assert.equal(m.attemptRecords[1].logPath, "attempts/02.json");
   const log1 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
   const log2 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "02.json"), "utf8"));
-  assert.equal(log1.stdout, "");
-  assert.equal(log2.stdout, "");
+  assert.equal("stdout" in log1, false);
+  assert.equal("stdout" in log2, false);
   assert.equal(log1.attemptNumber, 1);
   assert.equal(log2.attemptNumber, 2);
 
@@ -520,7 +520,7 @@ test("manifest: thrown backend launch errors still settle the run as error", asy
   assert.equal(onDisk.sessions[0].lastAttemptNumber, 1);
 
   const log = JSON.parse(readFileSync(join(workspaceDir, "attempts", "01.json"), "utf8"));
-  assert.equal(log.stdout, "");
+  assert.equal("stdout" in log, false);
   assert.match(log.stderr, /spawn claude ENOENT/);
 });
 

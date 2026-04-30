@@ -340,7 +340,7 @@ test("execute-after-init appends ordered created/started/attempt/finished record
   const attemptLog = JSON.parse(
     readFileSync(join(resumed.workspaceDir, resumed.manifest.attemptRecords[0].logPath), "utf8"),
   );
-  assert.equal(attemptLog.stdout, "");
+  assert.equal("stdout" in attemptLog, false);
   assert.equal(attemptLog.stderr, "stderr-secret");
 });
 
@@ -372,7 +372,7 @@ test("stdout sidecars stay out of compact audit records and attempt JSON", async
   const attemptLog = JSON.parse(
     readFileSync(join(outcome.workspaceDir, outcome.manifest.attemptRecords[0].logPath), "utf8"),
   );
-  assert.equal(attemptLog.stdout, "");
+  assert.equal("stdout" in attemptLog, false);
   assert.equal(attemptLog.stderr, "stderr-secret");
   assert.equal(
     readFileSync(join(outcome.workspaceDir, "attempts", "01.stdout.log"), "utf8"),

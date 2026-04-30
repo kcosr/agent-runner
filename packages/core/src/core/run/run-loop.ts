@@ -2227,14 +2227,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       | undefined;
   }): void => {
     const logPath = writeAttemptLog(workspaceDir, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId,
       attemptNumber: record.attemptNumber,
       sessionIndex,
       attemptIndexInSession: record.attemptIndexInSession,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
-      stdout: "",
       stderr: record.rawStderr,
     });
     withTaskStateLock(workspaceDir, () => {

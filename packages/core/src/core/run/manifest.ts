@@ -45,14 +45,13 @@ export function attemptStdoutLogRelativePath(attemptNumber: number): string {
 }
 
 export interface AttemptLog {
-  schemaVersion: 2;
+  schemaVersion: 3;
   runId: string;
   attemptNumber: number;
   sessionIndex: number;
   attemptIndexInSession: number;
   startedAt: string;
   endedAt: string;
-  stdout: string;
   stderr: string;
 }
 

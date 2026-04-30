@@ -216,38 +216,35 @@ function readAttemptLogForRecord(
     const raw = readFileSync(absoluteLogPath, "utf8");
     const parsed = JSON.parse(raw) as AttemptLog;
     if (
-      parsed.schemaVersion !== 2 ||
+      parsed.schemaVersion !== 3 ||
       parsed.runId !== runId ||
       parsed.attemptNumber !== record.attemptNumber ||
       parsed.sessionIndex !== record.sessionIndex ||
       parsed.attemptIndexInSession !== record.attemptIndexInSession
     ) {
       throw new Error(
-        `attempt log ${record.logPath} does not match schemaVersion 2 record identity`,
+        `attempt log ${record.logPath} does not match schemaVersion 3 record identity`,
       );
     }
     finish({
       fallback: false,
       stderrBytes: parsed.stderr.length,
-      stdoutBytes: parsed.stdout.length,
     });
     return parsed;
   } catch {
     const fallback: AttemptLog = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId,
       attemptNumber: record.attemptNumber,
       sessionIndex: record.sessionIndex,
       attemptIndexInSession: record.attemptIndexInSession,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
-      stdout: "",
       stderr: "",
     };
     finish({
       fallback: true,
       stderrBytes: 0,
-      stdoutBytes: 0,
     });
     return fallback;
   }

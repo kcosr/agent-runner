@@ -254,7 +254,7 @@ function normalizeAttemptLog(workspaceDir, manifestRunId, record) {
   if (!isObjectRecord(parsed)) {
     throw new Error(`${record.logPath} root is not an object`);
   }
-  if (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) {
+  if (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2 && parsed.schemaVersion !== 3) {
     throw new Error(`${record.logPath} has unsupported schemaVersion ${parsed.schemaVersion}`);
   }
   const attemptNumber =
@@ -271,7 +271,7 @@ function normalizeAttemptLog(workspaceDir, manifestRunId, record) {
   return {
     path: logPath,
     next: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId: manifestRunId,
       attemptNumber: record.attemptNumber,
       sessionIndex: record.sessionIndex,
@@ -284,7 +284,6 @@ function normalizeAttemptLog(workspaceDir, manifestRunId, record) {
         typeof parsed.endedAt === "string"
           ? parsed.endedAt
           : requireString(record.endedAt, "endedAt"),
-      stdout: typeof parsed.stdout === "string" ? parsed.stdout : "",
       stderr: typeof parsed.stderr === "string" ? parsed.stderr : "",
     },
     previous: parsed,
