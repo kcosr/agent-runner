@@ -8,6 +8,7 @@
   `queuedResumeMessages` as manifest state and expose queued resume
   messages on `RunDetail` plus `queuedResumeMessageCount` on `RunSummary`.
   Use `scripts/migrate-manifests-v18.mjs` before resuming schema v17 runs.
+  ([#127](https://github.com/kcosr/task-runner/pull/127))
 - Manifest schema version is now `17`. Runs now freeze selected
   backend-owned config on `manifest.backendConfig`, and the old
   per-backend manifest, reset-seed, daemon override, and hook-context config
@@ -121,6 +122,7 @@
   queue; the web Chat composer labels live-run submits as `Queue`, shows
   queued messages with remove controls, and run cards display the queued
   count.
+  ([#127](https://github.com/kcosr/task-runner/pull/127))
 - Added custom backend modules under
   `${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`.
   Modules are trusted local code, are not sandboxed, are cached for the
