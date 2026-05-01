@@ -340,6 +340,72 @@ test("sync upgrades an overlapping task-runner attempt instead of double-countin
   assert.equal(first.manifest.sessions[0].provenance.kind, "backend_session");
 });
 
+test("sync upgrades an overlapping retry attempt without promoting the mixed session", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const first = await runIn(dir, {
+    backend: historyBackend({
+      turns: [],
+      invoke: async () => ({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        sessionId: "session-retry-overlap",
+        transcript: "first answer",
+        rawStdout: "",
+        rawStderr: "",
+      }),
+    }),
+  });
+  const firstAttempt = first.manifest.attemptRecords[0];
+  const session = first.manifest.sessions[0];
+  const retryAttempt = {
+    ...firstAttempt,
+    attemptNumber: 2,
+    attemptIndexInSession: 1,
+    startedAt: "2026-04-20T11:04:00.000Z",
+    endedAt: "2026-04-20T11:05:00.000Z",
+    transcript: "retry answer",
+    logPath: "attempts/02.json",
+  };
+  first.manifest.attemptRecords.push(retryAttempt);
+  first.manifest.totalAttemptCount = 2;
+  session.endedAt = retryAttempt.endedAt;
+  session.lastAttemptNumber = 2;
+  session.maxAttemptsPerSession = 2;
+
+  const result = await syncBackendSessionHistory({
+    manifest: first.manifest,
+    backend: historyBackend({
+      source: fileSource("retry-overlap", "v2"),
+      turns: [
+        {
+          backendTurnId: "backend-turn-retry",
+          status: "complete",
+          startedAt: retryAttempt.startedAt,
+          updatedAt: retryAttempt.endedAt,
+          userText: retryAttempt.prompt,
+          assistantText: retryAttempt.transcript,
+        },
+      ],
+    }),
+    mode: "sync",
+  });
+
+  assert.equal(result.status, "synced");
+  assert.equal(first.manifest.attemptRecords.length, 2);
+  assert.equal(first.manifest.totalAttemptCount, 2);
+  assert.equal(first.manifest.sessions.length, 1);
+  assert.equal(first.manifest.sessions[0].provenance.kind, "task_runner");
+  assert.equal(first.manifest.sessions[0].firstAttemptNumber, 1);
+  assert.equal(first.manifest.sessions[0].lastAttemptNumber, 2);
+  assert.equal(first.manifest.sessions[0].maxAttemptsPerSession, 2);
+  assert.equal(first.manifest.attemptRecords[0].provenance.kind, "task_runner");
+  assert.equal(first.manifest.attemptRecords[1].provenance.kind, "backend_session");
+  assert.equal(first.manifest.attemptRecords[1].provenance.backendTurnId, "backend-turn-retry");
+});
+
 test("sync rollback leaves manifest unchanged except lastError when backend result is not persistable", async () => {
   const dir = tempDir();
   writeProject(dir);

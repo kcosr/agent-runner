@@ -281,7 +281,7 @@ test("command services: passive backend session mutations update only metadata a
     manifest.archivedAt = "2026-04-17T10:00:00.000Z";
     manifest.endedAt = "2026-04-17T09:59:00.000Z";
     manifest.exitCode = 0;
-    manifest.totalAttemptCount = 2;
+    manifest.totalAttemptCount = 3;
     manifest.totalSessionCount = 2;
     manifest.backendSessionId = "thread-original";
     manifest.sessions = [
@@ -294,7 +294,7 @@ test("command services: passive backend session mutations update only metadata a
         message: "seed message",
         brief: "seed brief",
         firstAttemptNumber: 1,
-        lastAttemptNumber: 2,
+        lastAttemptNumber: 3,
         maxAttemptsPerSession: 3,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "thread-original",
@@ -369,6 +369,32 @@ test("command services: passive backend session mutations update only metadata a
           source: { kind: "custom", label: "test", changeToken: { version: 1 } },
         },
       },
+      {
+        attemptNumber: 3,
+        sessionIndex: 0,
+        attemptIndexInSession: 1,
+        startedAt: "2026-04-17T09:10:00.000Z",
+        endedAt: "2026-04-17T09:20:00.000Z",
+        prompt: "mixed imported prompt",
+        sessionIdAtStart: "thread-original",
+        sessionIdCaptured: "thread-original",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "mixed imported transcript",
+        logPath: "attempts/03.json",
+        invalidStatuses: [],
+        provenance: {
+          kind: "backend_session",
+          backend: "passive",
+          backendSessionId: "thread-original",
+          backendTurnId: "mixed-stale-turn",
+          importedAt: "2026-04-17T09:20:00.000Z",
+          lastSyncedAt: "2026-04-17T09:20:00.000Z",
+          mode: "sync",
+          source: { kind: "custom", label: "test", changeToken: { version: 1 } },
+        },
+      },
     ];
     manifest.backendSessionSync = {
       backend: "passive",
@@ -377,7 +403,7 @@ test("command services: passive backend session mutations update only metadata a
       cursor: null,
       lastSyncedAt: "2026-04-17T09:30:00.000Z",
       lastError: null,
-      importedTurnIds: ["stale-turn"],
+      importedTurnIds: ["stale-turn", "mixed-stale-turn"],
       openTurnIds: [],
     };
   });
@@ -401,7 +427,12 @@ test("command services: passive backend session mutations update only metadata a
     ...preservedBefore,
     totalAttemptCount: 1,
     totalSessionCount: 1,
-    sessions: before.sessions.filter((record) => record.provenance.kind === "task_runner"),
+    sessions: before.sessions
+      .filter((record) => record.provenance.kind === "task_runner")
+      .map((record) => ({
+        ...record,
+        lastAttemptNumber: 1,
+      })),
     attemptRecords: before.attemptRecords.filter(
       (record) => record.provenance.kind === "task_runner",
     ),

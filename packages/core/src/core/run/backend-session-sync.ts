@@ -266,19 +266,33 @@ function existingCompleteTurnMatches(params: {
   turn: BackendSyncedTurn;
 }): boolean {
   const { attempt, session, backendSessionId, turn } = params;
-  return (
+  const attemptMatches =
     attempt.startedAt === turn.startedAt &&
     attempt.endedAt === turn.updatedAt &&
     attempt.prompt === (turn.userText ?? "") &&
     attempt.transcript === turn.assistantText &&
     attempt.sessionIdAtStart === backendSessionId &&
-    attempt.sessionIdCaptured === backendSessionId &&
+    attempt.sessionIdCaptured === backendSessionId;
+  if (!attemptMatches || attempt.provenance.kind !== "backend_session") {
+    return false;
+  }
+  if (session.provenance.kind !== "backend_session") {
+    return true;
+  }
+  return (
     session.startedAt === turn.startedAt &&
     session.endedAt === turn.updatedAt &&
     session.message === turn.userText &&
     session.brief === (turn.userText ?? "") &&
     session.backendSessionIdAtStart === backendSessionId &&
     session.backendSessionIdAtEnd === backendSessionId
+  );
+}
+
+function shouldPromoteSessionFromBackendTurn(session: SessionRecord): boolean {
+  return (
+    session.provenance.kind === "backend_session" ||
+    session.firstAttemptNumber === session.lastAttemptNumber
   );
 }
 
@@ -332,13 +346,15 @@ function upsertCompleteTurn(params: {
       turn,
     });
     existingAttempt.provenance = provenance;
-    existingSession.startedAt = turn.startedAt;
-    existingSession.endedAt = turn.updatedAt;
-    existingSession.message = turn.userText;
-    existingSession.brief = turn.userText ?? "";
-    existingSession.backendSessionIdAtStart = backendSessionId;
-    existingSession.backendSessionIdAtEnd = backendSessionId;
-    existingSession.provenance = provenance;
+    if (shouldPromoteSessionFromBackendTurn(existingSession)) {
+      existingSession.startedAt = turn.startedAt;
+      existingSession.endedAt = turn.updatedAt;
+      existingSession.message = turn.userText;
+      existingSession.brief = turn.userText ?? "";
+      existingSession.backendSessionIdAtStart = backendSessionId;
+      existingSession.backendSessionIdAtEnd = backendSessionId;
+      existingSession.provenance = provenance;
+    }
     return { changed: true, addedAttemptNumber: null, createdLogPath: null };
   }
 

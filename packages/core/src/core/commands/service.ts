@@ -685,19 +685,47 @@ function validateBackendSessionId(sessionId: string): string {
 }
 
 function dropImportedBackendSessionHistory(manifest: RunManifest): void {
+  const attemptsBySessionIndex = new Map<number, typeof manifest.attemptRecords>();
+  for (const record of manifest.attemptRecords) {
+    const records = attemptsBySessionIndex.get(record.sessionIndex) ?? [];
+    records.push(record);
+    attemptsBySessionIndex.set(record.sessionIndex, records);
+  }
   const droppedSessionIndexes = new Set(
     manifest.sessions
-      .filter((record) => record.provenance.kind === "backend_session")
+      .filter((record) => {
+        const attempts = attemptsBySessionIndex.get(record.sessionIndex) ?? [];
+        if (attempts.length === 0) {
+          return record.provenance.kind === "backend_session";
+        }
+        return attempts.every((attempt) => attempt.provenance.kind === "backend_session");
+      })
       .map((record) => record.sessionIndex),
-  );
-  manifest.sessions = manifest.sessions.filter(
-    (record) => record.provenance.kind !== "backend_session",
   );
   manifest.attemptRecords = manifest.attemptRecords.filter(
     (record) =>
       record.provenance.kind !== "backend_session" &&
       !droppedSessionIndexes.has(record.sessionIndex),
   );
+  const remainingAttemptsBySessionIndex = new Map<number, typeof manifest.attemptRecords>();
+  for (const record of manifest.attemptRecords) {
+    const records = remainingAttemptsBySessionIndex.get(record.sessionIndex) ?? [];
+    records.push(record);
+    remainingAttemptsBySessionIndex.set(record.sessionIndex, records);
+  }
+  manifest.sessions = manifest.sessions
+    .filter((record) => !droppedSessionIndexes.has(record.sessionIndex))
+    .map((record) => {
+      const attempts = remainingAttemptsBySessionIndex.get(record.sessionIndex);
+      if (!attempts || attempts.length === 0) {
+        return record;
+      }
+      return {
+        ...record,
+        firstAttemptNumber: Math.min(...attempts.map((attempt) => attempt.attemptNumber)),
+        lastAttemptNumber: Math.max(...attempts.map((attempt) => attempt.attemptNumber)),
+      };
+    });
   manifest.totalSessionCount = manifest.sessions.length;
   manifest.totalAttemptCount = manifest.attemptRecords.length;
 }
