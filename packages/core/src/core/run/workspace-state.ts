@@ -22,6 +22,15 @@ interface LockAcquisitionStats {
   retries: number;
 }
 
+export type TaskStateLockAttempt<T> =
+  | {
+      acquired: true;
+      value: T;
+    }
+  | {
+      acquired: false;
+    };
+
 function sleep(ms: number): void {
   Atomics.wait(LOCK_WAIT_BUFFER, 0, 0, ms);
 }
@@ -61,6 +70,24 @@ function acquireFilesystemLock(lockPath: string): LockAcquisitionStats {
   }
 }
 
+function tryAcquireFilesystemLock(lockPath: string): LockAcquisitionStats | null {
+  const startedAt = Date.now();
+  mkdirSync(dirname(lockPath), { recursive: true });
+  try {
+    mkdirSync(lockPath);
+    return {
+      waitMs: Date.now() - startedAt,
+      retries: 0,
+    };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === "EEXIST") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function acquireFilesystemLockAsync(lockPath: string): Promise<LockAcquisitionStats> {
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   const startedAt = Date.now();
@@ -90,6 +117,36 @@ async function acquireFilesystemLockAsync(lockPath: string): Promise<LockAcquisi
 
 function releaseFilesystemLock(lockPath: string): void {
   rmSync(lockPath, { recursive: true, force: true });
+}
+
+async function tryWithFilesystemLockAsync<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+): Promise<TaskStateLockAttempt<T>> {
+  const shouldLog = debugPerfEnabled();
+  const queueStartedAt = shouldLog ? Date.now() : 0;
+  if (ASYNC_LOCK_QUEUES.has(lockPath)) {
+    return { acquired: false };
+  }
+  const acquisition = tryAcquireFilesystemLock(lockPath);
+  if (!acquisition) {
+    return { acquired: false };
+  }
+  const lockAcquiredAt = shouldLog ? Date.now() : 0;
+  try {
+    return { acquired: true, value: await fn() };
+  } finally {
+    releaseFilesystemLock(lockPath);
+    if (shouldLog) {
+      debugPerfLog("lock.async.try", {
+        lockPath,
+        queuedMs: lockAcquiredAt - queueStartedAt,
+        waitMs: acquisition.waitMs,
+        holdMs: Date.now() - lockAcquiredAt,
+        retries: acquisition.retries,
+      });
+    }
+  }
 }
 
 function withFilesystemLock<T>(lockPath: string, fn: () => T): T {
@@ -164,6 +221,13 @@ export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T {
 
 export function withTaskStateLockAsync<T>(workspaceDir: string, fn: () => Promise<T>): Promise<T> {
   return withFilesystemLockAsync(taskLockPath(workspaceDir), fn);
+}
+
+export function tryWithTaskStateLockAsync<T>(
+  workspaceDir: string,
+  fn: () => Promise<T>,
+): Promise<TaskStateLockAttempt<T>> {
+  return tryWithFilesystemLockAsync(taskLockPath(workspaceDir), fn);
 }
 
 export function withGlobalStateLock<T>(lockName: string, fn: () => T, env?: NodeJS.ProcessEnv): T;

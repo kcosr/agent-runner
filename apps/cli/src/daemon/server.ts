@@ -123,8 +123,8 @@ import {
   deriveScheduleState,
 } from "@task-runner/core/core/run/schedule.js";
 import {
+  tryWithTaskStateLockAsync,
   withTaskStateLock,
-  withTaskStateLockAsync,
 } from "@task-runner/core/core/run/workspace-state.js";
 import {
   debugPerfEnabled,
@@ -427,7 +427,7 @@ class SessionSyncManager {
     this.inFlightRunIds.add(runId);
     this.lastSyncAttemptMsByRunId.set(runId, Date.now());
     try {
-      await withTaskStateLockAsync(manifest.workspaceDir, async () => {
+      await tryWithTaskStateLockAsync(manifest.workspaceDir, async () => {
         const latest = this.readEligibleManifest(runId);
         if (!latest) {
           return;

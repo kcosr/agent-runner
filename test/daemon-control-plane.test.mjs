@@ -6398,6 +6398,73 @@ test("daemon session sync publishes audit failures and persists lastError", asyn
   );
 });
 
+test("daemon session sync skips busy task-state locks without failure audit", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-locked")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+    manifest.backendSessionSync = {
+      backend: "syncer",
+      backendSessionId: "sync-session",
+      source: { kind: "custom", label: "sync-fixture", changeToken: { token: "v0" } },
+      cursor: { token: "v0" },
+      lastSyncedAt: "2026-04-26T10:09:00.000Z",
+      lastError: null,
+      importedTurnIds: [],
+      openTurnIds: [],
+    };
+  });
+  const lockPath = join(run.workspaceDir, ".task-state.lock");
+  mkdirSync(lockPath);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      const auditEvents = [];
+      try {
+        const auditSub = await client.subscribe(
+          { channel: "run_audit", runId: run.runId },
+          (event) => {
+            if (event.method === "run.audit") {
+              auditEvents.push(event.event.type);
+            }
+          },
+        );
+        await sleep(650);
+
+        const state = readSyncState(statePath);
+        assert.equal(state.resolveCalls, 0);
+        assert.equal(state.readCalls, 0);
+        const manifest = readManifest(run.workspaceDir);
+        assert.equal(manifest.backendSessionSync.lastError, null);
+        assert.equal(manifest.attemptRecords.length, 0);
+        assert.equal(auditEvents.includes("run.backend_session_history_sync_failed"), false);
+
+        await client.unsubscribe(auditSub);
+      } finally {
+        await client.close();
+        await server.close();
+        rmSync(lockPath, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
 test("daemon session sync close clears pending poll timers", async () => {
   const dir = tempDir();
   const statePath = join(dir, "sync-state.json");
