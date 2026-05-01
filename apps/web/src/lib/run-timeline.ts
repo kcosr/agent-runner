@@ -80,6 +80,8 @@ export function applyEnvelope(
       case "caller_instructions":
       case "run_started":
         return { history: next, requiresReload: false, showStaleWarning: false };
+      case "timeline_invalidated":
+        return { history, requiresReload: true, showStaleWarning: false };
       case "attempt_started":
         next.attempts = next.attempts.map((attempt) =>
           attempt.live ? { ...attempt, live: false } : attempt,

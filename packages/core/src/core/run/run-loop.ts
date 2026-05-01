@@ -193,6 +193,10 @@ export type RunEvent =
       sessionIndex: number | null;
     }
   | {
+      type: "timeline_invalidated";
+      reason: "backend_session_sync";
+    }
+  | {
       type: "attempt_started";
       attemptNumber: number;
       sessionIndex: number;

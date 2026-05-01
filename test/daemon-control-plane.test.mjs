@@ -6295,7 +6295,7 @@ test("daemon session sync ignores summary-only and running run subscriptions", a
   );
 });
 
-test("daemon session sync polls timeline and audit subscribers without synthetic timeline events", async () => {
+test("daemon session sync invalidates timeline subscribers after importing backend history", async () => {
   const dir = tempDir();
   const statePath = join(dir, "sync-state.json");
   writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
@@ -6354,7 +6354,10 @@ test("daemon session sync polls timeline and audit subscribers without synthetic
           () => (auditEvents.includes("run.backend_session_history_synced") ? true : null),
           "sync audit event",
         );
-        assert.deepEqual(timelineEvents, []);
+        await waitForValue(
+          () => (timelineEvents.includes("timeline_invalidated") ? true : null),
+          "timeline invalidation event",
+        );
         await client.unsubscribe(timelineSub);
         await client.unsubscribe(auditSub);
       } finally {

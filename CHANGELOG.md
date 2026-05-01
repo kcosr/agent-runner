@@ -446,6 +446,9 @@
 
 ### Fixed
 
+- Web dashboard Chat now refreshes timeline history after subscribed
+  backend-session sync imports new attempts, so watched sessions update
+  without reselecting the run.
 - Web dashboard selected-run surfaces once again span the full viewport
   height on mobile, covering the app toolbar while the drawer is open.
 - Web dashboard user chat bubbles now use a stronger neutral surface in

@@ -301,6 +301,7 @@ class SessionSyncManager {
       activeRuns: Map<string, ActiveRunRecord>;
       refreshManifestIndexEntry(runId: string): ListedRunManifest;
       publishMutationResult(runId: string): void;
+      publishTimelineInvalidated(runId: string): void;
       publishAudit(envelope: RunAuditEnvelope): void;
       auditContext: ReturnType<typeof daemonMutationContext>;
     },
@@ -455,6 +456,7 @@ class SessionSyncManager {
             });
             this.options.publishAudit(envelope);
             this.options.publishMutationResult(runId);
+            this.options.publishTimelineInvalidated(runId);
           }
         } catch (error) {
           if (recordBackendSessionSyncError(latest, formatDaemonError(error))) {
@@ -1120,7 +1122,10 @@ export async function serveDaemon(
     const history = app.getRunTimelineHistory(runId);
     const active = activeRuns.get(runId);
     const projected = !active
-      ? history
+      ? {
+          ...history,
+          lastCursor: lastTimelineCursorByRun.get(runId) ?? history.lastCursor,
+        }
       : {
           runId,
           attempts: active.currentAttempt
@@ -1804,15 +1809,22 @@ export async function serveDaemon(
       subscriberCount: timelineSubscriptions.size,
     });
     const active = activeRuns.get(runId);
-    if (!active) {
-      finish({ active: false, published: 0 });
-      return;
+    const cursor = active ? active.nextCursor + 1 : (lastTimelineCursorByRun.get(runId) ?? 0) + 1;
+    if (active) {
+      active.nextCursor = cursor;
     }
-    const cursor = active.nextCursor + 1;
-    active.nextCursor = cursor;
     lastTimelineCursorByRun.set(runId, cursor);
     const envelope: RunTimelineEnvelope = { runId, cursor, event };
-    bufferTimelineEvent(active, envelope);
+    if (active) {
+      bufferTimelineEvent(active, envelope);
+    } else {
+      const nextEvents = [...(recentTimelineBuffers.get(runId)?.events ?? []), envelope];
+      if (nextEvents.length > MAX_TIMELINE_BUFFER_EVENTS) {
+        const overflow = nextEvents.length - MAX_TIMELINE_BUFFER_EVENTS;
+        nextEvents.splice(0, overflow);
+      }
+      rememberRecentTimelineBuffer(runId, nextEvents);
+    }
     let published = 0;
     for (const [id, subscription] of timelineSubscriptions) {
       if (subscription.runId !== runId) {
@@ -1826,9 +1838,16 @@ export async function serveDaemon(
       }
     }
     finish({
-      active: true,
+      active: Boolean(active),
       cursor,
       published,
+    });
+  };
+
+  const publishTimelineInvalidated = (runId: string): void => {
+    publishTimeline(runId, {
+      type: "timeline_invalidated",
+      reason: "backend_session_sync",
     });
   };
 
@@ -1925,6 +1944,7 @@ export async function serveDaemon(
         summary: getProjectedSummary(runId),
         detail: getProjectedDetail(runId),
       }),
+    publishTimelineInvalidated,
     publishAudit,
     auditContext: mutationAuditContext,
   });
