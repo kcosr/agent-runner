@@ -17,6 +17,7 @@ export interface RunChatSystemRow {
   kind: "system";
   sessionIndex: number;
   source: "initial" | "resume";
+  status: "pending" | "sent";
   text: string;
 }
 
@@ -65,12 +66,11 @@ function toAssistantRow(
 }
 
 function sessionUserMessage(
-  run: RunDetail,
   sessionIndex: number,
   session: RunSessionSummary | undefined,
 ): string | null {
   if (sessionIndex === 0) {
-    return normalizedMessage(run.message);
+    return null;
   }
   return normalizedMessage(session?.message ?? null);
 }
@@ -139,6 +139,26 @@ function deriveArtifactsByAttempt(
 }
 
 export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): RunChatRow[] {
+  const pendingPromptAvailable =
+    (run.status === "initialized" || run.status === "ready") &&
+    run.totalAttemptCount === 0 &&
+    history.attempts.length === 0;
+  if (pendingPromptAvailable) {
+    const pendingPrompt = normalizedMessage(run.pendingPrompt);
+    if (pendingPrompt !== null) {
+      return [
+        {
+          id: "session:0:system:pending",
+          kind: "system",
+          sessionIndex: 0,
+          source: "initial",
+          status: "pending",
+          text: pendingPrompt,
+        },
+      ];
+    }
+  }
+
   const attemptsBySession = new Map<number, RunTimelineAttempt[]>();
   for (const attempt of history.attempts) {
     const attempts = attemptsBySession.get(attempt.sessionIndex) ?? [];
@@ -158,7 +178,7 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
   for (const sessionIndex of [...sessionIndexes].sort((left, right) => left - right)) {
     const session = sessionsByIndex.get(sessionIndex);
     const attempts = attemptsBySession.get(sessionIndex) ?? [];
-    const userMessage = sessionUserMessage(run, sessionIndex, session);
+    const userMessage = sessionUserMessage(sessionIndex, session);
     const source = sessionSource(sessionIndex);
     if (userMessage !== null) {
       rows.push({
@@ -173,13 +193,14 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
     for (const attempt of attempts) {
       const systemMessage = normalizedMessage(attempt.prompt);
       const promptCoveredByUserMessage =
-        attempt.attemptIndexInSession === 0 && userMessage !== null;
+        sessionIndex > 0 && attempt.attemptIndexInSession === 0 && userMessage !== null;
       if (systemMessage !== null && !promptCoveredByUserMessage) {
         rows.push({
           id: `session:${sessionIndex}:system:${attempt.attemptNumber}`,
           kind: "system",
           sessionIndex,
           source,
+          status: "sent",
           text: systemMessage,
         });
       }

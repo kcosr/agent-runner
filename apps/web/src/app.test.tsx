@@ -2439,6 +2439,107 @@ describe("web app", () => {
     );
   });
 
+  it("renders a pending Chat system card before the first attempt starts", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "initialized",
+          effectiveStatus: "initialized",
+          activeTask: null,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          currentSession: null,
+          lastSession: null,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "initialized",
+          effectiveStatus: "initialized",
+          isLive: false,
+          activeTask: null,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          sessions: [],
+          currentSession: null,
+          lastSession: null,
+          message: "Review this handoff before launch.",
+          pendingPrompt: "## Prepared prompt\n\n- Check setup",
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 0,
+          attempts: [],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    const pendingLabel = await within(chat).findByText("Pending prompt");
+    const pendingBubble = pendingLabel.closest(".chat-bubble--system-pending");
+    expect(pendingBubble).not.toBeNull();
+    expect(
+      within(chat).getByRole("heading", { level: 2, name: "Prepared prompt" }),
+    ).toBeInTheDocument();
+    expect(await within(chat).findByText("Check setup")).toBeInTheDocument();
+    expect(within(chat).queryByText("Review this handoff before launch.")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("No conversation yet")).not.toBeInTheDocument();
+  });
+
+  it("keeps the empty Chat state before attempts when there is no pending prompt", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "ready",
+          effectiveStatus: "ready",
+          activeTask: null,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          currentSession: null,
+          lastSession: null,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "ready",
+          effectiveStatus: "ready",
+          isLive: false,
+          activeTask: null,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          sessions: [],
+          currentSession: null,
+          lastSession: null,
+          message: "Initial request",
+          pendingPrompt: null,
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 0,
+          attempts: [],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("No conversation yet")).toBeInTheDocument();
+    expect(
+      await within(chat).findByText("This run has no user messages or attempts."),
+    ).toBeInTheDocument();
+    expect(within(chat).queryByText("Initial request")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("Pending prompt")).not.toBeInTheDocument();
+  });
+
   it("opens the existing attachment preview drawer from previewable Chat artifact cards", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     installFetchMock({

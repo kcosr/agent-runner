@@ -157,6 +157,87 @@ describe("deriveRunChatRows", () => {
     expect(rows).toEqual([]);
   });
 
+  it("derives a pending system row from an initialized run pending prompt before attempts exist", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        status: "initialized",
+        effectiveStatus: "initialized",
+        message: "  Initial request  ",
+        pendingPrompt: "  ## Pending prompt  ",
+      }),
+      makeHistory([]),
+    );
+
+    expect(rows).toEqual([
+      {
+        id: "session:0:system:pending",
+        kind: "system",
+        sessionIndex: 0,
+        source: "initial",
+        status: "pending",
+        text: "## Pending prompt",
+      },
+    ]);
+  });
+
+  it("derives a pending system row from a ready run without an initial user row", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        status: "ready",
+        effectiveStatus: "ready",
+        message: "Initial request",
+        pendingPrompt: "Ready pending prompt",
+      }),
+      makeHistory([]),
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: "system",
+      source: "initial",
+      status: "pending",
+      text: "Ready pending prompt",
+    });
+    expect(rows.some((row) => row.kind === "user")).toBe(false);
+  });
+
+  it("replaces the pending row with the first real attempt prompt once attempts exist", () => {
+    const pendingRun = makeRun({
+      status: "initialized",
+      effectiveStatus: "initialized",
+      message: "Initial request",
+      pendingPrompt: "Pending prompt",
+      sessions: [makeSession({ sessionIndex: 0, message: null })],
+    });
+
+    expect(deriveRunChatRows(pendingRun, makeHistory([]))).toMatchObject([
+      {
+        kind: "system",
+        status: "pending",
+        text: "Pending prompt",
+      },
+    ]);
+
+    const rows = deriveRunChatRows(
+      {
+        ...pendingRun,
+        status: "running",
+        effectiveStatus: "running",
+        totalAttemptCount: 1,
+      },
+      makeHistory([makeAttempt({ prompt: "First real attempt prompt" })]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["session:0:system:1", "session:0:assistant:1"]);
+    expect(rows[0]).toMatchObject({
+      kind: "system",
+      status: "sent",
+      text: "First real attempt prompt",
+    });
+    expect(rows.some((row) => row.id === "session:0:system:pending")).toBe(false);
+    expect(rows.some((row) => row.kind === "user")).toBe(false);
+  });
+
   it("sorts sessions and renders attempts chronologically", () => {
     const rows = deriveRunChatRows(
       makeRun({
@@ -188,7 +269,7 @@ describe("deriveRunChatRows", () => {
     );
 
     expect(rows.map((row) => row.id)).toEqual([
-      "session:0:user",
+      "session:0:system:1",
       "session:0:assistant:1",
       "session:0:assistant:2",
       "session:1:user",
@@ -196,9 +277,10 @@ describe("deriveRunChatRows", () => {
       "session:1:assistant:4",
     ]);
     expect(rows[0]).toMatchObject({
-      kind: "user",
+      kind: "system",
       source: "initial",
-      text: "Initial",
+      status: "sent",
+      text: "Prompt text",
     });
     expect(rows[3]).toMatchObject({
       kind: "user",
@@ -247,11 +329,13 @@ describe("deriveRunChatRows", () => {
     expect(rows[0]).toMatchObject({
       kind: "system",
       source: "initial",
+      status: "sent",
       text: "Initial bootstrap prompt",
     });
     expect(rows[2]).toMatchObject({
       kind: "system",
       source: "resume",
+      status: "sent",
       text: "Resume reminder",
     });
   });
@@ -284,14 +368,44 @@ describe("deriveRunChatRows", () => {
       "session:0:system:2",
       "session:0:assistant:2",
     ]);
-    expect(rows[0]).toMatchObject({ kind: "system", text: "Initial bootstrap prompt" });
+    expect(rows[0]).toMatchObject({
+      kind: "system",
+      status: "sent",
+      text: "Initial bootstrap prompt",
+    });
     expect(rows[2]).toMatchObject({
       kind: "system",
+      status: "sent",
       text: "Some tasks are not yet completed. Please continue.",
     });
   });
 
-  it("prefers the user message over the prompt when both are present", () => {
+  it("renders the initial attempt prompt instead of a duplicate initial user message", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        message: "User typed initial",
+        sessions: [makeSession({ sessionIndex: 0, message: null })],
+      }),
+      makeHistory([
+        makeAttempt({
+          sessionIndex: 0,
+          attemptNumber: 1,
+          prompt: "agent prefix\n\nUser typed initial",
+        }),
+      ]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["session:0:system:1", "session:0:assistant:1"]);
+    expect(rows[0]).toMatchObject({
+      kind: "system",
+      source: "initial",
+      status: "sent",
+      text: "agent prefix\n\nUser typed initial",
+    });
+    expect(rows.some((row) => row.kind === "user")).toBe(false);
+  });
+
+  it("preserves resume-session user message behavior and follow-up system prompts", () => {
     const rows = deriveRunChatRows(
       makeRun({
         message: "User typed initial",
@@ -304,24 +418,34 @@ describe("deriveRunChatRows", () => {
         makeAttempt({
           sessionIndex: 0,
           attemptNumber: 1,
-          prompt: "agent prefix\n\nUser typed initial",
+          prompt: "Initial prompt",
         }),
         makeAttempt({
           sessionIndex: 1,
           attemptNumber: 2,
+          attemptIndexInSession: 0,
           prompt: "tasks-reminder\n\nUser typed resume",
+        }),
+        makeAttempt({
+          sessionIndex: 1,
+          attemptNumber: 3,
+          attemptIndexInSession: 1,
+          prompt: "Automatic retry prompt",
         }),
       ]),
     );
 
     expect(rows.map((row) => row.id)).toEqual([
-      "session:0:user",
+      "session:0:system:1",
       "session:0:assistant:1",
       "session:1:user",
       "session:1:assistant:2",
+      "session:1:system:3",
+      "session:1:assistant:3",
     ]);
-    expect(rows[0]).toMatchObject({ kind: "user", text: "User typed initial" });
+    expect(rows[0]).toMatchObject({ kind: "system", text: "Initial prompt" });
     expect(rows[2]).toMatchObject({ kind: "user", text: "User typed resume" });
+    expect(rows[4]).toMatchObject({ kind: "system", text: "Automatic retry prompt" });
   });
 
   it("retains live or empty transcript states on the assistant row", () => {
