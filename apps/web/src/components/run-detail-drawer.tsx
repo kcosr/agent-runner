@@ -23,6 +23,7 @@ import {
   useState,
 } from "react";
 import type { ReconfigureRunPatch } from "../lib/api-client.js";
+import { isPreviewableAttachment } from "../lib/attachments.js";
 import { type AuditMessagePart, formatAuditEvent } from "../lib/audit-formatter.js";
 import {
   formatBytes,
@@ -46,7 +47,6 @@ import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
-import { isPreviewableAttachment } from "./attachment-preview-drawer.js";
 import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import {
   ArchiveIcon,

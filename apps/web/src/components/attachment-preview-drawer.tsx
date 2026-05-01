@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { createApiClient } from "../lib/api-client.js";
+import { isImagePreviewMediaType, normalizeAttachmentMimeType } from "../lib/attachments.js";
 import { formatBytes, formatTimestamp } from "../lib/format.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
@@ -21,33 +22,6 @@ import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import { ChevronIcon, CloseIcon, CollapseIcon, DownloadIcon, ExpandIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
-
-function normalizeAttachmentMimeType(mimeType: string): string {
-  return mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
-}
-
-const IMAGE_ATTACHMENT_MEDIA_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "image/svg+xml",
-]);
-
-const PREVIEWABLE_ATTACHMENT_MEDIA_TYPES = new Set([
-  "text/markdown",
-  "text/plain",
-  ...IMAGE_ATTACHMENT_MEDIA_TYPES,
-]);
-
-export function isPreviewableAttachment(attachment: Pick<RunAttachment, "mimeType">): boolean {
-  const mediaType = normalizeAttachmentMimeType(attachment.mimeType);
-  return PREVIEWABLE_ATTACHMENT_MEDIA_TYPES.has(mediaType);
-}
-
-function isImagePreviewMediaType(mediaType: string | null): boolean {
-  return mediaType !== null && IMAGE_ATTACHMENT_MEDIA_TYPES.has(mediaType);
-}
 
 export function AttachmentPreviewDrawer({
   actionPending,

@@ -116,6 +116,9 @@
 
 ### Added
 
+- Added selected-run Chat artifact cards for attachments produced during
+  attempt windows, with existing preview and download actions shown inline
+  after the matching assistant response.
 - Added queued resume messages for live runs across core, CLI, daemon
   HTTP/RPC, and the web dashboard. `task-runner run queue-message`,
   `run queued-messages`, and `run remove-queued-message` manage the

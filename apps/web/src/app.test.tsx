@@ -2186,6 +2186,199 @@ describe("web app", () => {
     ).toHaveLength(1);
   });
 
+  it("opens the existing attachment preview drawer from previewable Chat artifact cards", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun({ attachmentCount: 1 })],
+      details: {
+        "run-1": makeDetail({
+          attachments: [
+            makeAttachment({
+              id: "att-report",
+              name: "report.md",
+              mimeType: "text/markdown; charset=utf-8",
+              addedAt: "2026-04-13T05:01:00.000Z",
+            }),
+          ],
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:05:00.000Z",
+              prompt: "Prompt",
+              transcript: "Created an artifact",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("report.md")).toBeInTheDocument();
+    expect(within(chat).getByText("text/markdown; charset=utf-8")).toBeInTheDocument();
+    expect(within(chat).getByText("24 B")).toBeInTheDocument();
+
+    await user.click(within(chat).getByRole("button", { name: "Preview attachment report.md" }));
+
+    expect(router.state.location.pathname).toBe("/runs/run-1/attachments/run-1/att-report");
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("attachment body")).toBeInTheDocument();
+  });
+
+  it("downloads Chat artifact cards from primary and explicit actions without opening preview", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ attachmentCount: 2 })],
+      details: {
+        "run-1": makeDetail({
+          attachments: [
+            makeAttachment({
+              id: "att-report",
+              name: "report.md",
+              mimeType: "text/markdown",
+              addedAt: "2026-04-13T05:01:00.000Z",
+            }),
+            makeAttachment({
+              id: "att-archive",
+              name: "archive.zip",
+              mimeType: "application/zip",
+              addedAt: "2026-04-13T05:02:00.000Z",
+            }),
+          ],
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:05:00.000Z",
+              prompt: "Prompt",
+              transcript: "Created artifacts",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+    const createObjectURL = vi.fn(() => "blob:chat-artifact-download");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    try {
+      const user = userEvent.setup();
+      await renderApp("/runs/run-1");
+
+      const chat = await screen.findByLabelText("Run chat");
+      await within(chat).findByText("archive.zip");
+
+      await user.click(
+        within(chat).getByRole("button", { name: "Download attachment archive.zip" }),
+      );
+      await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
+      expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+
+      await user.click(within(chat).getByRole("button", { name: "Download report.md" }));
+      await user.click(within(chat).getByRole("button", { name: "Download archive.zip" }));
+      await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(3));
+      expect(createObjectURL).toHaveBeenCalledTimes(3);
+      expect(revokeObjectURL).toHaveBeenCalledTimes(3);
+      expect(
+        fetchCallCount(fetchMock, (url) =>
+          /\/api\/runs\/run-1\/attachments\/att-report\/content$/.test(url),
+        ),
+      ).toBe(1);
+      expect(
+        fetchCallCount(fetchMock, (url) =>
+          /\/api\/runs\/run-1\/attachments\/att-archive\/content$/.test(url),
+        ),
+      ).toBe(2);
+    } finally {
+      anchorClick.mockRestore();
+    }
+  });
+
+  it("removes Chat artifact cards when selected-run attachments disappear from detail state", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const attachment = makeAttachment({
+      id: "att-report",
+      name: "report.md",
+      mimeType: "text/markdown",
+      addedAt: "2026-04-13T05:01:00.000Z",
+    });
+    installFetchMock({
+      runs: [makeRun({ attachmentCount: 1 })],
+      details: {
+        "run-1": makeDetail({ attachments: [attachment] }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:05:00.000Z",
+              prompt: "Prompt",
+              transcript: "Created artifact",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("report.md")).toBeInTheDocument();
+
+    findEventSource("/api/runs/run-1/events/detail").emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({ attachments: [] }),
+    });
+
+    await waitFor(() => {
+      expect(within(chat).queryByText("report.md")).not.toBeInTheDocument();
+    });
+  });
+
   it("shows a Chat loading skeleton instead of user messages until timeline history loads", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     const timelineHistory = {

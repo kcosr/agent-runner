@@ -1,3 +1,4 @@
+import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunTimelineAttempt, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSessionSummary } from "@task-runner/core/contracts/runs.js";
 
@@ -19,22 +20,37 @@ export interface RunChatSystemRow {
   text: string;
 }
 
+export type RunChatAttachmentArtifact = Pick<
+  RunAttachment,
+  "id" | "name" | "mimeType" | "size" | "addedAt"
+>;
+
 export interface RunChatAssistantRow {
   id: string;
   kind: "assistant";
   transcript: string;
   hasTranscript: boolean;
   emptyState?: RunChatAssistantEmptyState;
+  artifacts: RunChatAttachmentArtifact[];
 }
 
 export type RunChatRow = RunChatUserRow | RunChatSystemRow | RunChatAssistantRow;
+
+interface AttemptWindow {
+  attemptNumber: number;
+  endedAt: number | null;
+  startedAt: number;
+}
 
 function normalizedMessage(value: string | null): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
 }
 
-function toAssistantRow(attempt: RunTimelineAttempt): Omit<RunChatAssistantRow, "id" | "kind"> {
+function toAssistantRow(
+  attempt: RunTimelineAttempt,
+  artifacts: RunChatAttachmentArtifact[],
+): Omit<RunChatAssistantRow, "id" | "kind"> {
   const hasTranscript = attempt.transcript.trim().length > 0;
   return {
     transcript: attempt.transcript,
@@ -44,6 +60,7 @@ function toAssistantRow(attempt: RunTimelineAttempt): Omit<RunChatAssistantRow, 
       : attempt.live
         ? "waiting_live_response"
         : "no_response_recorded",
+    artifacts,
   };
 }
 
@@ -62,6 +79,65 @@ function sessionSource(sessionIndex: number): "initial" | "resume" {
   return sessionIndex === 0 ? "initial" : "resume";
 }
 
+function attachmentAddedAtSort(
+  left: RunChatAttachmentArtifact,
+  right: RunChatAttachmentArtifact,
+): number {
+  const addedAtOrder = Date.parse(left.addedAt) - Date.parse(right.addedAt);
+  return addedAtOrder === 0 ? left.id.localeCompare(right.id) : addedAtOrder;
+}
+
+function attemptMatchesAttachment(window: AttemptWindow, attachmentAddedAt: number): boolean {
+  if (window.endedAt === null) {
+    return attachmentAddedAt >= window.startedAt;
+  }
+  return attachmentAddedAt >= window.startedAt && attachmentAddedAt <= window.endedAt;
+}
+
+function deriveArtifactsByAttempt(
+  attachments: RunAttachment[],
+  attempts: RunTimelineAttempt[],
+): Map<number, RunChatAttachmentArtifact[]> {
+  const artifactsByAttempt = new Map<number, RunChatAttachmentArtifact[]>();
+  if (attachments.length === 0 || attempts.length === 0) {
+    return artifactsByAttempt;
+  }
+
+  const attemptWindows = attempts
+    .map((attempt) => ({
+      attemptNumber: attempt.attemptNumber,
+      startedAt: Date.parse(attempt.startedAt),
+      endedAt: attempt.endedAt === null ? null : Date.parse(attempt.endedAt),
+    }))
+    .sort((left, right) => left.attemptNumber - right.attemptNumber);
+
+  for (const attachment of attachments) {
+    const attachmentAddedAt = Date.parse(attachment.addedAt);
+    const matchingWindow = attemptWindows.find((window) =>
+      attemptMatchesAttachment(window, attachmentAddedAt),
+    );
+    if (!matchingWindow) {
+      continue;
+    }
+
+    const artifacts = artifactsByAttempt.get(matchingWindow.attemptNumber) ?? [];
+    artifacts.push({
+      id: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      addedAt: attachment.addedAt,
+    });
+    artifactsByAttempt.set(matchingWindow.attemptNumber, artifacts);
+  }
+
+  for (const artifacts of artifactsByAttempt.values()) {
+    artifacts.sort(attachmentAddedAtSort);
+  }
+
+  return artifactsByAttempt;
+}
+
 export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): RunChatRow[] {
   const attemptsBySession = new Map<number, RunTimelineAttempt[]>();
   for (const attempt of history.attempts) {
@@ -74,6 +150,7 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
     attempts.sort((left, right) => left.attemptNumber - right.attemptNumber);
   }
 
+  const artifactsByAttempt = deriveArtifactsByAttempt(run.attachments, history.attempts);
   const sessionsByIndex = new Map(run.sessions.map((session) => [session.sessionIndex, session]));
   const sessionIndexes = new Set<number>(attemptsBySession.keys());
 
@@ -110,7 +187,7 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
       rows.push({
         id: `session:${sessionIndex}:assistant:${attempt.attemptNumber}`,
         kind: "assistant",
-        ...toAssistantRow(attempt),
+        ...toAssistantRow(attempt, artifactsByAttempt.get(attempt.attemptNumber) ?? []),
       });
     }
   }

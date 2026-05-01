@@ -1268,8 +1268,11 @@ body {
 }
 
 .chat-output {
+  display: flex;
   min-width: 0;
   max-width: 100%;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .chat-output .chat-markdown pre {
@@ -1281,6 +1284,115 @@ body {
 
 .chat-output .markdown-table-wrap {
   max-width: 100%;
+}
+
+.chat-artifacts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-artifact-card {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--card) 72%, var(--background));
+}
+
+.chat-artifact-card:focus-within,
+.chat-artifact-card:hover {
+  border-color: var(--ring);
+  background: color-mix(in srgb, var(--accent) 64%, var(--card));
+}
+
+.chat-artifact-card__primary,
+.chat-artifact-card__download {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-artifact-card__primary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.chat-artifact-card__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+
+.chat-artifact-card__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.chat-artifact-card__body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.chat-artifact-card__name {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-artifact-card__meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.chat-artifact-card__download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-left: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.chat-artifact-card__download:hover {
+  background: color-mix(in srgb, var(--accent) 78%, transparent);
+  color: var(--foreground);
+}
+
+.chat-artifact-card__download svg {
+  width: 14px;
+  height: 14px;
+}
+
+.app[data-focus-indicators="on"] .chat-artifact-card__primary:focus-visible,
+.app[data-focus-indicators="on"] .chat-artifact-card__download:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 .chat-bubble--system {
