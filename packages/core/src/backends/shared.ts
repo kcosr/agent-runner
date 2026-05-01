@@ -1,4 +1,5 @@
-import { promises as fs, statSync } from "node:fs";
+import { createReadStream, statSync } from "node:fs";
+import { createInterface } from "node:readline";
 import type { BackendSessionHistorySource } from "../core/backends/types.js";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -32,12 +33,15 @@ export async function readJsonlRecordLines(
   path: string,
   sourceName: string,
 ): Promise<JsonlRecordLine[]> {
-  const raw = await fs.readFile(path, "utf8");
   const records: JsonlRecordLine[] = [];
-  const lines = raw.split(/\r?\n/);
-  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
-    const line = lines[lineNumber] ?? "";
+  let lineNumber = 0;
+  const lines = createInterface({
+    input: createReadStream(path, { encoding: "utf8" }),
+    crlfDelay: Number.POSITIVE_INFINITY,
+  });
+  for await (const line of lines) {
     if (line.trim().length === 0) {
+      lineNumber++;
       continue;
     }
     try {
@@ -51,6 +55,7 @@ export async function readJsonlRecordLines(
         `failed to parse ${sourceName} session history ${path}:${lineNumber + 1}: ${(error as Error).message}`,
       );
     }
+    lineNumber++;
   }
   return records;
 }
