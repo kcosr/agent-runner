@@ -148,6 +148,7 @@ export function useRunTimelineState({
     stale: false,
   });
   const historyRef = useRef<RunTimelineHistory | null>(null);
+  const historyCacheRef = useRef(new Map<string, RunTimelineHistory>());
   const staleRef = useRef(false);
   const bootstrappedRef = useRef(false);
   const bufferRef = useRef<RunTimelineEnvelope[]>([]);
@@ -236,6 +237,7 @@ export function useRunTimelineState({
         bootstrappedRef.current = true;
         reloadCountRef.current = 0;
         historyRef.current = merged;
+        historyCacheRef.current.set(runId, merged);
         staleRef.current = false;
         setState({
           history: merged,
@@ -272,13 +274,18 @@ export function useRunTimelineState({
     const previousRunIsLive = sameRunId ? previousRunIsLiveRef.current : undefined;
     previousRunIdRef.current = runId;
     if (!sameRunId) {
-      historyRef.current = null;
+      const cachedHistory = historyCacheRef.current.get(runId) ?? null;
+      historyRef.current = cachedHistory;
       staleRef.current = false;
-      bootstrappedRef.current = false;
+      bootstrappedRef.current = cachedHistory !== null;
       bufferRef.current = [];
       reloadCountRef.current = 0;
       previousRunIsLiveRef.current = undefined;
-      setState({ history: null, isLoading: enabled, stale: false });
+      setState({
+        history: cachedHistory,
+        isLoading: enabled && cachedHistory === null,
+        stale: false,
+      });
     }
 
     if (!enabled) {
@@ -370,6 +377,7 @@ export function useRunTimelineState({
           return;
         }
         historyRef.current = result.history;
+        historyCacheRef.current.set(runId, result.history);
         staleRef.current = false;
         setState({
           history: result.history,
@@ -398,5 +406,14 @@ export function useRunTimelineState({
     };
   }, [api, config, daemonToken, enabled, runId, runIsLive, subscribeToEvents]);
 
-  return state;
+  if (!runId || state.history === null || state.history.runId === runId) {
+    return state;
+  }
+
+  const cachedHistory = historyCacheRef.current.get(runId) ?? null;
+  return {
+    history: cachedHistory,
+    isLoading: enabled && cachedHistory === null,
+    stale: false,
+  };
 }

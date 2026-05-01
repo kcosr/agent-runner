@@ -2323,6 +2323,120 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
   });
 
+  it("reuses cached selected-run Chat history when returning to a previously loaded card", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "First run",
+          currentSession: null,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          name: "First run",
+          status: "success",
+          totalAttemptCount: 1,
+        }),
+        makeRun({
+          runId: "run-2",
+          assignmentName: "Second run",
+          currentSession: null,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          name: "Second run",
+          status: "success",
+          totalAttemptCount: 1,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "First run",
+            sourcePath: "/tmp/first.md",
+          },
+          currentSession: null,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          isLive: false,
+          message: "First request",
+          name: "First run",
+          status: "success",
+        }),
+        "run-2": makeDetail({
+          runId: "run-2",
+          assignment: {
+            name: "Second run",
+            sourcePath: "/tmp/second.md",
+          },
+          backendSessionId: "thread-2",
+          currentSession: null,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          isLive: false,
+          message: "Second request",
+          name: "Second run",
+          status: "success",
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "First prompt",
+              transcript: "First response",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+        "run-2": {
+          runId: "run-2",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Second prompt",
+              transcript: "Second response",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("First response")).toBeInTheDocument();
+    const runOneTimelineFetches = fetchCallCount(fetchMock, (url) =>
+      url.endsWith("/api/runs/run-1/timeline"),
+    );
+
+    const user = userEvent.setup();
+    await user.click(await findRunCard("Second run"));
+    expect(await screen.findByText("Second response")).toBeInTheDocument();
+
+    await user.click(await findRunCard("First run"));
+    const activeChat = await screen.findByLabelText("Run chat");
+    expect(within(activeChat).queryByText("Second response")).not.toBeInTheDocument();
+    expect(within(activeChat).queryByLabelText("Loading conversation")).not.toBeInTheDocument();
+    expect(await within(activeChat).findByText("First response")).toBeInTheDocument();
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(
+      runOneTimelineFetches,
+    );
+  });
+
   it("opens the existing attachment preview drawer from previewable Chat artifact cards", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     installFetchMock({
