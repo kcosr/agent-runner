@@ -156,6 +156,7 @@ test("executeRunCommand treats ready runs with prior sessions as resumes for mes
           maxAttemptsPerSession: manifest.maxAttemptsPerSession,
           backendSessionIdAtStart: null,
           backendSessionIdAtEnd: null,
+          provenance: { kind: "task_runner" },
         },
       ];
       manifest.totalAttemptCount = 1;

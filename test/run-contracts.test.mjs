@@ -32,7 +32,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 18,
+    schemaVersion: 19,
     runId: "run123",
     runGroupId: "run123",
     repo: "demo-repo",
@@ -83,6 +83,7 @@ function buildManifest(overrides = {}) {
     tasksCompleted: Object.values(finalTasks).filter((task) => task.status === "completed").length,
     tasksTotal: Object.keys(finalTasks).length,
     backendSessionId: null,
+    backendSessionSync: null,
     runtimeVars: {},
     runtimeVarSources: {},
     resolvedHooks: [

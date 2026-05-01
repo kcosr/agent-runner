@@ -163,6 +163,64 @@ export interface ValidateSessionContext {
 
 export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };
 
+export interface BackendSessionHistorySourceContext {
+  sessionId: string;
+  cwd: string;
+  env: Record<string, string>;
+  backendConfig?: unknown;
+  resolvedBackendArgs: ResolvedBackendArgs;
+  previousSource?: BackendSessionHistorySource | null;
+}
+
+export type BackendSessionHistorySourceResult =
+  | { available: true; source: BackendSessionHistorySource }
+  | { available: false; reason: string };
+
+export type BackendSessionHistorySource =
+  | {
+      kind: "file";
+      path: string;
+      mtimeMs: number;
+      size: number;
+      changeToken: {
+        kind: "file";
+        path: string;
+        mtimeMs: number;
+        size: number;
+      };
+    }
+  | {
+      kind: "custom";
+      label: string;
+      changeToken: unknown;
+    };
+
+export interface BackendSessionHistoryContext {
+  sessionId: string;
+  cwd: string;
+  env: Record<string, string>;
+  backendConfig?: unknown;
+  resolvedBackendArgs: ResolvedBackendArgs;
+  source: BackendSessionHistorySource;
+  cursor?: unknown;
+  mode: "bootstrap" | "sync";
+}
+
+export interface BackendSessionHistoryResult {
+  source: BackendSessionHistorySource;
+  cursor: unknown;
+  turns: BackendSyncedTurn[];
+}
+
+export interface BackendSyncedTurn {
+  backendTurnId: string;
+  status: "complete" | "open";
+  startedAt: string;
+  updatedAt: string;
+  userText: string | null;
+  assistantText: string | null;
+}
+
 export interface Backend {
   id: BackendName;
   sourcePath?: string;
@@ -187,4 +245,18 @@ export interface Backend {
    * truth.
    */
   validateSessionId?(ctx: ValidateSessionContext): Promise<ValidateSessionResult>;
+  /**
+   * Optional read-only discovery for backend-owned session history. Return
+   * `available: false` when the backend cannot currently resolve durable
+   * history for the supplied session id.
+   */
+  resolveSessionHistorySource?(
+    ctx: BackendSessionHistorySourceContext,
+  ): Promise<BackendSessionHistorySourceResult>;
+  /**
+   * Optional reader for complete/open turns from a previously resolved
+   * backend-owned history source. Returned source change tokens and cursors
+   * must be JSON-persistable because task-runner stores them in run.json.
+   */
+  readSessionHistory?(ctx: BackendSessionHistoryContext): Promise<BackendSessionHistoryResult>;
 }

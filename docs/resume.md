@@ -4,7 +4,9 @@ Resume continues an existing run from its frozen manifest state.
 task-runner does *not* re-read the source agent or assignment files on
 resume — everything the backend needs is in `run.json`, including the
 selected backend name, frozen backendConfig, resolved backend args, and
-backend session id.
+backend session id. Current manifests use schema version 19, which also
+stores backend-session sync state and provenance for task-runner-owned and
+backend-imported history.
 
 ## Command
 
@@ -126,6 +128,29 @@ for retry or manual cleanup.
 For ready-start (running a `ready` run with zero prior attempts), the
 stored `manifest.brief` is reused verbatim.
 
+## Backend session history sync
+
+Backends that implement `resolveSessionHistorySource` and
+`readSessionHistory` can import durable backend-owned turns. On
+`--backend-session-id` bootstrap, complete historical turns are imported
+before the first task-runner-owned invocation. Each imported turn becomes
+a canonical session plus attempt with `backend_session` provenance; open
+turns are tracked in `manifest.backendSessionSync.openTurnIds` without
+creating attempt records.
+
+Before any `task-runner run --resume-run <id>` starts, task-runner checks
+backend-owned history for the run's persisted `backendSessionId`. This
+pre-resume sync is subscriber-independent: it runs in embedded CLI and
+daemon-managed resume paths regardless of whether any client is watching
+the run. It happens before allocating the next session index or attempt
+number. If the backend history source changed but the sync cannot safely
+complete, resume fails before allocation and the prior manifest remains
+the canonical state.
+
+If the source change token is unchanged, resume skips the read and
+continues. If the backend has no history reader or no source is currently
+available, resume proceeds with the existing manifest history.
+
 ## Retry nudges
 
 Within a single `run` invocation, task-runner may retry the backend up to
@@ -141,9 +166,10 @@ resume — it is a retry inside the same session.
 
 ## Reset vs resume
 
-`run reset` is not a form of resume. It clears attempt/session history and
-restores the initialized seed so the run is executed from scratch on the
-next `run --resume-run` or fresh `run`. Reset does not re-read source
+`run reset` is not a form of resume. It clears attempt/session history,
+backend session id, and backend-session sync state, then restores the
+initialized seed so the run is executed from scratch on the next
+`run --resume-run` or fresh `run`. Reset does not re-read source
 definitions — it uses `manifest.resetSeed` captured at run creation.
 
 ## Daemon and backend sessions
@@ -162,3 +188,9 @@ when possible:
 
 If a backend reports the session as gone, task-runner surfaces the failure
 rather than silently restarting.
+
+For subscribed non-running runs, the daemon also polls backend-owned
+history while detail, timeline, or audit subscribers are present. This is
+only a projection freshness path; it uses the same sync rules as
+pre-resume, emits `run.backend_session_history_synced` audit events for
+changed history, and does not create synthetic timeline events.

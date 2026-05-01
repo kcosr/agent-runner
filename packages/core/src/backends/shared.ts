@@ -1,5 +1,55 @@
+import { readFileSync, statSync } from "node:fs";
+import type { BackendSessionHistorySource } from "../core/backends/types.js";
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function sessionHistoryFileSource(
+  path: string,
+): Extract<BackendSessionHistorySource, { kind: "file" }> {
+  const stats = statSync(path);
+  return {
+    kind: "file",
+    path,
+    mtimeMs: stats.mtimeMs,
+    size: stats.size,
+    changeToken: {
+      kind: "file",
+      path,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+    },
+  };
+}
+
+export interface JsonlRecordLine {
+  record: Record<string, unknown>;
+  lineNumber: number;
+}
+
+export function readJsonlRecordLines(path: string, sourceName: string): JsonlRecordLine[] {
+  const raw = readFileSync(path, "utf8");
+  const records: JsonlRecordLine[] = [];
+  const lines = raw.split(/\r?\n/);
+  for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
+    const line = lines[lineNumber] ?? "";
+    if (line.trim().length === 0) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      if (!isRecord(parsed)) {
+        throw new Error("record is not an object");
+      }
+      records.push({ record: parsed, lineNumber });
+    } catch (error) {
+      throw new Error(
+        `failed to parse ${sourceName} session history ${path}:${lineNumber + 1}: ${(error as Error).message}`,
+      );
+    }
+  }
+  return records;
 }
 
 export function normalizeBackendModel(model: string): string {

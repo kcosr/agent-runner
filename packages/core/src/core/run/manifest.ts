@@ -12,6 +12,7 @@ import {
 import type { RunAttachment } from "../../contracts/attachments.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import {
+  type BackendSessionHistorySource,
   cloneBackendConfig,
   cloneResolvedBackendArgs,
   isJsonishPersistable,
@@ -107,6 +108,30 @@ export interface RunResetSeed {
   finalTasks: Record<string, TaskSnapshot>;
 }
 
+export type RunHistoryProvenance =
+  | { kind: "task_runner" }
+  | {
+      kind: "backend_session";
+      backend: string;
+      backendSessionId: string;
+      backendTurnId: string;
+      importedAt: string;
+      lastSyncedAt: string;
+      mode: "bootstrap" | "sync";
+      source: BackendSessionHistorySource;
+    };
+
+export interface BackendSessionSyncState {
+  backend: string;
+  backendSessionId: string;
+  source: BackendSessionHistorySource | null;
+  cursor: unknown;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  importedTurnIds: string[];
+  openTurnIds: string[];
+}
+
 export type RunDependencyRef =
   | {
       type: "run";
@@ -132,6 +157,7 @@ export interface AttemptRecord {
   transcript: string | null;
   logPath: string; // relative to workspaceDir, e.g. "attempts/01.json"
   invalidStatuses: InvalidStatusReport[];
+  provenance: RunHistoryProvenance;
 }
 
 export interface SessionRecord {
@@ -147,6 +173,7 @@ export interface SessionRecord {
   maxAttemptsPerSession: number;
   backendSessionIdAtStart: string | null;
   backendSessionIdAtEnd: string | null;
+  provenance: RunHistoryProvenance;
 }
 
 export type RunExecutionHostMode = "embedded" | "daemon";
@@ -203,13 +230,13 @@ export interface QueuedResumeMessage {
   createdAt: string;
 }
 
-// schemaVersion: 18 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 19 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // reinitialize or run an explicit migration if one is added.
 export interface RunManifest {
-  schemaVersion: 18;
+  schemaVersion: 19;
   runId: string;
   repo: string;
   agent: {
@@ -260,6 +287,7 @@ export interface RunManifest {
   tasksCompleted: number;
   tasksTotal: number;
   backendSessionId: string | null;
+  backendSessionSync: BackendSessionSyncState | null;
   runtimeVars: Record<string, unknown>;
   runtimeVarSources: Record<string, RuntimeVarSourceRecord>;
   execution: RunExecution;
@@ -331,6 +359,40 @@ export function cloneRunDependencyRefs(
   );
 }
 
+export function cloneBackendSessionHistorySource(
+  source: BackendSessionHistorySource,
+): BackendSessionHistorySource {
+  return structuredClone(source);
+}
+
+export function cloneRunHistoryProvenance(provenance: RunHistoryProvenance): RunHistoryProvenance {
+  if (provenance.kind === "task_runner") {
+    return { kind: "task_runner" };
+  }
+  return {
+    ...provenance,
+    source: cloneBackendSessionHistorySource(provenance.source),
+  };
+}
+
+export function cloneBackendSessionSyncState(
+  state: BackendSessionSyncState | null,
+): BackendSessionSyncState | null {
+  if (state === null) {
+    return null;
+  }
+  return {
+    backend: state.backend,
+    backendSessionId: state.backendSessionId,
+    source: state.source === null ? null : cloneBackendSessionHistorySource(state.source),
+    cursor: structuredClone(state.cursor),
+    lastSyncedAt: state.lastSyncedAt,
+    lastError: state.lastError,
+    importedTurnIds: [...state.importedTurnIds],
+    openTurnIds: [...state.openTurnIds],
+  };
+}
+
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
@@ -393,6 +455,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.totalSessionCount = 0;
   manifest.sessions = [];
   manifest.attemptRecords = [];
+  manifest.backendSessionSync = null;
 }
 
 function isManifestStatus(value: unknown): value is ManifestStatus {
@@ -426,6 +489,79 @@ function isValidRunSchedule(value: unknown): value is RunSchedule | null {
   const cron = recurrence.schedule as Record<string, unknown>;
   return (
     cron.type === "cron" && typeof cron.expression === "string" && typeof cron.timezone === "string"
+  );
+}
+
+function isValidBackendSessionHistorySource(value: unknown): value is BackendSessionHistorySource {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const source = value as Record<string, unknown>;
+  if (!isJsonishPersistable(source.changeToken)) {
+    return false;
+  }
+  if (source.kind === "file") {
+    const token = source.changeToken as Record<string, unknown>;
+    return (
+      typeof source.path === "string" &&
+      typeof source.mtimeMs === "number" &&
+      Number.isFinite(source.mtimeMs) &&
+      typeof source.size === "number" &&
+      Number.isFinite(source.size) &&
+      token.kind === "file" &&
+      token.path === source.path &&
+      token.mtimeMs === source.mtimeMs &&
+      token.size === source.size
+    );
+  }
+  return (
+    source.kind === "custom" &&
+    typeof source.label === "string" &&
+    isJsonishPersistable(source.changeToken)
+  );
+}
+
+function isValidRunHistoryProvenance(value: unknown): value is RunHistoryProvenance {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const provenance = value as Record<string, unknown>;
+  if (provenance.kind === "task_runner") {
+    return Object.keys(provenance).length === 1;
+  }
+  return (
+    provenance.kind === "backend_session" &&
+    typeof provenance.backend === "string" &&
+    typeof provenance.backendSessionId === "string" &&
+    typeof provenance.backendTurnId === "string" &&
+    typeof provenance.importedAt === "string" &&
+    typeof provenance.lastSyncedAt === "string" &&
+    (provenance.mode === "bootstrap" || provenance.mode === "sync") &&
+    isValidBackendSessionHistorySource(provenance.source)
+  );
+}
+
+function isValidStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function isValidBackendSessionSyncState(value: unknown): value is BackendSessionSyncState | null {
+  if (value === null) {
+    return true;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const state = value as Record<string, unknown>;
+  return (
+    typeof state.backend === "string" &&
+    typeof state.backendSessionId === "string" &&
+    (state.source === null || isValidBackendSessionHistorySource(state.source)) &&
+    isJsonishPersistable(state.cursor) &&
+    (state.lastSyncedAt === null || typeof state.lastSyncedAt === "string") &&
+    (state.lastError === null || typeof state.lastError === "string") &&
+    isValidStringArray(state.importedTurnIds) &&
+    isValidStringArray(state.openTurnIds)
   );
 }
 
@@ -510,7 +646,16 @@ function normalizeRunManifest(parsed: RunManifest): RunManifest {
     launcher: cloneResolvedLauncherConfig(parsed.launcher),
     dependencies: cloneRunDependencyRefs(parsed.dependencies),
     queuedResumeMessages: parsed.queuedResumeMessages.map((message) => ({ ...message })),
+    backendSessionSync: cloneBackendSessionSyncState(parsed.backendSessionSync),
     runtimeVarSources: cloneRuntimeVarSources(parsed.runtimeVarSources),
+    sessions: parsed.sessions.map((session) => ({
+      ...session,
+      provenance: cloneRunHistoryProvenance(session.provenance),
+    })),
+    attemptRecords: parsed.attemptRecords.map((attempt) => ({
+      ...attempt,
+      provenance: cloneRunHistoryProvenance(attempt.provenance),
+    })),
     resetSeed: {
       ...parsed.resetSeed,
       backendConfig: cloneBackendConfig(parsed.resetSeed.backendConfig),
@@ -539,16 +684,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 18
+    (parsed as { schemaVersion: number }).schemaVersion !== 19
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
-    if (version === 17) {
-      throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion 17; this version of task-runner requires schemaVersion 18. Reinitialize the run or use an explicit migration for queued resume message manifests.`,
-      );
-    }
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 18.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 19.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -700,7 +840,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 18) return false;
+  if (obj.schemaVersion !== 19) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -743,6 +883,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.tasksCompleted !== "number") return false;
   if (typeof obj.tasksTotal !== "number") return false;
   if (typeof obj.totalSessionCount !== "number") return false;
+  if (!isValidBackendSessionSyncState(obj.backendSessionSync)) return false;
   if (typeof obj.brief !== "string") return false;
   if (!Array.isArray(obj.resolvedHooks)) return false;
   if (!Array.isArray(obj.hookAudits)) return false;
@@ -791,7 +932,8 @@ function isRunManifest(value: unknown): value is RunManifest {
         typeof record.timedOut !== "boolean" ||
         (record.transcript !== null && typeof record.transcript !== "string") ||
         typeof record.logPath !== "string" ||
-        !Array.isArray(record.invalidStatuses)
+        !Array.isArray(record.invalidStatuses) ||
+        !isValidRunHistoryProvenance(record.provenance)
       );
     })
   ) {
@@ -816,7 +958,9 @@ function isRunManifest(value: unknown): value is RunManifest {
         typeof record.maxAttemptsPerSession !== "number" ||
         (record.backendSessionIdAtStart !== null &&
           typeof record.backendSessionIdAtStart !== "string") ||
-        (record.backendSessionIdAtEnd !== null && typeof record.backendSessionIdAtEnd !== "string")
+        (record.backendSessionIdAtEnd !== null &&
+          typeof record.backendSessionIdAtEnd !== "string") ||
+        !isValidRunHistoryProvenance(record.provenance)
       );
     })
   ) {

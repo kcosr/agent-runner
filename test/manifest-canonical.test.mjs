@@ -170,17 +170,18 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 18, captures repo, initializes updatedAt, and starts with no queued resume messages", async () => {
+test("manifest schemaVersion is 19, captures repo, initializes updatedAt, and starts with no queued resume messages", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 18);
+  assert.equal(outcome.manifest.schemaVersion, 19);
   assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.updatedAt, outcome.manifest.startedAt);
   assert.equal(outcome.manifest.archivedAt, null);
   assert.equal(outcome.manifest.schedule, null);
   assert.deepEqual(outcome.manifest.queuedResumeMessages, []);
+  assert.equal(outcome.manifest.backendSessionSync, null);
 });
 
 test("manifest reset clears queued resume messages while resume preserves them for daemon drain", async () => {
@@ -573,7 +574,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 18/);
+        assert.match(err.message, /requires schemaVersion 19/);
         return true;
       },
     );
@@ -624,7 +625,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 18/);
+        assert.match(err.message, /requires schemaVersion 19/);
         return true;
       },
     );
@@ -676,7 +677,7 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 18/);
+        assert.match(err.message, /requires schemaVersion 19/);
         return true;
       },
     );
@@ -728,7 +729,7 @@ test("schemaVersion mismatch: resume rejects a v10 manifest with a clear error",
       () => resolveResumeTarget("stale10", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 10/);
-        assert.match(err.message, /requires schemaVersion 18/);
+        assert.match(err.message, /requires schemaVersion 19/);
         return true;
       },
     );
@@ -749,7 +750,7 @@ test("schemaVersion mismatch: resume rejects a v12 manifest with the v17 migrati
       () => resolveResumeTarget("stale12", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 12/);
-        assert.match(err.message, /requires schemaVersion 18/);
+        assert.match(err.message, /requires schemaVersion 19/);
         return true;
       },
     );
@@ -770,7 +771,7 @@ test("schemaVersion mismatch: resume rejects a v13 manifest with the v17 migrati
       () => resolveResumeTarget("stale13", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 13/);
-        assert.match(err.message, /requires schemaVersion 18/);
+        assert.match(err.message, /requires schemaVersion 19/);
         return true;
       },
     );
@@ -791,7 +792,7 @@ test("schemaVersion mismatch: resume rejects a v15 manifest with the v17 migrati
       () => resolveResumeTarget("stale15", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 15/);
-        assert.match(err.message, /requires schemaVersion 18/);
+        assert.match(err.message, /requires schemaVersion 19/);
         return true;
       },
     );

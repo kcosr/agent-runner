@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `19`. Runs now require
+  backend-session sync state plus explicit provenance on session and
+  attempt records; use `scripts/migrate-manifests-v19.mjs` before
+  resuming schema v18 runs.
 - Manifest schema version is now `18`. Runs now require
   `queuedResumeMessages` as manifest state and expose queued resume
   messages on `RunDetail` plus `queuedResumeMessageCount` on `RunSummary`.
@@ -116,6 +120,12 @@
 
 ### Added
 
+- Added backend-owned session history import and sync for Claude and
+  Codex runs. Bootstrap `--backend-session-id` imports complete prior
+  backend turns, pre-resume sync updates history before allocating new
+  attempt/session numbers, and subscribed daemon detail/timeline/audit
+  runs stay synchronized while clients watch them through
+  `run.backend_session_history_synced` audit events.
 - Added selected-run Chat artifact cards for attachments produced during
   attempt windows, with existing preview and download actions shown inline
   after the matching assistant response.

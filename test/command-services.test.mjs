@@ -298,6 +298,7 @@ test("command services: passive backend session mutations update only metadata a
         maxAttemptsPerSession: 3,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "thread-original",
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.attemptRecords = [
@@ -316,8 +317,19 @@ test("command services: passive backend session mutations update only metadata a
         transcript: "transcript 1",
         logPath: "attempts/01.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
     ];
+    manifest.backendSessionSync = {
+      backend: "passive",
+      backendSessionId: "thread-original",
+      source: null,
+      cursor: null,
+      lastSyncedAt: "2026-04-17T09:30:00.000Z",
+      lastError: null,
+      importedTurnIds: ["stale-turn"],
+      openTurnIds: [],
+    };
   });
 
   const before = readManifest(passiveRun.workspaceDir);
@@ -345,6 +357,7 @@ test("command services: passive backend session mutations update only metadata a
       updatedAt: afterSet,
       changed: true,
     });
+    assert.equal(readManifest(passiveRun.workspaceDir).backendSessionSync, null);
     assertTimestampAdvanced(before.updatedAt, afterSet, "setRunBackendSession updatedAt");
 
     const setAgainResult = setRunBackendSession(passiveRun.runId, {
@@ -366,6 +379,7 @@ test("command services: passive backend session mutations update only metadata a
       updatedAt: afterClear,
       changed: true,
     });
+    assert.equal(readManifest(passiveRun.workspaceDir).backendSessionSync, null);
     assertTimestampAdvanced(afterSet, afterClear, "clearRunBackendSession updatedAt");
 
     assert.deepEqual(clearRunBackendSession(passiveRun.runId), {
@@ -493,6 +507,7 @@ test("command services: getRunTimelineHistory reads schema v3 attempt logs", asy
         maxAttemptsPerSession: manifest.maxAttemptsPerSession,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.totalSessionCount = 1;
@@ -512,6 +527,7 @@ test("command services: getRunTimelineHistory reads schema v3 attempt logs", asy
         transcript: "First output",
         logPath: "attempts/01.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
       {
         attemptNumber: 2,
@@ -528,6 +544,7 @@ test("command services: getRunTimelineHistory reads schema v3 attempt logs", asy
         transcript: "Second output",
         logPath: "attempts/02.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
       {
         attemptNumber: 3,
@@ -544,6 +561,7 @@ test("command services: getRunTimelineHistory reads schema v3 attempt logs", asy
         transcript: "Third output",
         logPath: "attempts/03.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.totalAttemptCount = manifest.attemptRecords.length;
@@ -602,6 +620,7 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         maxAttemptsPerSession: manifest.maxAttemptsPerSession,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.totalSessionCount = 1;
@@ -621,6 +640,7 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         transcript: "Missing transcript",
         logPath: "attempts/01.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
       {
         attemptNumber: 2,
@@ -637,6 +657,7 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         transcript: "Corrupt transcript",
         logPath: "attempts/02.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
       {
         attemptNumber: 3,
@@ -653,6 +674,7 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         transcript: "Escaping transcript",
         logPath: "../outside.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.totalAttemptCount = manifest.attemptRecords.length;
@@ -854,6 +876,7 @@ test("command services: readStatus and timeline history resolve bare run ids acr
         transcript: "First output",
         logPath: "attempts/01.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.totalAttemptCount = 1;
@@ -871,6 +894,7 @@ test("command services: readStatus and timeline history resolve bare run ids acr
         maxAttemptsPerSession: manifest.maxAttemptsPerSession,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.totalSessionCount = 1;

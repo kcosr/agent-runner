@@ -1428,6 +1428,7 @@ export function setRunBackendSession(
     }
     const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = nextBackendSessionId;
+    resolved.manifest.backendSessionSync = null;
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
       emitAuditEnvelope,
@@ -1464,6 +1465,7 @@ export function clearRunBackendSession(
     }
     const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = null;
+    resolved.manifest.backendSessionSync = null;
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
       emitAuditEnvelope,

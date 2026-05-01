@@ -1,11 +1,19 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import { createConnection } from "node:net";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { WebSocket } from "ws";
 import type {
   Backend,
   BackendConfigResolutionContext,
   BackendInvokeContext,
   BackendInvokeResult,
+  BackendSessionHistoryContext,
+  BackendSessionHistoryResult,
+  BackendSessionHistorySourceContext,
+  BackendSessionHistorySourceResult,
+  BackendSyncedTurn,
   CodexTransportConfig,
   EffortLevel,
   ValidateSessionContext,
@@ -19,6 +27,8 @@ import {
   createLineFeeder,
   isRecord,
   normalizeBackendModel,
+  readJsonlRecordLines,
+  sessionHistoryFileSource,
   silentTranscriptFallback,
   streamBoundarySeparator,
 } from "./shared.js";
@@ -51,6 +61,7 @@ const normalizeCodexModel = normalizeBackendModel;
 const TURN_INTERRUPT_GRACE_MS = 1_000;
 const TURN_INTERRUPT_RETRY_MS = 5_000;
 const TURN_INTERRUPT_CONFIRM_MS = 5_000;
+const CODEX_SESSION_ROOT_PARTS = [".codex", "sessions"] as const;
 
 /**
  * Decide whether the turn was interrupted by something *outside* this
@@ -1027,6 +1038,166 @@ export function buildCodexTurnStartPayload(
   return payload;
 }
 
+function codexSessionsRoot(): string {
+  return join(homedir(), ...CODEX_SESSION_ROOT_PARTS);
+}
+
+function listCodexRolloutFiles(dir: string): string[] {
+  const entries = readdirSync(dir, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listCodexRolloutFiles(path));
+    } else if (
+      entry.isFile() &&
+      entry.name.startsWith("rollout-") &&
+      entry.name.endsWith(".jsonl")
+    ) {
+      files.push(path);
+    }
+  }
+  return files.sort();
+}
+
+function codexSessionIdFromRecord(record: Record<string, unknown>): string | null {
+  if (record.type !== "session_meta" || !isRecord(record.payload)) {
+    return null;
+  }
+  return typeof record.payload.id === "string" ? record.payload.id : null;
+}
+
+function codexMessageText(
+  record: Record<string, unknown>,
+  role: "user" | "assistant",
+): string | null {
+  if (record.type !== "response_item" || !isRecord(record.payload)) {
+    return null;
+  }
+  const payload = record.payload;
+  if (payload.type !== "message" || payload.role !== role) {
+    return null;
+  }
+  const text = extractTextFromContent(payload.content);
+  return text.length > 0 ? text : null;
+}
+
+interface CodexTurnBuilder {
+  backendTurnId: string;
+  startedAt: string;
+  updatedAt: string;
+  userText: string | null;
+  assistantText: string;
+}
+
+function joinCodexAssistantText(prior: string, next: string): string {
+  return `${prior}${streamBoundarySeparator(prior, next)}${next}`;
+}
+
+export function parseCodexSessionHistoryJsonl(path: string): BackendSyncedTurn[] {
+  const turns: BackendSyncedTurn[] = [];
+  let current: CodexTurnBuilder | null = null;
+
+  for (const { record } of readJsonlRecordLines(path, "Codex")) {
+    const timestamp = typeof record.timestamp === "string" ? record.timestamp : null;
+
+    if (record.type === "event_msg" && isRecord(record.payload)) {
+      const payload = record.payload;
+      const backendTurnId = typeof payload.turn_id === "string" ? payload.turn_id : null;
+      if (payload.type === "task_started" && backendTurnId !== null && timestamp !== null) {
+        current = {
+          backendTurnId,
+          startedAt: timestamp,
+          updatedAt: timestamp,
+          userText: null,
+          assistantText: "",
+        };
+        continue;
+      }
+      if (
+        payload.type === "task_complete" &&
+        backendTurnId !== null &&
+        timestamp !== null &&
+        current?.backendTurnId === backendTurnId
+      ) {
+        current.updatedAt = timestamp;
+        turns.push({
+          backendTurnId: current.backendTurnId,
+          status: "complete",
+          startedAt: current.startedAt,
+          updatedAt: current.updatedAt,
+          userText: current.userText,
+          assistantText: current.assistantText.length > 0 ? current.assistantText : null,
+        });
+        current = null;
+        continue;
+      }
+    }
+
+    if (current !== null && timestamp !== null) {
+      const userText = codexMessageText(record, "user");
+      if (userText !== null) {
+        current.userText =
+          current.userText === null ? userText : `${current.userText}\n\n${userText}`;
+        current.updatedAt = timestamp;
+        continue;
+      }
+      const assistantText = codexMessageText(record, "assistant");
+      if (assistantText !== null) {
+        current.assistantText = joinCodexAssistantText(current.assistantText, assistantText);
+        current.updatedAt = timestamp;
+      }
+    }
+  }
+
+  return turns;
+}
+
+async function resolveCodexSessionHistorySource(
+  ctx: BackendSessionHistorySourceContext,
+): Promise<BackendSessionHistorySourceResult> {
+  const root = codexSessionsRoot();
+  if (!existsSync(root)) {
+    return { available: false, reason: `codex sessions root not found: ${root}` };
+  }
+  if (
+    ctx.previousSource?.kind === "file" &&
+    existsSync(ctx.previousSource.path) &&
+    codexFileMatchesSession(ctx.previousSource.path, ctx.sessionId)
+  ) {
+    return { available: true, source: sessionHistoryFileSource(ctx.previousSource.path) };
+  }
+  for (const path of listCodexRolloutFiles(root)) {
+    if (codexFileMatchesSession(path, ctx.sessionId)) {
+      return { available: true, source: sessionHistoryFileSource(path) };
+    }
+  }
+  return {
+    available: false,
+    reason: `codex session "${ctx.sessionId}" not found under ${root}`,
+  };
+}
+
+function codexFileMatchesSession(path: string, sessionId: string): boolean {
+  return readJsonlRecordLines(path, "Codex").some(
+    ({ record }) => codexSessionIdFromRecord(record) === sessionId,
+  );
+}
+
+async function readCodexSessionHistory(
+  ctx: BackendSessionHistoryContext,
+): Promise<BackendSessionHistoryResult> {
+  if (ctx.source.kind !== "file") {
+    throw new Error("codex session history source must be a file");
+  }
+  const source = sessionHistoryFileSource(ctx.source.path);
+  return {
+    source,
+    cursor: { kind: "file", size: source.size },
+    turns: parseCodexSessionHistoryJsonl(ctx.source.path),
+  };
+}
+
 /**
  * Validate that a codex thread id exists and was created under the
  * supplied cwd. Opens a transport, completes the JSON-RPC handshake,
@@ -1140,6 +1311,8 @@ export const codexBackend: Backend = {
   id: "codex",
   resolveConfig: resolveCodexBackendConfig,
   validateSessionId: validateCodexSession,
+  resolveSessionHistorySource: resolveCodexSessionHistorySource,
+  readSessionHistory: readCodexSessionHistory,
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const startedAt = Date.now();
     const rawStdoutChunks: string[] = [];
