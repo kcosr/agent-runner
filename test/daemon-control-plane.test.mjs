@@ -200,6 +200,9 @@ export default {
     const state = readState();
     state.readCalls = (state.readCalls ?? 0) + 1;
     writeState(state);
+    if (state.readDelayMs !== undefined) {
+      await new Promise((resolve) => setTimeout(resolve, state.readDelayMs));
+    }
     if (state.failRead === true) {
       throw new Error("fixture read failed");
     }
@@ -6495,6 +6498,80 @@ test("daemon session sync skips busy task-state locks without failure audit", as
         await client.close();
         await server.close();
         rmSync(lockPath, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+test("daemon session sync reads backend history outside the task-state lock", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    readDelayMs: 1_000,
+    token: "v1",
+    turns: [makeSyncedTurn("turn-delayed")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+    manifest.backendSessionSync = {
+      backend: "syncer",
+      backendSessionId: "sync-session",
+      source: { kind: "custom", label: "sync-fixture", changeToken: { token: "v0" } },
+      cursor: { token: "v0" },
+      lastSyncedAt: "2026-04-26T10:09:00.000Z",
+      lastError: null,
+      importedTurnIds: [],
+      openTurnIds: [],
+    };
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const detailSub = await client.subscribe(
+          { channel: "run_detail", runId: run.runId },
+          () => {},
+        );
+        await waitForValue(
+          () => (readSyncState(statePath).readCalls > 0 ? true : null),
+          "delayed backend history read to start",
+        );
+
+        assert.equal(existsSync(join(run.workspaceDir, ".task-state.lock")), false);
+        runCli(["task", "append-notes", run.runId, "t1", "--text", "during backend read"], {
+          cwd: dir,
+        });
+        assert.match(
+          runCli(["task", "show", run.runId, "t1"], { cwd: dir }),
+          /during backend read/,
+        );
+
+        await waitForValue(() => {
+          const manifest = readManifest(run.workspaceDir);
+          return manifest.attemptRecords.some(
+            (attempt) =>
+              attempt.provenance.kind === "backend_session" &&
+              attempt.provenance.backendTurnId === "turn-delayed",
+          )
+            ? true
+            : null;
+        }, "delayed backend history sync to apply");
+        await client.unsubscribe(detailSub);
+      } finally {
+        await client.close();
+        await server.close();
       }
     },
   );

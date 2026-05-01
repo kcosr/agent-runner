@@ -83,8 +83,9 @@ import {
 } from "@task-runner/core/core/commands/service.js";
 import { MAX_ATTACHMENT_BYTES } from "@task-runner/core/core/run/attachments.js";
 import {
+  applyPreparedBackendSessionHistorySync,
+  prepareBackendSessionHistorySync,
   recordBackendSessionSyncError,
-  syncBackendSessionHistory,
 } from "@task-runner/core/core/run/backend-session-sync.js";
 import {
   deriveDependencyState,
@@ -417,6 +418,29 @@ class SessionSyncManager {
     }
   }
 
+  private async recordSyncFailure(
+    runId: string,
+    workspaceDir: string,
+    error: unknown,
+  ): Promise<void> {
+    await tryWithTaskStateLockAsync(workspaceDir, async () => {
+      const latest = this.readEligibleManifest(runId);
+      if (!latest) {
+        return;
+      }
+      if (recordBackendSessionSyncError(latest, formatDaemonError(error))) {
+        writeManifest(latest.workspaceDir, latest);
+      }
+      const envelope = appendRunBackendSessionHistorySyncFailedEvent({
+        manifest: latest,
+        context: systemRunEventContext(this.options.auditContext),
+        reason: "subscription",
+        error: formatDaemonError(error),
+      });
+      this.options.publishAudit(envelope);
+    });
+  }
+
   private async syncRun(runId: string): Promise<void> {
     if (this.inFlightRunIds.has(runId)) {
       return;
@@ -425,54 +449,59 @@ class SessionSyncManager {
     if (!manifest) {
       return;
     }
+    const backend = resolveBackend(manifest.backend);
+    if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
+      return;
+    }
     this.inFlightRunIds.add(runId);
     this.lastSyncAttemptMsByRunId.set(runId, Date.now());
     try {
+      const lockProbe = await tryWithTaskStateLockAsync(manifest.workspaceDir, async () => {});
+      if (!lockProbe.acquired) {
+        return;
+      }
+      const prepared = await prepareBackendSessionHistorySync({
+        manifest,
+        backend,
+        mode: "sync",
+      });
+      if (prepared.status !== "ready") {
+        return;
+      }
       await tryWithTaskStateLockAsync(manifest.workspaceDir, async () => {
         const latest = this.readEligibleManifest(runId);
         if (!latest) {
           return;
         }
-        const backend = resolveBackend(latest.backend);
-        if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
+        if (
+          latest.backend !== prepared.backend ||
+          latest.backendSessionId !== prepared.backendSessionId
+        ) {
           return;
         }
-        try {
-          const result = await syncBackendSessionHistory({
-            manifest: latest,
-            backend,
-            mode: "sync",
-          });
-          if (result.status === "synced" && result.changed) {
-            writeManifest(latest.workspaceDir, latest);
-            const refreshed = this.options.refreshManifestIndexEntry(runId).manifest;
-            const envelope = appendRunBackendSessionHistorySyncedEvent({
-              manifest: refreshed,
-              context: systemRunEventContext(this.options.auditContext),
-              reason: "subscription",
-              importedTurnCount: result.importedTurnCount,
-              openTurnCount: result.openTurnCount,
-              addedAttemptNumbers: result.addedAttemptNumbers,
-            });
-            this.options.publishAudit(envelope);
-            this.options.publishMutationResult(runId);
-            this.options.publishTimelineInvalidated(runId);
-          }
-        } catch (error) {
-          if (recordBackendSessionSyncError(latest, formatDaemonError(error))) {
-            writeManifest(latest.workspaceDir, latest);
-          }
-          const envelope = appendRunBackendSessionHistorySyncFailedEvent({
-            manifest: latest,
+        const result = applyPreparedBackendSessionHistorySync({
+          manifest: latest,
+          mode: "sync",
+          prepared,
+        });
+        if (result.status === "synced" && result.changed) {
+          writeManifest(latest.workspaceDir, latest);
+          const refreshed = this.options.refreshManifestIndexEntry(runId).manifest;
+          const envelope = appendRunBackendSessionHistorySyncedEvent({
+            manifest: refreshed,
             context: systemRunEventContext(this.options.auditContext),
             reason: "subscription",
-            error: formatDaemonError(error),
+            importedTurnCount: result.importedTurnCount,
+            openTurnCount: result.openTurnCount,
+            addedAttemptNumbers: result.addedAttemptNumbers,
           });
           this.options.publishAudit(envelope);
-          throw error;
+          this.options.publishMutationResult(runId);
+          this.options.publishTimelineInvalidated(runId);
         }
       });
     } catch (error) {
+      await this.recordSyncFailure(runId, manifest.workspaceDir, error);
       console.error(
         `task-runner daemon: backend session history sync failed for run ${runId}: ${formatDaemonError(error)}`,
       );

@@ -50,6 +50,17 @@ export interface BackendSessionHistorySyncOptions {
   env?: Record<string, string>;
 }
 
+export interface PreparedBackendSessionHistorySync {
+  status: "ready";
+  backend: string;
+  backendSessionId: string;
+  historyResult: BackendSessionHistoryResult;
+}
+
+export type BackendSessionHistorySyncPreparation =
+  | BackendSessionHistorySyncResult
+  | PreparedBackendSessionHistorySync;
+
 export class BackendSessionHistorySyncError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -432,9 +443,9 @@ function buildSyncState(params: {
   };
 }
 
-async function syncBackendSessionHistoryInternal(
+export async function prepareBackendSessionHistorySync(
   options: BackendSessionHistorySyncOptions,
-): Promise<BackendSessionHistorySyncResult> {
+): Promise<BackendSessionHistorySyncPreparation> {
   const { manifest, backend, mode } = options;
   if (manifest.backendSessionId === null) {
     return {
@@ -506,6 +517,22 @@ async function syncBackendSessionHistoryInternal(
   });
   validateHistoryResult(historyResult);
 
+  return {
+    status: "ready",
+    backend: manifest.backend,
+    backendSessionId,
+    historyResult,
+  };
+}
+
+export function applyPreparedBackendSessionHistorySync(options: {
+  manifest: RunManifest;
+  mode: BackendSessionHistorySyncMode;
+  prepared: PreparedBackendSessionHistorySync;
+}): BackendSessionHistorySyncResult {
+  const { manifest, mode, prepared } = options;
+  const backendSessionId = prepared.backendSessionId;
+  const historyResult = prepared.historyResult;
   const completeTurns = historyResult.turns.filter((turn) => turn.status === "complete");
   const openTurns = historyResult.turns.filter((turn) => turn.status === "open");
   const syncedAt = new Date().toISOString();
@@ -566,6 +593,20 @@ async function syncBackendSessionHistoryInternal(
     openTurnCount: openTurns.length,
     addedAttemptNumbers,
   };
+}
+
+async function syncBackendSessionHistoryInternal(
+  options: BackendSessionHistorySyncOptions,
+): Promise<BackendSessionHistorySyncResult> {
+  const prepared = await prepareBackendSessionHistorySync(options);
+  if (prepared.status !== "ready") {
+    return prepared;
+  }
+  return applyPreparedBackendSessionHistorySync({
+    manifest: options.manifest,
+    mode: options.mode,
+    prepared,
+  });
 }
 
 export async function importBackendSessionHistoryForInitialManifest(

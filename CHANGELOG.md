@@ -449,6 +449,9 @@
 - Web dashboard Chat now refreshes timeline history after subscribed
   backend-session sync imports new attempts, so watched sessions update
   without reselecting the run.
+- Subscribed backend-session sync no longer holds the task-state lock while
+  reading backend transcript files, preventing large histories from blocking
+  run timeline and attachment requests.
 - Web dashboard selected-run surfaces once again span the full viewport
   height on mobile, covering the app toolbar while the drawer is open.
 - Web dashboard user chat bubbles now use a stronger neutral surface in
