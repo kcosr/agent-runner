@@ -1482,11 +1482,13 @@ async function openFilters(user: ReturnType<typeof userEvent.setup>) {
 }
 
 function findEventSource(urlSuffix: string) {
-  const instance = MockEventSource.instances.find((candidate) => candidate.url.endsWith(urlSuffix));
-  if (!instance) {
-    throw new Error(`expected EventSource for ${urlSuffix}`);
+  for (let index = MockEventSource.instances.length - 1; index >= 0; index--) {
+    const instance = MockEventSource.instances[index];
+    if (instance?.url.endsWith(urlSuffix)) {
+      return instance;
+    }
   }
-  return instance;
+  throw new Error(`expected EventSource for ${urlSuffix}`);
 }
 
 function hasEventSource(urlSuffix: string) {
@@ -2184,6 +2186,141 @@ describe("web app", () => {
         source.url.endsWith("/api/runs/run-1/events/timeline"),
       ),
     ).toHaveLength(1);
+  });
+
+  it("reloads selected-run Chat when backend sync invalidates a completed timeline", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const timelineHistory: RunTimelineHistory = {
+      runId: "run-1",
+      lastCursor: 1,
+      attempts: [
+        {
+          attemptNumber: 1,
+          attemptIndexInSession: 0,
+          sessionIndex: 0,
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: "2026-04-13T05:02:00.000Z",
+          prompt: "Initial prompt",
+          transcript: "Initial answer",
+          notices: "",
+          exitCode: 0,
+          timedOut: false,
+          live: false,
+        },
+      ],
+    };
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          status: "success",
+          effectiveStatus: "success",
+          endedAt: "2026-04-13T05:02:00.000Z",
+          totalAttemptCount: 1,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "success",
+          effectiveStatus: "success",
+          isLive: false,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          totalAttemptCount: 1,
+        }),
+      },
+      timelineHistories: {
+        "run-1": timelineHistory,
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("Initial answer")).toBeInTheDocument();
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+    const initialAttempt = timelineHistory.attempts[0];
+    if (!initialAttempt) {
+      throw new Error("expected initial attempt");
+    }
+    timelineHistory.lastCursor = 2;
+    timelineHistory.attempts = [
+      initialAttempt,
+      {
+        attemptNumber: 2,
+        attemptIndexInSession: 0,
+        sessionIndex: 1,
+        startedAt: "2026-04-13T05:03:00.000Z",
+        endedAt: "2026-04-13T05:04:00.000Z",
+        prompt: "testing 456",
+        transcript: "Synced answer",
+        notices: "",
+        exitCode: 0,
+        timedOut: false,
+        live: false,
+      },
+    ];
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "timeline_invalidated",
+        reason: "backend_session_sync",
+      },
+    });
+
+    expect(await within(chat).findByText("Synced answer")).toBeInTheDocument();
+    expect(
+      fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline")),
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not subscribe archived selected-run Chat to timeline events", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+          effectiveStatus: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+          effectiveStatus: "success",
+          isLive: false,
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Archived prompt",
+              transcript: "Archived answer",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    expect(await screen.findByText("Archived answer")).toBeInTheDocument();
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
+    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
   });
 
   it("opens the existing attachment preview drawer from previewable Chat artifact cards", async () => {
@@ -3212,16 +3349,10 @@ describe("web app", () => {
     expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Pending" })).not.toBeInTheDocument();
 
-    let timelineSource: MockEventSource | undefined;
     await waitFor(() => {
-      timelineSource = MockEventSource.instances.find((candidate) =>
-        candidate.url.endsWith("/api/runs/run-1/events/timeline"),
-      );
-      expect(timelineSource).toBeDefined();
+      expect(findEventSource("/api/runs/run-1/events/timeline")).toBeDefined();
     });
-    if (!timelineSource) {
-      throw new Error("expected timeline EventSource after run start");
-    }
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
     timelineSource.emitMessage({
       runId: "run-1",
@@ -3373,7 +3504,7 @@ describe("web app", () => {
       "Completed attempt",
     );
     expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
-    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
+    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(true);
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
     const detailSource = findEventSource("/api/runs/run-1/events/detail");

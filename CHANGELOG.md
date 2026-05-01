@@ -448,7 +448,7 @@
 
 - Web dashboard Chat now refreshes timeline history after subscribed
   backend-session sync imports new attempts, so watched sessions update
-  without reselecting the run.
+  without reselecting the run, while archived runs remain unsubscribed.
 - Subscribed backend-session sync no longer holds the task-state lock while
   reading backend transcript files, preventing large histories from blocking
   run timeline and attachment requests.

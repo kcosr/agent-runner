@@ -464,6 +464,10 @@ export function useRunsDashboardState() {
     enabled: Boolean(detailRunId),
   });
   const selectedRunIsLive = detailRunId === selectedRunId && selectedRunQuery.data?.isLive === true;
+  const selectedRunTimelineEventsEnabled =
+    detailRunId === selectedRunId &&
+    selectedRunQuery.data !== undefined &&
+    selectedRunQuery.data.archivedAt === null;
   const selectedStoredDrawerView =
     selectedRunId !== undefined
       ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
@@ -530,6 +534,7 @@ export function useRunsDashboardState() {
     enabled: timelineEnabled,
     runId: detailRunId,
     runIsLive: selectedRunIsLive,
+    subscribeToEvents: selectedRunTimelineEventsEnabled,
   });
   const auditState = useRunAuditState({
     config,

@@ -132,11 +132,13 @@ export function useRunTimelineState({
   enabled,
   runId,
   runIsLive,
+  subscribeToEvents,
 }: {
   config: AppRuntimeConfig;
   enabled: boolean;
   runId?: string;
   runIsLive: boolean;
+  subscribeToEvents: boolean;
 }): RunTimelineState {
   const { daemonToken } = useDaemonAuthToken();
   const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
@@ -151,6 +153,7 @@ export function useRunTimelineState({
   const bufferRef = useRef<RunTimelineEnvelope[]>([]);
   const loadSeqRef = useRef(0);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
+  const loadInFlightRef = useRef(false);
   const reloadCountRef = useRef(0);
   const previousRunIdRef = useRef<string | undefined>(undefined);
   const previousRunIsLiveRef = useRef<boolean | undefined>(undefined);
@@ -167,6 +170,7 @@ export function useRunTimelineState({
     if (!runId) {
       loadAbortControllerRef.current?.abort();
       loadAbortControllerRef.current = null;
+      loadInFlightRef.current = false;
       historyRef.current = null;
       staleRef.current = false;
       bootstrappedRef.current = false;
@@ -201,6 +205,7 @@ export function useRunTimelineState({
       loadAbortControllerRef.current?.abort();
       const controller = new AbortController();
       loadAbortControllerRef.current = controller;
+      loadInFlightRef.current = true;
       setState((current) => ({ ...current, error: undefined, isLoading: true }));
       try {
         const fetched = await api.getRunTimelineHistory(runId, { signal: controller.signal });
@@ -251,6 +256,11 @@ export function useRunTimelineState({
           stale: true,
         });
         staleRef.current = true;
+      } finally {
+        if (loadSeq === loadSeqRef.current && loadAbortControllerRef.current === controller) {
+          loadAbortControllerRef.current = null;
+          loadInFlightRef.current = false;
+        }
       }
     };
 
@@ -278,16 +288,19 @@ export function useRunTimelineState({
         disposed = true;
         loadAbortControllerRef.current?.abort();
         loadAbortControllerRef.current = null;
+        loadInFlightRef.current = false;
       };
     }
 
     const shouldLoadHistory =
-      !bootstrappedRef.current || staleRef.current || historyRef.current === null;
+      (!bootstrappedRef.current || staleRef.current || historyRef.current === null) &&
+      !loadInFlightRef.current;
     const shouldRefreshForLiveTransition =
       sameRunId &&
       previousRunIsLive === false &&
       runIsLive &&
       !shouldLoadHistory &&
+      !loadInFlightRef.current &&
       bootstrappedRef.current &&
       historyRef.current !== null &&
       historyRef.current.attempts.length > 0;
@@ -308,14 +321,16 @@ export function useRunTimelineState({
       void loadHistory();
     }
 
-    if (!runIsLive) {
-      if (shouldLoadHistory) {
-        void loadHistory();
-      }
+    if (shouldLoadHistory) {
+      void loadHistory();
+    }
+
+    if (!subscribeToEvents) {
       return () => {
         disposed = true;
         loadAbortControllerRef.current?.abort();
         loadAbortControllerRef.current = null;
+        loadInFlightRef.current = false;
       };
     }
 
@@ -325,7 +340,7 @@ export function useRunTimelineState({
         if (disposed) {
           return;
         }
-        if (!bootstrappedRef.current || staleRef.current) {
+        if ((!bootstrappedRef.current || staleRef.current) && !loadInFlightRef.current) {
           void loadHistory();
         }
       },
@@ -378,9 +393,10 @@ export function useRunTimelineState({
       disposed = true;
       loadAbortControllerRef.current?.abort();
       loadAbortControllerRef.current = null;
+      loadInFlightRef.current = false;
       unsubscribe();
     };
-  }, [api, config, daemonToken, enabled, runId, runIsLive]);
+  }, [api, config, daemonToken, enabled, runId, runIsLive, subscribeToEvents]);
 
   return state;
 }
