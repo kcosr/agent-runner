@@ -442,7 +442,7 @@ class SessionSyncManager {
             backend,
             mode: "sync",
           });
-          if (result.status === "synced") {
+          if (result.status === "synced" && result.changed) {
             writeManifest(latest.workspaceDir, latest);
             const refreshed = this.options.refreshManifestIndexEntry(runId).manifest;
             const envelope = appendRunBackendSessionHistorySyncedEvent({

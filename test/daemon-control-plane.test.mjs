@@ -6157,12 +6157,21 @@ test("daemon session sync polls subscribed detail runs, skips unchanged reads, a
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
       const seenAttemptCounts = [];
+      const auditEvents = [];
       try {
         const subscriptionId = await client.subscribe(
           { channel: "run_detail", runId: run.runId },
           (event) => {
             if (event.method === "run.detail") {
               seenAttemptCounts.push(event.detail.totalAttemptCount);
+            }
+          },
+        );
+        const auditSubscriptionId = await client.subscribe(
+          { channel: "run_audit", runId: run.runId },
+          (event) => {
+            if (event.method === "run.audit") {
+              auditEvents.push(event.event.type);
             }
           },
         );
@@ -6178,6 +6187,10 @@ test("daemon session sync polls subscribed detail runs, skips unchanged reads, a
             : null;
         }, "daemon session sync to import turn-1");
         await waitForValue(() => (seenAttemptCounts.includes(1) ? true : null), "detail publish");
+        await waitForValue(
+          () => (auditEvents.includes("run.backend_session_history_synced") ? true : null),
+          "sync audit publish",
+        );
 
         const afterFirst = readSyncState(statePath);
         assert.equal(afterFirst.readCalls, 1);
@@ -6187,6 +6200,24 @@ test("daemon session sync polls subscribed detail runs, skips unchanged reads, a
             ? true
             : null;
         }, "unchanged source polling without reread");
+
+        const auditCountAfterFirst = auditEvents.filter(
+          (eventType) => eventType === "run.backend_session_history_synced",
+        ).length;
+        writeSyncState(statePath, {
+          token: "v1-noop",
+          turns: [makeSyncedTurn("turn-1")],
+        });
+        await waitForValue(() => {
+          const state = readSyncState(statePath);
+          return state.readCalls > afterFirst.readCalls ? true : null;
+        }, "noop changed source read");
+        await sleep(150);
+        assert.equal(
+          auditEvents.filter((eventType) => eventType === "run.backend_session_history_synced")
+            .length,
+          auditCountAfterFirst,
+        );
 
         writeSyncState(statePath, {
           token: "v2",
@@ -6208,6 +6239,7 @@ test("daemon session sync polls subscribed detail runs, skips unchanged reads, a
         );
 
         await client.unsubscribe(subscriptionId);
+        await client.unsubscribe(auditSubscriptionId);
         const afterUnsubscribe = readSyncState(statePath);
         await sleep(350);
         assert.equal(readSyncState(statePath).resolveCalls, afterUnsubscribe.resolveCalls);
