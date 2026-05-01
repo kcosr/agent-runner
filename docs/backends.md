@@ -169,8 +169,9 @@ returns either:
 Built-ins use `file` sources for local JSONL histories. Custom backends
 can return `{ kind: "custom", label, changeToken }`; `changeToken` must
 be JSON-persistable and should change whenever `readSessionHistory` needs
-to run again. For `file` sources, task-runner stores path, size, and
-mtime as the source change token.
+to run again. `label` is a human-readable source name for diagnostics
+and audit context. For `file` sources, task-runner stores path, size,
+and mtime as the source change token.
 
 `readSessionHistory(ctx)` receives the resolved source, the previous
 cursor when one exists, and a mode of `"bootstrap"` or `"sync"`. It
@@ -234,8 +235,8 @@ context and return the same invoke result shape.
   cwd (`/` and `.` → `-`). Resume is validated against that on-disk path.
 - Session history import reads the cwd-bound Claude JSONL file, ignores
   sidechains, tool-only user events, task notifications, and terminal
-  markers, and treats the latest sync turn as open until a later read
-  completes it.
+  markers. Bootstrap import finalizes the latest turn as complete; sync
+  mode treats the latest turn as open until a later read completes it.
 - Effort mapping: `off` → no flag; `minimal` / `low` → `low`; `medium`,
   `high`, `max` map to themselves; `xhigh` → `max`.
 

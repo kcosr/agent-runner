@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type {
   Backend,
   BackendInvokeContext,
@@ -38,8 +38,25 @@ export function encodeClaudeProjectDir(cwd: string): string {
   return cwd.replace(/[/.]/g, "-");
 }
 
+function validateClaudeSessionId(sessionId: string): string | null {
+  if (sessionId.includes("/") || sessionId.includes("\\") || sessionId.includes("..")) {
+    return "claude session id must be a session id, not a path";
+  }
+  return null;
+}
+
 export function claudeSessionFilePath(cwd: string, sessionId: string): string {
-  return join(homedir(), ".claude", "projects", encodeClaudeProjectDir(cwd), `${sessionId}.jsonl`);
+  const invalidReason = validateClaudeSessionId(sessionId);
+  if (invalidReason !== null) {
+    throw new Error(invalidReason);
+  }
+  const projectDir = join(homedir(), ".claude", "projects", encodeClaudeProjectDir(cwd));
+  const path = resolve(projectDir, `${sessionId}.jsonl`);
+  const relativePath = relative(projectDir, path);
+  if (relativePath.startsWith("..") || relativePath.includes("\\") || relativePath === "") {
+    throw new Error("claude session id must resolve inside the cwd-bound project directory");
+  }
+  return path;
 }
 
 function mapEffortToClaude(effort: EffortLevel): string | null {
@@ -236,6 +253,10 @@ export function isResumeFailure(stderr: string, exitCode: number | null): boolea
 }
 
 async function validateClaudeSession(ctx: ValidateSessionContext): Promise<ValidateSessionResult> {
+  const invalidReason = validateClaudeSessionId(ctx.sessionId);
+  if (invalidReason !== null) {
+    return { valid: false, reason: invalidReason };
+  }
   const path = claudeSessionFilePath(ctx.cwd, ctx.sessionId);
   if (!existsSync(path)) {
     return {
@@ -320,15 +341,15 @@ function finishClaudeTurn(
   });
 }
 
-export function parseClaudeSessionHistoryJsonl(params: {
+export async function parseClaudeSessionHistoryJsonl(params: {
   path: string;
   sessionId: string;
   mode: "bootstrap" | "sync";
-}): BackendSyncedTurn[] {
+}): Promise<BackendSyncedTurn[]> {
   const turns: BackendSyncedTurn[] = [];
   let current: ClaudeTurnBuilder | null = null;
 
-  for (const { record, lineNumber } of readJsonlRecordLines(params.path, "Claude")) {
+  for (const { record, lineNumber } of await readJsonlRecordLines(params.path, "Claude")) {
     const timestamp = typeof record.timestamp === "string" ? record.timestamp : null;
     const userText = realClaudeUserText(record);
     if (userText !== null && timestamp !== null) {
@@ -363,6 +384,10 @@ export function parseClaudeSessionHistoryJsonl(params: {
 async function resolveClaudeSessionHistorySource(
   ctx: BackendSessionHistorySourceContext,
 ): Promise<BackendSessionHistorySourceResult> {
+  const invalidReason = validateClaudeSessionId(ctx.sessionId);
+  if (invalidReason !== null) {
+    return { available: false, reason: invalidReason };
+  }
   const path = claudeSessionFilePath(ctx.cwd, ctx.sessionId);
   if (!existsSync(path)) {
     return { available: false, reason: `claude session file not found: ${path}` };
@@ -380,7 +405,7 @@ async function readClaudeSessionHistory(
   return {
     source,
     cursor: { kind: "file", size: source.size },
-    turns: parseClaudeSessionHistoryJsonl({
+    turns: await parseClaudeSessionHistoryJsonl({
       path: ctx.source.path,
       sessionId: ctx.sessionId,
       mode: ctx.mode,

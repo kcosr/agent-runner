@@ -82,7 +82,10 @@ import {
   refreshRunSnapshotAfterTaskStateSettles,
 } from "@task-runner/core/core/commands/service.js";
 import { MAX_ATTACHMENT_BYTES } from "@task-runner/core/core/run/attachments.js";
-import { syncBackendSessionHistory } from "@task-runner/core/core/run/backend-session-sync.js";
+import {
+  recordBackendSessionSyncError,
+  syncBackendSessionHistory,
+} from "@task-runner/core/core/run/backend-session-sync.js";
 import {
   deriveDependencyState,
   deriveDependencyStateFromDetails,
@@ -103,6 +106,7 @@ import {
 import { hasRunnableTasks } from "@task-runner/core/core/run/resume-policy.js";
 import {
   type ScheduleDecisionReason,
+  appendRunBackendSessionHistorySyncFailedEvent,
   appendRunBackendSessionHistorySyncedEvent,
   appendRunScheduleAdvancedEvent,
   appendRunScheduleDisabledEvent,
@@ -118,7 +122,10 @@ import {
   advanceRecurringSchedule,
   deriveScheduleState,
 } from "@task-runner/core/core/run/schedule.js";
-import { withTaskStateLock } from "@task-runner/core/core/run/workspace-state.js";
+import {
+  withTaskStateLock,
+  withTaskStateLockAsync,
+} from "@task-runner/core/core/run/workspace-state.js";
 import {
   debugPerfEnabled,
   debugPerfLog,
@@ -417,32 +424,52 @@ class SessionSyncManager {
     if (!manifest) {
       return;
     }
-    const backend = resolveBackend(manifest.backend);
-    if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
-      return;
-    }
     this.inFlightRunIds.add(runId);
     this.lastSyncAttemptMsByRunId.set(runId, Date.now());
     try {
-      const result = await syncBackendSessionHistory({
-        manifest,
-        backend,
-        mode: "sync",
+      await withTaskStateLockAsync(manifest.workspaceDir, async () => {
+        const latest = this.readEligibleManifest(runId);
+        if (!latest) {
+          return;
+        }
+        const backend = resolveBackend(latest.backend);
+        if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
+          return;
+        }
+        try {
+          const result = await syncBackendSessionHistory({
+            manifest: latest,
+            backend,
+            mode: "sync",
+          });
+          if (result.status === "synced") {
+            writeManifest(latest.workspaceDir, latest);
+            const refreshed = this.options.refreshManifestIndexEntry(runId).manifest;
+            const envelope = appendRunBackendSessionHistorySyncedEvent({
+              manifest: refreshed,
+              context: systemRunEventContext(this.options.auditContext),
+              reason: "subscription",
+              importedTurnCount: result.importedTurnCount,
+              openTurnCount: result.openTurnCount,
+              addedAttemptNumbers: result.addedAttemptNumbers,
+            });
+            this.options.publishAudit(envelope);
+            this.options.publishMutationResult(runId);
+          }
+        } catch (error) {
+          if (recordBackendSessionSyncError(latest, formatDaemonError(error))) {
+            writeManifest(latest.workspaceDir, latest);
+          }
+          const envelope = appendRunBackendSessionHistorySyncFailedEvent({
+            manifest: latest,
+            context: systemRunEventContext(this.options.auditContext),
+            reason: "subscription",
+            error: formatDaemonError(error),
+          });
+          this.options.publishAudit(envelope);
+          throw error;
+        }
       });
-      if (result.status === "synced") {
-        writeManifest(manifest.workspaceDir, manifest);
-        const refreshed = this.options.refreshManifestIndexEntry(runId).manifest;
-        const envelope = appendRunBackendSessionHistorySyncedEvent({
-          manifest: refreshed,
-          context: systemRunEventContext(this.options.auditContext),
-          reason: "subscription",
-          importedTurnCount: result.importedTurnCount,
-          openTurnCount: result.openTurnCount,
-          addedAttemptNumbers: result.addedAttemptNumbers,
-        });
-        this.options.publishAudit(envelope);
-        this.options.publishMutationResult(runId);
-      }
     } catch (error) {
       console.error(
         `task-runner daemon: backend session history sync failed for run ${runId}: ${formatDaemonError(error)}`,

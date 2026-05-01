@@ -676,7 +676,30 @@ function validateBackendSessionId(sessionId: string): string {
   if (trimmed.length === 0) {
     throw new CommandError("run set-backend-session: <session-id> cannot be empty");
   }
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("..")) {
+    throw new CommandError(
+      "run set-backend-session: <session-id> must be a session id, not a path",
+    );
+  }
   return trimmed;
+}
+
+function dropImportedBackendSessionHistory(manifest: RunManifest): void {
+  const droppedSessionIndexes = new Set(
+    manifest.sessions
+      .filter((record) => record.provenance.kind === "backend_session")
+      .map((record) => record.sessionIndex),
+  );
+  manifest.sessions = manifest.sessions.filter(
+    (record) => record.provenance.kind !== "backend_session",
+  );
+  manifest.attemptRecords = manifest.attemptRecords.filter(
+    (record) =>
+      record.provenance.kind !== "backend_session" &&
+      !droppedSessionIndexes.has(record.sessionIndex),
+  );
+  manifest.totalSessionCount = manifest.sessions.length;
+  manifest.totalAttemptCount = manifest.attemptRecords.length;
 }
 
 function validateAttachmentSourcePath(sourcePath: string): void {
@@ -1429,6 +1452,7 @@ export function setRunBackendSession(
     const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = nextBackendSessionId;
     resolved.manifest.backendSessionSync = null;
+    dropImportedBackendSessionHistory(resolved.manifest);
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
       emitAuditEnvelope,
@@ -1466,6 +1490,7 @@ export function clearRunBackendSession(
     const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = null;
     resolved.manifest.backendSessionSync = null;
+    dropImportedBackendSessionHistory(resolved.manifest);
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
       emitAuditEnvelope,

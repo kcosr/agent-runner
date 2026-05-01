@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import type {
   Backend,
   BackendSessionHistoryResult,
@@ -50,8 +51,8 @@ export interface BackendSessionHistorySyncOptions {
 }
 
 export class BackendSessionHistorySyncError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "BackendSessionHistorySyncError";
   }
 }
@@ -153,17 +154,63 @@ function backendSessionTurnId(record: AttemptRecord | SessionRecord): string | n
   return record.provenance.kind === "backend_session" ? record.provenance.backendTurnId : null;
 }
 
+function isBackendSessionAttempt(
+  manifest: RunManifest,
+  backendSessionId: string,
+  turn: BackendSyncedTurn,
+  record: AttemptRecord,
+): boolean {
+  return (
+    record.provenance.kind === "backend_session" &&
+    record.provenance.backend === manifest.backend &&
+    record.provenance.backendSessionId === backendSessionId &&
+    record.provenance.backendTurnId === turn.backendTurnId
+  );
+}
+
+function taskRunnerAttemptMatchesBackendTurn(
+  manifest: RunManifest,
+  backendSessionId: string,
+  turn: BackendSyncedTurn,
+  record: AttemptRecord,
+): boolean {
+  if (record.provenance.kind !== "task_runner") {
+    return false;
+  }
+  const session = manifest.sessions.find(
+    (candidate) => candidate.sessionIndex === record.sessionIndex,
+  );
+  const attemptMatches =
+    record.sessionIdAtStart === backendSessionId || record.sessionIdCaptured === backendSessionId;
+  const sessionMatches =
+    session !== undefined &&
+    (session.backendSessionIdAtStart === backendSessionId ||
+      session.backendSessionIdAtEnd === backendSessionId);
+  if (!attemptMatches && !sessionMatches) {
+    return false;
+  }
+  if (record.prompt !== (turn.userText ?? "")) {
+    return false;
+  }
+  const turnStartedAt = Date.parse(turn.startedAt);
+  const turnUpdatedAt = Date.parse(turn.updatedAt);
+  const recordStartedAt = Date.parse(record.startedAt);
+  const recordEndedAt = record.endedAt === null ? recordStartedAt : Date.parse(record.endedAt);
+  return recordStartedAt <= turnUpdatedAt && recordEndedAt >= turnStartedAt;
+}
+
 function findExistingAttempt(
   manifest: RunManifest,
   backendSessionId: string,
   turn: BackendSyncedTurn,
 ): AttemptRecord | undefined {
-  return manifest.attemptRecords.find(
-    (record) =>
-      record.provenance.kind === "backend_session" &&
-      record.provenance.backend === manifest.backend &&
-      record.provenance.backendSessionId === backendSessionId &&
-      record.provenance.backendTurnId === turn.backendTurnId,
+  return (
+    manifest.attemptRecords.find((record) =>
+      isBackendSessionAttempt(manifest, backendSessionId, turn, record),
+    ) ??
+    manifest.attemptRecords.find((record) =>
+      taskRunnerAttemptMatchesBackendTurn(manifest, backendSessionId, turn, record),
+    )
   );
 }
 
@@ -242,10 +289,14 @@ function upsertCompleteTurn(params: {
   mode: BackendSessionHistorySyncMode;
   source: BackendSessionHistorySource;
   syncedAt: string;
-}): { changed: boolean; addedAttemptNumber: number | null } {
+}): { changed: boolean; addedAttemptNumber: number | null; createdLogPath: string | null } {
   const { manifest, backendSessionId, turn, mode, source, syncedAt } = params;
   const existingAttempt = findExistingAttempt(manifest, backendSessionId, turn);
-  const existingSession = findExistingSession(manifest, backendSessionId, turn);
+  const existingSession =
+    findExistingSession(manifest, backendSessionId, turn) ??
+    (existingAttempt
+      ? manifest.sessions.find((record) => record.sessionIndex === existingAttempt.sessionIndex)
+      : undefined);
   if (existingAttempt && existingSession) {
     if (
       existingCompleteTurnMatches({
@@ -255,7 +306,7 @@ function upsertCompleteTurn(params: {
         turn,
       })
     ) {
-      return { changed: false, addedAttemptNumber: null };
+      return { changed: false, addedAttemptNumber: null, createdLogPath: null };
     }
     const importedAt =
       existingAttempt.provenance.kind === "backend_session"
@@ -288,7 +339,7 @@ function upsertCompleteTurn(params: {
     existingSession.backendSessionIdAtStart = backendSessionId;
     existingSession.backendSessionIdAtEnd = backendSessionId;
     existingSession.provenance = provenance;
-    return { changed: true, addedAttemptNumber: null };
+    return { changed: true, addedAttemptNumber: null, createdLogPath: null };
   }
 
   const sessionIndex = nextSessionIndex(manifest);
@@ -337,7 +388,7 @@ function upsertCompleteTurn(params: {
   };
   manifest.sessions.push(session);
   manifest.attemptRecords.push(attempt);
-  return { changed: true, addedAttemptNumber: attemptNumber };
+  return { changed: true, addedAttemptNumber: attemptNumber, createdLogPath: logPath };
 }
 
 function dedupeStrings(values: string[]): string[] {
@@ -443,6 +494,7 @@ async function syncBackendSessionHistoryInternal(
   const openTurns = historyResult.turns.filter((turn) => turn.status === "open");
   const syncedAt = new Date().toISOString();
   const addedAttemptNumbers: number[] = [];
+  const createdLogPaths: string[] = [];
   let changed = false;
   const snapshot = structuredClone(manifest);
 
@@ -459,6 +511,9 @@ async function syncBackendSessionHistoryInternal(
       changed = upsert.changed || changed;
       if (upsert.addedAttemptNumber !== null) {
         addedAttemptNumbers.push(upsert.addedAttemptNumber);
+      }
+      if (upsert.createdLogPath !== null) {
+        createdLogPaths.push(upsert.createdLogPath);
       }
     }
 
@@ -481,6 +536,9 @@ async function syncBackendSessionHistoryInternal(
     manifest.totalSessionCount = manifest.sessions.length;
   } catch (error) {
     Object.assign(manifest, snapshot);
+    for (const logPath of createdLogPaths) {
+      rmSync(`${manifest.workspaceDir}/${logPath}`, { force: true });
+    }
     throw error;
   }
 
@@ -506,6 +564,34 @@ export async function syncBackendSessionHistory(
   try {
     return await syncBackendSessionHistoryInternal(options);
   } catch (error) {
-    throw new BackendSessionHistorySyncError(errorMessage(error));
+    const syncError =
+      error instanceof BackendSessionHistorySyncError
+        ? error
+        : new BackendSessionHistorySyncError(errorMessage(error), { cause: error });
+    recordBackendSessionSyncError(options.manifest, syncError.message);
+    throw syncError;
   }
+}
+
+export function recordBackendSessionSyncError(manifest: RunManifest, message: string): boolean {
+  const previousState = manifest.backendSessionSync;
+  if (
+    previousState === null ||
+    manifest.backendSessionId === null ||
+    previousState.backend !== manifest.backend ||
+    previousState.backendSessionId !== manifest.backendSessionId
+  ) {
+    return false;
+  }
+  manifest.backendSessionSync = {
+    backend: previousState.backend,
+    backendSessionId: previousState.backendSessionId,
+    source: previousState.source === null ? null : cloneSource(previousState.source),
+    cursor: structuredClone(previousState.cursor),
+    lastSyncedAt: previousState.lastSyncedAt,
+    lastError: message,
+    importedTurnIds: [...previousState.importedTurnIds],
+    openTurnIds: [...previousState.openTurnIds],
+  };
+  return true;
 }

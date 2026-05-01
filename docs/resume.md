@@ -130,8 +130,9 @@ stored `manifest.brief` is reused verbatim.
 
 ## Backend session history sync
 
-Backends that implement `resolveSessionHistorySource` and
-`readSessionHistory` can import durable backend-owned turns. On
+Only backends that implement both `resolveSessionHistorySource` and
+`readSessionHistory` import durable backend-owned turns; unsupported
+backends skip this step. On
 `--backend-session-id` bootstrap, complete historical turns are imported
 before the first task-runner-owned invocation. Each imported turn becomes
 a canonical session plus attempt with `backend_session` provenance; open
@@ -148,8 +149,10 @@ complete, resume fails before allocation and the prior manifest remains
 the canonical state.
 
 If the source change token is unchanged, resume skips the read and
-continues. If the backend has no history reader or no source is currently
-available, resume proceeds with the existing manifest history.
+continues. If the backend has no history reader, resume proceeds with the
+existing manifest history. If a backend history reader reports the source
+as unavailable for a run with a backend session id, resume fails before
+allocating the next attempt.
 
 ## Retry nudges
 
@@ -193,4 +196,5 @@ For subscribed non-running runs, the daemon also polls backend-owned
 history while detail, timeline, or audit subscribers are present. This is
 only a projection freshness path; it uses the same sync rules as
 pre-resume, emits `run.backend_session_history_synced` audit events for
-changed history, and does not create synthetic timeline events.
+changed history, emits `run.backend_session_history_sync_failed` audit
+events for failures, and does not create synthetic timeline events.

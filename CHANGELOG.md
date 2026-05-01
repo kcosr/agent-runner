@@ -5,13 +5,10 @@
 ### Breaking Changes
 
 - Manifest schema version is now `19`. Runs now require
-  backend-session sync state plus explicit provenance on session and
-  attempt records; use `scripts/migrate-manifests-v19.mjs` before
-  resuming schema v18 runs.
-- Manifest schema version is now `18`. Runs now require
-  `queuedResumeMessages` as manifest state and expose queued resume
-  messages on `RunDetail` plus `queuedResumeMessageCount` on `RunSummary`.
-  Use `scripts/migrate-manifests-v18.mjs` before resuming schema v17 runs.
+  `queuedResumeMessages`, backend-session sync state, and explicit
+  provenance on session and attempt records. Use
+  `scripts/migrate-manifests-v18.mjs`, then
+  `scripts/migrate-manifests-v19.mjs`, before resuming schema v17 runs.
   ([#127](https://github.com/kcosr/task-runner/pull/127))
 - Manifest schema version is now `17`. Runs now freeze selected
   backend-owned config on `manifest.backendConfig`, and the old

@@ -99,6 +99,7 @@ import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 export { RecursionDepthError } from "./recursion-guard.js";
 import {
   importBackendSessionHistoryForInitialManifest,
+  recordBackendSessionSyncError,
   syncBackendSessionHistory,
 } from "./backend-session-sync.js";
 import { WORKER_BRIEF_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
@@ -2134,17 +2135,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
             mode: "sync",
           });
         } catch (error) {
+          if (recordBackendSessionSyncError(latest, (error as Error).message)) {
+            writeManifest(workspaceDir, latest);
+          }
           appendBackendHistorySyncFailedAudit(latest, "pre_resume", error);
           throw new ResumeError(
             `cannot sync backend session history before resume: ${(error as Error).message}`,
           );
         }
-        if (
-          syncResult.status === "skipped" &&
-          syncResult.reason === "source_unavailable" &&
-          latest.backendSessionSync !== null
-        ) {
+        if (syncResult.status === "skipped" && syncResult.reason === "source_unavailable") {
           const error = new ResumeError("backend session history source is unavailable");
+          if (recordBackendSessionSyncError(latest, error.message)) {
+            writeManifest(workspaceDir, latest);
+          }
           appendBackendHistorySyncFailedAudit(latest, "pre_resume", error);
           throw error;
         }

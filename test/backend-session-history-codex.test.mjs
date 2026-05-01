@@ -79,12 +79,12 @@ function sessionRecords(sessionId = "thread-123") {
   ];
 }
 
-test("codex history parser returns complete turns in source order and joins assistant messages", () => {
+test("codex history parser returns complete turns in source order and joins assistant messages", async () => {
   const dir = tempDir();
   const path = join(dir, "rollout-test.jsonl");
   writeJsonl(path, sessionRecords());
 
-  const turns = parseCodexSessionHistoryJsonl(path);
+  const turns = await parseCodexSessionHistoryJsonl(path);
 
   assert.deepEqual(turns, [
     {
@@ -135,16 +135,36 @@ test("codex history resolves rollout file by session_meta payload id", async () 
   });
 });
 
-test("codex history parser reports malformed jsonl with file and line", () => {
+test("codex history parser reports malformed jsonl with file and line", async () => {
   const dir = tempDir();
   const path = join(dir, "rollout-bad.jsonl");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path, `${JSON.stringify(sessionRecords()[0])}\n{not-json}\n`);
 
-  assert.throws(
+  await assert.rejects(
     () => parseCodexSessionHistoryJsonl(path),
     new RegExp(`failed to parse Codex session history ${path}:2`),
   );
+});
+
+test("codex history skips corrupt rollout files while resolving a matching session", async () => {
+  const home = tempDir();
+  const corruptPath = join(home, ".codex", "sessions", "2026", "04", "30", "rollout-corrupt.jsonl");
+  const targetPath = join(home, ".codex", "sessions", "2026", "05", "01", "rollout-target.jsonl");
+  mkdirSync(join(corruptPath, ".."), { recursive: true });
+  writeFileSync(corruptPath, "{not-json}\n");
+  writeJsonl(targetPath, sessionRecords("thread-123"));
+
+  await withEnv({ HOME: home }, async () => {
+    const resolved = await codexBackend.resolveSessionHistorySource({
+      sessionId: "thread-123",
+      cwd: "/repo",
+      env: {},
+      resolvedBackendArgs: [],
+    });
+    assert.equal(resolved.available, true);
+    assert.equal(resolved.source.path, targetPath);
+  });
 });
 
 test("codex history source is unavailable when no rollout matches the thread id", async () => {

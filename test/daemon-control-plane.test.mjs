@@ -200,6 +200,9 @@ export default {
     const state = readState();
     state.readCalls = (state.readCalls ?? 0) + 1;
     writeState(state);
+    if (state.failRead === true) {
+      throw new Error("fixture read failed");
+    }
     return {
       source: {
         kind: "custom",
@@ -6321,6 +6324,71 @@ test("daemon session sync polls timeline and audit subscribers without synthetic
         );
         assert.deepEqual(timelineEvents, []);
         await client.unsubscribe(timelineSub);
+        await client.unsubscribe(auditSub);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon session sync publishes audit failures and persists lastError", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-before-failure")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+    manifest.backendSessionSync = {
+      backend: "syncer",
+      backendSessionId: "sync-session",
+      source: { kind: "custom", label: "sync-fixture", changeToken: { token: "v0" } },
+      cursor: { token: "v0" },
+      lastSyncedAt: "2026-04-26T10:09:00.000Z",
+      lastError: null,
+      importedTurnIds: [],
+      openTurnIds: [],
+    };
+  });
+  writeSyncState(statePath, { token: "v2", failRead: true, turns: [makeSyncedTurn("turn-fail")] });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const auditSub = await client.subscribe(
+          { channel: "run_audit", runId: run.runId },
+          () => {},
+        );
+
+        await waitForValue(async () => {
+          const history = await daemonGetRunAuditHistory(listenUrl, run.runId);
+          return history.events.some(
+            ({ event }) =>
+              event.type === "run.backend_session_history_sync_failed" &&
+              String(event.fields.error).includes("fixture read failed"),
+          )
+            ? true
+            : null;
+        }, "daemon sync failure audit");
+        assert.equal(
+          readManifest(run.workspaceDir).backendSessionSync.lastError,
+          "fixture read failed",
+        );
         await client.unsubscribe(auditSub);
       } finally {
         await client.close();

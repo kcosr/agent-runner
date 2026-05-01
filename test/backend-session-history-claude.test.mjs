@@ -84,12 +84,12 @@ function records() {
   ];
 }
 
-test("claude history parser ignores sidechains, task notifications, tool-only users, and terminal markers", () => {
+test("claude history parser ignores sidechains, task notifications, tool-only users, and terminal markers", async () => {
   const dir = tempDir();
   const path = join(dir, "session.jsonl");
   writeJsonl(path, records());
 
-  const turns = parseClaudeSessionHistoryJsonl({
+  const turns = await parseClaudeSessionHistoryJsonl({
     path,
     sessionId: "session-123",
     mode: "bootstrap",
@@ -119,12 +119,12 @@ test("claude history parser ignores sidechains, task notifications, tool-only us
   );
 });
 
-test("claude history parser treats latest sync turn as mutable open", () => {
+test("claude history parser treats latest sync turn as mutable open", async () => {
   const dir = tempDir();
   const path = join(dir, "session.jsonl");
   writeJsonl(path, records());
 
-  const turns = parseClaudeSessionHistoryJsonl({
+  const turns = await parseClaudeSessionHistoryJsonl({
     path,
     sessionId: "session-123",
     mode: "sync",
@@ -175,13 +175,13 @@ test("claude history resolves only the cwd-bound parent session file", async () 
   });
 });
 
-test("claude history parser reports malformed jsonl with file and line", () => {
+test("claude history parser reports malformed jsonl with file and line", async () => {
   const dir = tempDir();
   const path = join(dir, "session-bad.jsonl");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path, `${JSON.stringify(records()[0])}\n{not-json}\n`);
 
-  assert.throws(
+  await assert.rejects(
     () =>
       parseClaudeSessionHistoryJsonl({
         path,
@@ -190,6 +190,25 @@ test("claude history parser reports malformed jsonl with file and line", () => {
       }),
     new RegExp(`failed to parse Claude session history ${path}:2`),
   );
+});
+
+test("claude history rejects path-like session ids", async () => {
+  const home = tempDir();
+
+  await withEnv({ HOME: home }, async () => {
+    assert.throws(
+      () => claudeSessionFilePath("/repo", "../../outside"),
+      /claude session id must be a session id, not a path/,
+    );
+    const resolved = await claudeBackend.resolveSessionHistorySource({
+      sessionId: "../../outside",
+      cwd: "/repo",
+      env: {},
+      resolvedBackendArgs: [],
+    });
+    assert.equal(resolved.available, false);
+    assert.equal(resolved.reason, "claude session id must be a session id, not a path");
+  });
 });
 
 test("claude history source is unavailable when the cwd-bound session file is missing", async () => {

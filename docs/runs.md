@@ -118,13 +118,15 @@ attempt, task-runner syncs backend-owned history for runs with a backend
 session id and a backend that implements history reads. This pre-resume
 sync is independent of daemon subscriptions. If the source changed and
 history cannot be read or persisted safely, resume fails before any new
-attempt/session numbers are allocated and the manifest remains unchanged.
+attempt/session numbers are allocated. When previous sync metadata exists,
+`backendSessionSync.lastError` records the failure.
 
 The daemon also polls subscribed non-running run detail, timeline, and
 audit streams. Changed backend history updates `run.json`, refreshes run
 indexes, publishes fresh summary/detail projections, and emits audit
 `run.backend_session_history_synced` events for synced backend turns.
-Summary-only subscriptions do not start history polling.
+Daemon sync failures emit `run.backend_session_history_sync_failed` audit
+events. Summary-only subscriptions do not start history polling.
 
 ## Lifecycle states
 

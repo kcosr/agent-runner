@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { promises as fs, statSync } from "node:fs";
 import type { BackendSessionHistorySource } from "../core/backends/types.js";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -28,8 +28,11 @@ export interface JsonlRecordLine {
   lineNumber: number;
 }
 
-export function readJsonlRecordLines(path: string, sourceName: string): JsonlRecordLine[] {
-  const raw = readFileSync(path, "utf8");
+export async function readJsonlRecordLines(
+  path: string,
+  sourceName: string,
+): Promise<JsonlRecordLine[]> {
+  const raw = await fs.readFile(path, "utf8");
   const records: JsonlRecordLine[] = [];
   const lines = raw.split(/\r?\n/);
   for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {

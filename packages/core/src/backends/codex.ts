@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { WebSocket } from "ws";
 import type {
   Backend,
@@ -1094,11 +1094,11 @@ function joinCodexAssistantText(prior: string, next: string): string {
   return `${prior}${streamBoundarySeparator(prior, next)}${next}`;
 }
 
-export function parseCodexSessionHistoryJsonl(path: string): BackendSyncedTurn[] {
+export async function parseCodexSessionHistoryJsonl(path: string): Promise<BackendSyncedTurn[]> {
   const turns: BackendSyncedTurn[] = [];
   let current: CodexTurnBuilder | null = null;
 
-  for (const { record } of readJsonlRecordLines(path, "Codex")) {
+  for (const { record } of await readJsonlRecordLines(path, "Codex")) {
     const timestamp = typeof record.timestamp === "string" ? record.timestamp : null;
 
     if (record.type === "event_msg" && isRecord(record.payload)) {
@@ -1162,13 +1162,14 @@ async function resolveCodexSessionHistorySource(
   }
   if (
     ctx.previousSource?.kind === "file" &&
+    fileIsUnderRoot(root, ctx.previousSource.path) &&
     existsSync(ctx.previousSource.path) &&
-    codexFileMatchesSession(ctx.previousSource.path, ctx.sessionId)
+    (await codexFileMatchesSession(ctx.previousSource.path, ctx.sessionId))
   ) {
     return { available: true, source: sessionHistoryFileSource(ctx.previousSource.path) };
   }
   for (const path of listCodexRolloutFiles(root)) {
-    if (codexFileMatchesSession(path, ctx.sessionId)) {
+    if (await codexFileMatchesSession(path, ctx.sessionId)) {
       return { available: true, source: sessionHistoryFileSource(path) };
     }
   }
@@ -1178,10 +1179,19 @@ async function resolveCodexSessionHistorySource(
   };
 }
 
-function codexFileMatchesSession(path: string, sessionId: string): boolean {
-  return readJsonlRecordLines(path, "Codex").some(
-    ({ record }) => codexSessionIdFromRecord(record) === sessionId,
-  );
+function fileIsUnderRoot(root: string, path: string): boolean {
+  const relativePath = relative(root, path);
+  return relativePath !== "" && !relativePath.startsWith("..") && !isAbsolute(relativePath);
+}
+
+async function codexFileMatchesSession(path: string, sessionId: string): Promise<boolean> {
+  try {
+    return (await readJsonlRecordLines(path, "Codex")).some(
+      ({ record }) => codexSessionIdFromRecord(record) === sessionId,
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function readCodexSessionHistory(
@@ -1194,7 +1204,7 @@ async function readCodexSessionHistory(
   return {
     source,
     cursor: { kind: "file", size: source.size },
-    turns: parseCodexSessionHistoryJsonl(ctx.source.path),
+    turns: await parseCodexSessionHistoryJsonl(ctx.source.path),
   };
 }
 

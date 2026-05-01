@@ -282,7 +282,7 @@ test("command services: passive backend session mutations update only metadata a
     manifest.endedAt = "2026-04-17T09:59:00.000Z";
     manifest.exitCode = 0;
     manifest.totalAttemptCount = 2;
-    manifest.totalSessionCount = 1;
+    manifest.totalSessionCount = 2;
     manifest.backendSessionId = "thread-original";
     manifest.sessions = [
       {
@@ -299,6 +299,30 @@ test("command services: passive backend session mutations update only metadata a
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "thread-original",
         provenance: { kind: "task_runner" },
+      },
+      {
+        sessionIndex: 1,
+        startedAt: "2026-04-17T09:40:00.000Z",
+        endedAt: "2026-04-17T09:50:00.000Z",
+        status: "success",
+        exitCode: 0,
+        message: "imported message",
+        brief: "imported brief",
+        firstAttemptNumber: 2,
+        lastAttemptNumber: 2,
+        maxAttemptsPerSession: 1,
+        backendSessionIdAtStart: "thread-original",
+        backendSessionIdAtEnd: "thread-original",
+        provenance: {
+          kind: "backend_session",
+          backend: "passive",
+          backendSessionId: "thread-original",
+          backendTurnId: "stale-turn",
+          importedAt: "2026-04-17T09:50:00.000Z",
+          lastSyncedAt: "2026-04-17T09:50:00.000Z",
+          mode: "sync",
+          source: { kind: "custom", label: "test", changeToken: { version: 1 } },
+        },
       },
     ];
     manifest.attemptRecords = [
@@ -318,6 +342,32 @@ test("command services: passive backend session mutations update only metadata a
         logPath: "attempts/01.json",
         invalidStatuses: [],
         provenance: { kind: "task_runner" },
+      },
+      {
+        attemptNumber: 2,
+        sessionIndex: 1,
+        attemptIndexInSession: 0,
+        startedAt: "2026-04-17T09:40:00.000Z",
+        endedAt: "2026-04-17T09:50:00.000Z",
+        prompt: "imported prompt",
+        sessionIdAtStart: "thread-original",
+        sessionIdCaptured: "thread-original",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "imported transcript",
+        logPath: "attempts/02.json",
+        invalidStatuses: [],
+        provenance: {
+          kind: "backend_session",
+          backend: "passive",
+          backendSessionId: "thread-original",
+          backendTurnId: "stale-turn",
+          importedAt: "2026-04-17T09:50:00.000Z",
+          lastSyncedAt: "2026-04-17T09:50:00.000Z",
+          mode: "sync",
+          source: { kind: "custom", label: "test", changeToken: { version: 1 } },
+        },
       },
     ];
     manifest.backendSessionSync = {
@@ -347,6 +397,15 @@ test("command services: passive backend session mutations update only metadata a
     tasksTotal: before.tasksTotal,
     resetSeed: before.resetSeed,
   };
+  const preservedAfterBackendSessionDrop = {
+    ...preservedBefore,
+    totalAttemptCount: 1,
+    totalSessionCount: 1,
+    sessions: before.sessions.filter((record) => record.provenance.kind === "task_runner"),
+    attemptRecords: before.attemptRecords.filter(
+      (record) => record.provenance.kind === "task_runner",
+    ),
+  };
 
   await withSharedRuntimeEnv(dir, async () => {
     const setResult = setRunBackendSession(passiveRun.runId, { backendSessionId: "thread-42" });
@@ -357,7 +416,10 @@ test("command services: passive backend session mutations update only metadata a
       updatedAt: afterSet,
       changed: true,
     });
-    assert.equal(readManifest(passiveRun.workspaceDir).backendSessionSync, null);
+    const afterSetManifest = readManifest(passiveRun.workspaceDir);
+    assert.equal(afterSetManifest.backendSessionSync, null);
+    assert.equal(afterSetManifest.totalAttemptCount, 1);
+    assert.equal(afterSetManifest.totalSessionCount, 1);
     assertTimestampAdvanced(before.updatedAt, afterSet, "setRunBackendSession updatedAt");
 
     const setAgainResult = setRunBackendSession(passiveRun.runId, {
@@ -379,7 +441,10 @@ test("command services: passive backend session mutations update only metadata a
       updatedAt: afterClear,
       changed: true,
     });
-    assert.equal(readManifest(passiveRun.workspaceDir).backendSessionSync, null);
+    const afterClearManifest = readManifest(passiveRun.workspaceDir);
+    assert.equal(afterClearManifest.backendSessionSync, null);
+    assert.equal(afterClearManifest.totalAttemptCount, 1);
+    assert.equal(afterClearManifest.totalSessionCount, 1);
     assertTimestampAdvanced(afterSet, afterClear, "clearRunBackendSession updatedAt");
 
     assert.deepEqual(clearRunBackendSession(passiveRun.runId), {
@@ -426,7 +491,7 @@ test("command services: passive backend session mutations update only metadata a
       tasksTotal: after.tasksTotal,
       resetSeed: after.resetSeed,
     },
-    preservedBefore,
+    preservedAfterBackendSessionDrop,
   );
 });
 
