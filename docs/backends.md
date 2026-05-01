@@ -234,9 +234,10 @@ context and return the same invoke result shape.
 - Sessions are stored under Claude's project directory encoded from the
   cwd (`/` and `.` → `-`). Resume is validated against that on-disk path.
 - Session history import reads the cwd-bound Claude JSONL file, ignores
-  sidechains, tool-only user events, task notifications, and terminal
-  markers. Bootstrap import finalizes the latest turn as complete; sync
-  mode treats the latest turn as open until a later read completes it.
+  sidechains, tool-only user events, and task notifications. Bootstrap
+  import finalizes the latest turn as complete; sync mode keeps the latest
+  turn open until Claude writes a terminal turn-duration marker or a later
+  user turn completes it.
 - Effort mapping: `off` → no flag; `minimal` / `low` → `low`; `medium`,
   `high`, `max` map to themselves; `xhigh` → `max`.
 

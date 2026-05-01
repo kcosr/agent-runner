@@ -651,12 +651,11 @@ subscriptions do not. A changed source is synced into the manifest with
 the same backend-session sync helper used by pre-resume, under the
 workspace task-state lock. The daemon refreshes indexes and publishes
 normal summary/detail projections plus
-`run.backend_session_history_synced` audit envelopes for imported turns;
-sync failures publish `run.backend_session_history_sync_failed` audit
-envelopes and update `backendSessionSync.lastError` when previous sync
-metadata exists. It does not publish synthetic timeline events for
-imported backend history, so timeline-only subscribers should refetch
-history after a sync signal from detail or audit.
+`run.backend_session_history_synced` audit envelopes for imported turns,
+and a timeline invalidation event so selected Chat/Attempts views refetch
+history. Sync failures publish `run.backend_session_history_sync_failed`
+audit envelopes and update `backendSessionSync.lastError` when previous
+sync metadata exists.
 
 Live subscriptions are split by responsibility instead of sharing one
 mixed event bus:

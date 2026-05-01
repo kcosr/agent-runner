@@ -135,6 +135,29 @@ test("claude history parser treats latest sync turn as mutable open", async () =
   assert.equal(turns[1].status, "open");
 });
 
+test("claude history parser completes latest sync turn after terminal marker", async () => {
+  const dir = tempDir();
+  const path = join(dir, "session.jsonl");
+  writeJsonl(path, [
+    ...records(),
+    {
+      timestamp: "2026-05-01T00:00:08.000Z",
+      type: "system",
+      subtype: "turn_duration",
+    },
+  ]);
+
+  const turns = await parseClaudeSessionHistoryJsonl({
+    path,
+    sessionId: "session-123",
+    mode: "sync",
+  });
+
+  assert.equal(turns[1].backendTurnId, "claude:session-123:line:5");
+  assert.equal(turns[1].status, "complete");
+  assert.equal(turns[1].updatedAt, "2026-05-01T00:00:08.000Z");
+});
+
 test("claude history resolves only the cwd-bound parent session file", async () => {
   const home = tempDir();
   const cwd = "/repo";

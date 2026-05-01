@@ -148,7 +148,6 @@ export function useRunTimelineState({
     stale: false,
   });
   const historyRef = useRef<RunTimelineHistory | null>(null);
-  const historyCacheRef = useRef(new Map<string, RunTimelineHistory>());
   const staleRef = useRef(false);
   const bootstrappedRef = useRef(false);
   const bufferRef = useRef<RunTimelineEnvelope[]>([]);
@@ -237,7 +236,6 @@ export function useRunTimelineState({
         bootstrappedRef.current = true;
         reloadCountRef.current = 0;
         historyRef.current = merged;
-        historyCacheRef.current.set(runId, merged);
         staleRef.current = false;
         setState({
           history: merged,
@@ -274,16 +272,15 @@ export function useRunTimelineState({
     const previousRunIsLive = sameRunId ? previousRunIsLiveRef.current : undefined;
     previousRunIdRef.current = runId;
     if (!sameRunId) {
-      const cachedHistory = historyCacheRef.current.get(runId) ?? null;
-      historyRef.current = cachedHistory;
+      historyRef.current = null;
       staleRef.current = false;
-      bootstrappedRef.current = cachedHistory !== null;
+      bootstrappedRef.current = false;
       bufferRef.current = [];
       reloadCountRef.current = 0;
       previousRunIsLiveRef.current = undefined;
       setState({
-        history: cachedHistory,
-        isLoading: enabled && cachedHistory === null,
+        history: null,
+        isLoading: enabled,
         stale: false,
       });
     }
@@ -377,7 +374,6 @@ export function useRunTimelineState({
           return;
         }
         historyRef.current = result.history;
-        historyCacheRef.current.set(runId, result.history);
         staleRef.current = false;
         setState({
           history: result.history,
@@ -410,10 +406,9 @@ export function useRunTimelineState({
     return state;
   }
 
-  const cachedHistory = historyCacheRef.current.get(runId) ?? null;
   return {
-    history: cachedHistory,
-    isLoading: enabled && cachedHistory === null,
+    history: null,
+    isLoading: enabled,
     stale: false,
   };
 }

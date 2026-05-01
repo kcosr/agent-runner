@@ -307,6 +307,12 @@ function claudeAssistantRecordText(record: Record<string, unknown>): string | nu
   return text.length > 0 ? text : null;
 }
 
+function isClaudeTurnTerminalRecord(record: Record<string, unknown>): boolean {
+  return (
+    record.type === "system" && record.subtype === "turn_duration" && record.isSidechain !== true
+  );
+}
+
 interface ClaudeTurnBuilder {
   backendTurnId: string;
   startedAt: string;
@@ -371,6 +377,12 @@ export async function parseClaudeSessionHistoryJsonl(params: {
         current.assistantText += streamBoundarySeparator(current.assistantText, assistantText);
         current.assistantText += assistantText;
         current.updatedAt = timestamp;
+        continue;
+      }
+      if (isClaudeTurnTerminalRecord(record) && current.assistantText.length > 0) {
+        current.updatedAt = timestamp;
+        finishClaudeTurn(turns, current, "complete");
+        current = null;
       }
     }
   }

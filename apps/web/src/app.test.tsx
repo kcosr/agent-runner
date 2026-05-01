@@ -2323,7 +2323,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
   });
 
-  it("reuses cached selected-run Chat history when returning to a previously loaded card", async () => {
+  it("does not render the previous selected-run Chat while reloading a reselected card", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     const fetchMock = installFetchMock({
       runs: [
@@ -2430,10 +2430,9 @@ describe("web app", () => {
     await user.click(await findRunCard("First run"));
     const activeChat = await screen.findByLabelText("Run chat");
     expect(within(activeChat).queryByText("Second response")).not.toBeInTheDocument();
-    expect(within(activeChat).queryByLabelText("Loading conversation")).not.toBeInTheDocument();
     expect(await within(activeChat).findByText("First response")).toBeInTheDocument();
     expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(
-      runOneTimelineFetches,
+      runOneTimelineFetches + 1,
     );
   });
 
