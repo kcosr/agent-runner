@@ -1,22 +1,16 @@
 # task-runner
 
-`task-runner` drives agents through structured task lists and keeps run
-state in a manifest-canonical workspace. It supports embedded CLI
-execution, active backend invocation, passive sidecar operation, a local
-daemon, a browser dashboard, resumable runs, attachments, dependencies,
-scheduled runs, launcher prefixes for subprocess backends, a first-class
-`run brief` surface for handing a run to a worker, and `task-runner run
-audit` for reading durable run audit history. Live runs can also hold
-queued resume messages as daemon-owned pending user intent for the next
-runnable resume opportunity.
+`task-runner` runs a coding agent against a structured task list, checks
+which tasks actually got done after each turn, and re-prompts the agent
+until the list is finished. Run state lives in a single on-disk manifest
+(`run.json`) so a partial run can be resumed, inspected, or handed to a
+different worker.
 
-- Task state is canonical in `run.json`.
-- `run-events.jsonl` is a per-run append-only audit trail with monotonic
-  cursors for current runs; it is durable history, not canonical state.
-- Workers use the task CLI, not workspace files.
-- `task-runner run brief <run-id>` is the canonical worker handoff.
-- `task-runner status` reports the current system/environment context.
-- Run-targeted read surfaces live under `task-runner run`.
+It is for people who already use a coding agent (Claude, Codex, Cursor,
+Pi) day-to-day and want it to actually finish what it was given, stay
+finishable across sessions, and produce an audit trail. It is not an
+editor, chat UI, or interactive coding environment — task-runner is the
+layer underneath those tools that keeps the work durable.
 
 ## Why
 
@@ -70,6 +64,16 @@ actually complete the checklist it was given? Assignments can also
 declare deterministic hooks that run at prepare time, around attempts,
 or during task transitions to block, re-invoke, mutate run metadata, or
 stage attachments before the run continues.
+
+## Mental model at a glance
+
+- Task state is canonical in `run.json`.
+- `run-events.jsonl` is a per-run append-only audit trail with monotonic
+  cursors for current runs; it is durable history, not canonical state.
+- Workers use the task CLI, not workspace files.
+- `task-runner run brief <run-id>` is the canonical worker handoff.
+- `task-runner status` reports the current system/environment context.
+- Run-targeted read surfaces live under `task-runner run`.
 
 ## Scope and direction
 
