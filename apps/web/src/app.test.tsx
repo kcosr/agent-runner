@@ -2139,10 +2139,13 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const chat = await screen.findByLabelText("Run chat");
-    const userMessage = await within(chat).findByText("Initial **dashboard** request");
-    expect(userMessage.closest(".chat-bubble--user")).not.toBeNull();
-    expect(userMessage.closest(".chat-bubble--user")?.querySelector("strong")).toBeNull();
-    expect(within(chat).queryByText(/Prompt with/)).not.toBeInTheDocument();
+    expect(within(chat).queryByText("Initial **dashboard** request")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
+    const systemLabel = await within(chat).findByText("System");
+    expect(systemLabel.closest(".chat-bubble--system")).not.toBeNull();
+    expect(within(chat).getByText("Prompt with")).toBeInTheDocument();
+    expect(within(chat).getByText("markdown").closest("strong")).not.toBeNull();
+    expect(within(chat).getByText("list item")).toBeInTheDocument();
     expect(within(chat).queryByText("Notices and diagnostics")).not.toBeInTheDocument();
     expect(within(chat).queryByText("backend notice")).not.toBeInTheDocument();
     const assistantMessage = await within(chat).findByText("Streaming answer");
@@ -2805,8 +2808,11 @@ describe("web app", () => {
 
     releaseTimeline?.();
 
-    expect(await within(chat).findByText("Initial dashboard request")).toBeInTheDocument();
-    expect(within(chat).queryByText("Timeline prompt")).not.toBeInTheDocument();
+    expect(await within(chat).findByText("Timeline prompt")).toBeInTheDocument();
+    expect(
+      within(chat).getByText("Timeline prompt").closest(".chat-bubble--system"),
+    ).not.toBeNull();
+    expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
     expect(await within(chat).findByText("Timeline response")).toBeInTheDocument();
     expect(within(chat).queryByLabelText("Loading conversation")).not.toBeInTheDocument();
   });

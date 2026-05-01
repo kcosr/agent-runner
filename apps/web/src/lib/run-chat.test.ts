@@ -201,6 +201,19 @@ describe("deriveRunChatRows", () => {
     expect(rows.some((row) => row.kind === "user")).toBe(false);
   });
 
+  it("does not render a pending row when status is not initialized or ready", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        status: "running",
+        effectiveStatus: "running",
+        pendingPrompt: "Stale pending prompt",
+      }),
+      makeHistory([]),
+    );
+
+    expect(rows).toEqual([]);
+  });
+
   it("replaces the pending row with the first real attempt prompt once attempts exist", () => {
     const pendingRun = makeRun({
       status: "initialized",
@@ -236,6 +249,19 @@ describe("deriveRunChatRows", () => {
     });
     expect(rows.some((row) => row.id === "session:0:system:pending")).toBe(false);
     expect(rows.some((row) => row.kind === "user")).toBe(false);
+  });
+
+  it("uses attempt prompt as authoritative when the first attempt prompt is blank", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        message: "User typed initial request",
+        sessions: [makeSession({ sessionIndex: 0, message: null })],
+      }),
+      makeHistory([makeAttempt({ prompt: "   " })]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["session:0:assistant:1"]);
+    expect(rows.some((row) => row.kind === "user" || row.kind === "system")).toBe(false);
   });
 
   it("sorts sessions and renders attempts chronologically", () => {

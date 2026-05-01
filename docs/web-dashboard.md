@@ -211,11 +211,13 @@ history and streaming without starting a duplicate timeline subscription.
 Chat renders the selected run as a conversational thread derived from
 `RunDetail` plus timeline history. Before the first attempt starts,
 initialized and ready runs with a non-empty `pendingPrompt` show that
-pending prompt as a muted System card labeled `Pending prompt`; runs
-without a pending prompt keep the empty conversation state. Once timeline
-history contains the first real attempt, Chat renders session 0 attempt 0
-from `attempt.prompt` as a normal System card, even when the run has an
-initial message, because before-attempt hooks may rewrite the prompt. Later
+pending prompt as a warning-tinted System card labeled `Pending prompt`;
+runs without a pending prompt keep the empty conversation state. Once
+timeline history contains the first real attempt, Chat renders session 0
+attempt 0 from `attempt.prompt` as a normal System card, even when the run
+has an initial message, because before-attempt hooks may rewrite the prompt.
+If a hook clears `attempt.prompt`, Chat does not fall back to the original
+run message. Later
 resume sessions keep their stored session message as a user bubble, and
 automatic follow-up or retry prompts continue to render as System cards.
 Chat shows the existing loading skeleton until timeline history is available,
