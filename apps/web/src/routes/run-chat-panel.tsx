@@ -8,12 +8,21 @@ import {
   useRef,
   useState,
 } from "react";
-import { MessageIcon, PencilIcon, SendIcon, TrashIcon } from "../components/icons.js";
+import {
+  DownloadIcon,
+  FileIcon,
+  MessageIcon,
+  PencilIcon,
+  SendIcon,
+  TrashIcon,
+} from "../components/icons.js";
 import { MarkdownContent } from "../components/markdown.js";
-import { formatTimestamp } from "../lib/format.js";
+import { isPreviewableAttachment } from "../lib/attachments.js";
+import { formatBytes, formatTimestamp } from "../lib/format.js";
 import {
   type RunChatAssistantEmptyState,
   type RunChatAssistantRow,
+  type RunChatAttachmentArtifact,
   type RunChatRow,
   type RunChatSystemRow,
   deriveRunChatRows,
@@ -21,6 +30,20 @@ import {
 import type { RunTimelineState } from "../lib/run-timeline.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
+
+type DownloadAttachmentHandler = (
+  runId: string,
+  attachmentId: string,
+  name: string,
+) => Promise<void>;
+type OpenAttachmentPreviewHandler = (attachmentOwnerRunId: string, attachmentId: string) => void;
+type RunChatNonAssistantRow = Exclude<RunChatRow, RunChatAssistantRow>;
+
+interface ArtifactActions {
+  onDownloadAttachment: DownloadAttachmentHandler;
+  onOpenAttachmentPreview: OpenAttachmentPreviewHandler;
+  selectedRunId: string;
+}
 
 function isScrolledToBottom(element: HTMLElement) {
   return (
@@ -59,7 +82,7 @@ function ChatConversationSkeleton() {
   );
 }
 
-function ChatRow({ row }: { row: RunChatRow }) {
+function ChatRow({ row }: { row: RunChatNonAssistantRow }) {
   if (row.kind === "user") {
     return (
       <article className="chat-row chat-row--user">
@@ -70,11 +93,7 @@ function ChatRow({ row }: { row: RunChatRow }) {
     );
   }
 
-  if (row.kind === "system") {
-    return <SystemChatRow row={row} />;
-  }
-
-  return <AssistantChatRow row={row} />;
+  return <SystemChatRow row={row} />;
 }
 
 function SystemChatRow({ row }: { row: RunChatSystemRow }) {
@@ -88,7 +107,72 @@ function SystemChatRow({ row }: { row: RunChatSystemRow }) {
   );
 }
 
-function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
+function ChatAttachmentArtifactCard({
+  actions,
+  artifact,
+}: {
+  actions: ArtifactActions;
+  artifact: RunChatAttachmentArtifact;
+}) {
+  const previewable = isPreviewableAttachment(artifact);
+  const primaryLabel = previewable
+    ? `Preview attachment ${artifact.name}`
+    : `Download attachment ${artifact.name}`;
+
+  function downloadArtifact() {
+    void actions.onDownloadAttachment(actions.selectedRunId, artifact.id, artifact.name);
+  }
+
+  function activatePrimaryAction() {
+    if (previewable) {
+      actions.onOpenAttachmentPreview(actions.selectedRunId, artifact.id);
+      return;
+    }
+    downloadArtifact();
+  }
+
+  return (
+    <li className="chat-artifact-card">
+      <button
+        aria-label={primaryLabel}
+        className="chat-artifact-card__primary"
+        onClick={activatePrimaryAction}
+        type="button"
+      >
+        <span className="chat-artifact-card__icon">
+          <FileIcon aria-hidden="true" />
+        </span>
+        <span className="chat-artifact-card__body">
+          <span className="chat-artifact-card__name">{artifact.name}</span>
+          <span className="chat-artifact-card__meta">
+            <span>{artifact.mimeType}</span>
+            <span aria-hidden="true">&middot;</span>
+            <span>{formatBytes(artifact.size)}</span>
+            <span aria-hidden="true">&middot;</span>
+            <span>{formatTimestamp(artifact.addedAt)}</span>
+          </span>
+        </span>
+      </button>
+      <button
+        aria-label={`Download ${artifact.name}`}
+        className="chat-artifact-card__download"
+        onClick={downloadArtifact}
+        type="button"
+      >
+        <DownloadIcon aria-hidden="true" />
+        <span>Download</span>
+      </button>
+    </li>
+  );
+}
+
+function AssistantChatRow({
+  actions,
+  row,
+}: {
+  actions: ArtifactActions;
+  row: RunChatAssistantRow;
+}) {
   return (
     <article className="chat-row chat-row--assistant">
       <div className="chat-output">
@@ -97,6 +181,13 @@ function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
         ) : (
           <p className="task-empty">{assistantEmptyText(row.emptyState)}</p>
         )}
+        {row.artifacts.length > 0 ? (
+          <ul aria-label="Assistant artifacts" className="chat-artifacts">
+            {row.artifacts.map((artifact) => (
+              <ChatAttachmentArtifactCard actions={actions} artifact={artifact} key={artifact.id} />
+            ))}
+          </ul>
+        ) : null}
       </div>
     </article>
   );
@@ -104,6 +195,8 @@ function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
 
 export function RunChatView({
   detailSettling,
+  onDownloadAttachment,
+  onOpenAttachmentPreview,
   onQueueMessage,
   onRemoveQueuedMessage,
   onSubmitResume,
@@ -115,6 +208,8 @@ export function RunChatView({
   timelineState,
 }: {
   detailSettling: boolean;
+  onDownloadAttachment: DownloadAttachmentHandler;
+  onOpenAttachmentPreview: OpenAttachmentPreviewHandler;
   onQueueMessage: (runId: string, message: string) => Promise<void>;
   onRemoveQueuedMessage: (runId: string, messageId: string) => Promise<void>;
   onSubmitResume: (runId: string, message: string) => Promise<void>;
@@ -134,6 +229,11 @@ export function RunChatView({
   const selectedRun = selectedRunQuery.data;
   const timelineHistory = timelineState.history;
   const timelineReady = timelineHistory !== null;
+  const artifactActions: ArtifactActions = {
+    onDownloadAttachment,
+    onOpenAttachmentPreview,
+    selectedRunId,
+  };
   const rows = useMemo(
     () => (selectedRun && timelineHistory ? deriveRunChatRows(selectedRun, timelineHistory) : []),
     [selectedRun, timelineHistory],
@@ -288,9 +388,13 @@ export function RunChatView({
 
     return (
       <div className="chat-message-list" onScroll={handleMessageListScroll} ref={listRef}>
-        {rows.map((row) => (
-          <ChatRow key={row.id} row={row} />
-        ))}
+        {rows.map((row) =>
+          row.kind === "assistant" ? (
+            <AssistantChatRow actions={artifactActions} key={row.id} row={row} />
+          ) : (
+            <ChatRow key={row.id} row={row} />
+          ),
+        )}
       </div>
     );
   }

@@ -221,6 +221,14 @@ reads like output with user interjections and automatic follow-up prompts.
 User bubbles render Markdown independently. Backend notices and diagnostics
 stay out of Chat.
 
+When selected-run attachments were added during an attempt window, Chat
+synthesizes artifact cards at the end of that assistant response from the
+current `RunDetail.attachments` list and timeline attempt timestamps.
+Previewable cards open the existing attachment preview drawer, and every
+card can use the existing browser download flow. Removing an attachment from
+the selected run removes its synthesized Chat card on the next detail
+projection.
+
 The composer is fixed at the bottom of the Chat panel for a selected
 run. For resumable non-live runs, it sends only non-empty trimmed
 messages through the existing resume API, using the same resume mutation

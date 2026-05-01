@@ -1,7 +1,8 @@
+import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunTimelineAttempt, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSessionSummary } from "@task-runner/core/contracts/runs.js";
 import { describe, expect, it } from "vitest";
-import { deriveRunChatRows } from "./run-chat.js";
+import { type RunChatAssistantRow, deriveRunChatRows } from "./run-chat.js";
 
 function makeSession(overrides: Partial<RunSessionSummary>): RunSessionSummary {
   return {
@@ -43,6 +44,20 @@ function makeHistory(attempts: RunTimelineAttempt[]): RunTimelineHistory {
     runId: "run-1",
     attempts,
     lastCursor: 1,
+  };
+}
+
+function makeAttachment(
+  overrides: Partial<RunAttachment> & Pick<RunAttachment, "id">,
+): RunAttachment {
+  return {
+    id: overrides.id,
+    name: overrides.name ?? `${overrides.id}.txt`,
+    mimeType: overrides.mimeType ?? "text/plain",
+    size: overrides.size ?? 12,
+    sha256: overrides.sha256 ?? "abc123",
+    addedAt: overrides.addedAt ?? "2026-04-28T10:02:00.000Z",
+    relativePath: overrides.relativePath ?? `attachments/${overrides.id}/${overrides.id}.txt`,
   };
 }
 
@@ -119,6 +134,10 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
     },
     ...overrides,
   };
+}
+
+function assistantRows(rows: ReturnType<typeof deriveRunChatRows>): RunChatAssistantRow[] {
+  return rows.filter((row): row is RunChatAssistantRow => row.kind === "assistant");
 }
 
 describe("deriveRunChatRows", () => {
@@ -350,5 +369,124 @@ describe("deriveRunChatRows", () => {
       hasTranscript: false,
       emptyState: "waiting_live_response",
     });
+  });
+
+  it("matches selected-run attachments inside completed attempt windows inclusively and sorts by addedAt", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        sessions: [makeSession({ sessionIndex: 0, message: null })],
+        attachments: [
+          makeAttachment({ id: "att-end", addedAt: "2026-04-28T10:05:00.000Z" }),
+          makeAttachment({ id: "att-middle", addedAt: "2026-04-28T10:03:00.000Z" }),
+          makeAttachment({ id: "att-start", addedAt: "2026-04-28T10:00:00.000Z" }),
+        ],
+      }),
+      makeHistory([makeAttempt({ attemptNumber: 1 })]),
+    );
+
+    expect(assistantRows(rows)[0]?.artifacts.map((artifact) => artifact.id)).toEqual([
+      "att-start",
+      "att-middle",
+      "att-end",
+    ]);
+  });
+
+  it("attaches overlapping-window matches to the earliest matching attempt number", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        sessions: [makeSession({ sessionIndex: 0, message: null })],
+        attachments: [makeAttachment({ id: "att-overlap", addedAt: "2026-04-28T10:04:00.000Z" })],
+      }),
+      makeHistory([
+        makeAttempt({
+          attemptNumber: 2,
+          startedAt: "2026-04-28T10:03:00.000Z",
+          endedAt: "2026-04-28T10:06:00.000Z",
+        }),
+        makeAttempt({
+          attemptNumber: 1,
+          startedAt: "2026-04-28T10:00:00.000Z",
+          endedAt: "2026-04-28T10:05:00.000Z",
+        }),
+      ]),
+    );
+
+    const assistant = assistantRows(rows);
+    expect(assistant[0]?.artifacts.map((artifact) => artifact.id)).toEqual(["att-overlap"]);
+    expect(assistant[1]?.artifacts).toEqual([]);
+  });
+
+  it("excludes attachments outside completed attempts when there is no live match", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        sessions: [makeSession({ sessionIndex: 0, message: null })],
+        attachments: [
+          makeAttachment({ id: "att-before", addedAt: "2026-04-28T09:59:59.999Z" }),
+          makeAttachment({ id: "att-after", addedAt: "2026-04-28T10:05:00.001Z" }),
+        ],
+      }),
+      makeHistory([makeAttempt({ attemptNumber: 1 })]),
+    );
+
+    expect(assistantRows(rows)[0]?.artifacts).toEqual([]);
+  });
+
+  it("matches attachments to open-ended live attempts", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        sessions: [makeSession({ sessionIndex: 0, message: null })],
+        attachments: [
+          makeAttachment({ id: "att-before-live", addedAt: "2026-04-28T10:09:59.999Z" }),
+          makeAttachment({ id: "att-live", addedAt: "2026-04-28T10:10:00.000Z" }),
+          makeAttachment({ id: "att-later-live", addedAt: "2026-04-28T10:11:00.000Z" }),
+        ],
+      }),
+      makeHistory([
+        makeAttempt({
+          attemptNumber: 1,
+          startedAt: "2026-04-28T10:00:00.000Z",
+          endedAt: "2026-04-28T10:05:00.000Z",
+        }),
+        makeAttempt({
+          attemptNumber: 2,
+          startedAt: "2026-04-28T10:10:00.000Z",
+          endedAt: null,
+          exitCode: null,
+          live: true,
+        }),
+      ]),
+    );
+
+    const assistant = assistantRows(rows);
+    expect(assistant[0]?.artifacts).toEqual([]);
+    expect(assistant[1]?.artifacts.map((artifact) => artifact.id)).toEqual([
+      "att-live",
+      "att-later-live",
+    ]);
+  });
+
+  it("omits artifact cards after attachments are removed from the selected run", () => {
+    const attachment = makeAttachment({
+      id: "att-removed",
+      addedAt: "2026-04-28T10:02:00.000Z",
+    });
+    const history = makeHistory([makeAttempt({ attemptNumber: 1 })]);
+    const run = makeRun({
+      sessions: [makeSession({ sessionIndex: 0, message: null })],
+      attachments: [attachment],
+    });
+
+    expect(assistantRows(deriveRunChatRows(run, history))[0]?.artifacts).toHaveLength(1);
+    expect(
+      assistantRows(
+        deriveRunChatRows(
+          {
+            ...run,
+            attachments: [],
+          },
+          history,
+        ),
+      )[0]?.artifacts,
+    ).toEqual([]);
   });
 });

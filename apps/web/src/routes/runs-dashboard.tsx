@@ -357,6 +357,8 @@ export function RunsDashboardRoute() {
                 chatSurface={
                   <RunChatView
                     detailSettling={state.detailSettling}
+                    onDownloadAttachment={state.runActions.downloadAttachment}
+                    onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
                     onRemoveQueuedMessage={state.runActions.removeQueuedResumeMessage}
                     onQueueMessage={state.runActions.queueResumeMessage}
                     onSubmitResume={state.runActions.resume}
