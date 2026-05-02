@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
@@ -1042,24 +1042,6 @@ function codexSessionsRoot(): string {
   return join(homedir(), ...CODEX_SESSION_ROOT_PARTS);
 }
 
-function listCodexRolloutFiles(dir: string): string[] {
-  const entries = readdirSync(dir, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...listCodexRolloutFiles(path));
-    } else if (
-      entry.isFile() &&
-      entry.name.startsWith("rollout-") &&
-      entry.name.endsWith(".jsonl")
-    ) {
-      files.push(path);
-    }
-  }
-  return files.sort();
-}
-
 function codexSessionIdFromRecord(record: Record<string, unknown>): string | null {
   if (record.type !== "session_meta" || !isRecord(record.payload)) {
     return null;
@@ -1172,18 +1154,18 @@ async function resolveCodexSessionHistorySource(
     ctx.previousSource?.kind === "file" &&
     fileIsUnderRoot(root, ctx.previousSource.path) &&
     existsSync(ctx.previousSource.path) &&
-    (await codexFileMatchesSession(ctx.previousSource.path, ctx.sessionId))
+    codexFileNameMatchesSession(ctx.previousSource.path, ctx.sessionId)
   ) {
     return { available: true, source: sessionHistoryFileSource(ctx.previousSource.path) };
   }
-  for (const path of listCodexRolloutFiles(root)) {
-    if (await codexFileMatchesSession(path, ctx.sessionId)) {
+  for (const path of codexSessionHistoryPathCandidates(root, ctx.sessionId)) {
+    if (existsSync(path)) {
       return { available: true, source: sessionHistoryFileSource(path) };
     }
   }
   return {
     available: false,
-    reason: `codex session "${ctx.sessionId}" not found under ${root}`,
+    reason: `codex session "${ctx.sessionId}" not found at expected rollout paths under ${root}`,
   };
 }
 
@@ -1192,14 +1174,61 @@ function fileIsUnderRoot(root: string, path: string): boolean {
   return relativePath !== "" && !relativePath.startsWith("..") && !isAbsolute(relativePath);
 }
 
-async function codexFileMatchesSession(path: string, sessionId: string): Promise<boolean> {
-  try {
-    return (await readJsonlRecordLines(path, "Codex")).some(
-      ({ record }) => codexSessionIdFromRecord(record) === sessionId,
-    );
-  } catch {
-    return false;
+function codexFileNameMatchesSession(path: string, sessionId: string): boolean {
+  return path.endsWith(`-${sessionId}.jsonl`);
+}
+
+function uuidV7UnixMs(sessionId: string): number | null {
+  const compact = sessionId.replaceAll("-", "");
+  if (!/^[0-9a-fA-F]{12}/.test(compact)) {
+    return null;
   }
+  const timestampMs = Number.parseInt(compact.slice(0, 12), 16);
+  return Number.isSafeInteger(timestampMs) ? timestampMs : null;
+}
+
+function padDatePart(value: number): string {
+  return value.toString().padStart(2, "0");
+}
+
+function codexRolloutTimestampParts(date: Date, zone: "local" | "utc") {
+  const year = zone === "local" ? date.getFullYear() : date.getUTCFullYear();
+  const month = (zone === "local" ? date.getMonth() : date.getUTCMonth()) + 1;
+  const day = zone === "local" ? date.getDate() : date.getUTCDate();
+  const hour = zone === "local" ? date.getHours() : date.getUTCHours();
+  const minute = zone === "local" ? date.getMinutes() : date.getUTCMinutes();
+  const second = zone === "local" ? date.getSeconds() : date.getUTCSeconds();
+  return {
+    year: year.toString(),
+    month: padDatePart(month),
+    day: padDatePart(day),
+    hour: padDatePart(hour),
+    minute: padDatePart(minute),
+    second: padDatePart(second),
+  };
+}
+
+function codexSessionHistoryPathCandidates(root: string, sessionId: string): string[] {
+  const timestampMs = uuidV7UnixMs(sessionId);
+  if (timestampMs === null) {
+    return [];
+  }
+  const candidates = new Set<string>();
+  for (const zone of ["local", "utc"] as const) {
+    for (let offsetSeconds = -5; offsetSeconds <= 5; offsetSeconds++) {
+      const parts = codexRolloutTimestampParts(new Date(timestampMs + offsetSeconds * 1000), zone);
+      candidates.add(
+        join(
+          root,
+          parts.year,
+          parts.month,
+          parts.day,
+          `rollout-${parts.year}-${parts.month}-${parts.day}T${parts.hour}-${parts.minute}-${parts.second}-${sessionId}.jsonl`,
+        ),
+      );
+    }
+  }
+  return Array.from(candidates);
 }
 
 async function readCodexSessionHistory(

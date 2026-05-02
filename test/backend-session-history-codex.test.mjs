@@ -18,6 +18,16 @@ function writeJsonl(path, records) {
   writeFileSync(path, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
 }
 
+const CODEX_SESSION_ID = "019de655-7446-7952-b343-dbcb507cf74a";
+const CODEX_SESSION_PATH_PARTS = [
+  ".codex",
+  "sessions",
+  "2026",
+  "05",
+  "02",
+  `rollout-2026-05-02T01-37-33-${CODEX_SESSION_ID}.jsonl`,
+];
+
 function sessionRecords(sessionId = "thread-123") {
   return [
     {
@@ -137,22 +147,14 @@ test("codex history parser returns complete turns in source order and joins assi
   ]);
 });
 
-test("codex history resolves rollout file by session_meta payload id", async () => {
+test("codex history resolves rollout file by deterministic session filename", async () => {
   const home = tempDir();
-  const path = join(
-    home,
-    ".codex",
-    "sessions",
-    "2026",
-    "05",
-    "01",
-    "rollout-2026-05-01T00-00-00-thread-123.jsonl",
-  );
-  writeJsonl(path, sessionRecords("thread-123"));
+  const path = join(home, ...CODEX_SESSION_PATH_PARTS);
+  writeJsonl(path, sessionRecords(CODEX_SESSION_ID));
 
-  await withEnv({ HOME: home }, async () => {
+  await withEnv({ HOME: home, TZ: "UTC" }, async () => {
     const resolved = await codexBackend.resolveSessionHistorySource({
-      sessionId: "thread-123",
+      sessionId: CODEX_SESSION_ID,
       cwd: "/repo",
       env: {},
       resolvedBackendArgs: [],
@@ -162,7 +164,7 @@ test("codex history resolves rollout file by session_meta payload id", async () 
     assert.equal(resolved.source.path, path);
 
     const result = await codexBackend.readSessionHistory({
-      sessionId: "thread-123",
+      sessionId: CODEX_SESSION_ID,
       cwd: "/repo",
       env: {},
       resolvedBackendArgs: [],
@@ -186,17 +188,17 @@ test("codex history parser reports malformed jsonl with file and line", async ()
   );
 });
 
-test("codex history skips corrupt rollout files while resolving a matching session", async () => {
+test("codex history does not parse unrelated rollout files while resolving a matching session", async () => {
   const home = tempDir();
   const corruptPath = join(home, ".codex", "sessions", "2026", "04", "30", "rollout-corrupt.jsonl");
-  const targetPath = join(home, ".codex", "sessions", "2026", "05", "01", "rollout-target.jsonl");
+  const targetPath = join(home, ...CODEX_SESSION_PATH_PARTS);
   mkdirSync(join(corruptPath, ".."), { recursive: true });
   writeFileSync(corruptPath, "{not-json}\n");
-  writeJsonl(targetPath, sessionRecords("thread-123"));
+  writeJsonl(targetPath, sessionRecords(CODEX_SESSION_ID));
 
-  await withEnv({ HOME: home }, async () => {
+  await withEnv({ HOME: home, TZ: "UTC" }, async () => {
     const resolved = await codexBackend.resolveSessionHistorySource({
-      sessionId: "thread-123",
+      sessionId: CODEX_SESSION_ID,
       cwd: "/repo",
       env: {},
       resolvedBackendArgs: [],
@@ -208,12 +210,13 @@ test("codex history skips corrupt rollout files while resolving a matching sessi
 
 test("codex history source is unavailable when no rollout matches the thread id", async () => {
   const home = tempDir();
-  const path = join(home, ".codex", "sessions", "2026", "05", "01", "rollout-other.jsonl");
+  const missingSessionId = "019de656-7446-7952-b343-dbcb507cf74b";
+  const path = join(home, ...CODEX_SESSION_PATH_PARTS);
   writeJsonl(path, sessionRecords("other-thread"));
 
-  await withEnv({ HOME: home }, async () => {
+  await withEnv({ HOME: home, TZ: "UTC" }, async () => {
     const resolved = await codexBackend.resolveSessionHistorySource({
-      sessionId: "missing-thread",
+      sessionId: missingSessionId,
       cwd: "/repo",
       env: {},
       resolvedBackendArgs: [],
@@ -221,7 +224,7 @@ test("codex history source is unavailable when no rollout matches the thread id"
     assert.equal(resolved.available, false);
     assert.match(
       resolved.reason,
-      /codex session "missing-thread" not found under .*\.codex\/sessions/,
+      /codex session "019de656-7446-7952-b343-dbcb507cf74b" not found at expected rollout paths under .*\.codex\/sessions/,
     );
   });
 });

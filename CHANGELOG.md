@@ -451,6 +451,9 @@
 
 ### Fixed
 
+- Codex backend session history now resolves rollout files from the
+  session id filename instead of recursively scanning and parsing the
+  full Codex sessions directory.
 - Pre-resume backend session sync now reads backend history outside the
   task-state lock, preventing follow-up resumes from blocking timeline and
   run-detail requests while transcript files are parsed.
