@@ -1042,13 +1042,6 @@ function codexSessionsRoot(): string {
   return join(homedir(), ...CODEX_SESSION_ROOT_PARTS);
 }
 
-function codexSessionIdFromRecord(record: Record<string, unknown>): string | null {
-  if (record.type !== "session_meta" || !isRecord(record.payload)) {
-    return null;
-  }
-  return typeof record.payload.id === "string" ? record.payload.id : null;
-}
-
 function codexMessageText(record: Record<string, unknown>, role: "assistant"): string | null {
   if (record.type !== "response_item" || !isRecord(record.payload)) {
     return null;

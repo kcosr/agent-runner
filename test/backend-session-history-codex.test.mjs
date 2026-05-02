@@ -27,6 +27,14 @@ const CODEX_SESSION_PATH_PARTS = [
   "02",
   `rollout-2026-05-02T01-37-33-${CODEX_SESSION_ID}.jsonl`,
 ];
+const CODEX_LOCAL_SESSION_PATH_PARTS = [
+  ".codex",
+  "sessions",
+  "2026",
+  "05",
+  "01",
+  `rollout-2026-05-01T20-37-33-${CODEX_SESSION_ID}.jsonl`,
+];
 
 function sessionRecords(sessionId = "thread-123") {
   return [
@@ -173,6 +181,23 @@ test("codex history resolves rollout file by deterministic session filename", as
     });
     assert.equal(result.turns.length, 1);
     assert.equal(result.turns[0].backendTurnId, "turn-a");
+  });
+});
+
+test("codex history resolves rollout file by local timestamp filename", async () => {
+  const home = tempDir();
+  const path = join(home, ...CODEX_LOCAL_SESSION_PATH_PARTS);
+  writeJsonl(path, sessionRecords(CODEX_SESSION_ID));
+
+  await withEnv({ HOME: home, TZ: "America/Chicago" }, async () => {
+    const resolved = await codexBackend.resolveSessionHistorySource({
+      sessionId: CODEX_SESSION_ID,
+      cwd: "/repo",
+      env: {},
+      resolvedBackendArgs: [],
+    });
+    assert.equal(resolved.available, true);
+    assert.equal(resolved.source.path, path);
   });
 });
 
