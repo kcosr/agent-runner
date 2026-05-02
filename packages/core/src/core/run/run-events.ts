@@ -20,6 +20,9 @@ const RUN_EVENT_TYPES = [
   "run.resumed",
   "run.ready",
   "run.backend_session_updated",
+  "run.backend_session_history_imported",
+  "run.backend_session_history_synced",
+  "run.backend_session_history_sync_failed",
   "run.hook_recorded",
   "run.attempt_recorded",
   "run.retrying",
@@ -71,6 +74,8 @@ export type BackendSessionUpdateReason =
   | "passive_set"
   | "passive_clear"
   | "reset_clear";
+
+export type BackendSessionHistorySyncReason = "bootstrap" | "pre_resume" | "subscription";
 
 export type ScheduleDecisionReason =
   | "dependencies_unmet"
@@ -436,6 +441,71 @@ export function appendRunBackendSessionUpdatedEvent(params: {
       previousBackendSessionId: params.previousBackendSessionId,
       nextBackendSessionId: params.nextBackendSessionId,
       reason: params.reason,
+    },
+  });
+}
+
+type BackendSessionHistorySuccessEventType =
+  | "run.backend_session_history_imported"
+  | "run.backend_session_history_synced";
+
+interface BackendSessionHistorySuccessEventParams {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "backend" | "backendSessionId">;
+  context: RunEventWriteContext;
+  reason: BackendSessionHistorySyncReason;
+  importedTurnCount: number;
+  openTurnCount: number;
+  addedAttemptNumbers: number[];
+}
+
+function appendRunBackendSessionHistorySuccessEvent(
+  eventType: BackendSessionHistorySuccessEventType,
+  params: BackendSessionHistorySuccessEventParams,
+): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType,
+    context: params.context,
+    fields: {
+      backend: params.manifest.backend,
+      backendSessionId: params.manifest.backendSessionId,
+      reason: params.reason,
+      importedTurnCount: params.importedTurnCount,
+      openTurnCount: params.openTurnCount,
+      addedAttemptNumbers: [...params.addedAttemptNumbers],
+    },
+  });
+}
+
+export function appendRunBackendSessionHistoryImportedEvent(
+  params: BackendSessionHistorySuccessEventParams,
+): RunAuditEnvelope {
+  return appendRunBackendSessionHistorySuccessEvent("run.backend_session_history_imported", params);
+}
+
+export function appendRunBackendSessionHistorySyncedEvent(
+  params: BackendSessionHistorySuccessEventParams,
+): RunAuditEnvelope {
+  return appendRunBackendSessionHistorySuccessEvent("run.backend_session_history_synced", params);
+}
+
+export function appendRunBackendSessionHistorySyncFailedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "backend" | "backendSessionId">;
+  context: RunEventWriteContext;
+  reason: BackendSessionHistorySyncReason;
+  error: string;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.backend_session_history_sync_failed",
+    context: params.context,
+    fields: {
+      backend: params.manifest.backend,
+      backendSessionId: params.manifest.backendSessionId,
+      reason: params.reason,
+      error: params.error,
     },
   });
 }

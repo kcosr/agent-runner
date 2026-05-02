@@ -144,6 +144,8 @@ export function renderRunEvent(event: RunEvent): RenderedRunChunk[] {
       });
       return stderr(`${lines.join("\n")}\n\n`);
     }
+    case "timeline_invalidated":
+      return [];
     case "attempt_started":
       return stderr(
         `-- attempt ${event.attemptNumber} (session ${event.sessionIndex + 1}, session attempt ${event.attemptIndexInSession + 1}) --\n`,

@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `18`. Older manifest shapes are not
+The current manifest schema is version `19`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -129,6 +129,8 @@ The canonical record is `run.json`. Important persisted fields:
 - `callerInstructions`
 - `backendSessionId` (backend-native resume handle; Pi, Codex, Claude,
   etc. each store their own flavor here)
+- `backendSessionSync` (backend-owned history source, cursor, imported
+  turn ids, open turn ids, and last sync/error metadata)
 - `runGroupId`
 - `dependencies` (typed upstream run or group refs)
 - `parentRunId` (lineage only)
@@ -137,7 +139,8 @@ The canonical record is `run.json`. Important persisted fields:
 - `hookAudits` (per-hook execution audit records)
 - attachment metadata
 - queued resume messages (`queuedResumeMessages`)
-- attempt and session history
+- attempt and session history with `task_runner` or `backend_session`
+  provenance
 - `runtimeVars` (frozen concrete values)
 - `runtimeVarSources` (frozen var provenance for projection-time redaction)
 - `resetSeed` (snapshot used by `run reset`)
@@ -149,6 +152,15 @@ the next session. Attempts are backend invocations within a session.
 `maxAttemptsPerSession` is the per-session retry budget. Attempt numbers
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
+
+Manifest schema version 19 adds backend-session history provenance and
+sync state. Task-runner-owned records carry
+`provenance.kind: "task_runner"`. Backend-imported records carry
+`provenance.kind: "backend_session"` plus backend name, backend session
+id, backend turn id, import/sync timestamps, mode (`bootstrap` or
+`sync`), and source descriptor. `manifest.backendSessionSync` stores the
+last resolved source, cursor, imported turn ids, open turn ids, last sync
+timestamp, and last error.
 
 If the run started from an assignment file, task-runner also stores
 `assignment-seed.md` as an immutable audit snapshot. Runs created by
@@ -320,7 +332,9 @@ blocked with the rest completed or blocked → `blocked`; otherwise
    `direct`, with passive and Codex websocket/UDS forced to `direct`)
 9. freezes the initial manifest
 10. composes and stores `brief`
-11. invokes the backend, or leaves the run initialized if the backend is
+11. imports complete backend-owned history when `--backend-session-id`
+   is present and the backend supports history reads
+12. invokes the backend, or leaves the run initialized if the backend is
    `passive`
 
 Nested `task-runner` invocations automatically carry
@@ -454,6 +468,10 @@ Important rules:
 - dependencies gate execution: declared run dependencies must be in
   `success`, and declared group dependencies require every non-archived
   group member to be `success`
+- backend-owned session history sync runs before allocating the next
+  session index or attempt number when the backend supports it; this is
+  subscriber-independent, and a changed source that cannot be synced
+  safely fails resume before allocation
 
 See [resume.md](resume.md).
 
@@ -592,7 +610,7 @@ Rules:
 `run set-backend-session` / `run clear-backend-session` are
 passive-only metadata mutations. They update `manifest.backendSessionId`
 without changing task state, lifecycle status, attempt history, archive state,
-or dependency projections.
+or dependency projections, and clear `manifest.backendSessionSync`.
 
 Dependency mutations are only allowed on `initialized` runs. Group
 mutations are allowed only for non-running runs and are cycle-checked.
@@ -625,6 +643,19 @@ intent. It reads them from the manifest, publishes their count on run
 summaries and the full list on run details, drains them at automatic
 start boundaries, and leaves them persisted if the start attempt fails
 before the backend accepts the resume message.
+
+The daemon also owns subscribed-run backend-session sync for non-running
+runs with a backend session id and a backend history reader. Detail,
+timeline, and audit subscriptions start polling; summary-only
+subscriptions do not. A changed source is synced into the manifest with
+the same backend-session sync helper used by pre-resume, under the
+workspace task-state lock. The daemon refreshes indexes and publishes
+normal summary/detail projections plus
+`run.backend_session_history_synced` audit envelopes for imported turns,
+and a timeline invalidation event so selected Chat/Attempts views refetch
+history. Sync failures publish `run.backend_session_history_sync_failed`
+audit envelopes and update `backendSessionSync.lastError` when previous
+sync metadata exists.
 
 Live subscriptions are split by responsibility instead of sharing one
 mixed event bus:

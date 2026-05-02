@@ -872,6 +872,7 @@ test("run reset: json output restores initialized state and removes attempt arti
         maxAttemptsPerSession: 9,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "sess-after-run",
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.attemptRecords = [
@@ -890,6 +891,7 @@ test("run reset: json output restores initialized state and removes attempt arti
         transcript: "attempt 1",
         logPath: "attempts/01.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
       {
         attemptNumber: 2,
@@ -906,6 +908,7 @@ test("run reset: json output restores initialized state and removes attempt arti
         transcript: "attempt 2",
         logPath: "attempts/02.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
     ];
   });

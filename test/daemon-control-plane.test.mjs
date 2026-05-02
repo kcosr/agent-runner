@@ -90,6 +90,14 @@ tasks:
 Daemon assignment.
 `;
 
+const SYNC_AGENT = `---
+schemaVersion: 1
+name: sync-daemon-agent
+backend: syncer
+---
+Sync daemon agent.
+`;
+
 const RECONFIG_ASSIGNMENT = `---
 schemaVersion: 1
 name: reconfig-work
@@ -141,6 +149,100 @@ function writeBackend(baseDir, name, body) {
   writeFileSync(join(dir, "backend.mjs"), body);
 }
 
+function writeSyncBackend(baseDir) {
+  writeBackend(
+    baseDir,
+    "syncer",
+    `
+import { readFileSync, writeFileSync } from "node:fs";
+
+const statePath = process.env.TASK_RUNNER_SYNC_BACKEND_STATE;
+
+function readState() {
+  return JSON.parse(readFileSync(statePath, "utf8"));
+}
+
+function writeState(state) {
+  writeFileSync(statePath, JSON.stringify(state, null, 2) + "\\n");
+}
+
+export default {
+  id: "syncer",
+  async invoke() {
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+      sessionId: "sync-session",
+      transcript: "ok",
+      rawStdout: "",
+      rawStderr: "",
+    };
+  },
+  async resolveSessionHistorySource() {
+    const state = readState();
+    state.resolveCalls = (state.resolveCalls ?? 0) + 1;
+    writeState(state);
+    if (state.available === false) {
+      return { available: false, reason: "not available" };
+    }
+    return {
+      available: true,
+      source: {
+        kind: "custom",
+        label: "sync-fixture",
+        changeToken: { token: state.token },
+      },
+    };
+  },
+  async readSessionHistory() {
+    const state = readState();
+    state.readCalls = (state.readCalls ?? 0) + 1;
+    writeState(state);
+    if (state.readDelayMs !== undefined) {
+      await new Promise((resolve) => setTimeout(resolve, state.readDelayMs));
+    }
+    if (state.failRead === true) {
+      throw new Error("fixture read failed");
+    }
+    return {
+      source: {
+        kind: "custom",
+        label: "sync-fixture",
+        changeToken: { token: state.token },
+      },
+      cursor: { token: state.token },
+      turns: state.turns,
+    };
+  },
+};
+`,
+  );
+}
+
+function writeSyncState(path, patch = {}) {
+  const previous = existsSync(path)
+    ? JSON.parse(readFileSync(path, "utf8"))
+    : { token: "v1", turns: [], resolveCalls: 0, readCalls: 0 };
+  writeFileSync(path, `${JSON.stringify({ ...previous, ...patch }, null, 2)}\n`);
+}
+
+function readSyncState(path) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function makeSyncedTurn(id, startedAt = "2026-04-26T10:00:00.000Z") {
+  return {
+    backendTurnId: id,
+    status: "complete",
+    startedAt,
+    updatedAt: "2026-04-26T10:01:00.000Z",
+    userText: `prompt ${id}`,
+    assistantText: `answer ${id}`,
+  };
+}
+
 async function initRun(baseDir, agentName = "daemon-agent", options = {}) {
   return withEnv(sharedRuntimeEnv(baseDir), async () => {
     const loaded = loadAgentConfig(agentName, baseDir);
@@ -173,10 +275,12 @@ function readManifest(workspaceDir) {
 }
 
 function patchManifest(workspaceDir, mutator) {
-  const manifestPath = join(workspaceDir, "run.json");
-  const manifest = readManifest(workspaceDir);
-  mutator(manifest);
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  withTaskStateLock(workspaceDir, () => {
+    const manifestPath = join(workspaceDir, "run.json");
+    const manifest = readManifest(workspaceDir);
+    mutator(manifest);
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  });
 }
 
 function markRunRunning(workspaceDir) {
@@ -521,13 +625,15 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForValue(read, description) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+async function waitForValue(read, description, options = {}) {
+  const attempts = options.attempts ?? 50;
+  const delayMs = options.delayMs ?? 20;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const value = await read();
     if (value !== null) {
       return value;
     }
-    await sleep(20);
+    await sleep(delayMs);
   }
   throw new Error(`timed out waiting for ${description}`);
 }
@@ -869,7 +975,10 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.ok(agents.agents.entries.some((entry) => entry.name === "daemon-agent"));
       assert.deepEqual(agents.agents.warnings, []);
 
-      const assignment = await client.call("assignments.get", { target: "daemon-work", cwd: dir });
+      const assignment = await client.call("assignments.get", {
+        target: "daemon-work",
+        cwd: dir,
+      });
       assert.equal(assignment.assignment.config.name, "daemon-work");
     } finally {
       await client.close();
@@ -3369,78 +3478,85 @@ Zero-task daemon work.
     ],
   };
 
-  await withEnv(sharedRuntimeEnv(dir), async () => {
-    const server = await serveDaemon(listenUrl);
-    const client = await DaemonClient.connect(listenUrl);
-    try {
-      const started = await client.call("runs.start", {
-        agent: "queued-agent",
-        assignment: "daemon-work",
-        definitionCwd: dir,
-        callerCwd: dir,
-        cliVars: {},
-        overrides: {},
-      });
-      const startedDetail = await client.call("runs.get", { target: started.runId });
-      await waitForValue(
-        () => (globalThis.__queuedResumeBackendState.invocations.length >= 1 ? true : null),
-        "initial backend invocation",
-      );
-      const queued = await client.call("runs.queueResumeMessage", {
-        target: started.runId,
-        message: "Use the queued production path.",
-      });
-
-      releaseInitialBackend();
-      await waitForValue(
-        () => (globalThis.__queuedResumeBackendState.invocations.length >= 2 ? true : null),
-        "queued resume backend invocation",
-      );
-      assert.match(
-        globalThis.__queuedResumeBackendState.invocations[1].prompt,
-        /Use the queued production path\./,
-      );
-      assert.equal(
-        globalThis.__queuedResumeBackendState.invocations[1].resumeSessionId,
-        "queued-session-1",
-      );
-      const originalSchedule = recurringSchedule(new Date(Date.now() - 60_000));
-      setManifestSchedule(startedDetail.run.workspaceDir, originalSchedule);
-      const drained = await waitForValue(async () => {
-        const detail = await httpJson(httpBaseUrl, `/api/runs/${started.runId}`);
-        assert.equal(detail.status, 200);
-        return detail.body.run.queuedResumeMessages.length === 0 && detail.body.run.isLive
-          ? detail.body.run
-          : null;
-      }, "queued resume messages to drain after accepted resume");
-      assert.equal(drained.runId, started.runId);
-
-      releaseResumeBackend();
-      releaseResumeBackend = undefined;
-      const drainedAudit = await waitForValue(async () => {
-        const response = await httpJson(httpBaseUrl, `/api/runs/${started.runId}/audit`);
-        assert.equal(response.status, 200);
-        return response.body.history.events.find(
-          (event) => event.event.type === "run.queued_resume_messages_drained",
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "60" },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const started = await client.call("runs.start", {
+          agent: "queued-agent",
+          assignment: "daemon-work",
+          definitionCwd: dir,
+          callerCwd: dir,
+          cliVars: {},
+          overrides: {},
+        });
+        const startedDetail = await client.call("runs.get", { target: started.runId });
+        await waitForValue(
+          () => (globalThis.__queuedResumeBackendState.invocations.length >= 1 ? true : null),
+          "initial backend invocation",
         );
-      }, "queued resume drain audit");
-      assert.equal(drainedAudit.event.fields.messageCount, 1);
-      assert.deepEqual(drainedAudit.event.fields.messageIds, [queued.queuedResumeMessage.id]);
-      const advancedSchedule = await waitForValue(() => {
-        const manifest = readManifest(startedDetail.run.workspaceDir);
-        return manifest.schedule?.runAt !== originalSchedule.runAt ? manifest.schedule : null;
-      }, "recurring schedule to advance after queued resume drain");
-      assert.equal(advancedSchedule.enabled, true);
-      assert.equal(advancedSchedule.recurrence.mode, "reuse");
-      assert.ok(new Date(advancedSchedule.runAt).getTime() > Date.now());
-    } finally {
-      releaseInitialBackend?.();
-      releaseResumeBackend?.();
-      globalThis.__queuedResumeBackendState = undefined;
-      await client.close();
-      await server.close();
-    }
-  });
+        const queued = await client.call("runs.queueResumeMessage", {
+          target: started.runId,
+          message: "Use the queued production path.",
+        });
+
+        releaseInitialBackend();
+        await waitForValue(
+          () => (globalThis.__queuedResumeBackendState.invocations.length >= 2 ? true : null),
+          "queued resume backend invocation",
+        );
+        assert.match(
+          globalThis.__queuedResumeBackendState.invocations[1].prompt,
+          /Use the queued production path\./,
+        );
+        assert.equal(
+          globalThis.__queuedResumeBackendState.invocations[1].resumeSessionId,
+          "queued-session-1",
+        );
+        const originalSchedule = recurringSchedule(new Date(Date.now() - 60_000));
+        setManifestSchedule(startedDetail.run.workspaceDir, originalSchedule);
+        const drained = await waitForValue(async () => {
+          const detail = await httpJson(httpBaseUrl, `/api/runs/${started.runId}`);
+          assert.equal(detail.status, 200);
+          return detail.body.run.queuedResumeMessages.length === 0 && detail.body.run.isLive
+            ? detail.body.run
+            : null;
+        }, "queued resume messages to drain after accepted resume");
+        assert.equal(drained.runId, started.runId);
+
+        releaseResumeBackend();
+        releaseResumeBackend = undefined;
+        const drainedAudit = await waitForValue(async () => {
+          const response = await httpJson(httpBaseUrl, `/api/runs/${started.runId}/audit`);
+          assert.equal(response.status, 200);
+          return response.body.history.events.find(
+            (event) => event.event.type === "run.queued_resume_messages_drained",
+          );
+        }, "queued resume drain audit");
+        assert.equal(drainedAudit.event.fields.messageCount, 1);
+        assert.deepEqual(drainedAudit.event.fields.messageIds, [queued.queuedResumeMessage.id]);
+        const advancedSchedule = await waitForValue(
+          () => {
+            const manifest = readManifest(startedDetail.run.workspaceDir);
+            return manifest.schedule?.runAt !== originalSchedule.runAt ? manifest.schedule : null;
+          },
+          "recurring schedule to advance after queued resume drain",
+          { attempts: 150 },
+        );
+        assert.equal(advancedSchedule.enabled, true);
+        assert.equal(advancedSchedule.recurrence.mode, "reuse");
+        assert.ok(new Date(advancedSchedule.runAt).getTime() > Date.now());
+      } finally {
+        releaseInitialBackend?.();
+        releaseResumeBackend?.();
+        globalThis.__queuedResumeBackendState = undefined;
+        await client.close();
+        await server.close();
+      }
+    },
+  );
 });
 
 test("daemon drains queued resume messages before evaluating a due schedule", async () => {
@@ -4196,6 +4312,7 @@ test("daemon scheduler resumes recurring reuse runs with a synthetic message aft
         maxAttemptsPerSession: 2,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "thread-reuse",
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.attemptRecords = [
@@ -4214,6 +4331,7 @@ test("daemon scheduler resumes recurring reuse runs with a synthetic message aft
         transcript: "done",
         logPath: "attempts/01.json",
         invalidStatuses: [],
+        provenance: { kind: "task_runner" },
       },
     ];
     manifest.schedule = recurringSchedule(new Date(Date.now() + 1_000));
@@ -6013,6 +6131,611 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
     await sse.close();
     await server.close();
   }
+});
+
+test("daemon session sync polls subscribed detail runs, skips unchanged reads, and publishes synced detail", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-1")],
+  });
+
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      const seenAttemptCounts = [];
+      const auditEvents = [];
+      try {
+        const subscriptionId = await client.subscribe(
+          { channel: "run_detail", runId: run.runId },
+          (event) => {
+            if (event.method === "run.detail") {
+              seenAttemptCounts.push(event.detail.totalAttemptCount);
+            }
+          },
+        );
+        const auditSubscriptionId = await client.subscribe(
+          { channel: "run_audit", runId: run.runId },
+          (event) => {
+            if (event.method === "run.audit") {
+              auditEvents.push(event.event.type);
+            }
+          },
+        );
+
+        await waitForValue(() => {
+          const manifest = readManifest(run.workspaceDir);
+          return manifest.attemptRecords.some(
+            (attempt) =>
+              attempt.provenance.kind === "backend_session" &&
+              attempt.provenance.backendTurnId === "turn-1",
+          )
+            ? true
+            : null;
+        }, "daemon session sync to import turn-1");
+        await waitForValue(() => (seenAttemptCounts.includes(1) ? true : null), "detail publish");
+        await waitForValue(
+          () => (auditEvents.includes("run.backend_session_history_synced") ? true : null),
+          "sync audit publish",
+        );
+
+        const afterFirst = readSyncState(statePath);
+        assert.equal(afterFirst.readCalls, 1);
+        await waitForValue(() => {
+          const state = readSyncState(statePath);
+          return state.resolveCalls > afterFirst.resolveCalls && state.readCalls === 1
+            ? true
+            : null;
+        }, "unchanged source polling without reread");
+
+        const auditCountAfterFirst = auditEvents.filter(
+          (eventType) => eventType === "run.backend_session_history_synced",
+        ).length;
+        writeSyncState(statePath, {
+          token: "v1-noop",
+          turns: [makeSyncedTurn("turn-1")],
+        });
+        await waitForValue(() => {
+          const state = readSyncState(statePath);
+          return state.readCalls > afterFirst.readCalls ? true : null;
+        }, "noop changed source read");
+        await sleep(150);
+        assert.equal(
+          auditEvents.filter((eventType) => eventType === "run.backend_session_history_synced")
+            .length,
+          auditCountAfterFirst,
+        );
+
+        writeSyncState(statePath, {
+          token: "v2",
+          turns: [makeSyncedTurn("turn-1"), makeSyncedTurn("turn-2", "2026-04-26T10:02:00.000Z")],
+        });
+        await waitForValue(() => {
+          const manifest = readManifest(run.workspaceDir);
+          return manifest.attemptRecords.some(
+            (attempt) =>
+              attempt.provenance.kind === "backend_session" &&
+              attempt.provenance.backendTurnId === "turn-2",
+          )
+            ? true
+            : null;
+        }, "daemon session sync to import turn-2");
+        await waitForValue(
+          () => (seenAttemptCounts.includes(2) ? true : null),
+          "second detail publish",
+        );
+
+        await client.unsubscribe(subscriptionId);
+        await client.unsubscribe(auditSubscriptionId);
+        const afterUnsubscribe = readSyncState(statePath);
+        await sleep(350);
+        assert.equal(readSyncState(statePath).resolveCalls, afterUnsubscribe.resolveCalls);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon session sync ignores summary-only and running run subscriptions", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-1")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.backendSessionId = "sync-session";
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const summarySub = await client.subscribe({ channel: "run_summary" }, () => {});
+        await sleep(350);
+        assert.equal(readSyncState(statePath).resolveCalls, 0);
+        await client.unsubscribe(summarySub);
+
+        const detailSub = await client.subscribe(
+          { channel: "run_detail", runId: run.runId },
+          () => {},
+        );
+        await sleep(350);
+        assert.equal(readSyncState(statePath).resolveCalls, 0);
+        await client.unsubscribe(detailSub);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon session sync is disabled by TASK_RUNNER_BACKEND_SESSION_SYNC=false", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-disabled")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    {
+      ...sharedRuntimeEnv(dir),
+      TASK_RUNNER_SYNC_BACKEND_STATE: statePath,
+      TASK_RUNNER_BACKEND_SESSION_SYNC: "false",
+    },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const detailSub = await client.subscribe(
+          { channel: "run_detail", runId: run.runId },
+          () => {},
+        );
+        await sleep(650);
+        assert.equal(readSyncState(statePath).resolveCalls, 0);
+        assert.equal(readSyncState(statePath).readCalls, 0);
+        assert.equal(readManifest(run.workspaceDir).attemptRecords.length, 0);
+        await client.unsubscribe(detailSub);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon session sync invalidates timeline subscribers after importing backend history", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-audit")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      const timelineEvents = [];
+      const auditEvents = [];
+      try {
+        const timelineSub = await client.subscribe(
+          { channel: "run_timeline", runId: run.runId },
+          (event) => {
+            if (event.method === "run.timeline") {
+              timelineEvents.push(event.event.type);
+            }
+          },
+        );
+        const auditSub = await client.subscribe(
+          { channel: "run_audit", runId: run.runId },
+          (event) => {
+            if (event.method === "run.audit") {
+              auditEvents.push(event.event.type);
+            }
+          },
+        );
+
+        await waitForValue(() => {
+          const manifest = readManifest(run.workspaceDir);
+          return manifest.attemptRecords.some(
+            (attempt) =>
+              attempt.provenance.kind === "backend_session" &&
+              attempt.provenance.backendTurnId === "turn-audit",
+          )
+            ? true
+            : null;
+        }, "timeline/audit subscription sync");
+        await waitForValue(
+          () => (auditEvents.includes("run.backend_session_history_synced") ? true : null),
+          "sync audit event",
+        );
+        await waitForValue(
+          () => (timelineEvents.includes("timeline_invalidated") ? true : null),
+          "timeline invalidation event",
+        );
+        await client.unsubscribe(timelineSub);
+        await client.unsubscribe(auditSub);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon session sync publishes audit failures and persists lastError", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-before-failure")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+    manifest.backendSessionSync = {
+      backend: "syncer",
+      backendSessionId: "sync-session",
+      source: { kind: "custom", label: "sync-fixture", changeToken: { token: "v0" } },
+      cursor: { token: "v0" },
+      lastSyncedAt: "2026-04-26T10:09:00.000Z",
+      lastError: null,
+      importedTurnIds: [],
+      openTurnIds: [],
+    };
+  });
+  writeSyncState(statePath, { token: "v2", failRead: true, turns: [makeSyncedTurn("turn-fail")] });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const auditSub = await client.subscribe(
+          { channel: "run_audit", runId: run.runId },
+          () => {},
+        );
+
+        await waitForValue(async () => {
+          const history = await daemonGetRunAuditHistory(listenUrl, run.runId);
+          return history.events.some(
+            ({ event }) =>
+              event.type === "run.backend_session_history_sync_failed" &&
+              String(event.fields.error).includes("fixture read failed"),
+          )
+            ? true
+            : null;
+        }, "daemon sync failure audit");
+        assert.equal(
+          readManifest(run.workspaceDir).backendSessionSync.lastError,
+          "fixture read failed",
+        );
+        await client.unsubscribe(auditSub);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon session sync skips busy task-state locks without failure audit", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-locked")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+    manifest.backendSessionSync = {
+      backend: "syncer",
+      backendSessionId: "sync-session",
+      source: { kind: "custom", label: "sync-fixture", changeToken: { token: "v0" } },
+      cursor: { token: "v0" },
+      lastSyncedAt: "2026-04-26T10:09:00.000Z",
+      lastError: null,
+      importedTurnIds: [],
+      openTurnIds: [],
+    };
+  });
+  const lockPath = join(run.workspaceDir, ".task-state.lock");
+  mkdirSync(lockPath);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      const auditEvents = [];
+      try {
+        const auditSub = await client.subscribe(
+          { channel: "run_audit", runId: run.runId },
+          (event) => {
+            if (event.method === "run.audit") {
+              auditEvents.push(event.event.type);
+            }
+          },
+        );
+        await sleep(650);
+
+        const state = readSyncState(statePath);
+        assert.equal(state.resolveCalls, 0);
+        assert.equal(state.readCalls, 0);
+        const manifest = readManifest(run.workspaceDir);
+        assert.equal(manifest.backendSessionSync.lastError, null);
+        assert.equal(manifest.attemptRecords.length, 0);
+        assert.equal(auditEvents.includes("run.backend_session_history_sync_failed"), false);
+
+        await client.unsubscribe(auditSub);
+      } finally {
+        await client.close();
+        await server.close();
+        rmSync(lockPath, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+test("daemon session sync reads backend history outside the task-state lock", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    readDelayMs: 1_000,
+    token: "v1",
+    turns: [makeSyncedTurn("turn-delayed")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+    manifest.backendSessionSync = {
+      backend: "syncer",
+      backendSessionId: "sync-session",
+      source: { kind: "custom", label: "sync-fixture", changeToken: { token: "v0" } },
+      cursor: { token: "v0" },
+      lastSyncedAt: "2026-04-26T10:09:00.000Z",
+      lastError: null,
+      importedTurnIds: [],
+      openTurnIds: [],
+    };
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const detailSub = await client.subscribe(
+          { channel: "run_detail", runId: run.runId },
+          () => {},
+        );
+        await waitForValue(
+          () => (readSyncState(statePath).readCalls > 0 ? true : null),
+          "delayed backend history read to start",
+        );
+
+        assert.equal(existsSync(join(run.workspaceDir, ".task-state.lock")), false);
+        runCli(["task", "append-notes", run.runId, "t1", "--text", "during backend read"], {
+          cwd: dir,
+        });
+        assert.match(
+          runCli(["task", "show", run.runId, "t1"], { cwd: dir }),
+          /during backend read/,
+        );
+
+        await waitForValue(() => {
+          const manifest = readManifest(run.workspaceDir);
+          return manifest.attemptRecords.some(
+            (attempt) =>
+              attempt.provenance.kind === "backend_session" &&
+              attempt.provenance.backendTurnId === "turn-delayed",
+          )
+            ? true
+            : null;
+        }, "delayed backend history sync to apply");
+        await client.unsubscribe(detailSub);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon session sync skips apply when sync state changes during backend read", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    readDelayMs: 1_000,
+    token: "v1",
+    turns: [makeSyncedTurn("turn-raced")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+    manifest.backendSessionSync = {
+      backend: "syncer",
+      backendSessionId: "sync-session",
+      source: { kind: "custom", label: "sync-fixture", changeToken: { token: "v0" } },
+      cursor: { token: "v0" },
+      lastSyncedAt: "2026-04-26T10:09:00.000Z",
+      lastError: null,
+      importedTurnIds: [],
+      openTurnIds: [],
+    };
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const detailSub = await client.subscribe(
+          { channel: "run_detail", runId: run.runId },
+          () => {},
+        );
+        await waitForValue(
+          () => (readSyncState(statePath).readCalls > 0 ? true : null),
+          "raced backend history read to start",
+        );
+        patchManifest(run.workspaceDir, (manifest) => {
+          manifest.backendSessionSync = {
+            backend: "syncer",
+            backendSessionId: "sync-session",
+            source: { kind: "custom", label: "sync-fixture", changeToken: { token: "external" } },
+            cursor: { token: "external" },
+            lastSyncedAt: "2026-04-26T10:09:30.000Z",
+            lastError: null,
+            importedTurnIds: [],
+            openTurnIds: [],
+          };
+        });
+        await client.unsubscribe(detailSub);
+        await sleep(1_200);
+
+        const manifest = readManifest(run.workspaceDir);
+        assert.equal(
+          manifest.attemptRecords.some(
+            (attempt) =>
+              attempt.provenance.kind === "backend_session" &&
+              attempt.provenance.backendTurnId === "turn-raced",
+          ),
+          false,
+        );
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon session sync close clears pending poll timers", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-1")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        await client.subscribe({ channel: "run_detail", runId: run.runId }, () => {});
+        await server.close();
+        await sleep(350);
+        assert.equal(readSyncState(statePath).resolveCalls, 0);
+      } finally {
+        await client.close();
+      }
+    },
+  );
 });
 
 test("streamEvents keeps SSE subscribers active when writes report backpressure", () => {

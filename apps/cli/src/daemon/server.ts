@@ -49,7 +49,7 @@ import {
   updateTask,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
-import { loadCustomBackends } from "@task-runner/core/backends/registry.js";
+import { loadCustomBackends, resolveBackend } from "@task-runner/core/backends/registry.js";
 import { isPathArg } from "@task-runner/core/config/runtime-paths.js";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type {
@@ -83,6 +83,12 @@ import {
 } from "@task-runner/core/core/commands/service.js";
 import { MAX_ATTACHMENT_BYTES } from "@task-runner/core/core/run/attachments.js";
 import {
+  applyPreparedBackendSessionHistorySync,
+  backendSessionHistorySyncEnabled,
+  prepareBackendSessionHistorySync,
+  recordBackendSessionSyncError,
+} from "@task-runner/core/core/run/backend-session-sync.js";
+import {
   deriveDependencyState,
   deriveDependencyStateFromDetails,
   resolveDependencies,
@@ -102,6 +108,8 @@ import {
 import { hasRunnableTasks } from "@task-runner/core/core/run/resume-policy.js";
 import {
   type ScheduleDecisionReason,
+  appendRunBackendSessionHistorySyncFailedEvent,
+  appendRunBackendSessionHistorySyncedEvent,
   appendRunScheduleAdvancedEvent,
   appendRunScheduleDisabledEvent,
   appendRunScheduleDueEvent,
@@ -116,7 +124,10 @@ import {
   advanceRecurringSchedule,
   deriveScheduleState,
 } from "@task-runner/core/core/run/schedule.js";
-import { withTaskStateLock } from "@task-runner/core/core/run/workspace-state.js";
+import {
+  tryWithTaskStateLockAsync,
+  withTaskStateLock,
+} from "@task-runner/core/core/run/workspace-state.js";
 import {
   debugPerfEnabled,
   debugPerfLog,
@@ -224,6 +235,21 @@ interface SubscriptionHandle {
   unsubscribe(): void;
 }
 
+type SessionSyncSubscriptionKind = "detail" | "timeline" | "audit";
+
+interface SessionSyncSubscriptionCounts {
+  detail: number;
+  timeline: number;
+  audit: number;
+}
+
+const SESSION_SYNC_DEBOUNCE_MS = 250;
+const SESSION_SYNC_POLL_INTERVAL_MS = 500;
+
+function backendSessionSyncStateKey(manifest: RunManifest): string {
+  return JSON.stringify(manifest.backendSessionSync);
+}
+
 interface UploadStreamRecord {
   result: Promise<RunAttachment>;
   resolveCommit(): void;
@@ -264,6 +290,258 @@ function daemonMutationContext(daemonInstanceId: string) {
     hostMode: "daemon" as const,
     controllerInstanceId: daemonInstanceId,
   };
+}
+
+function formatDaemonError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+class SessionSyncManager {
+  private readonly countsByRunId = new Map<string, SessionSyncSubscriptionCounts>();
+  private readonly timersByRunId = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly inFlightRunIds = new Set<string>();
+  private readonly lastSyncAttemptMsByRunId = new Map<string, number>();
+
+  constructor(
+    private readonly options: {
+      activeRuns: Map<string, ActiveRunRecord>;
+      refreshManifestIndexEntry(runId: string): ListedRunManifest;
+      publishMutationResult(runId: string): void;
+      publishTimelineInvalidated(runId: string): void;
+      publishAudit(envelope: RunAuditEnvelope): void;
+      auditContext: ReturnType<typeof daemonMutationContext>;
+      env: NodeJS.ProcessEnv;
+    },
+  ) {}
+
+  addSubscription(runId: string, kind: SessionSyncSubscriptionKind): void {
+    const counts = this.countsByRunId.get(runId) ?? { detail: 0, timeline: 0, audit: 0 };
+    counts[kind]++;
+    this.countsByRunId.set(runId, counts);
+    this.reconcileRun(runId);
+  }
+
+  removeSubscription(runId: string, kind: SessionSyncSubscriptionKind): void {
+    const counts = this.countsByRunId.get(runId);
+    if (!counts) {
+      return;
+    }
+    counts[kind] = Math.max(0, counts[kind] - 1);
+    if (this.subscriberCount(counts) === 0) {
+      this.countsByRunId.delete(runId);
+      this.clearTimer(runId);
+      this.lastSyncAttemptMsByRunId.delete(runId);
+      return;
+    }
+    this.countsByRunId.set(runId, counts);
+    this.reconcileRun(runId);
+  }
+
+  notifyRunMutated(runId: string): void {
+    this.reconcileRun(runId);
+  }
+
+  reconcileRun(runId: string): void {
+    if (!this.hasSubscribers(runId)) {
+      this.clearTimer(runId);
+      return;
+    }
+    if (!backendSessionHistorySyncEnabled(this.options.env)) {
+      this.clearTimer(runId);
+      return;
+    }
+    const manifest = this.readEligibleManifest(runId);
+    if (!manifest) {
+      this.clearTimer(runId);
+      return;
+    }
+    const backend = resolveBackend(manifest.backend);
+    if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
+      this.clearTimer(runId);
+      return;
+    }
+    if (this.timersByRunId.has(runId) || this.inFlightRunIds.has(runId)) {
+      return;
+    }
+    const lastSyncAttemptMs = this.lastSyncAttemptMsByRunId.get(runId);
+    const delay =
+      lastSyncAttemptMs === undefined
+        ? SESSION_SYNC_DEBOUNCE_MS
+        : Math.max(
+            SESSION_SYNC_DEBOUNCE_MS,
+            lastSyncAttemptMs + SESSION_SYNC_POLL_INTERVAL_MS - Date.now(),
+          );
+    const timer = setTimeout(() => {
+      this.timersByRunId.delete(runId);
+      void this.syncRun(runId);
+    }, delay);
+    timer.unref?.();
+    this.timersByRunId.set(runId, timer);
+  }
+
+  close(): void {
+    for (const timer of this.timersByRunId.values()) {
+      clearTimeout(timer);
+    }
+    this.timersByRunId.clear();
+    this.countsByRunId.clear();
+    this.lastSyncAttemptMsByRunId.clear();
+  }
+
+  private hasSubscribers(runId: string): boolean {
+    const counts = this.countsByRunId.get(runId);
+    return counts !== undefined && this.subscriberCount(counts) > 0;
+  }
+
+  private subscriberCount(counts: SessionSyncSubscriptionCounts): number {
+    return counts.detail + counts.timeline + counts.audit;
+  }
+
+  private clearTimer(runId: string): void {
+    const timer = this.timersByRunId.get(runId);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    this.timersByRunId.delete(runId);
+  }
+
+  private readEligibleManifest(runId: string): RunManifest | null {
+    if (this.options.activeRuns.has(runId)) {
+      return null;
+    }
+    try {
+      const { manifest } = this.options.refreshManifestIndexEntry(runId);
+      if (
+        manifest.backendSessionId === null ||
+        manifest.archivedAt !== null ||
+        manifest.status === "running"
+      ) {
+        return null;
+      }
+      return manifest;
+    } catch (error) {
+      if (error instanceof RunNotFoundError || error instanceof ResumeError) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async recordSyncFailure(
+    runId: string,
+    workspaceDir: string,
+    error: unknown,
+  ): Promise<void> {
+    await tryWithTaskStateLockAsync(workspaceDir, async () => {
+      const latest = this.readEligibleManifest(runId);
+      if (!latest) {
+        return;
+      }
+      if (recordBackendSessionSyncError(latest, formatDaemonError(error))) {
+        writeManifest(latest.workspaceDir, latest);
+      }
+      const envelope = appendRunBackendSessionHistorySyncFailedEvent({
+        manifest: latest,
+        context: systemRunEventContext(this.options.auditContext),
+        reason: "subscription",
+        error: formatDaemonError(error),
+      });
+      this.options.publishAudit(envelope);
+    });
+  }
+
+  private async syncRun(runId: string): Promise<void> {
+    if (this.inFlightRunIds.has(runId)) {
+      return;
+    }
+    if (!backendSessionHistorySyncEnabled(this.options.env)) {
+      return;
+    }
+    const manifest = this.readEligibleManifest(runId);
+    if (!manifest) {
+      return;
+    }
+    this.inFlightRunIds.add(runId);
+    this.lastSyncAttemptMsByRunId.set(runId, Date.now());
+    try {
+      const lockProbe = await tryWithTaskStateLockAsync(manifest.workspaceDir, async () => {
+        const latest = this.readEligibleManifest(runId);
+        if (!latest) {
+          return null;
+        }
+        return {
+          manifest: structuredClone(latest),
+          syncStateKey: backendSessionSyncStateKey(latest),
+        };
+      });
+      if (!lockProbe.acquired || lockProbe.value === null) {
+        return;
+      }
+      const snapshot = lockProbe.value.manifest;
+      const snapshotStateKey = lockProbe.value.syncStateKey;
+      const backend = resolveBackend(snapshot.backend);
+      if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
+        return;
+      }
+      const prepared = await prepareBackendSessionHistorySync({
+        manifest: snapshot,
+        backend,
+        mode: "sync",
+        env: this.options.env as Record<string, string>,
+      });
+      if (prepared.status !== "ready") {
+        return;
+      }
+      await tryWithTaskStateLockAsync(manifest.workspaceDir, async () => {
+        const latest = this.readEligibleManifest(runId);
+        if (!latest) {
+          return;
+        }
+        if (
+          latest.backend !== snapshot.backend ||
+          latest.backendSessionId !== snapshot.backendSessionId ||
+          latest.backend !== prepared.backend ||
+          latest.backendSessionId !== prepared.backendSessionId ||
+          backendSessionSyncStateKey(latest) !== snapshotStateKey
+        ) {
+          return;
+        }
+        const result = applyPreparedBackendSessionHistorySync({
+          manifest: latest,
+          mode: "sync",
+          prepared,
+        });
+        if (result.status === "synced" && result.changed) {
+          writeManifest(latest.workspaceDir, latest);
+          const refreshed = this.options.refreshManifestIndexEntry(runId).manifest;
+          const envelope = appendRunBackendSessionHistorySyncedEvent({
+            manifest: refreshed,
+            context: systemRunEventContext(this.options.auditContext),
+            reason: "subscription",
+            importedTurnCount: result.importedTurnCount,
+            openTurnCount: result.openTurnCount,
+            addedAttemptNumbers: result.addedAttemptNumbers,
+          });
+          this.options.publishAudit(envelope);
+          this.options.publishMutationResult(runId);
+          this.options.publishTimelineInvalidated(runId);
+        }
+      });
+    } catch (error) {
+      await this.recordSyncFailure(runId, manifest.workspaceDir, error);
+      console.error(
+        `task-runner daemon: backend session history sync failed for run ${runId}: ${formatDaemonError(error)}`,
+      );
+    } finally {
+      this.inFlightRunIds.delete(runId);
+      if (this.hasSubscribers(runId)) {
+        this.reconcileRun(runId);
+      } else {
+        this.lastSyncAttemptMsByRunId.delete(runId);
+      }
+    }
+  }
 }
 
 function deriveDaemonAbortCapability(
@@ -451,6 +729,7 @@ export async function serveDaemon(
   const timelineSubscriptions = new Map<string, TimelineSubscriptionRecord>();
   const auditSubscriptions = new Map<string, AuditSubscriptionRecord>();
   const activeRuns = new Map<string, ActiveRunRecord>();
+  let sessionSyncManager: SessionSyncManager | null = null;
   const manifestEntriesByRunId = new Map<string, ListedRunManifest>();
   const dependentRunIdsByRunId = new Map<string, Set<string>>();
   const dependentRunIdsByGroupId = new Map<string, Set<string>>();
@@ -904,7 +1183,10 @@ export async function serveDaemon(
     const history = app.getRunTimelineHistory(runId);
     const active = activeRuns.get(runId);
     const projected = !active
-      ? history
+      ? {
+          ...history,
+          lastCursor: lastTimelineCursorByRun.get(runId) ?? history.lastCursor,
+        }
       : {
           runId,
           attempts: active.currentAttempt
@@ -1548,6 +1830,7 @@ export async function serveDaemon(
       published++;
       if (!keep) {
         detailSubscriptions.delete(id);
+        sessionSyncManager?.removeSubscription(subscription.runId, "detail");
       }
     }
     finish({ published });
@@ -1574,6 +1857,7 @@ export async function serveDaemon(
       published++;
       if (!keep) {
         auditSubscriptions.delete(id);
+        sessionSyncManager?.removeSubscription(subscription.runId, "audit");
       }
     }
     finish({ published, active: Boolean(active) });
@@ -1586,15 +1870,22 @@ export async function serveDaemon(
       subscriberCount: timelineSubscriptions.size,
     });
     const active = activeRuns.get(runId);
-    if (!active) {
-      finish({ active: false, published: 0 });
-      return;
+    const cursor = active ? active.nextCursor + 1 : (lastTimelineCursorByRun.get(runId) ?? 0) + 1;
+    if (active) {
+      active.nextCursor = cursor;
     }
-    const cursor = active.nextCursor + 1;
-    active.nextCursor = cursor;
     lastTimelineCursorByRun.set(runId, cursor);
     const envelope: RunTimelineEnvelope = { runId, cursor, event };
-    bufferTimelineEvent(active, envelope);
+    if (active) {
+      bufferTimelineEvent(active, envelope);
+    } else {
+      const nextEvents = [...(recentTimelineBuffers.get(runId)?.events ?? []), envelope];
+      if (nextEvents.length > MAX_TIMELINE_BUFFER_EVENTS) {
+        const overflow = nextEvents.length - MAX_TIMELINE_BUFFER_EVENTS;
+        nextEvents.splice(0, overflow);
+      }
+      rememberRecentTimelineBuffer(runId, nextEvents);
+    }
     let published = 0;
     for (const [id, subscription] of timelineSubscriptions) {
       if (subscription.runId !== runId) {
@@ -1604,12 +1895,20 @@ export async function serveDaemon(
       published++;
       if (!keep) {
         timelineSubscriptions.delete(id);
+        sessionSyncManager?.removeSubscription(subscription.runId, "timeline");
       }
     }
     finish({
-      active: true,
+      active: Boolean(active),
       cursor,
       published,
+    });
+  };
+
+  const publishTimelineInvalidated = (runId: string): void => {
+    publishTimeline(runId, {
+      type: "timeline_invalidated",
+      reason: "backend_session_sync",
     });
   };
 
@@ -1695,11 +1994,27 @@ export async function serveDaemon(
       publishDependentDetails: options.publishDependentDetails ?? false,
       additionalDependentRunIds: options.additionalDependentRunIds,
     });
+    sessionSyncManager?.notifyRunMutated(runId);
   };
+
+  sessionSyncManager = new SessionSyncManager({
+    activeRuns,
+    refreshManifestIndexEntry,
+    publishMutationResult: (runId) =>
+      publishMutationResult(runId, {
+        summary: getProjectedSummary(runId),
+        detail: getProjectedDetail(runId),
+      }),
+    publishTimelineInvalidated,
+    publishAudit,
+    auditContext: mutationAuditContext,
+    env: process.env,
+  });
 
   const publishRunDeletion = (runId: string): void => {
     const dependents = dependentRunIds(runId);
     clearScheduleTimer(runId);
+    sessionSyncManager?.notifyRunMutated(runId);
     removeManifestIndexEntry(runId);
     dependentRunIdsByRunId.delete(runId);
     publishSummaryRemoval(runId);
@@ -1853,6 +2168,29 @@ export async function serveDaemon(
     };
   };
 
+  const createRunEventSubscription = <TRecord extends { id: string; runId: string }>(
+    store: Map<string, TRecord>,
+    kind: SessionSyncSubscriptionKind,
+    runId: string,
+    buildRecord: (subscriptionId: string) => TRecord,
+    subscriptionId = `sub-${shortId()}`,
+  ): SubscriptionHandle => {
+    const handle = createSubscription(store, buildRecord, subscriptionId);
+    sessionSyncManager?.addSubscription(runId, kind);
+    let closed = false;
+    return {
+      subscriptionId: handle.subscriptionId,
+      unsubscribe: () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        handle.unsubscribe();
+        sessionSyncManager?.removeSubscription(runId, kind);
+      },
+    };
+  };
+
   const subscribeRunSummaries = (
     owner: object,
     publish: (summary: RunSummaryStreamEvent) => boolean,
@@ -1874,8 +2212,10 @@ export async function serveDaemon(
     publish: (detail: RunDetailStreamEvent) => boolean,
     subscriptionId = `sub-${shortId()}`,
   ): SubscriptionHandle =>
-    createSubscription(
+    createRunEventSubscription(
       detailSubscriptions,
+      "detail",
+      runId,
       (id) => ({
         id,
         owner,
@@ -1891,8 +2231,10 @@ export async function serveDaemon(
     publish: (event: RunTimelineEnvelope) => boolean,
     subscriptionId = `sub-${shortId()}`,
   ): SubscriptionHandle =>
-    createSubscription(
+    createRunEventSubscription(
       timelineSubscriptions,
+      "timeline",
+      runId,
       (id) => ({
         id,
         owner,
@@ -1908,8 +2250,10 @@ export async function serveDaemon(
     publish: (event: RunAuditEnvelope) => boolean,
     subscriptionId = `sub-${shortId()}`,
   ): SubscriptionHandle =>
-    createSubscription(
+    createRunEventSubscription(
       auditSubscriptions,
+      "audit",
+      runId,
       (id) => ({
         id,
         owner,
@@ -1918,6 +2262,40 @@ export async function serveDaemon(
       }),
       subscriptionId,
     );
+
+  const unsubscribeRunDetail = (subscriptionId: string): void => {
+    const subscription = detailSubscriptions.get(subscriptionId);
+    if (!subscription) {
+      return;
+    }
+    detailSubscriptions.delete(subscriptionId);
+    sessionSyncManager?.removeSubscription(subscription.runId, "detail");
+  };
+
+  const unsubscribeRunTimeline = (subscriptionId: string): void => {
+    const subscription = timelineSubscriptions.get(subscriptionId);
+    if (!subscription) {
+      return;
+    }
+    timelineSubscriptions.delete(subscriptionId);
+    sessionSyncManager?.removeSubscription(subscription.runId, "timeline");
+  };
+
+  const unsubscribeRunAudit = (subscriptionId: string): void => {
+    const subscription = auditSubscriptions.get(subscriptionId);
+    if (!subscription) {
+      return;
+    }
+    auditSubscriptions.delete(subscriptionId);
+    sessionSyncManager?.removeSubscription(subscription.runId, "audit");
+  };
+
+  const unsubscribeAnyEventSubscription = (subscriptionId: string): void => {
+    summarySubscriptions.delete(subscriptionId);
+    unsubscribeRunDetail(subscriptionId);
+    unsubscribeRunTimeline(subscriptionId);
+    unsubscribeRunAudit(subscriptionId);
+  };
 
   const replayTimeline = (
     runId: string,
@@ -1967,17 +2345,17 @@ export async function serveDaemon(
     }
     for (const [id, subscription] of detailSubscriptions) {
       if (subscription.owner === owner) {
-        detailSubscriptions.delete(id);
+        unsubscribeRunDetail(id);
       }
     }
     for (const [id, subscription] of timelineSubscriptions) {
       if (subscription.owner === owner) {
-        timelineSubscriptions.delete(id);
+        unsubscribeRunTimeline(id);
       }
     }
     for (const [id, subscription] of auditSubscriptions) {
       if (subscription.owner === owner) {
-        auditSubscriptions.delete(id);
+        unsubscribeRunAudit(id);
       }
     }
   };
@@ -3197,10 +3575,7 @@ export async function serveDaemon(
         case "events.unsubscribe": {
           const parsed = asRecord(params, "events.unsubscribe params");
           const subscriptionId = requiredString(parsed.subscriptionId, "subscriptionId");
-          summarySubscriptions.delete(subscriptionId);
-          detailSubscriptions.delete(subscriptionId);
-          timelineSubscriptions.delete(subscriptionId);
-          auditSubscriptions.delete(subscriptionId);
+          unsubscribeAnyEventSubscription(subscriptionId);
           sendJson(ws, resultResponse(request.id, { unsubscribed: true }));
           return;
         }
@@ -3302,6 +3677,7 @@ export async function serveDaemon(
         record.abortController.abort();
       }
       await Promise.allSettled(active.map((record) => record.done));
+      sessionSyncManager?.close();
       summarySubscriptions.clear();
       detailSubscriptions.clear();
       timelineSubscriptions.clear();

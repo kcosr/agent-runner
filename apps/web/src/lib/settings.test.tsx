@@ -81,6 +81,7 @@ function SettingsProbe() {
           updateViewState({
             drawerWidth: 700,
             activeRightSurface: "chat",
+            drawerFullscreen: true,
             search: "task-runner-web",
           })
         }
@@ -278,6 +279,7 @@ describe("DashboardSettingsProvider", () => {
         collapsedColumnKeys: ["running"],
         drawerWidth: 700,
         activeRightSurface: "notes",
+        drawerFullscreen: true,
       }),
     );
 
@@ -286,6 +288,7 @@ describe("DashboardSettingsProvider", () => {
     expect(screen.getByTestId("view-state")).toHaveTextContent('"collapsedColumnKeys":["running"]');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"notes"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerFullscreen":true');
   });
 
   it("defaults malformed dashboard surface view state", () => {
@@ -301,6 +304,7 @@ describe("DashboardSettingsProvider", () => {
 
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"detail"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerFullscreen":false');
   });
 
   it("hydrates persisted collapsed column keys while defaulting unsaved columns to expanded", () => {
@@ -421,6 +425,7 @@ describe("DashboardSettingsProvider", () => {
         collapsedColumnKeys: ["running"],
         drawerWidth: 700,
         activeRightSurface: "chat",
+        drawerFullscreen: true,
       }),
     );
   });

@@ -73,6 +73,13 @@ process.stdout.write(JSON.stringify({
   return path;
 }
 
+function writeFakeClaudeSessionFile(baseDir, cwd, sessionId) {
+  const encodedCwd = cwd.replace(/[/.]/g, "-");
+  const path = join(baseDir, ".claude", "projects", encodedCwd, `${sessionId}.jsonl`);
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, "");
+}
+
 async function initRun(baseDir, agentName = "run-mgmt-agent") {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig(agentName, baseDir);
@@ -573,11 +580,12 @@ Work.
         "--output-format",
         "json",
       ],
-      { cwd: dir, env: { TASK_RUNNER_CLAUDE_BIN: fakeClaude } },
+      { cwd: dir, env: { HOME: dir, TASK_RUNNER_CLAUDE_BIN: fakeClaude } },
     ),
   );
   assert.equal(first.message, "fresh file message\n");
   assert.equal(first.status, "success");
+  writeFakeClaudeSessionFile(dir, dir, "sess-cli-message-file");
 
   const second = JSON.parse(
     runCli(
@@ -590,7 +598,7 @@ Work.
         "--output-format",
         "json",
       ],
-      { cwd: dir, env: { TASK_RUNNER_CLAUDE_BIN: fakeClaude } },
+      { cwd: dir, env: { HOME: dir, TASK_RUNNER_CLAUDE_BIN: fakeClaude } },
     ),
   );
   assert.equal(second.sessions.at(-1).message, "resume file message\n");

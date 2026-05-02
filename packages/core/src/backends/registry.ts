@@ -91,6 +91,15 @@ function validateCustomBackend(name: string, sourcePath: string, value: unknown)
       issues.push("validateSessionId must be a function when present");
     }
     if (
+      value.resolveSessionHistorySource !== undefined &&
+      typeof value.resolveSessionHistorySource !== "function"
+    ) {
+      issues.push("resolveSessionHistorySource must be a function when present");
+    }
+    if (value.readSessionHistory !== undefined && typeof value.readSessionHistory !== "function") {
+      issues.push("readSessionHistory must be a function when present");
+    }
+    if (
       value.supportsBootstrapSessionImport !== undefined &&
       typeof value.supportsBootstrapSessionImport !== "boolean"
     ) {

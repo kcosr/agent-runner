@@ -4,6 +4,11 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `19`. Runs now require
+  backend-session sync state and explicit provenance on session and attempt
+  records. Use `scripts/migrate-manifests-v19.mjs` before resuming schema
+  v18 runs; schema v17 runs must run the v18 migration first.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
 - Manifest schema version is now `18`. Runs now require
   `queuedResumeMessages` as manifest state and expose queued resume
   messages on `RunDetail` plus `queuedResumeMessageCount` on `RunSummary`.
@@ -116,6 +121,17 @@
 
 ### Added
 
+- Added backend-owned session history import and sync for Claude and
+  Codex runs. Bootstrap `--backend-session-id` imports complete prior
+  backend turns, pre-resume sync updates history before allocating new
+  attempt/session numbers, and subscribed daemon detail/timeline/audit
+  runs stay synchronized while clients watch them through
+  `run.backend_session_history_synced` audit events.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Added `TASK_RUNNER_BACKEND_SESSION_SYNC=false` to disable backend-owned
+  session history import, pre-resume sync, and daemon subscribed-run
+  polling for the current process.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
 - Added selected-run Chat artifact cards for attachments produced during
   attempt windows, with existing preview and download actions shown inline
   after the matching assistant response.
@@ -331,6 +347,9 @@
 
 ### Changed
 
+- The web dashboard now persists selected drawer fullscreen mode across
+  reloads.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
 - Changed attempt-log persistence to schemaVersion 3 so new writes omit stdout from
   `attempts/NN.json` and, when `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` is
   set, write raw backend stdout to local `attempts/NN.stdout.log` sidecars
@@ -439,6 +458,33 @@
 
 ### Fixed
 
+- Backend session sync now preserves the original in-session attempt index
+  when rewriting an overlapping task-runner attempt log.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Codex backend session history now resolves rollout files from the
+  session id filename instead of recursively scanning and parsing the
+  full Codex sessions directory.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Pre-resume backend session sync now reads backend history outside the
+  task-state lock, preventing follow-up resumes from blocking timeline and
+  run-detail requests while transcript files are parsed.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Web dashboard Chat now refreshes timeline history after subscribed
+  backend-session sync imports new attempts, so watched sessions update
+  without reselecting the run, while archived runs remain unsubscribed.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Web dashboard Chat now refreshes timeline history when a queued resume
+  starts from an empty history, so drained queued messages show as chat
+  bubbles without reselecting the run.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Codex backend session sync now imports the actual user-message event
+  instead of replayed context messages, preventing duplicate task-runner
+  sessions when synced turns include injected context or subagent notices.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Subscribed backend-session sync no longer holds the task-state lock while
+  reading backend transcript files, preventing large histories from blocking
+  run timeline and attachment requests.
+  ([#131](https://github.com/kcosr/task-runner/pull/131))
 - Web dashboard selected-run surfaces once again span the full viewport
   height on mobile, covering the app toolbar while the drawer is open.
 - Web dashboard user chat bubbles now use a stronger neutral surface in

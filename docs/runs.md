@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 17)
+├── run.json               # canonical manifest (schema version 19)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── agent-seed.md          # only when the run started from an agent file
@@ -43,7 +43,7 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `17`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `19`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath }` or `null` |
@@ -65,12 +65,13 @@ The manifest is the source of truth. Important fields:
 | `brief` | composed worker handoff, frozen |
 | `callerInstructions` | operator-facing docs, never sent to backend |
 | `backendSessionId` | backend-native resume handle |
+| `backendSessionSync` | backend-owned history sync state or `null` |
 | `runGroupId` | grouping key for run-group filters, group attachments, and group dependencies |
 | `dependencies` | typed upstream run or group refs that must be satisfied before execution |
 | `parentRunId` | direct lineage edge to the parent run when this run was launched from another run |
 | `attachments` | metadata for files under `attachments/` |
-| `totalAttemptCount`, `attemptRecords` | per-attempt execution log |
-| `totalSessionCount`, `sessions` | session-level summaries |
+| `totalAttemptCount`, `attemptRecords` | per-attempt execution log with `task_runner` or `backend_session` provenance |
+| `totalSessionCount`, `sessions` | session-level summaries with `task_runner` or `backend_session` provenance |
 | `runtimeVars` | frozen resolved vars |
 | `runtimeVarSources` | frozen provenance for each resolved var |
 | `resetSeed` | snapshot used by `run reset` |
@@ -93,6 +94,42 @@ the next session. Attempts are backend invocations within a session.
 `maxAttemptsPerSession` is the per-session retry budget. Attempt numbers
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
+
+Task-runner-created attempts and sessions carry
+`provenance: { kind: "task_runner" }`. Attempts and sessions imported
+from a backend-owned session history carry `kind: "backend_session"` plus
+the backend name, backend session id, backend turn id, import/sync
+timestamps, sync mode, and source descriptor. Imported backend turns are
+inserted into the same monotonic attempt/session sequence, so later
+task-runner-owned resume attempts allocate after the imported history.
+
+## Backend session history
+
+When a backend supports session history reads, `--backend-session-id`
+bootstrap import can materialize complete prior backend turns into the
+new run before the first task-runner-owned attempt. The import writes
+canonical `sessions`, `attemptRecords`, attempt logs, and
+`backendSessionSync` state. Open backend turns are recorded only in
+`backendSessionSync.openTurnIds`; they are not attempts until a later
+sync reports them complete.
+
+Before `task-runner run --resume-run <id>` allocates a new session or
+attempt, task-runner syncs backend-owned history for runs with a backend
+session id and a backend that implements history reads. This pre-resume
+sync is independent of daemon subscriptions. If the source changed and
+history cannot be read or persisted safely, resume fails before any new
+attempt/session numbers are allocated. When previous sync metadata exists,
+`backendSessionSync.lastError` records the failure.
+
+The daemon also polls subscribed non-running run detail, timeline, and
+audit streams. Changed backend history updates `run.json`, refreshes run
+indexes, publishes fresh summary/detail projections, and emits audit
+`run.backend_session_history_synced` events for synced backend turns.
+Daemon sync failures emit `run.backend_session_history_sync_failed` audit
+events. Summary-only subscriptions do not start history polling. Set
+`TASK_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
+`off`) to disable backend-owned session history import/sync for the
+current process.
 
 ## Lifecycle states
 
@@ -284,9 +321,10 @@ task-runner run schedule clear <id|path>
 (model, effort, name, run group, dependencies, timeoutSec,
 maxAttemptsPerSession, selected backendConfig, resolved backend args,
 brief, final task snapshot). Attempt and session history, endedAt,
-exitCode, and the live status are cleared. Existing `run-events.jsonl`
-history is preserved and reset appends one more diagnostic record instead
-of truncating the file. Only non-running runs can be reset.
+exitCode, backend session id, backend-session sync state, and the live
+status are cleared. Existing `run-events.jsonl` history is preserved and
+reset appends one more diagnostic record instead of truncating the file.
+Only non-running runs can be reset.
 `manifest.schedule` is preserved across manual reset because it is not
 part of the reset seed.
 
@@ -334,7 +372,9 @@ dependency readiness.
 
 Passive-only metadata mutations. Update `manifest.backendSessionId` without
 changing task state, lifecycle status, attempt history, archive state, or
-dependency projections.
+dependency projections. Both mutations clear `manifest.backendSessionSync`
+because externally tracked passive session ids have no task-runner-owned
+history reader.
 
 ### set-group / clear-group
 

@@ -438,6 +438,7 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
       maxAttemptsPerSession: 2,
       backendSessionIdAtStart: null,
       backendSessionIdAtEnd: "sess-stale",
+      provenance: { kind: "task_runner" },
     },
   ];
   staleManifest.attemptRecords = [
@@ -456,6 +457,7 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
       transcript: "stale",
       logPath: "attempts/01.json",
       invalidStatuses: [],
+      provenance: { kind: "task_runner" },
     },
   ];
   staleManifest.backendSessionId = "sess-stale";

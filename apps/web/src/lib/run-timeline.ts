@@ -80,6 +80,8 @@ export function applyEnvelope(
       case "caller_instructions":
       case "run_started":
         return { history: next, requiresReload: false, showStaleWarning: false };
+      case "timeline_invalidated":
+        return { history, requiresReload: true, showStaleWarning: false };
       case "attempt_started":
         next.attempts = next.attempts.map((attempt) =>
           attempt.live ? { ...attempt, live: false } : attempt,
@@ -130,11 +132,13 @@ export function useRunTimelineState({
   enabled,
   runId,
   runIsLive,
+  subscribeToEvents,
 }: {
   config: AppRuntimeConfig;
   enabled: boolean;
   runId?: string;
   runIsLive: boolean;
+  subscribeToEvents: boolean;
 }): RunTimelineState {
   const { daemonToken } = useDaemonAuthToken();
   const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
@@ -149,6 +153,7 @@ export function useRunTimelineState({
   const bufferRef = useRef<RunTimelineEnvelope[]>([]);
   const loadSeqRef = useRef(0);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
+  const loadInFlightRef = useRef(false);
   const reloadCountRef = useRef(0);
   const previousRunIdRef = useRef<string | undefined>(undefined);
   const previousRunIsLiveRef = useRef<boolean | undefined>(undefined);
@@ -165,6 +170,7 @@ export function useRunTimelineState({
     if (!runId) {
       loadAbortControllerRef.current?.abort();
       loadAbortControllerRef.current = null;
+      loadInFlightRef.current = false;
       historyRef.current = null;
       staleRef.current = false;
       bootstrappedRef.current = false;
@@ -199,6 +205,7 @@ export function useRunTimelineState({
       loadAbortControllerRef.current?.abort();
       const controller = new AbortController();
       loadAbortControllerRef.current = controller;
+      loadInFlightRef.current = true;
       setState((current) => ({ ...current, error: undefined, isLoading: true }));
       try {
         const fetched = await api.getRunTimelineHistory(runId, { signal: controller.signal });
@@ -249,6 +256,11 @@ export function useRunTimelineState({
           stale: true,
         });
         staleRef.current = true;
+      } finally {
+        if (loadSeq === loadSeqRef.current && loadAbortControllerRef.current === controller) {
+          loadAbortControllerRef.current = null;
+          loadInFlightRef.current = false;
+        }
       }
     };
 
@@ -266,7 +278,11 @@ export function useRunTimelineState({
       bufferRef.current = [];
       reloadCountRef.current = 0;
       previousRunIsLiveRef.current = undefined;
-      setState({ history: null, isLoading: enabled, stale: false });
+      setState({
+        history: null,
+        isLoading: enabled,
+        stale: false,
+      });
     }
 
     if (!enabled) {
@@ -276,19 +292,21 @@ export function useRunTimelineState({
         disposed = true;
         loadAbortControllerRef.current?.abort();
         loadAbortControllerRef.current = null;
+        loadInFlightRef.current = false;
       };
     }
 
     const shouldLoadHistory =
-      !bootstrappedRef.current || staleRef.current || historyRef.current === null;
+      (!bootstrappedRef.current || staleRef.current || historyRef.current === null) &&
+      !loadInFlightRef.current;
     const shouldRefreshForLiveTransition =
       sameRunId &&
       previousRunIsLive === false &&
       runIsLive &&
       !shouldLoadHistory &&
+      !loadInFlightRef.current &&
       bootstrappedRef.current &&
-      historyRef.current !== null &&
-      historyRef.current.attempts.length > 0;
+      historyRef.current !== null;
     previousRunIsLiveRef.current = runIsLive;
 
     if (sameRunId) {
@@ -302,18 +320,21 @@ export function useRunTimelineState({
     if (shouldRefreshForLiveTransition) {
       // Detail can observe a resumed live attempt before timeline replay/history
       // has projected the new attempt record. Refresh once on same-run live
-      // transition so an already-open Attempts tab catches up.
+      // transition so an already-open timeline catches up even if the live
+      // attempt event was missed or the existing history is empty.
       void loadHistory();
     }
 
-    if (!runIsLive) {
-      if (shouldLoadHistory) {
-        void loadHistory();
-      }
+    if (shouldLoadHistory) {
+      void loadHistory();
+    }
+
+    if (!subscribeToEvents) {
       return () => {
         disposed = true;
         loadAbortControllerRef.current?.abort();
         loadAbortControllerRef.current = null;
+        loadInFlightRef.current = false;
       };
     }
 
@@ -323,7 +344,7 @@ export function useRunTimelineState({
         if (disposed) {
           return;
         }
-        if (!bootstrappedRef.current || staleRef.current) {
+        if ((!bootstrappedRef.current || staleRef.current) && !loadInFlightRef.current) {
           void loadHistory();
         }
       },
@@ -376,9 +397,18 @@ export function useRunTimelineState({
       disposed = true;
       loadAbortControllerRef.current?.abort();
       loadAbortControllerRef.current = null;
+      loadInFlightRef.current = false;
       unsubscribe();
     };
-  }, [api, config, daemonToken, enabled, runId, runIsLive]);
+  }, [api, config, daemonToken, enabled, runId, runIsLive, subscribeToEvents]);
 
-  return state;
+  if (!runId || state.history === null || state.history.runId === runId) {
+    return state;
+  }
+
+  return {
+    history: null,
+    isLoading: enabled,
+    stale: false,
+  };
 }

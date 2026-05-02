@@ -157,6 +157,21 @@ describe("applyEnvelope", () => {
     expect(result.history.lastCursor).toBe(1);
   });
 
+  it("reloads silently when backend-owned history changes", () => {
+    const result = applyEnvelope(makeHistory({ lastCursor: 1 }), {
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "timeline_invalidated",
+        reason: "backend_session_sync",
+      },
+    });
+
+    expect(result.requiresReload).toBe(true);
+    expect(result.showStaleWarning).toBe(false);
+    expect(result.history.lastCursor).toBe(1);
+  });
+
   it("reloads silently when a run finishes", () => {
     const result = applyEnvelope(
       makeHistory({

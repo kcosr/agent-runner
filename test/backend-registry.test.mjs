@@ -201,6 +201,30 @@ test("registry: rejects custom backend id mismatch", async () => {
   );
 });
 
+for (const methodName of ["resolveSessionHistorySource", "readSessionHistory"]) {
+  test(`registry: rejects custom backend with non-function ${methodName}`, async () => {
+    const configDir = tempConfigDir();
+    writeBackend(
+      configDir,
+      `${methodName}-agent`,
+      "backend.mjs",
+      `export default {
+        id: "${methodName}-agent",
+        ${methodName}: true,
+        async invoke() {}
+      };`,
+    );
+
+    await assert.rejects(
+      () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+      (err) =>
+        err instanceof BackendConfigError &&
+        err.backendName === `${methodName}-agent` &&
+        new RegExp(`${methodName} must be a function when present`).test(err.message),
+    );
+  });
+}
+
 test("registry: import failure includes backend name and module path", async () => {
   const configDir = tempConfigDir();
   writeBackend(

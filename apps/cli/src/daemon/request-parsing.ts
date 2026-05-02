@@ -83,6 +83,25 @@ function requiredNonEmptyString(value: unknown, label: string): string {
   return stringValue;
 }
 
+function requiredBackendSessionId(value: unknown, label: string): string {
+  const stringValue = requiredNonEmptyString(value, label);
+  if (stringValue.includes("/") || stringValue.includes("\\") || stringValue.includes("..")) {
+    throw new RequestValidationError(`${label} must be a session id, not a path`);
+  }
+  return stringValue;
+}
+
+function optionalBackendSessionId(value: unknown, label: string): string | undefined {
+  const stringValue = optionalNonEmptyString(value, label);
+  if (stringValue === undefined) {
+    return undefined;
+  }
+  if (stringValue.includes("/") || stringValue.includes("\\") || stringValue.includes("..")) {
+    throw new RequestValidationError(`${label} must be a session id, not a path`);
+  }
+  return stringValue;
+}
+
 export function requiredRunIdString(value: unknown, label: string): string {
   const stringValue = requiredNonEmptyString(value, label);
   if (stringValue.includes("/") || stringValue.includes("\\") || stringValue.includes("..")) {
@@ -400,7 +419,7 @@ function parseStartRunBaseParams(value: unknown, label: string) {
     callerCwd: optionalString(record.callerCwd, "callerCwd"),
     parentRunId: optionalRunIdString(record.parentRunId, "parentRunId"),
     runGroupId: optionalRunGroupId(record.runGroupId, "runGroupId"),
-    backendSessionId: optionalString(record.backendSessionId, "backendSessionId"),
+    backendSessionId: optionalBackendSessionId(record.backendSessionId, "backendSessionId"),
     overrides: optionalOverrides(record.overrides),
   };
 }
@@ -544,7 +563,10 @@ export function parseRunSetBackendSessionParams(
   const record = asRecord(value, label);
   return {
     target: requiredString(record.target, `${label}.target`),
-    backendSessionId: requiredNonEmptyString(record.backendSessionId, `${label}.backendSessionId`),
+    backendSessionId: requiredBackendSessionId(
+      record.backendSessionId,
+      `${label}.backendSessionId`,
+    ),
   };
 }
 

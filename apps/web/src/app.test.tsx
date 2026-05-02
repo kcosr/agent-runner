@@ -6,6 +6,7 @@ import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surf
 import type {
   QueuedResumeMessage,
   RunDetail,
+  RunSessionSummary,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -58,10 +59,12 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   collapsedColumnKeys: string[];
   drawerWidth: number;
   activeRightSurface: "detail" | "chat" | "notes" | "tasks";
+  drawerFullscreen: boolean;
 } = {
   collapsedColumnKeys: [],
   drawerWidth: 540,
   activeRightSurface: "detail",
+  drawerFullscreen: false,
 };
 
 class MockEventSource {
@@ -1482,11 +1485,13 @@ async function openFilters(user: ReturnType<typeof userEvent.setup>) {
 }
 
 function findEventSource(urlSuffix: string) {
-  const instance = MockEventSource.instances.find((candidate) => candidate.url.endsWith(urlSuffix));
-  if (!instance) {
-    throw new Error(`expected EventSource for ${urlSuffix}`);
+  for (let index = MockEventSource.instances.length - 1; index >= 0; index--) {
+    const instance = MockEventSource.instances[index];
+    if (instance?.url.endsWith(urlSuffix)) {
+      return instance;
+    }
   }
-  return instance;
+  throw new Error(`expected EventSource for ${urlSuffix}`);
 }
 
 function hasEventSource(urlSuffix: string) {
@@ -2186,6 +2191,254 @@ describe("web app", () => {
     ).toHaveLength(1);
   });
 
+  it("reloads selected-run Chat when backend sync invalidates a completed timeline", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const timelineHistory: RunTimelineHistory = {
+      runId: "run-1",
+      lastCursor: 1,
+      attempts: [
+        {
+          attemptNumber: 1,
+          attemptIndexInSession: 0,
+          sessionIndex: 0,
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: "2026-04-13T05:02:00.000Z",
+          prompt: "Initial prompt",
+          transcript: "Initial answer",
+          notices: "",
+          exitCode: 0,
+          timedOut: false,
+          live: false,
+        },
+      ],
+    };
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          status: "success",
+          effectiveStatus: "success",
+          endedAt: "2026-04-13T05:02:00.000Z",
+          totalAttemptCount: 1,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "success",
+          effectiveStatus: "success",
+          isLive: false,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          totalAttemptCount: 1,
+        }),
+      },
+      timelineHistories: {
+        "run-1": timelineHistory,
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("Initial answer")).toBeInTheDocument();
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+    const initialAttempt = timelineHistory.attempts[0];
+    if (!initialAttempt) {
+      throw new Error("expected initial attempt");
+    }
+    timelineHistory.lastCursor = 2;
+    timelineHistory.attempts = [
+      initialAttempt,
+      {
+        attemptNumber: 2,
+        attemptIndexInSession: 0,
+        sessionIndex: 1,
+        startedAt: "2026-04-13T05:03:00.000Z",
+        endedAt: "2026-04-13T05:04:00.000Z",
+        prompt: "testing 456",
+        transcript: "Synced answer",
+        notices: "",
+        exitCode: 0,
+        timedOut: false,
+        live: false,
+      },
+    ];
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "timeline_invalidated",
+        reason: "backend_session_sync",
+      },
+    });
+
+    expect(await within(chat).findByText("Synced answer")).toBeInTheDocument();
+    expect(
+      fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline")),
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not subscribe archived selected-run Chat to timeline events", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+          effectiveStatus: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+          effectiveStatus: "success",
+          isLive: false,
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Archived prompt",
+              transcript: "Archived answer",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    expect(await screen.findByText("Archived answer")).toBeInTheDocument();
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
+    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
+  });
+
+  it("does not render the previous selected-run Chat while reloading a reselected card", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "First run",
+          currentSession: null,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          name: "First run",
+          status: "success",
+          totalAttemptCount: 1,
+        }),
+        makeRun({
+          runId: "run-2",
+          assignmentName: "Second run",
+          currentSession: null,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          name: "Second run",
+          status: "success",
+          totalAttemptCount: 1,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "First run",
+            sourcePath: "/tmp/first.md",
+          },
+          currentSession: null,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          isLive: false,
+          message: "First request",
+          name: "First run",
+          status: "success",
+        }),
+        "run-2": makeDetail({
+          runId: "run-2",
+          assignment: {
+            name: "Second run",
+            sourcePath: "/tmp/second.md",
+          },
+          backendSessionId: "thread-2",
+          currentSession: null,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          isLive: false,
+          message: "Second request",
+          name: "Second run",
+          status: "success",
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "First prompt",
+              transcript: "First response",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+        "run-2": {
+          runId: "run-2",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Second prompt",
+              transcript: "Second response",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("First response")).toBeInTheDocument();
+    const runOneTimelineFetches = fetchCallCount(fetchMock, (url) =>
+      url.endsWith("/api/runs/run-1/timeline"),
+    );
+
+    const user = userEvent.setup();
+    await user.click(await findRunCard("Second run"));
+    expect(await screen.findByText("Second response")).toBeInTheDocument();
+
+    await user.click(await findRunCard("First run"));
+    const activeChat = await screen.findByLabelText("Run chat");
+    expect(within(activeChat).queryByText("Second response")).not.toBeInTheDocument();
+    expect(await within(activeChat).findByText("First response")).toBeInTheDocument();
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(
+      runOneTimelineFetches + 1,
+    );
+  });
+
   it("opens the existing attachment preview drawer from previewable Chat artifact cards", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     installFetchMock({
@@ -2788,6 +3041,122 @@ describe("web app", () => {
     expect(screen.queryAllByLabelText("1 queued message")).toHaveLength(0);
   });
 
+  it("refreshes selected-run Chat history when a queued resume starts from an empty timeline", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const queuedResumeMessage = {
+      id: "qmsg1",
+      text: "Already queued",
+      createdAt: "2026-04-30T15:20:00.000Z",
+    };
+    const baseSession = makeDetail().sessions[0];
+    if (!baseSession) {
+      throw new Error("expected base session");
+    }
+    const firstSession: RunSessionSummary = {
+      ...baseSession,
+      status: "success" as const,
+      endedAt: "2026-04-13T05:02:00.000Z",
+      exitCode: 0,
+      message: null,
+    };
+    const resumedSession: RunSessionSummary = {
+      ...firstSession,
+      sessionIndex: 1,
+      status: "running" as const,
+      startedAt: "2026-04-13T05:03:00.000Z",
+      endedAt: null,
+      exitCode: null,
+      message: "Already queued",
+      firstAttemptNumber: 2,
+      lastAttemptNumber: 2,
+      attemptCount: 1,
+    };
+    const timelineHistory: RunTimelineHistory = {
+      runId: "run-1",
+      lastCursor: 0,
+      attempts: [],
+    };
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          status: "success",
+          effectiveStatus: "success",
+          endedAt: "2026-04-13T05:02:00.000Z",
+          currentSession: null,
+          lastSession: firstSession,
+          queuedResumeMessageCount: 1,
+          capabilities: { canResume: true },
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "success",
+          effectiveStatus: "success",
+          isLive: false,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          exitCode: 0,
+          sessions: [firstSession],
+          currentSession: null,
+          lastSession: firstSession,
+          queuedResumeMessages: [queuedResumeMessage],
+          capabilities: { canResume: true },
+        }),
+      },
+      timelineHistories: {
+        "run-1": timelineHistory,
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await screen.findByLabelText("Queued messages")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
+    });
+
+    timelineHistory.lastCursor = 2;
+    timelineHistory.attempts = [
+      {
+        attemptNumber: 2,
+        attemptIndexInSession: 0,
+        sessionIndex: 1,
+        startedAt: "2026-04-13T05:03:00.000Z",
+        endedAt: null,
+        prompt: "Already queued",
+        transcript: "Queued answer",
+        notices: "",
+        exitCode: null,
+        timedOut: false,
+        live: true,
+      },
+    ];
+    findEventSource("/api/runs/run-1/events/detail").emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        status: "running",
+        effectiveStatus: "running",
+        isLive: true,
+        endedAt: null,
+        exitCode: null,
+        totalAttemptCount: 2,
+        totalSessionCount: 2,
+        sessions: [firstSession, resumedSession],
+        currentSession: resumedSession,
+        lastSession: resumedSession,
+        queuedResumeMessages: [],
+        capabilities: { canAbort: true, canResume: false },
+      }),
+    });
+
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(2);
+    });
+    expect(screen.queryByLabelText("Queued messages")).not.toBeInTheDocument();
+    expect(await within(chat).findByText("Already queued")).toBeInTheDocument();
+    expect(await within(chat).findByText("Queued answer")).toBeInTheDocument();
+  });
+
   it("submits Chat composer messages with Command+Enter", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resumeBody: { overrides?: { message?: string } } | undefined;
@@ -3212,16 +3581,10 @@ describe("web app", () => {
     expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Pending" })).not.toBeInTheDocument();
 
-    let timelineSource: MockEventSource | undefined;
     await waitFor(() => {
-      timelineSource = MockEventSource.instances.find((candidate) =>
-        candidate.url.endsWith("/api/runs/run-1/events/timeline"),
-      );
-      expect(timelineSource).toBeDefined();
+      expect(findEventSource("/api/runs/run-1/events/timeline")).toBeDefined();
     });
-    if (!timelineSource) {
-      throw new Error("expected timeline EventSource after run start");
-    }
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
     timelineSource.emitMessage({
       runId: "run-1",
@@ -3373,7 +3736,7 @@ describe("web app", () => {
       "Completed attempt",
     );
     expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
-    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
+    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(true);
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
     const detailSource = findEventSource("/api/runs/run-1/events/detail");
@@ -6122,11 +6485,17 @@ describe("web app", () => {
       "aria-pressed",
       "true",
     );
+    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toContain(
+      '"drawerFullscreen":true',
+    );
 
     await user.keyboard("f");
     expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
       "aria-pressed",
       "false",
+    );
+    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toContain(
+      '"drawerFullscreen":false',
     );
   });
 
@@ -6752,6 +7121,7 @@ describe("web app", () => {
       collapsedColumnKeys: [],
       drawerWidth: 570,
       activeRightSurface: "detail",
+      drawerFullscreen: false,
     });
 
     cleanup();
@@ -8612,6 +8982,7 @@ describe("web app", () => {
         collapsedColumnKeys: ["running"],
         drawerWidth: 540,
         activeRightSurface: "detail",
+        drawerFullscreen: false,
       }),
     );
     expect(
@@ -8629,6 +9000,7 @@ describe("web app", () => {
         collapsedColumnKeys: [],
         drawerWidth: 540,
         activeRightSurface: "detail",
+        drawerFullscreen: false,
       }),
     );
     expect(

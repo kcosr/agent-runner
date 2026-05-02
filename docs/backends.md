@@ -76,6 +76,8 @@ The module must default-export a backend object with:
 - `invoke(ctx)` as a function
 - optional `resolveConfig(ctx)` as a function
 - optional `validateSessionId(ctx)` as a function
+- optional `resolveSessionHistorySource(ctx)` as a function
+- optional `readSessionHistory(ctx)` as a function
 - optional `supportsBootstrapSessionImport` as a boolean
 - optional `launcherMode` as `"applies"` or `"direct"`
 
@@ -148,6 +150,49 @@ passes it back as `ctx.resumeSessionId` on resume. Implement
 `supportsBootstrapSessionImport: false` when public resume ids are not
 self-validating enough to import safely.
 
+### Session history import and sync
+
+Backends can opt into backend-owned session history import by implementing
+both `resolveSessionHistorySource(ctx)` and `readSessionHistory(ctx)`.
+Task-runner calls them for `--backend-session-id` bootstrap import and
+before `task-runner run --resume-run <id>` allocates a new session or
+attempt.
+
+Set `TASK_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
+`off`) to disable backend-owned session history import/sync for the
+current process, including daemon subscribed-run polling.
+
+`resolveSessionHistorySource(ctx)` receives `sessionId`, `cwd`, `env`,
+resolved backend config/args, and the previous source when one exists. It
+returns either:
+
+- `{ available: false, reason }` when no durable history source can be
+  read for that session
+- `{ available: true, source }` with a persistable source descriptor
+
+Built-ins use `file` sources for local JSONL histories. Custom backends
+can return `{ kind: "custom", label, changeToken }`; `changeToken` must
+be JSON-persistable and should change whenever `readSessionHistory` needs
+to run again. `label` is a human-readable source name for diagnostics
+and audit context. For `file` sources, task-runner stores path, size,
+and mtime as the source change token.
+
+`readSessionHistory(ctx)` receives the resolved source, the previous
+cursor when one exists, and a mode of `"bootstrap"` or `"sync"`. It
+returns:
+
+- the current `source`
+- a JSON-persistable `cursor`
+- ordered turns with `backendTurnId`, `status`, timestamps, user text,
+  and assistant text
+
+Complete turns are imported as canonical session and attempt records with
+`backend_session` provenance. Open turns are tracked in
+`manifest.backendSessionSync.openTurnIds` but are not persisted as
+attempts until a later sync reports them complete. If a backend returns a
+non-persistable cursor, source change token, or malformed turn,
+task-runner aborts the sync and leaves the prior manifest unchanged.
+
 Custom backend code is trusted local code. It is loaded into the
 task-runner process without sandboxing and cached for the process
 lifetime; daemon changes require a daemon restart, including the first
@@ -192,6 +237,11 @@ context and return the same invoke result shape.
 - Session id captured from JSON stream events.
 - Sessions are stored under Claude's project directory encoded from the
   cwd (`/` and `.` → `-`). Resume is validated against that on-disk path.
+- Session history import reads the cwd-bound Claude JSONL file, ignores
+  sidechains, tool-only user events, and task notifications. Bootstrap
+  import finalizes the latest turn as complete; sync mode keeps the latest
+  turn open until Claude writes a terminal turn-duration marker or a later
+  user turn completes it.
 - Effort mapping: `off` → no flag; `minimal` / `low` → `low`; `medium`,
   `high`, `max` map to themselves; `xhigh` → `max`.
 
@@ -231,6 +281,9 @@ context and return the same invoke result shape.
 - Session handle is the thread id.
 - Resume validates the thread exists and the cwd matches exactly via
   `thread/read`.
+- Session history import resolves the matching
+  `~/.codex/sessions/**/rollout-*.jsonl` file by `session_meta` payload
+  id and imports complete user/assistant turns in source order.
 - The resolved transport is frozen into the manifest and reset seed at
   fresh-run/init time. Resume and ready-start reuse that frozen transport
   even if later client or daemon env changes.

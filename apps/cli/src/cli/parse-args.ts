@@ -187,6 +187,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--backend-session-id requires a value");
       if (next.trim().length === 0) throw new Error("--backend-session-id cannot be empty");
+      if (next.includes("/") || next.includes("\\") || next.includes("..")) {
+        throw new Error("--backend-session-id must be a session id, not a path");
+      }
       result.backendSessionId = next;
     } else if (arg === "--assignment") {
       const next = args.shift();
