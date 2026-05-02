@@ -338,6 +338,8 @@
 
 ### Changed
 
+- The web dashboard now persists selected drawer fullscreen mode across
+  reloads.
 - Changed attempt-log persistence to schemaVersion 3 so new writes omit stdout from
   `attempts/NN.json` and, when `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` is
   set, write raw backend stdout to local `attempts/NN.stdout.log` sidecars
