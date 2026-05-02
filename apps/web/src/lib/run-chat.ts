@@ -4,16 +4,24 @@ import type { RunDetail, RunSessionSummary } from "@task-runner/core/contracts/r
 
 export type RunChatAssistantEmptyState = "waiting_live_response" | "no_response_recorded";
 
-export interface RunChatUserRow {
+export interface RunChatTurnDivider {
   id: string;
+  timestamp: string;
+}
+
+interface RunChatRowBase {
+  id: string;
+  turnDivider?: RunChatTurnDivider;
+}
+
+export interface RunChatUserRow extends RunChatRowBase {
   kind: "user";
   sessionIndex: number;
   source: "initial" | "resume";
   text: string;
 }
 
-export interface RunChatSystemRow {
-  id: string;
+export interface RunChatSystemRow extends RunChatRowBase {
   kind: "system";
   sessionIndex: number;
   source: "initial" | "resume";
@@ -26,8 +34,7 @@ export type RunChatAttachmentArtifact = Pick<
   "id" | "name" | "mimeType" | "size" | "addedAt"
 >;
 
-export interface RunChatAssistantRow {
-  id: string;
+export interface RunChatAssistantRow extends RunChatRowBase {
   kind: "assistant";
   transcript: string;
   hasTranscript: boolean;
@@ -77,6 +84,10 @@ function sessionUserMessage(
 
 function sessionSource(sessionIndex: number): "initial" | "resume" {
   return sessionIndex === 0 ? "initial" : "resume";
+}
+
+function turnDivider(id: string, timestamp: string): RunChatTurnDivider {
+  return { id, timestamp };
 }
 
 function attachmentAddedAtSort(
@@ -154,6 +165,7 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
           source: "initial",
           status: "pending",
           text: pendingPrompt,
+          turnDivider: turnDivider("pending", run.startedAt),
         },
       ];
     }
@@ -187,6 +199,10 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
         sessionIndex,
         source,
         text: userMessage,
+        turnDivider: turnDivider(
+          `session:${sessionIndex}`,
+          session?.startedAt ?? attempts[0]?.startedAt ?? run.startedAt,
+        ),
       });
     }
 
@@ -194,6 +210,10 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
       const systemMessage = normalizedMessage(attempt.prompt);
       const promptCoveredByUserMessage =
         sessionIndex > 0 && attempt.attemptIndexInSession === 0 && userMessage !== null;
+      const attemptDivider =
+        promptCoveredByUserMessage && userMessage !== null
+          ? undefined
+          : turnDivider(`attempt:${attempt.attemptNumber}`, attempt.startedAt);
       if (systemMessage !== null && !promptCoveredByUserMessage) {
         rows.push({
           id: `session:${sessionIndex}:system:${attempt.attemptNumber}`,
@@ -202,12 +222,18 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
           source,
           status: "sent",
           text: systemMessage,
+          ...(attemptDivider ? { turnDivider: attemptDivider } : {}),
         });
       }
 
       rows.push({
         id: `session:${sessionIndex}:assistant:${attempt.attemptNumber}`,
         kind: "assistant",
+        ...(systemMessage !== null && !promptCoveredByUserMessage
+          ? {}
+          : attemptDivider
+            ? { turnDivider: attemptDivider }
+            : {}),
         ...toAssistantRow(attempt, artifactsByAttempt.get(attempt.attemptNumber) ?? []),
       });
     }

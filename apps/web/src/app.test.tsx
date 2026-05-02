@@ -2141,6 +2141,14 @@ describe("web app", () => {
     const chat = await screen.findByLabelText("Run chat");
     expect(within(chat).queryByText("Initial **dashboard** request")).not.toBeInTheDocument();
     expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
+    const turnTimestamp = new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date("2026-04-13T05:00:00.000Z"));
+    expect(await within(chat).findByText(turnTimestamp)).toHaveClass("chat-turn-divider__label");
     const systemLabel = await within(chat).findByText("System");
     expect(systemLabel.closest(".chat-bubble--system")).not.toBeNull();
     expect(within(chat).getByText("Prompt with")).toBeInTheDocument();
@@ -2192,6 +2200,80 @@ describe("web app", () => {
         source.url.endsWith("/api/runs/run-1/events/timeline"),
       ),
     ).toHaveLength(1);
+  });
+
+  it("shows Chat scroll controls when scrolled away from transcript edges", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Prompt",
+              transcript: "First response",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    const list = chat.querySelector(".chat-message-list");
+    if (!(list instanceof HTMLElement)) {
+      throw new Error("expected chat message list");
+    }
+    const scrollTopButton = chat.querySelector(".chat-scroll-control--top");
+    if (!(scrollTopButton instanceof HTMLButtonElement)) {
+      throw new Error("expected Chat scroll-to-top button");
+    }
+    const scrollBottomButton = chat.querySelector(".chat-scroll-control--bottom");
+    if (!(scrollBottomButton instanceof HTMLButtonElement)) {
+      throw new Error("expected Chat scroll-to-bottom button");
+    }
+    expect(scrollTopButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "true");
+
+    defineElementMetric(list, "clientHeight", 120);
+    defineElementMetric(list, "scrollHeight", 360);
+    defineElementMetric(list, "scrollTop", 80);
+    fireEvent.scroll(list);
+
+    expect(scrollTopButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollTopButton).toHaveClass("chat-scroll-control--visible");
+    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollBottomButton).toHaveClass("chat-scroll-control--visible");
+
+    await user.click(scrollBottomButton);
+
+    expect(list.scrollTop).toBe(240);
+    expect(scrollTopButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollBottomButton).not.toHaveClass("chat-scroll-control--visible");
+
+    await user.click(scrollTopButton);
+
+    expect(list.scrollTop).toBe(0);
+    expect(scrollTopButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollTopButton).not.toHaveClass("chat-scroll-control--visible");
+    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "false");
   });
 
   it("reloads selected-run Chat when backend sync invalidates a completed timeline", async () => {

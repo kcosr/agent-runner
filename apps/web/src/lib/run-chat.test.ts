@@ -176,6 +176,10 @@ describe("deriveRunChatRows", () => {
         source: "initial",
         status: "pending",
         text: "## Pending prompt",
+        turnDivider: {
+          id: "pending",
+          timestamp: "2026-04-28T10:00:00.000Z",
+        },
       },
     ]);
   });
@@ -307,11 +311,19 @@ describe("deriveRunChatRows", () => {
       source: "initial",
       status: "sent",
       text: "Prompt text",
+      turnDivider: {
+        id: "attempt:1",
+        timestamp: "2026-04-28T10:00:00.000Z",
+      },
     });
     expect(rows[3]).toMatchObject({
       kind: "user",
       source: "resume",
       text: "First resume",
+      turnDivider: {
+        id: "session:1",
+        timestamp: "2026-04-28T10:00:00.000Z",
+      },
     });
     expect(rows[1]).toMatchObject({
       kind: "assistant",
@@ -472,6 +484,14 @@ describe("deriveRunChatRows", () => {
     expect(rows[0]).toMatchObject({ kind: "system", text: "Initial prompt" });
     expect(rows[2]).toMatchObject({ kind: "user", text: "User typed resume" });
     expect(rows[4]).toMatchObject({ kind: "system", text: "Automatic retry prompt" });
+    expect(rows[2]?.turnDivider).toMatchObject({
+      id: "session:1",
+      timestamp: "2026-04-28T10:00:00.000Z",
+    });
+    expect(rows[4]?.turnDivider).toMatchObject({
+      id: "attempt:3",
+      timestamp: "2026-04-28T10:00:00.000Z",
+    });
   });
 
   it("retains live or empty transcript states on the assistant row", () => {

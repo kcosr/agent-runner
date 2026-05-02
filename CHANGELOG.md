@@ -350,6 +350,8 @@
 - The web dashboard now persists selected drawer fullscreen mode across
   reloads.
   ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Web dashboard Chat now shows timestamp turn dividers and scroll controls when
+  the transcript is scrolled away from the latest output.
 - Web dashboard Chat now shows initialized and ready run pending prompts before
   the first attempt, then keeps the first real attempt prompt as the initial
   System card after start instead of rendering a duplicate initial user bubble.
