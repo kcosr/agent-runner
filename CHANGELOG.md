@@ -350,6 +350,12 @@
 - The web dashboard now persists selected drawer fullscreen mode across
   reloads.
   ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Web dashboard Chat now shows timestamp turn dividers and scroll controls when
+  the transcript is scrolled away from the latest output.
+  ([#130](https://github.com/kcosr/task-runner/pull/130))
+- Web dashboard Chat now shows initialized and ready run pending prompts before
+  the first attempt, then keeps the first real attempt prompt as the initial
+  System card after start instead of rendering a duplicate initial user bubble.
 - Changed attempt-log persistence to schemaVersion 3 so new writes omit stdout from
   `attempts/NN.json` and, when `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` is
   set, write raw backend stdout to local `attempts/NN.stdout.log` sidecars

@@ -2,6 +2,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import type { RunDetail } from "@task-runner/core/contracts/runs.js";
 import {
   type FormEvent,
+  Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useMemo,
@@ -9,6 +10,7 @@ import {
   useState,
 } from "react";
 import {
+  ChevronIcon,
   DownloadIcon,
   FileIcon,
   MessageIcon,
@@ -25,11 +27,12 @@ import {
   type RunChatAttachmentArtifact,
   type RunChatRow,
   type RunChatSystemRow,
+  type RunChatTurnDivider,
   deriveRunChatRows,
 } from "../lib/run-chat.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 
-const CHAT_BOTTOM_THRESHOLD_PX = 32;
+const CHAT_SCROLL_EDGE_THRESHOLD_PX = 32;
 
 type DownloadAttachmentHandler = (
   runId: string,
@@ -47,12 +50,30 @@ interface ArtifactActions {
 
 function isScrolledToBottom(element: HTMLElement) {
   return (
-    element.scrollHeight - element.scrollTop - element.clientHeight <= CHAT_BOTTOM_THRESHOLD_PX
+    element.scrollHeight - element.scrollTop - element.clientHeight <= CHAT_SCROLL_EDGE_THRESHOLD_PX
   );
+}
+
+function isScrolledToTop(element: HTMLElement) {
+  return element.scrollTop <= CHAT_SCROLL_EDGE_THRESHOLD_PX;
 }
 
 function scrollElementToBottom(element: HTMLElement) {
   element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+}
+
+function scrollElementToTop(element: HTMLElement) {
+  element.scrollTop = 0;
+}
+
+function formatTurnDividerTimestamp(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function assistantEmptyText(emptyState: RunChatAssistantEmptyState | undefined) {
@@ -96,11 +117,26 @@ function ChatRow({ row }: { row: RunChatNonAssistantRow }) {
   return <SystemChatRow row={row} />;
 }
 
+function ChatTurnDivider({ divider }: { divider: RunChatTurnDivider }) {
+  return (
+    <div className="chat-turn-divider" title={formatTimestamp(divider.timestamp)}>
+      <span className="chat-turn-divider__line" />
+      <time className="chat-turn-divider__label" dateTime={divider.timestamp}>
+        {formatTurnDividerTimestamp(divider.timestamp)}
+      </time>
+      <span className="chat-turn-divider__line" />
+    </div>
+  );
+}
+
 function SystemChatRow({ row }: { row: RunChatSystemRow }) {
+  const pending = row.status === "pending";
+  const label = pending ? "System (PENDING)" : "System";
+
   return (
     <article className="chat-row chat-row--system">
       <div className="chat-bubble chat-bubble--system">
-        <span className="chat-bubble__label">System</span>
+        <span className="chat-bubble__label">{label}</span>
         <MarkdownContent className="chat-markdown" text={row.text} />
       </div>
     </article>
@@ -222,6 +258,8 @@ export function RunChatView({
 }) {
   const [draft, setDraft] = useState("");
   const [chatError, setChatError] = useState<string>();
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const resetRunIdRef = useRef(selectedRunId);
@@ -259,17 +297,28 @@ export function RunChatView({
     setDraft("");
     setChatError(undefined);
     stickToBottomRef.current = true;
+    setShowScrollToTop(false);
+    setShowScrollToBottom(false);
   }, [selectedRunId]);
 
   useEffect(() => {
     if (rows.length === 0) {
+      setShowScrollToTop(false);
+      setShowScrollToBottom(false);
       return;
     }
     const element = listRef.current;
-    if (!element || !stickToBottomRef.current) {
+    if (!element) {
       return;
     }
-    scrollElementToBottom(element);
+    if (stickToBottomRef.current) {
+      scrollElementToBottom(element);
+      setShowScrollToTop(!isScrolledToTop(element));
+      setShowScrollToBottom(false);
+      return;
+    }
+    setShowScrollToTop(!isScrolledToTop(element));
+    setShowScrollToBottom(!isScrolledToBottom(element));
   }, [rows]);
 
   function handleMessageListScroll() {
@@ -277,7 +326,32 @@ export function RunChatView({
     if (!element) {
       return;
     }
+    const atBottom = isScrolledToBottom(element);
+    stickToBottomRef.current = atBottom;
+    setShowScrollToTop(!isScrolledToTop(element));
+    setShowScrollToBottom(!atBottom);
+  }
+
+  function handleScrollToTop() {
+    const element = listRef.current;
+    if (!element) {
+      return;
+    }
+    scrollElementToTop(element);
     stickToBottomRef.current = isScrolledToBottom(element);
+    setShowScrollToTop(false);
+    setShowScrollToBottom(!stickToBottomRef.current);
+  }
+
+  function handleScrollToBottom() {
+    const element = listRef.current;
+    if (!element) {
+      return;
+    }
+    scrollElementToBottom(element);
+    stickToBottomRef.current = true;
+    setShowScrollToTop(!isScrolledToTop(element));
+    setShowScrollToBottom(false);
   }
 
   async function submitDraft() {
@@ -388,13 +462,16 @@ export function RunChatView({
 
     return (
       <div className="chat-message-list" onScroll={handleMessageListScroll} ref={listRef}>
-        {rows.map((row) =>
-          row.kind === "assistant" ? (
-            <AssistantChatRow actions={artifactActions} key={row.id} row={row} />
-          ) : (
-            <ChatRow key={row.id} row={row} />
-          ),
-        )}
+        {rows.map((row) => (
+          <Fragment key={row.id}>
+            {row.turnDivider ? <ChatTurnDivider divider={row.turnDivider} /> : null}
+            {row.kind === "assistant" ? (
+              <AssistantChatRow actions={artifactActions} row={row} />
+            ) : (
+              <ChatRow row={row} />
+            )}
+          </Fragment>
+        ))}
       </div>
     );
   }
@@ -460,7 +537,31 @@ export function RunChatView({
           <span className="notice__message">{chatError}</span>
         </div>
       ) : null}
-      <div className="chat-view__body">{renderBody()}</div>
+      <div className="chat-view__body">
+        {renderBody()}
+        <div className="chat-scroll-controls">
+          <button
+            aria-hidden={showScrollToTop ? "false" : "true"}
+            aria-label="Scroll to top"
+            className={`chat-scroll-control chat-scroll-control--top${showScrollToTop ? " chat-scroll-control--visible" : ""}`}
+            onClick={handleScrollToTop}
+            tabIndex={showScrollToTop ? 0 : -1}
+            type="button"
+          >
+            <ChevronIcon aria-hidden="true" />
+          </button>
+          <button
+            aria-hidden={showScrollToBottom ? "false" : "true"}
+            aria-label="Scroll to bottom"
+            className={`chat-scroll-control chat-scroll-control--bottom${showScrollToBottom ? " chat-scroll-control--visible" : ""}`}
+            onClick={handleScrollToBottom}
+            tabIndex={showScrollToBottom ? 0 : -1}
+            type="button"
+          >
+            <ChevronIcon aria-hidden="true" />
+          </button>
+        </div>
+      </div>
       <form
         className={`chat-composer${composerActivityVisible ? " chat-composer--active" : ""}`}
         onSubmit={handleSubmit}

@@ -2139,10 +2139,21 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const chat = await screen.findByLabelText("Run chat");
-    const userMessage = await within(chat).findByText("Initial **dashboard** request");
-    expect(userMessage.closest(".chat-bubble--user")).not.toBeNull();
-    expect(userMessage.closest(".chat-bubble--user")?.querySelector("strong")).toBeNull();
-    expect(within(chat).queryByText(/Prompt with/)).not.toBeInTheDocument();
+    expect(within(chat).queryByText("Initial **dashboard** request")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
+    const turnTimestamp = new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date("2026-04-13T05:00:00.000Z"));
+    expect(await within(chat).findByText(turnTimestamp)).toHaveClass("chat-turn-divider__label");
+    const systemLabel = await within(chat).findByText("System");
+    expect(systemLabel.closest(".chat-bubble--system")).not.toBeNull();
+    expect(within(chat).getByText("Prompt with")).toBeInTheDocument();
+    expect(within(chat).getByText("markdown").closest("strong")).not.toBeNull();
+    expect(within(chat).getByText("list item")).toBeInTheDocument();
     expect(within(chat).queryByText("Notices and diagnostics")).not.toBeInTheDocument();
     expect(within(chat).queryByText("backend notice")).not.toBeInTheDocument();
     const assistantMessage = await within(chat).findByText("Streaming answer");
@@ -2189,6 +2200,80 @@ describe("web app", () => {
         source.url.endsWith("/api/runs/run-1/events/timeline"),
       ),
     ).toHaveLength(1);
+  });
+
+  it("shows Chat scroll controls when scrolled away from transcript edges", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Prompt",
+              transcript: "First response",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    const list = chat.querySelector(".chat-message-list");
+    if (!(list instanceof HTMLElement)) {
+      throw new Error("expected chat message list");
+    }
+    const scrollTopButton = chat.querySelector(".chat-scroll-control--top");
+    if (!(scrollTopButton instanceof HTMLButtonElement)) {
+      throw new Error("expected Chat scroll-to-top button");
+    }
+    const scrollBottomButton = chat.querySelector(".chat-scroll-control--bottom");
+    if (!(scrollBottomButton instanceof HTMLButtonElement)) {
+      throw new Error("expected Chat scroll-to-bottom button");
+    }
+    expect(scrollTopButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "true");
+
+    defineElementMetric(list, "clientHeight", 120);
+    defineElementMetric(list, "scrollHeight", 360);
+    defineElementMetric(list, "scrollTop", 80);
+    fireEvent.scroll(list);
+
+    expect(scrollTopButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollTopButton).toHaveClass("chat-scroll-control--visible");
+    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollBottomButton).toHaveClass("chat-scroll-control--visible");
+
+    await user.click(scrollBottomButton);
+
+    expect(list.scrollTop).toBe(240);
+    expect(scrollTopButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollBottomButton).not.toHaveClass("chat-scroll-control--visible");
+
+    await user.click(scrollTopButton);
+
+    expect(list.scrollTop).toBe(0);
+    expect(scrollTopButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollTopButton).not.toHaveClass("chat-scroll-control--visible");
+    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "false");
   });
 
   it("reloads selected-run Chat when backend sync invalidates a completed timeline", async () => {
@@ -2437,6 +2522,108 @@ describe("web app", () => {
     expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(
       runOneTimelineFetches + 1,
     );
+  });
+
+  it("renders a pending Chat system card before the first attempt starts", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "initialized",
+          effectiveStatus: "initialized",
+          activeTask: null,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          currentSession: null,
+          lastSession: null,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "initialized",
+          effectiveStatus: "initialized",
+          isLive: false,
+          activeTask: null,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          sessions: [],
+          currentSession: null,
+          lastSession: null,
+          message: "Review this handoff before launch.",
+          pendingPrompt: "## Prepared prompt\n\n- Check setup",
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 0,
+          attempts: [],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    const pendingLabel = await within(chat).findByText("System (PENDING)");
+    const pendingBubble = pendingLabel.closest(".chat-bubble--system");
+    expect(pendingBubble).not.toBeNull();
+    expect(pendingBubble).not.toHaveClass("chat-bubble--system-pending");
+    expect(
+      within(chat).getByRole("heading", { level: 2, name: "Prepared prompt" }),
+    ).toBeInTheDocument();
+    expect(await within(chat).findByText("Check setup")).toBeInTheDocument();
+    expect(within(chat).queryByText("Review this handoff before launch.")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("No conversation yet")).not.toBeInTheDocument();
+  });
+
+  it("keeps the empty Chat state before attempts when there is no pending prompt", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "ready",
+          effectiveStatus: "ready",
+          activeTask: null,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          currentSession: null,
+          lastSession: null,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "ready",
+          effectiveStatus: "ready",
+          isLive: false,
+          activeTask: null,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          sessions: [],
+          currentSession: null,
+          lastSession: null,
+          message: "Initial request",
+          pendingPrompt: null,
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 0,
+          attempts: [],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("No conversation yet")).toBeInTheDocument();
+    expect(
+      await within(chat).findByText("This run has no user messages or attempts."),
+    ).toBeInTheDocument();
+    expect(within(chat).queryByText("Initial request")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("System (PENDING)")).not.toBeInTheDocument();
   });
 
   it("opens the existing attachment preview drawer from previewable Chat artifact cards", async () => {
@@ -2704,8 +2891,11 @@ describe("web app", () => {
 
     releaseTimeline?.();
 
-    expect(await within(chat).findByText("Initial dashboard request")).toBeInTheDocument();
-    expect(within(chat).queryByText("Timeline prompt")).not.toBeInTheDocument();
+    expect(await within(chat).findByText("Timeline prompt")).toBeInTheDocument();
+    expect(
+      within(chat).getByText("Timeline prompt").closest(".chat-bubble--system"),
+    ).not.toBeNull();
+    expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
     expect(await within(chat).findByText("Timeline response")).toBeInTheDocument();
     expect(within(chat).queryByLabelText("Loading conversation")).not.toBeInTheDocument();
   });

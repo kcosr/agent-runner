@@ -4,19 +4,28 @@ import type { RunDetail, RunSessionSummary } from "@task-runner/core/contracts/r
 
 export type RunChatAssistantEmptyState = "waiting_live_response" | "no_response_recorded";
 
-export interface RunChatUserRow {
+export interface RunChatTurnDivider {
   id: string;
+  timestamp: string;
+}
+
+interface RunChatRowBase {
+  id: string;
+  turnDivider?: RunChatTurnDivider;
+}
+
+export interface RunChatUserRow extends RunChatRowBase {
   kind: "user";
   sessionIndex: number;
   source: "initial" | "resume";
   text: string;
 }
 
-export interface RunChatSystemRow {
-  id: string;
+export interface RunChatSystemRow extends RunChatRowBase {
   kind: "system";
   sessionIndex: number;
   source: "initial" | "resume";
+  status: "pending" | "sent";
   text: string;
 }
 
@@ -25,8 +34,7 @@ export type RunChatAttachmentArtifact = Pick<
   "id" | "name" | "mimeType" | "size" | "addedAt"
 >;
 
-export interface RunChatAssistantRow {
-  id: string;
+export interface RunChatAssistantRow extends RunChatRowBase {
   kind: "assistant";
   transcript: string;
   hasTranscript: boolean;
@@ -65,18 +73,21 @@ function toAssistantRow(
 }
 
 function sessionUserMessage(
-  run: RunDetail,
   sessionIndex: number,
   session: RunSessionSummary | undefined,
 ): string | null {
   if (sessionIndex === 0) {
-    return normalizedMessage(run.message);
+    return null;
   }
   return normalizedMessage(session?.message ?? null);
 }
 
 function sessionSource(sessionIndex: number): "initial" | "resume" {
   return sessionIndex === 0 ? "initial" : "resume";
+}
+
+function turnDivider(id: string, timestamp: string): RunChatTurnDivider {
+  return { id, timestamp };
 }
 
 function attachmentAddedAtSort(
@@ -139,6 +150,27 @@ function deriveArtifactsByAttempt(
 }
 
 export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): RunChatRow[] {
+  const pendingPromptAvailable =
+    (run.status === "initialized" || run.status === "ready") &&
+    run.totalAttemptCount === 0 &&
+    history.attempts.length === 0;
+  if (pendingPromptAvailable) {
+    const pendingPrompt = normalizedMessage(run.pendingPrompt);
+    if (pendingPrompt !== null) {
+      return [
+        {
+          id: "session:0:system:pending",
+          kind: "system",
+          sessionIndex: 0,
+          source: "initial",
+          status: "pending",
+          text: pendingPrompt,
+          turnDivider: turnDivider("pending", run.startedAt),
+        },
+      ];
+    }
+  }
+
   const attemptsBySession = new Map<number, RunTimelineAttempt[]>();
   for (const attempt of history.attempts) {
     const attempts = attemptsBySession.get(attempt.sessionIndex) ?? [];
@@ -158,7 +190,7 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
   for (const sessionIndex of [...sessionIndexes].sort((left, right) => left - right)) {
     const session = sessionsByIndex.get(sessionIndex);
     const attempts = attemptsBySession.get(sessionIndex) ?? [];
-    const userMessage = sessionUserMessage(run, sessionIndex, session);
+    const userMessage = sessionUserMessage(sessionIndex, session);
     const source = sessionSource(sessionIndex);
     if (userMessage !== null) {
       rows.push({
@@ -167,26 +199,41 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
         sessionIndex,
         source,
         text: userMessage,
+        turnDivider: turnDivider(
+          `session:${sessionIndex}`,
+          session?.startedAt ?? attempts[0]?.startedAt ?? run.startedAt,
+        ),
       });
     }
 
     for (const attempt of attempts) {
       const systemMessage = normalizedMessage(attempt.prompt);
       const promptCoveredByUserMessage =
-        attempt.attemptIndexInSession === 0 && userMessage !== null;
+        sessionIndex > 0 && attempt.attemptIndexInSession === 0 && userMessage !== null;
+      const attemptDivider =
+        promptCoveredByUserMessage && userMessage !== null
+          ? undefined
+          : turnDivider(`attempt:${attempt.attemptNumber}`, attempt.startedAt);
       if (systemMessage !== null && !promptCoveredByUserMessage) {
         rows.push({
           id: `session:${sessionIndex}:system:${attempt.attemptNumber}`,
           kind: "system",
           sessionIndex,
           source,
+          status: "sent",
           text: systemMessage,
+          ...(attemptDivider ? { turnDivider: attemptDivider } : {}),
         });
       }
 
       rows.push({
         id: `session:${sessionIndex}:assistant:${attempt.attemptNumber}`,
         kind: "assistant",
+        ...(systemMessage !== null && !promptCoveredByUserMessage
+          ? {}
+          : attemptDivider
+            ? { turnDivider: attemptDivider }
+            : {}),
         ...toAssistantRow(attempt, artifactsByAttempt.get(attempt.attemptNumber) ?? []),
       });
     }

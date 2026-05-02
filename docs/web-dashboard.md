@@ -208,18 +208,25 @@ history and streaming without starting a duplicate timeline subscription.
 
 ### Chat
 
-Chat renders the selected run as a conversational thread. Each session's
-user bubble is the stored run message for the initial session, or the stored
-session message for later resume sessions. When that user message is null or
-blank, Chat renders attempt prompts as separate System cards so
-daemon-synthesized prompts are not attributed to the user. Chat shows the
-existing loading skeleton until timeline history is available, so detail-only
-run/session messages do not appear as standalone user bubbles before the
-matching attempt/assistant row can be projected. Assistant output renders each
-attempt transcript chronologically and inline, without a bubble, so the thread
-reads like output with user interjections and automatic follow-up prompts.
-User bubbles render Markdown independently. Backend notices and diagnostics
-stay out of Chat.
+Chat renders the selected run as a conversational thread derived from
+`RunDetail` plus timeline history. Before the first attempt starts,
+initialized and ready runs with a non-empty `pendingPrompt` show that
+pending prompt as a normal System card labeled `System (PENDING)`; runs
+without a pending prompt keep the empty conversation state. Once timeline
+history contains the first real attempt, Chat renders session 0 attempt 0
+from `attempt.prompt` as a normal System card, even when the run has an
+initial message, because before-attempt hooks may rewrite the prompt. If a
+hook clears `attempt.prompt`, Chat does not fall back to the original run
+message. Later
+resume sessions keep their stored session message as a user bubble, and
+automatic follow-up or retry prompts continue to render as System cards.
+Chat shows the existing loading skeleton until timeline history is available,
+so detail-only run/session messages do not appear as standalone user bubbles
+before the matching attempt/assistant row can be projected. Assistant output
+renders each attempt transcript chronologically and inline, without a bubble,
+so the thread reads like output with user interjections and automatic
+follow-up prompts. User bubbles preserve their text verbatim. Backend notices
+and diagnostics stay out of Chat.
 
 When selected-run attachments were added during an attempt window, Chat
 synthesizes artifact cards at the end of that assistant response from the
