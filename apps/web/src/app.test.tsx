@@ -6,6 +6,7 @@ import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surf
 import type {
   QueuedResumeMessage,
   RunDetail,
+  RunSessionSummary,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -2768,11 +2769,9 @@ describe("web app", () => {
     expect(within(chat).queryByText(/prior attempt/i)).not.toBeInTheDocument();
   });
 
-  it("keeps Chat resume submissions pending until refreshed detail shows the live run", async () => {
+  it("submits Chat composer messages through resume and clears the draft on success", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resumeBody: { overrides?: { message?: string } } | undefined;
-    let resumeRequested = false;
-    let resolveDetailRefresh: ((response: Response) => void) | undefined;
     installFetchMock(
       {
         runs: [makeRun()],
@@ -2780,18 +2779,9 @@ describe("web app", () => {
       },
       {
         handleRequest: (url, init) => {
-          if (url.endsWith("/api/runs/run-1") && (!init?.method || init.method === "GET")) {
-            if (!resumeRequested) {
-              return undefined;
-            }
-            return new Promise<Response>((resolve) => {
-              resolveDetailRefresh = resolve;
-            });
-          }
           if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
             return undefined;
           }
-          resumeRequested = true;
           resumeBody =
             typeof init.body === "string" && init.body.length > 0
               ? (JSON.parse(init.body) as { overrides?: { message?: string } })
@@ -2818,29 +2808,9 @@ describe("web app", () => {
     await waitFor(() => {
       expect(resumeBody).toEqual({ overrides: { message: "Continue from chat" } });
     });
-    expect(message).toHaveValue("  Continue from chat  ");
-    const pendingSendButton = screen.getByRole("button", { name: "Send" });
-    expect(pendingSendButton).toBeDisabled();
-    expect(pendingSendButton).toHaveAttribute("title", "Sending...");
-
-    resolveDetailRefresh?.(
-      new Response(
-        JSON.stringify({
-          run: makeDetail({
-            runId: "run-1",
-            isLive: true,
-            status: "running",
-            capabilities: { canAbort: true, canResume: false },
-          }),
-        }),
-        { status: 200 },
-      ),
-    );
-
     await waitFor(() => {
       expect(message).toHaveValue("");
     });
-    expect(screen.getByRole("button", { name: "Queue" })).toBeDisabled();
   });
 
   it("disables the Chat composer for archived runs", async () => {
@@ -3069,6 +3039,122 @@ describe("web app", () => {
       expect(screen.queryByLabelText("Queued messages")).not.toBeInTheDocument();
     });
     expect(screen.queryAllByLabelText("1 queued message")).toHaveLength(0);
+  });
+
+  it("refreshes selected-run Chat history when a queued resume starts from an empty timeline", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const queuedResumeMessage = {
+      id: "qmsg1",
+      text: "Already queued",
+      createdAt: "2026-04-30T15:20:00.000Z",
+    };
+    const baseSession = makeDetail().sessions[0];
+    if (!baseSession) {
+      throw new Error("expected base session");
+    }
+    const firstSession: RunSessionSummary = {
+      ...baseSession,
+      status: "success" as const,
+      endedAt: "2026-04-13T05:02:00.000Z",
+      exitCode: 0,
+      message: null,
+    };
+    const resumedSession: RunSessionSummary = {
+      ...firstSession,
+      sessionIndex: 1,
+      status: "running" as const,
+      startedAt: "2026-04-13T05:03:00.000Z",
+      endedAt: null,
+      exitCode: null,
+      message: "Already queued",
+      firstAttemptNumber: 2,
+      lastAttemptNumber: 2,
+      attemptCount: 1,
+    };
+    const timelineHistory: RunTimelineHistory = {
+      runId: "run-1",
+      lastCursor: 0,
+      attempts: [],
+    };
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          status: "success",
+          effectiveStatus: "success",
+          endedAt: "2026-04-13T05:02:00.000Z",
+          currentSession: null,
+          lastSession: firstSession,
+          queuedResumeMessageCount: 1,
+          capabilities: { canResume: true },
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "success",
+          effectiveStatus: "success",
+          isLive: false,
+          endedAt: "2026-04-13T05:02:00.000Z",
+          exitCode: 0,
+          sessions: [firstSession],
+          currentSession: null,
+          lastSession: firstSession,
+          queuedResumeMessages: [queuedResumeMessage],
+          capabilities: { canResume: true },
+        }),
+      },
+      timelineHistories: {
+        "run-1": timelineHistory,
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await screen.findByLabelText("Queued messages")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
+    });
+
+    timelineHistory.lastCursor = 2;
+    timelineHistory.attempts = [
+      {
+        attemptNumber: 2,
+        attemptIndexInSession: 0,
+        sessionIndex: 1,
+        startedAt: "2026-04-13T05:03:00.000Z",
+        endedAt: null,
+        prompt: "Already queued",
+        transcript: "Queued answer",
+        notices: "",
+        exitCode: null,
+        timedOut: false,
+        live: true,
+      },
+    ];
+    findEventSource("/api/runs/run-1/events/detail").emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        status: "running",
+        effectiveStatus: "running",
+        isLive: true,
+        endedAt: null,
+        exitCode: null,
+        totalAttemptCount: 2,
+        totalSessionCount: 2,
+        sessions: [firstSession, resumedSession],
+        currentSession: resumedSession,
+        lastSession: resumedSession,
+        queuedResumeMessages: [],
+        capabilities: { canAbort: true, canResume: false },
+      }),
+    });
+
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(2);
+    });
+    expect(screen.queryByLabelText("Queued messages")).not.toBeInTheDocument();
+    expect(await within(chat).findByText("Already queued")).toBeInTheDocument();
+    expect(await within(chat).findByText("Queued answer")).toBeInTheDocument();
   });
 
   it("submits Chat composer messages with Command+Enter", async () => {

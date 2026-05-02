@@ -306,8 +306,7 @@ export function useRunTimelineState({
       !shouldLoadHistory &&
       !loadInFlightRef.current &&
       bootstrappedRef.current &&
-      historyRef.current !== null &&
-      historyRef.current.attempts.length > 0;
+      historyRef.current !== null;
     previousRunIsLiveRef.current = runIsLive;
 
     if (sameRunId) {
@@ -321,7 +320,8 @@ export function useRunTimelineState({
     if (shouldRefreshForLiveTransition) {
       // Detail can observe a resumed live attempt before timeline replay/history
       // has projected the new attempt record. Refresh once on same-run live
-      // transition so an already-open Attempts tab catches up.
+      // transition so an already-open timeline catches up even if the live
+      // attempt event was missed or the existing history is empty.
       void loadHistory();
     }
 
