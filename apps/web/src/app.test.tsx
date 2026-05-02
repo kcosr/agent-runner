@@ -2483,9 +2483,10 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const chat = await screen.findByLabelText("Run chat");
-    const pendingLabel = await within(chat).findByText("Pending prompt");
-    const pendingBubble = pendingLabel.closest(".chat-bubble--system-pending");
+    const pendingLabel = await within(chat).findByText("System (PENDING)");
+    const pendingBubble = pendingLabel.closest(".chat-bubble--system");
     expect(pendingBubble).not.toBeNull();
+    expect(pendingBubble).not.toHaveClass("chat-bubble--system-pending");
     expect(
       within(chat).getByRole("heading", { level: 2, name: "Prepared prompt" }),
     ).toBeInTheDocument();
@@ -2540,7 +2541,7 @@ describe("web app", () => {
       await within(chat).findByText("This run has no user messages or attempts."),
     ).toBeInTheDocument();
     expect(within(chat).queryByText("Initial request")).not.toBeInTheDocument();
-    expect(within(chat).queryByText("Pending prompt")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("System (PENDING)")).not.toBeInTheDocument();
   });
 
   it("opens the existing attachment preview drawer from previewable Chat artifact cards", async () => {

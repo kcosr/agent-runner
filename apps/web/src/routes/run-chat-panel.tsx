@@ -98,14 +98,11 @@ function ChatRow({ row }: { row: RunChatNonAssistantRow }) {
 
 function SystemChatRow({ row }: { row: RunChatSystemRow }) {
   const pending = row.status === "pending";
-  const className = `chat-bubble chat-bubble--system${
-    pending ? " chat-bubble--system-pending" : ""
-  }`;
-  const label = pending ? "Pending prompt" : "System";
+  const label = pending ? "System (PENDING)" : "System";
 
   return (
     <article className="chat-row chat-row--system">
-      <div className={className}>
+      <div className="chat-bubble chat-bubble--system">
         <span className="chat-bubble__label">{label}</span>
         <MarkdownContent className="chat-markdown" text={row.text} />
       </div>
