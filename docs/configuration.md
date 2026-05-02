@@ -120,6 +120,7 @@ traffic.
 | `TASK_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary (default `cursor-agent`) |
 | `TASK_RUNNER_CAPTURE_BACKEND_STDOUT` | Write raw backend stdout sidecars to `attempts/NN.stdout.log` for local debugging |
+| `TASK_RUNNER_BACKEND_SESSION_SYNC` | Set to `false`, `0`, `no`, or `off` to disable backend-owned session history import, pre-resume sync, and daemon subscribed-run polling |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary (default `pi`) |
 | `PI_HOME` | Pi session storage root (default `~/.pi`) |
 

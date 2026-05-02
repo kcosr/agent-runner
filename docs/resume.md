@@ -154,6 +154,10 @@ existing manifest history. If a backend history reader reports the source
 as unavailable for a run with a backend session id, resume fails before
 allocating the next attempt.
 
+Set `TASK_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
+`off`) to disable backend-owned session history import, pre-resume sync,
+and daemon subscribed-run polling in the current process.
+
 ## Retry nudges
 
 Within a single `run` invocation, task-runner may retry the backend up to

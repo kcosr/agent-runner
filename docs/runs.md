@@ -126,7 +126,10 @@ audit streams. Changed backend history updates `run.json`, refreshes run
 indexes, publishes fresh summary/detail projections, and emits audit
 `run.backend_session_history_synced` events for synced backend turns.
 Daemon sync failures emit `run.backend_session_history_sync_failed` audit
-events. Summary-only subscriptions do not start history polling.
+events. Summary-only subscriptions do not start history polling. Set
+`TASK_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
+`off`) to disable backend-owned session history import/sync for the
+current process.
 
 ## Lifecycle states
 

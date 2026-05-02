@@ -25,10 +25,17 @@ import {
 
 export type BackendSessionHistorySyncMode = "bootstrap" | "sync";
 
+export const TASK_RUNNER_BACKEND_SESSION_SYNC_ENV = "TASK_RUNNER_BACKEND_SESSION_SYNC";
+
 export type BackendSessionHistorySyncResult =
   | {
       status: "skipped";
-      reason: "no_backend_session" | "unsupported" | "source_unavailable" | "unchanged";
+      reason:
+        | "disabled"
+        | "no_backend_session"
+        | "unsupported"
+        | "source_unavailable"
+        | "unchanged";
       changed: false;
       source: BackendSessionHistorySource | null;
       importedTurnCount: number;
@@ -66,6 +73,13 @@ export class BackendSessionHistorySyncError extends Error {
     super(message, options);
     this.name = "BackendSessionHistorySyncError";
   }
+}
+
+export function backendSessionHistorySyncEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const raw = env[TASK_RUNNER_BACKEND_SESSION_SYNC_ENV]?.trim().toLowerCase();
+  return raw !== "0" && raw !== "false" && raw !== "off" && raw !== "no";
 }
 
 function errorMessage(error: unknown): string {
@@ -447,6 +461,7 @@ export async function prepareBackendSessionHistorySync(
   options: BackendSessionHistorySyncOptions,
 ): Promise<BackendSessionHistorySyncPreparation> {
   const { manifest, backend, mode } = options;
+  const env = options.env ?? (process.env as Record<string, string>);
   if (manifest.backendSessionId === null) {
     return {
       status: "skipped",
@@ -458,6 +473,16 @@ export async function prepareBackendSessionHistorySync(
     };
   }
   const backendSessionId = manifest.backendSessionId;
+  if (!backendSessionHistorySyncEnabled(env)) {
+    return {
+      status: "skipped",
+      reason: "disabled",
+      changed: false,
+      source: null,
+      importedTurnCount: manifest.backendSessionSync?.importedTurnIds.length ?? 0,
+      openTurnCount: manifest.backendSessionSync?.openTurnIds.length ?? 0,
+    };
+  }
   if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
     return {
       status: "skipped",
@@ -469,7 +494,6 @@ export async function prepareBackendSessionHistorySync(
     };
   }
 
-  const env = options.env ?? (process.env as Record<string, string>);
   const previousState = cloneBackendSessionSyncState(manifest.backendSessionSync);
   const sourceResult = await backend.resolveSessionHistorySource({
     sessionId: backendSessionId,

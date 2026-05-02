@@ -123,6 +123,9 @@
   attempt/session numbers, and subscribed daemon detail/timeline/audit
   runs stay synchronized while clients watch them through
   `run.backend_session_history_synced` audit events.
+- Added `TASK_RUNNER_BACKEND_SESSION_SYNC=false` to disable backend-owned
+  session history import, pre-resume sync, and daemon subscribed-run
+  polling for the current process.
 - Added selected-run Chat artifact cards for attachments produced during
   attempt windows, with existing preview and download actions shown inline
   after the matching assistant response.

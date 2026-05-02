@@ -84,6 +84,7 @@ import {
 import { MAX_ATTACHMENT_BYTES } from "@task-runner/core/core/run/attachments.js";
 import {
   applyPreparedBackendSessionHistorySync,
+  backendSessionHistorySyncEnabled,
   prepareBackendSessionHistorySync,
   recordBackendSessionSyncError,
 } from "@task-runner/core/core/run/backend-session-sync.js";
@@ -305,6 +306,7 @@ class SessionSyncManager {
       publishTimelineInvalidated(runId: string): void;
       publishAudit(envelope: RunAuditEnvelope): void;
       auditContext: ReturnType<typeof daemonMutationContext>;
+      env: NodeJS.ProcessEnv;
     },
   ) {}
 
@@ -337,6 +339,10 @@ class SessionSyncManager {
 
   reconcileRun(runId: string): void {
     if (!this.hasSubscribers(runId)) {
+      this.clearTimer(runId);
+      return;
+    }
+    if (!backendSessionHistorySyncEnabled(this.options.env)) {
       this.clearTimer(runId);
       return;
     }
@@ -445,6 +451,9 @@ class SessionSyncManager {
     if (this.inFlightRunIds.has(runId)) {
       return;
     }
+    if (!backendSessionHistorySyncEnabled(this.options.env)) {
+      return;
+    }
     const manifest = this.readEligibleManifest(runId);
     if (!manifest) {
       return;
@@ -464,6 +473,7 @@ class SessionSyncManager {
         manifest,
         backend,
         mode: "sync",
+        env: this.options.env as Record<string, string>,
       });
       if (prepared.status !== "ready") {
         return;
@@ -1976,6 +1986,7 @@ export async function serveDaemon(
     publishTimelineInvalidated,
     publishAudit,
     auditContext: mutationAuditContext,
+    env: process.env,
   });
 
   const publishRunDeletion = (runId: string): void => {

@@ -57,13 +57,16 @@ function fileSource(path, token = "v1") {
   };
 }
 
-function historyBackend({ turns, source = fileSource("history"), invoke, read }) {
+function historyBackend({ turns, source = fileSource("history"), invoke, read, resolve }) {
   return {
     id: "claude",
     async validateSessionId() {
       return { valid: true };
     },
-    async resolveSessionHistorySource() {
+    async resolveSessionHistorySource(ctx) {
+      if (resolve) {
+        return resolve(ctx);
+      }
       return { available: true, source };
     },
     async readSessionHistory(ctx) {
@@ -239,6 +242,61 @@ test("sync is idempotent and open turns update only sync metadata", async () => 
   assert.equal(initial.manifest.attemptRecords[0].transcript, "updated answer");
   assert.deepEqual(initial.manifest.backendSessionSync.importedTurnIds, ["complete-1"]);
   assert.deepEqual(initial.manifest.backendSessionSync.openTurnIds, ["open-1"]);
+});
+
+test("sync skips backend session history when TASK_RUNNER_BACKEND_SESSION_SYNC is false", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const initial = await runIn(dir, {
+    backend: historyBackend({
+      source: fileSource("disabled", "v1"),
+      turns: [
+        {
+          backendTurnId: "complete-1",
+          status: "complete",
+          startedAt: "2026-04-20T11:00:00.000Z",
+          updatedAt: "2026-04-20T11:01:00.000Z",
+          userText: "prompt",
+          assistantText: "answer",
+        },
+      ],
+    }),
+    bootstrapBackendSessionId: "session-disabled",
+    initialize: true,
+  });
+  const before = JSON.parse(JSON.stringify(initial.manifest));
+  let resolveCalls = 0;
+  let readCalls = 0;
+
+  const result = await syncBackendSessionHistory({
+    manifest: initial.manifest,
+    backend: historyBackend({
+      source: fileSource("disabled", "v2"),
+      turns: [],
+      resolve: async () => {
+        resolveCalls++;
+        return { available: true, source: fileSource("disabled", "v2") };
+      },
+      read: async () => {
+        readCalls++;
+        return {
+          source: fileSource("disabled", "v2"),
+          cursor: { offset: 0 },
+          turns: [],
+        };
+      },
+    }),
+    mode: "sync",
+    env: { TASK_RUNNER_BACKEND_SESSION_SYNC: "false" },
+  });
+
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "disabled");
+  assert.equal(result.importedTurnCount, 1);
+  assert.equal(result.openTurnCount, 0);
+  assert.equal(resolveCalls, 0);
+  assert.equal(readCalls, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(initial.manifest)), before);
 });
 
 test("sync promotes an open backend turn to a complete imported attempt", async () => {

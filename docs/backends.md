@@ -158,6 +158,10 @@ Task-runner calls them for `--backend-session-id` bootstrap import and
 before `task-runner run --resume-run <id>` allocates a new session or
 attempt.
 
+Set `TASK_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
+`off`) to disable backend-owned session history import/sync for the
+current process, including daemon subscribed-run polling.
+
 `resolveSessionHistorySource(ctx)` receives `sessionId`, `cwd`, `env`,
 resolved backend config/args, and the previous source when one exists. It
 returns either:

@@ -6298,6 +6298,53 @@ test("daemon session sync ignores summary-only and running run subscriptions", a
   );
 });
 
+test("daemon session sync is disabled by TASK_RUNNER_BACKEND_SESSION_SYNC=false", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    token: "v1",
+    turns: [makeSyncedTurn("turn-disabled")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    {
+      ...sharedRuntimeEnv(dir),
+      TASK_RUNNER_SYNC_BACKEND_STATE: statePath,
+      TASK_RUNNER_BACKEND_SESSION_SYNC: "false",
+    },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const detailSub = await client.subscribe(
+          { channel: "run_detail", runId: run.runId },
+          () => {},
+        );
+        await sleep(650);
+        assert.equal(readSyncState(statePath).resolveCalls, 0);
+        assert.equal(readSyncState(statePath).readCalls, 0);
+        assert.equal(readManifest(run.workspaceDir).attemptRecords.length, 0);
+        await client.unsubscribe(detailSub);
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
 test("daemon session sync invalidates timeline subscribers after importing backend history", async () => {
   const dir = tempDir();
   const statePath = join(dir, "sync-state.json");
