@@ -1067,10 +1067,7 @@ function codexSessionIdFromRecord(record: Record<string, unknown>): string | nul
   return typeof record.payload.id === "string" ? record.payload.id : null;
 }
 
-function codexMessageText(
-  record: Record<string, unknown>,
-  role: "user" | "assistant",
-): string | null {
+function codexMessageText(record: Record<string, unknown>, role: "assistant"): string | null {
   if (record.type !== "response_item" || !isRecord(record.payload)) {
     return null;
   }
@@ -1080,6 +1077,17 @@ function codexMessageText(
   }
   const text = extractTextFromContent(payload.content);
   return text.length > 0 ? text : null;
+}
+
+function codexUserMessageEventText(record: Record<string, unknown>): string | null {
+  if (record.type !== "event_msg" || !isRecord(record.payload)) {
+    return null;
+  }
+  const payload = record.payload;
+  if (payload.type !== "user_message" || typeof payload.message !== "string") {
+    return null;
+  }
+  return payload.message.length > 0 ? payload.message : null;
 }
 
 interface CodexTurnBuilder {
@@ -1135,7 +1143,7 @@ export async function parseCodexSessionHistoryJsonl(path: string): Promise<Backe
     }
 
     if (current !== null && timestamp !== null) {
-      const userText = codexMessageText(record, "user");
+      const userText = codexUserMessageEventText(record);
       if (userText !== null) {
         current.userText =
           current.userText === null ? userText : `${current.userText}\n\n${userText}`;

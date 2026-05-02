@@ -457,6 +457,9 @@
 - Web dashboard Chat now refreshes timeline history when a queued resume
   starts from an empty history, so drained queued messages show as chat
   bubbles without reselecting the run.
+- Codex backend session sync now imports the actual user-message event
+  instead of replayed context messages, preventing duplicate task-runner
+  sessions when synced turns include injected context or subagent notices.
 - Subscribed backend-session sync no longer holds the task-state lock while
   reading backend transcript files, preventing large histories from blocking
   run timeline and attachment requests.

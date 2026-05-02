@@ -36,6 +36,23 @@ function sessionRecords(sessionId = "thread-123") {
       payload: {
         type: "message",
         role: "user",
+        content: [{ type: "input_text", text: "Injected context should be ignored" }],
+      },
+    },
+    {
+      timestamp: "2026-05-01T00:00:02.100Z",
+      type: "event_msg",
+      payload: {
+        type: "user_message",
+        message: "Question A",
+      },
+    },
+    {
+      timestamp: "2026-05-01T00:00:02.200Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
         content: [{ type: "input_text", text: "Question A" }],
       },
     },
@@ -50,6 +67,20 @@ function sessionRecords(sessionId = "thread-123") {
     },
     {
       timestamp: "2026-05-01T00:00:04.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "<subagent_notification>internal status</subagent_notification>",
+          },
+        ],
+      },
+    },
+    {
+      timestamp: "2026-05-01T00:00:04.100Z",
       type: "response_item",
       payload: {
         type: "message",
@@ -69,6 +100,14 @@ function sessionRecords(sessionId = "thread-123") {
     },
     {
       timestamp: "2026-05-01T00:00:07.000Z",
+      type: "event_msg",
+      payload: {
+        type: "user_message",
+        message: "Unfinished",
+      },
+    },
+    {
+      timestamp: "2026-05-01T00:00:07.100Z",
       type: "response_item",
       payload: {
         type: "message",
