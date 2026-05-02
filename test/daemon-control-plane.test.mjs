@@ -6624,6 +6624,83 @@ test("daemon session sync reads backend history outside the task-state lock", as
   );
 });
 
+test("daemon session sync skips apply when sync state changes during backend read", async () => {
+  const dir = tempDir();
+  const statePath = join(dir, "sync-state.json");
+  writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeSyncBackend(dir);
+  writeSyncState(statePath, {
+    readDelayMs: 1_000,
+    token: "v1",
+    turns: [makeSyncedTurn("turn-raced")],
+  });
+  const run = await initRun(dir, "sync-daemon-agent");
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-26T10:10:00.000Z";
+    manifest.backendSessionId = "sync-session";
+    manifest.backendSessionSync = {
+      backend: "syncer",
+      backendSessionId: "sync-session",
+      source: { kind: "custom", label: "sync-fixture", changeToken: { token: "v0" } },
+      cursor: { token: "v0" },
+      lastSyncedAt: "2026-04-26T10:09:00.000Z",
+      lastError: null,
+      importedTurnIds: [],
+      openTurnIds: [],
+    };
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const detailSub = await client.subscribe(
+          { channel: "run_detail", runId: run.runId },
+          () => {},
+        );
+        await waitForValue(
+          () => (readSyncState(statePath).readCalls > 0 ? true : null),
+          "raced backend history read to start",
+        );
+        patchManifest(run.workspaceDir, (manifest) => {
+          manifest.backendSessionSync = {
+            backend: "syncer",
+            backendSessionId: "sync-session",
+            source: { kind: "custom", label: "sync-fixture", changeToken: { token: "external" } },
+            cursor: { token: "external" },
+            lastSyncedAt: "2026-04-26T10:09:30.000Z",
+            lastError: null,
+            importedTurnIds: [],
+            openTurnIds: [],
+          };
+        });
+        await client.unsubscribe(detailSub);
+        await sleep(1_200);
+
+        const manifest = readManifest(run.workspaceDir);
+        assert.equal(
+          manifest.attemptRecords.some(
+            (attempt) =>
+              attempt.provenance.kind === "backend_session" &&
+              attempt.provenance.backendTurnId === "turn-raced",
+          ),
+          false,
+        );
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
 test("daemon session sync close clears pending poll timers", async () => {
   const dir = tempDir();
   const statePath = join(dir, "sync-state.json");

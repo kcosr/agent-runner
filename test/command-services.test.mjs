@@ -407,6 +407,10 @@ test("command services: passive backend session mutations update only metadata a
       openTurnIds: [],
     };
   });
+  mkdirSync(join(passiveRun.workspaceDir, "attempts"), { recursive: true });
+  writeFileSync(join(passiveRun.workspaceDir, "attempts", "01.json"), "{}\n");
+  writeFileSync(join(passiveRun.workspaceDir, "attempts", "02.json"), "{}\n");
+  writeFileSync(join(passiveRun.workspaceDir, "attempts", "03.json"), "{}\n");
 
   const before = readManifest(passiveRun.workspaceDir);
   const preservedBefore = {
@@ -451,6 +455,9 @@ test("command services: passive backend session mutations update only metadata a
     assert.equal(afterSetManifest.backendSessionSync, null);
     assert.equal(afterSetManifest.totalAttemptCount, 1);
     assert.equal(afterSetManifest.totalSessionCount, 1);
+    assert.equal(existsSync(join(passiveRun.workspaceDir, "attempts", "01.json")), true);
+    assert.equal(existsSync(join(passiveRun.workspaceDir, "attempts", "02.json")), false);
+    assert.equal(existsSync(join(passiveRun.workspaceDir, "attempts", "03.json")), false);
     assertTimestampAdvanced(before.updatedAt, afterSet, "setRunBackendSession updatedAt");
 
     const setAgainResult = setRunBackendSession(passiveRun.runId, {

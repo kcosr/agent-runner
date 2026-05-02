@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -209,8 +209,27 @@ test("codex history parser reports malformed jsonl with file and line", async ()
 
   await assert.rejects(
     () => parseCodexSessionHistoryJsonl(path),
-    new RegExp(`failed to parse Codex session history ${path}:2`),
+    /failed to parse Codex session history rollout-bad\.jsonl:2: invalid JSON/,
   );
+});
+
+test("codex history rejects matching rollout symlinks that escape the sessions root", async () => {
+  const home = tempDir();
+  const linkPath = join(home, ...CODEX_SESSION_PATH_PARTS);
+  const outsidePath = join(home, "outside.jsonl");
+  writeJsonl(outsidePath, sessionRecords(CODEX_SESSION_ID));
+  mkdirSync(join(linkPath, ".."), { recursive: true });
+  symlinkSync(outsidePath, linkPath);
+
+  await withEnv({ HOME: home, TZ: "UTC" }, async () => {
+    const resolved = await codexBackend.resolveSessionHistorySource({
+      sessionId: CODEX_SESSION_ID,
+      cwd: "/repo",
+      env: {},
+      resolvedBackendArgs: [],
+    });
+    assert.equal(resolved.available, false);
+  });
 });
 
 test("codex history does not parse unrelated rollout files while resolving a matching session", async () => {

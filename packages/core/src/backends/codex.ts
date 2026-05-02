@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative } from "node:path";
+import { join } from "node:path";
 import { WebSocket } from "ws";
 import type {
   Backend,
@@ -28,6 +28,7 @@ import {
   isRecord,
   normalizeBackendModel,
   readJsonlRecordLines,
+  realFileIsUnderRoot,
   sessionHistoryFileSource,
   silentTranscriptFallback,
   streamBoundarySeparator,
@@ -1145,14 +1146,14 @@ async function resolveCodexSessionHistorySource(
   }
   if (
     ctx.previousSource?.kind === "file" &&
-    fileIsUnderRoot(root, ctx.previousSource.path) &&
     existsSync(ctx.previousSource.path) &&
+    realFileIsUnderRoot(root, ctx.previousSource.path) &&
     codexFileNameMatchesSession(ctx.previousSource.path, ctx.sessionId)
   ) {
     return { available: true, source: sessionHistoryFileSource(ctx.previousSource.path) };
   }
   for (const path of codexSessionHistoryPathCandidates(root, ctx.sessionId)) {
-    if (existsSync(path)) {
+    if (existsSync(path) && realFileIsUnderRoot(root, path)) {
       return { available: true, source: sessionHistoryFileSource(path) };
     }
   }
@@ -1160,11 +1161,6 @@ async function resolveCodexSessionHistorySource(
     available: false,
     reason: `codex session "${ctx.sessionId}" not found at expected rollout paths under ${root}`,
   };
-}
-
-function fileIsUnderRoot(root: string, path: string): boolean {
-  const relativePath = relative(root, path);
-  return relativePath !== "" && !relativePath.startsWith("..") && !isAbsolute(relativePath);
 }
 
 function codexFileNameMatchesSession(path: string, sessionId: string): boolean {

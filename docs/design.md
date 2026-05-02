@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `18`. Older manifest shapes are not
+The current manifest schema is version `19`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals

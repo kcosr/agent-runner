@@ -22,6 +22,7 @@ import {
   isRecord,
   normalizeBackendModel,
   readJsonlRecordLines,
+  realFileIsUnderRoot,
   sessionHistoryFileSource,
   silentTranscriptFallback,
   streamBoundarySeparator,
@@ -38,6 +39,10 @@ export function encodeClaudeProjectDir(cwd: string): string {
   return cwd.replace(/[/.]/g, "-");
 }
 
+function claudeProjectDir(cwd: string): string {
+  return join(homedir(), ".claude", "projects", encodeClaudeProjectDir(cwd));
+}
+
 function validateClaudeSessionId(sessionId: string): string | null {
   if (sessionId.includes("/") || sessionId.includes("\\") || sessionId.includes("..")) {
     return "claude session id must be a session id, not a path";
@@ -50,7 +55,7 @@ export function claudeSessionFilePath(cwd: string, sessionId: string): string {
   if (invalidReason !== null) {
     throw new Error(invalidReason);
   }
-  const projectDir = join(homedir(), ".claude", "projects", encodeClaudeProjectDir(cwd));
+  const projectDir = claudeProjectDir(cwd);
   const path = resolve(projectDir, `${sessionId}.jsonl`);
   const relativePath = relative(projectDir, path);
   if (relativePath.startsWith("..") || relativePath.includes("\\") || relativePath === "") {
@@ -403,6 +408,9 @@ async function resolveClaudeSessionHistorySource(
   const path = claudeSessionFilePath(ctx.cwd, ctx.sessionId);
   if (!existsSync(path)) {
     return { available: false, reason: `claude session file not found: ${path}` };
+  }
+  if (!realFileIsUnderRoot(claudeProjectDir(ctx.cwd), path)) {
+    return { available: false, reason: "claude session file escaped the project directory" };
   }
   return { available: true, source: sessionHistoryFileSource(path) };
 }

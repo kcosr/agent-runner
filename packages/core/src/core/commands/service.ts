@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   type TaskState,
   type TaskStatus,
@@ -684,7 +684,22 @@ function validateBackendSessionId(sessionId: string): string {
   return trimmed;
 }
 
-function dropImportedBackendSessionHistory(manifest: RunManifest): void {
+function droppedAttemptLogTarget(workspaceDir: string, logPath: string): string {
+  const target = resolve(workspaceDir, logPath);
+  const relativePath = relative(workspaceDir, target);
+  if (relativePath === "" || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+    throw new CommandError(`run backend-session: attempt log path escapes workspace: ${logPath}`);
+  }
+  return target;
+}
+
+function removeDroppedAttemptLogs(workspaceDir: string, logPaths: string[]): void {
+  for (const logPath of new Set(logPaths)) {
+    rmSync(droppedAttemptLogTarget(workspaceDir, logPath), { force: true });
+  }
+}
+
+function dropImportedBackendSessionHistory(manifest: RunManifest): string[] {
   const attemptsBySessionIndex = new Map<number, typeof manifest.attemptRecords>();
   for (const record of manifest.attemptRecords) {
     const records = attemptsBySessionIndex.get(record.sessionIndex) ?? [];
@@ -702,11 +717,16 @@ function dropImportedBackendSessionHistory(manifest: RunManifest): void {
       })
       .map((record) => record.sessionIndex),
   );
-  manifest.attemptRecords = manifest.attemptRecords.filter(
-    (record) =>
-      record.provenance.kind !== "backend_session" &&
-      !droppedSessionIndexes.has(record.sessionIndex),
-  );
+  const droppedLogPaths: string[] = [];
+  manifest.attemptRecords = manifest.attemptRecords.filter((record) => {
+    const drop =
+      record.provenance.kind === "backend_session" ||
+      droppedSessionIndexes.has(record.sessionIndex);
+    if (drop) {
+      droppedLogPaths.push(record.logPath);
+    }
+    return !drop;
+  });
   const remainingAttemptsBySessionIndex = new Map<number, typeof manifest.attemptRecords>();
   for (const record of manifest.attemptRecords) {
     const records = remainingAttemptsBySessionIndex.get(record.sessionIndex) ?? [];
@@ -728,6 +748,7 @@ function dropImportedBackendSessionHistory(manifest: RunManifest): void {
     });
   manifest.totalSessionCount = manifest.sessions.length;
   manifest.totalAttemptCount = manifest.attemptRecords.length;
+  return droppedLogPaths;
 }
 
 function validateAttachmentSourcePath(sourcePath: string): void {
@@ -1480,8 +1501,12 @@ export function setRunBackendSession(
     const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = nextBackendSessionId;
     resolved.manifest.backendSessionSync = null;
-    dropImportedBackendSessionHistory(resolved.manifest);
+    const droppedLogPaths = dropImportedBackendSessionHistory(resolved.manifest);
+    for (const logPath of droppedLogPaths) {
+      droppedAttemptLogTarget(resolved.workspaceDir, logPath);
+    }
     writeManifest(resolved.workspaceDir, resolved.manifest);
+    removeDroppedAttemptLogs(resolved.workspaceDir, droppedLogPaths);
     emitPersistedAudit(
       emitAuditEnvelope,
       appendRunBackendSessionUpdatedEvent({
@@ -1518,8 +1543,12 @@ export function clearRunBackendSession(
     const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = null;
     resolved.manifest.backendSessionSync = null;
-    dropImportedBackendSessionHistory(resolved.manifest);
+    const droppedLogPaths = dropImportedBackendSessionHistory(resolved.manifest);
+    for (const logPath of droppedLogPaths) {
+      droppedAttemptLogTarget(resolved.workspaceDir, logPath);
+    }
     writeManifest(resolved.workspaceDir, resolved.manifest);
+    removeDroppedAttemptLogs(resolved.workspaceDir, droppedLogPaths);
     emitPersistedAudit(
       emitAuditEnvelope,
       appendRunBackendSessionUpdatedEvent({

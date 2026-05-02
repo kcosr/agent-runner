@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -211,8 +211,31 @@ test("claude history parser reports malformed jsonl with file and line", async (
         sessionId: "session-123",
         mode: "bootstrap",
       }),
-    new RegExp(`failed to parse Claude session history ${path}:2`),
+    /failed to parse Claude session history session-bad\.jsonl:2: invalid JSON/,
   );
+});
+
+test("claude history rejects session symlinks that escape the cwd-bound project directory", async () => {
+  const home = tempDir();
+  const cwd = "/repo";
+  const sessionId = "session-escape";
+
+  await withEnv({ HOME: home }, async () => {
+    const path = claudeSessionFilePath(cwd, sessionId);
+    const outsidePath = join(home, "outside.jsonl");
+    writeJsonl(outsidePath, records());
+    mkdirSync(join(path, ".."), { recursive: true });
+    symlinkSync(outsidePath, path);
+
+    const resolved = await claudeBackend.resolveSessionHistorySource({
+      sessionId,
+      cwd,
+      env: {},
+      resolvedBackendArgs: [],
+    });
+    assert.equal(resolved.available, false);
+    assert.equal(resolved.reason, "claude session file escaped the project directory");
+  });
 });
 
 test("claude history rejects path-like session ids", async () => {

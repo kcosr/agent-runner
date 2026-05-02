@@ -733,6 +733,141 @@ test("pre-resume sync imports changed backend history before allocating the resu
   );
 });
 
+test("pre-resume sync records source_unavailable as a resume failure", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const first = await runIn(dir, {
+    backend: historyBackend({
+      turns: [],
+      invoke: async () => ({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        sessionId: "session-unavailable",
+        transcript: "first live attempt",
+        rawStdout: "",
+        rawStderr: "",
+      }),
+    }),
+  });
+  const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(first.runId, dir));
+  const manifestPath = join(target.workspaceDir, "run.json");
+  const beforeResume = JSON.parse(readFileSync(manifestPath, "utf8"));
+  beforeResume.backendSessionSync = {
+    backend: "claude",
+    backendSessionId: "session-unavailable",
+    source: fileSource("pre-resume-unavailable", "v1"),
+    cursor: { offset: 1 },
+    lastSyncedAt: "2026-04-20T11:30:00.000Z",
+    lastError: null,
+    importedTurnIds: [],
+    openTurnIds: [],
+  };
+  writeFileSync(manifestPath, `${JSON.stringify(beforeResume, null, 2)}\n`);
+
+  await assert.rejects(
+    () =>
+      runIn(dir, {
+        resume: target,
+        backend: historyBackend({
+          turns: [],
+          resolve: async () => ({ available: false, reason: "missing transcript" }),
+        }),
+      }),
+    /backend session history source is unavailable/,
+  );
+
+  const manifest = JSON.parse(readFileSync(join(target.workspaceDir, "run.json"), "utf8"));
+  assert.equal(
+    manifest.backendSessionSync.lastError,
+    "backend session history source is unavailable",
+  );
+  assert.equal(manifest.totalAttemptCount, 1);
+});
+
+test("pre-resume sync retries once when sync state changes during backend read", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const first = await runIn(dir, {
+    backend: historyBackend({
+      turns: [],
+      invoke: async () => ({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        sessionId: "session-retry",
+        transcript: "first live attempt",
+        rawStdout: "",
+        rawStderr: "",
+      }),
+    }),
+  });
+  const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(first.runId, dir));
+  let readCalls = 0;
+  const resumed = await runIn(dir, {
+    resume: target,
+    backend: historyBackend({
+      source: fileSource("pre-resume-retry", "v2"),
+      turns: [],
+      read: async () => {
+        readCalls++;
+        if (readCalls === 1) {
+          const manifestPath = join(target.workspaceDir, "run.json");
+          const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+          manifest.backendSessionSync = {
+            backend: "claude",
+            backendSessionId: "session-retry",
+            source: fileSource("external-mutation", "external"),
+            cursor: { token: "external" },
+            lastSyncedAt: "2026-04-20T11:30:00.000Z",
+            lastError: null,
+            importedTurnIds: [],
+            openTurnIds: [],
+          };
+          writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+        }
+        return {
+          source: fileSource("pre-resume-retry", "v2"),
+          cursor: { offset: readCalls },
+          turns: [
+            {
+              backendTurnId: `retry-turn-${readCalls}`,
+              status: "complete",
+              startedAt: "2026-04-20T12:00:00.000Z",
+              updatedAt: "2026-04-20T12:01:00.000Z",
+              userText: `outside prompt ${readCalls}`,
+              assistantText: `outside answer ${readCalls}`,
+            },
+          ],
+        };
+      },
+      invoke: async (ctx) => {
+        completeTask(target.workspaceDir, "t1");
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          aborted: false,
+          sessionId: ctx.resumeSessionId,
+          transcript: "resumed live attempt",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    }),
+  });
+
+  assert.equal(readCalls, 2);
+  assert.deepEqual(
+    resumed.manifest.attemptRecords
+      .filter((record) => record.provenance.kind === "backend_session")
+      .map((record) => record.provenance.backendTurnId),
+    ["retry-turn-2"],
+  );
+});
+
 test("pre-resume sync reads backend history outside the task-state lock", async () => {
   const dir = tempDir();
   writeProject(dir);

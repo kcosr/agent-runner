@@ -246,6 +246,10 @@ interface SessionSyncSubscriptionCounts {
 const SESSION_SYNC_DEBOUNCE_MS = 250;
 const SESSION_SYNC_POLL_INTERVAL_MS = 500;
 
+function backendSessionSyncStateKey(manifest: RunManifest): string {
+  return JSON.stringify(manifest.backendSessionSync);
+}
+
 interface UploadStreamRecord {
   result: Promise<RunAttachment>;
   resolveCommit(): void;
@@ -458,19 +462,30 @@ class SessionSyncManager {
     if (!manifest) {
       return;
     }
-    const backend = resolveBackend(manifest.backend);
-    if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
-      return;
-    }
     this.inFlightRunIds.add(runId);
     this.lastSyncAttemptMsByRunId.set(runId, Date.now());
     try {
-      const lockProbe = await tryWithTaskStateLockAsync(manifest.workspaceDir, async () => {});
-      if (!lockProbe.acquired) {
+      const lockProbe = await tryWithTaskStateLockAsync(manifest.workspaceDir, async () => {
+        const latest = this.readEligibleManifest(runId);
+        if (!latest) {
+          return null;
+        }
+        return {
+          manifest: structuredClone(latest),
+          syncStateKey: backendSessionSyncStateKey(latest),
+        };
+      });
+      if (!lockProbe.acquired || lockProbe.value === null) {
+        return;
+      }
+      const snapshot = lockProbe.value.manifest;
+      const snapshotStateKey = lockProbe.value.syncStateKey;
+      const backend = resolveBackend(snapshot.backend);
+      if (!backend.resolveSessionHistorySource || !backend.readSessionHistory) {
         return;
       }
       const prepared = await prepareBackendSessionHistorySync({
-        manifest,
+        manifest: snapshot,
         backend,
         mode: "sync",
         env: this.options.env as Record<string, string>,
@@ -484,8 +499,11 @@ class SessionSyncManager {
           return;
         }
         if (
+          latest.backend !== snapshot.backend ||
+          latest.backendSessionId !== snapshot.backendSessionId ||
           latest.backend !== prepared.backend ||
-          latest.backendSessionId !== prepared.backendSessionId
+          latest.backendSessionId !== prepared.backendSessionId ||
+          backendSessionSyncStateKey(latest) !== snapshotStateKey
         ) {
           return;
         }
@@ -517,7 +535,11 @@ class SessionSyncManager {
       );
     } finally {
       this.inFlightRunIds.delete(runId);
-      this.reconcileRun(runId);
+      if (this.hasSubscribers(runId)) {
+        this.reconcileRun(runId);
+      } else {
+        this.lastSyncAttemptMsByRunId.delete(runId);
+      }
     }
   }
 }
