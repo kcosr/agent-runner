@@ -451,6 +451,8 @@
 
 ### Fixed
 
+- Backend session sync now preserves the original in-session attempt index
+  when rewriting an overlapping task-runner attempt log.
 - Codex backend session history now resolves rollout files from the
   session id filename instead of recursively scanning and parsing the
   full Codex sessions directory.

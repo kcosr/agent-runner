@@ -269,6 +269,7 @@ function nextSessionIndex(manifest: RunManifest): number {
 function writeImportedAttemptLog(params: {
   manifest: RunManifest;
   sessionIndex: number;
+  attemptIndexInSession: number;
   attemptNumber: number;
   turn: BackendSyncedTurn;
 }): string {
@@ -277,7 +278,7 @@ function writeImportedAttemptLog(params: {
     runId: params.manifest.runId,
     attemptNumber: params.attemptNumber,
     sessionIndex: params.sessionIndex,
-    attemptIndexInSession: 0,
+    attemptIndexInSession: params.attemptIndexInSession,
     startedAt: params.turn.startedAt,
     endedAt: params.turn.updatedAt,
     stderr: "",
@@ -367,6 +368,7 @@ function upsertCompleteTurn(params: {
     existingAttempt.logPath = writeImportedAttemptLog({
       manifest,
       sessionIndex: existingAttempt.sessionIndex,
+      attemptIndexInSession: existingAttempt.attemptIndexInSession,
       attemptNumber: existingAttempt.attemptNumber,
       turn,
     });
@@ -394,7 +396,13 @@ function upsertCompleteTurn(params: {
     mode,
     source,
   });
-  const logPath = writeImportedAttemptLog({ manifest, sessionIndex, attemptNumber, turn });
+  const logPath = writeImportedAttemptLog({
+    manifest,
+    sessionIndex,
+    attemptIndexInSession: 0,
+    attemptNumber,
+    turn,
+  });
   const session: SessionRecord = {
     sessionIndex,
     startedAt: turn.startedAt,

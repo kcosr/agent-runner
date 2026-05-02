@@ -471,6 +471,11 @@ test("sync upgrades an overlapping retry attempt without promoting the mixed ses
   assert.equal(first.manifest.attemptRecords[0].provenance.kind, "task_runner");
   assert.equal(first.manifest.attemptRecords[1].provenance.kind, "backend_session");
   assert.equal(first.manifest.attemptRecords[1].provenance.backendTurnId, "backend-turn-retry");
+  assert.equal(
+    JSON.parse(readFileSync(join(first.workspaceDir, "attempts", "02.json"), "utf8"))
+      .attemptIndexInSession,
+    1,
+  );
 });
 
 test("sync rollback leaves manifest unchanged except lastError when backend result is not persistable", async () => {
