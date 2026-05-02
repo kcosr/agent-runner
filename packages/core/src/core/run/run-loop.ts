@@ -98,9 +98,12 @@ import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
 import {
+  type BackendSessionHistorySyncPreparation,
+  type BackendSessionHistorySyncResult,
+  applyPreparedBackendSessionHistorySync,
   importBackendSessionHistoryForInitialManifest,
+  prepareBackendSessionHistorySync,
   recordBackendSessionSyncError,
-  syncBackendSessionHistory,
 } from "./backend-session-sync.js";
 import { WORKER_BRIEF_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
 import {
@@ -2014,7 +2017,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const appendBackendHistoryAudit = (
     targetManifest: RunManifest,
     reason: "bootstrap" | "pre_resume",
-    result: Awaited<ReturnType<typeof syncBackendSessionHistory>>,
+    result: BackendSessionHistorySyncResult,
   ): void => {
     if (result.status !== "synced") {
       return;
@@ -2033,6 +2036,27 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         addedAttemptNumbers: result.addedAttemptNumbers,
       }),
     );
+  };
+  const backendSessionSyncStateKey = (targetManifest: RunManifest): string =>
+    JSON.stringify(targetManifest.backendSessionSync);
+  const assertResumeAllowed = (targetManifest: RunManifest): void => {
+    if (targetManifest.archivedAt !== null) {
+      throw new ResumeError(
+        `cannot resume archived run ${targetManifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${targetManifest.runId}`,
+      );
+    }
+    if (targetManifest.status === "running") {
+      throw new ResumeError(`cannot resume run ${targetManifest.runId} — it is already running`);
+    }
+  };
+  const recordPreResumeBackendHistorySyncFailure = async (error: unknown): Promise<void> => {
+    await withTaskStateLockAsync(workspaceDir, async () => {
+      const latest = resolveResumeTarget(workspaceDir).manifest;
+      if (recordBackendSessionSyncError(latest, (error as Error).message)) {
+        writeManifest(workspaceDir, latest);
+      }
+      appendBackendHistorySyncFailedAudit(latest, "pre_resume", error);
+    });
   };
 
   const appendBackendHistorySyncFailedAudit = (
@@ -2119,116 +2143,163 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       : [];
   let sessionRecord: SessionRecord;
   if (reusingWorkspace) {
-    await withTaskStateLockAsync(workspaceDir, async () => {
-      let latest = resolveResumeTarget(workspaceDir).manifest;
-      if (latest.archivedAt !== null) {
-        throw new ResumeError(
-          `cannot resume archived run ${latest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${latest.runId}`,
-        );
-      }
-      if (latest.status === "running") {
-        throw new ResumeError(`cannot resume run ${latest.runId} — it is already running`);
-      }
+    for (let prepareAttempt = 0; ; prepareAttempt++) {
+      let syncSnapshot: RunManifest | null = null;
+      let syncStateKey: string | null = null;
+      await withTaskStateLockAsync(workspaceDir, async () => {
+        const latest = resolveResumeTarget(workspaceDir).manifest;
+        assertResumeAllowed(latest);
+        if (latest.backendSessionId !== null) {
+          syncSnapshot = structuredClone(latest);
+          syncStateKey = backendSessionSyncStateKey(latest);
+        }
+      });
 
-      if (latest.backendSessionId !== null) {
-        let syncResult: Awaited<ReturnType<typeof syncBackendSessionHistory>>;
+      let syncPreparation: BackendSessionHistorySyncPreparation | null = null;
+      if (syncSnapshot !== null) {
         try {
-          syncResult = await syncBackendSessionHistory({
-            manifest: latest,
+          syncPreparation = await prepareBackendSessionHistorySync({
+            manifest: syncSnapshot,
             backend: currentBackend,
             mode: "sync",
           });
         } catch (error) {
-          if (recordBackendSessionSyncError(latest, (error as Error).message)) {
-            writeManifest(workspaceDir, latest);
-          }
-          appendBackendHistorySyncFailedAudit(latest, "pre_resume", error);
+          await recordPreResumeBackendHistorySyncFailure(error);
           throw new ResumeError(
             `cannot sync backend session history before resume: ${(error as Error).message}`,
           );
         }
-        if (syncResult.status === "skipped" && syncResult.reason === "source_unavailable") {
-          const error = new ResumeError("backend session history source is unavailable");
-          if (recordBackendSessionSyncError(latest, error.message)) {
-            writeManifest(workspaceDir, latest);
+      }
+
+      const finalized = await withTaskStateLockAsync(workspaceDir, async () => {
+        let latest = resolveResumeTarget(workspaceDir).manifest;
+        assertResumeAllowed(latest);
+
+        if (latest.backendSessionId !== null) {
+          if (
+            syncSnapshot === null ||
+            syncPreparation === null ||
+            latest.backend !== syncSnapshot.backend ||
+            latest.backendSessionId !== syncSnapshot.backendSessionId ||
+            backendSessionSyncStateKey(latest) !== syncStateKey
+          ) {
+            return false;
           }
-          appendBackendHistorySyncFailedAudit(latest, "pre_resume", error);
-          throw error;
-        }
-        if (syncResult.status === "synced") {
-          writeManifest(workspaceDir, latest);
-          appendBackendHistoryAudit(latest, "pre_resume", syncResult);
-          latest = resolveResumeTarget(workspaceDir).manifest;
-        }
-      }
 
-      priorAttemptCount = latest.attemptRecords.length;
-      priorSessionCount = latest.sessions.length;
-      sessionIndex = priorReady ? 0 : priorSessionCount;
-      tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, latest.finalTasks, isResume);
-      for (const task of addedTasks) {
-        tasks.set(task.id, { ...task });
-      }
+          if (
+            syncPreparation.status === "skipped" &&
+            syncPreparation.reason === "source_unavailable"
+          ) {
+            const error = new ResumeError("backend session history source is unavailable");
+            if (recordBackendSessionSyncError(latest, error.message)) {
+              writeManifest(workspaceDir, latest);
+            }
+            appendBackendHistorySyncFailedAudit(latest, "pre_resume", error);
+            throw error;
+          }
 
-      if (isResume) {
-        manifest = buildResumeSessionManifest(latest, initialPrompt, {
-          model: model ?? null,
-          effort: effort ?? null,
-          launcher,
-          name,
-          unrestricted,
-          cwd,
-          timeoutSec,
-          workspaceDir,
-          maxAttemptsPerSession,
-          execution,
-          totalSessionCount: priorSessionCount + 1,
-        });
-      } else {
-        manifest = {
-          ...latest,
-          brief: initialPrompt,
-          name,
+          if (syncPreparation.status === "ready") {
+            let syncResult: BackendSessionHistorySyncResult;
+            try {
+              syncResult = applyPreparedBackendSessionHistorySync({
+                manifest: latest,
+                mode: "sync",
+                prepared: syncPreparation,
+              });
+            } catch (error) {
+              if (recordBackendSessionSyncError(latest, (error as Error).message)) {
+                writeManifest(workspaceDir, latest);
+              }
+              appendBackendHistorySyncFailedAudit(latest, "pre_resume", error);
+              throw new ResumeError(
+                `cannot sync backend session history before resume: ${(error as Error).message}`,
+              );
+            }
+            if (syncResult.status === "synced") {
+              writeManifest(workspaceDir, latest);
+              appendBackendHistoryAudit(latest, "pre_resume", syncResult);
+              latest = resolveResumeTarget(workspaceDir).manifest;
+            }
+          }
+        }
+
+        priorAttemptCount = latest.attemptRecords.length;
+        priorSessionCount = latest.sessions.length;
+        sessionIndex = priorReady ? 0 : priorSessionCount;
+        tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, latest.finalTasks, isResume);
+        for (const task of addedTasks) {
+          tasks.set(task.id, { ...task });
+        }
+
+        if (isResume) {
+          manifest = buildResumeSessionManifest(latest, initialPrompt, {
+            model: model ?? null,
+            effort: effort ?? null,
+            launcher,
+            name,
+            unrestricted,
+            cwd,
+            timeoutSec,
+            workspaceDir,
+            maxAttemptsPerSession,
+            execution,
+            totalSessionCount: priorSessionCount + 1,
+          });
+        } else {
+          manifest = {
+            ...latest,
+            brief: initialPrompt,
+            name,
+            endedAt: null,
+            status: "running",
+            exitCode: null,
+            totalSessionCount: 1,
+            execution,
+          };
+        }
+
+        consumeOneTimeScheduleForManualStart(manifest, lifecycleContext, emitAuditEnvelope);
+        syncManifestTaskState(manifest, tasks);
+        refreshManifestAttachments(manifest);
+        sessionRecord = {
+          sessionIndex,
+          startedAt: now,
           endedAt: null,
           status: "running",
           exitCode: null,
-          totalSessionCount: 1,
-          execution,
+          message: priorReady ? latest.message : message,
+          brief: initialPrompt,
+          firstAttemptNumber: null,
+          lastAttemptNumber: null,
+          maxAttemptsPerSession,
+          backendSessionIdAtStart: latest.backendSessionId,
+          backendSessionIdAtEnd: null,
+          provenance: { kind: "task_runner" },
         };
+        manifest.sessions.push(sessionRecord);
+        manifest.totalAttemptCount = manifest.attemptRecords.length;
+        manifest.totalSessionCount = manifest.sessions.length;
+        writeManifest(workspaceDir, manifest);
+        emitAuditEnvelope(
+          appendRunStartedEvent({
+            manifest,
+            context: lifecycleContext,
+            sessionIndex,
+            backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
+            resumed: priorSessionCount > 0,
+          }),
+        );
+        return true;
+      });
+      if (finalized) {
+        break;
       }
-
-      consumeOneTimeScheduleForManualStart(manifest, lifecycleContext, emitAuditEnvelope);
-      syncManifestTaskState(manifest, tasks);
-      refreshManifestAttachments(manifest);
-      sessionRecord = {
-        sessionIndex,
-        startedAt: now,
-        endedAt: null,
-        status: "running",
-        exitCode: null,
-        message: priorReady ? latest.message : message,
-        brief: initialPrompt,
-        firstAttemptNumber: null,
-        lastAttemptNumber: null,
-        maxAttemptsPerSession,
-        backendSessionIdAtStart: latest.backendSessionId,
-        backendSessionIdAtEnd: null,
-        provenance: { kind: "task_runner" },
-      };
-      manifest.sessions.push(sessionRecord);
-      manifest.totalAttemptCount = manifest.attemptRecords.length;
-      manifest.totalSessionCount = manifest.sessions.length;
-      writeManifest(workspaceDir, manifest);
-      emitAuditEnvelope(
-        appendRunStartedEvent({
-          manifest,
-          context: lifecycleContext,
-          sessionIndex,
-          backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
-          resumed: priorSessionCount > 0,
-        }),
-      );
-    });
+      if (prepareAttempt > 0) {
+        throw new ResumeError(
+          "backend session history changed while preparing resume; retry the resume request",
+        );
+      }
+    }
   } else {
     consumeOneTimeScheduleForManualStart(manifest, lifecycleContext, emitAuditEnvelope);
     syncManifestTaskState(manifest, tasks);

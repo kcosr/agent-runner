@@ -451,6 +451,9 @@
 
 ### Fixed
 
+- Pre-resume backend session sync now reads backend history outside the
+  task-state lock, preventing follow-up resumes from blocking timeline and
+  run-detail requests while transcript files are parsed.
 - Web dashboard Chat now refreshes timeline history after subscribed
   backend-session sync imports new attempts, so watched sessions update
   without reselecting the run, while archived runs remain unsubscribed.

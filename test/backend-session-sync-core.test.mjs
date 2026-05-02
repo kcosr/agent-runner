@@ -14,6 +14,7 @@ import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/con
 import { syncBackendSessionHistory } from "../packages/core/dist/core/run/backend-session-sync.js";
 import { applyRunResetSeed, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
+import { withTaskStateLock } from "../packages/core/dist/core/run/workspace-state.js";
 import { withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const AGENT = `---
@@ -94,6 +95,14 @@ function completeTask(workspaceDir, taskId) {
   manifest.finalTasks[taskId].status = "completed";
   manifest.tasksCompleted = 1;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 async function runIn(baseDir, opts) {
@@ -717,4 +726,86 @@ test("pre-resume sync imports changed backend history before allocating the resu
       .attemptNumber,
     2,
   );
+});
+
+test("pre-resume sync reads backend history outside the task-state lock", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const first = await runIn(dir, {
+    backend: historyBackend({
+      turns: [],
+      invoke: async () => ({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        sessionId: "session-lock",
+        transcript: "first live attempt",
+        rawStdout: "",
+        rawStderr: "",
+      }),
+    }),
+  });
+  const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(first.runId, dir));
+  const readStarted = deferred();
+  const releaseRead = deferred();
+
+  const resume = runIn(dir, {
+    resume: target,
+    backend: historyBackend({
+      source: fileSource("pre-resume-lock", "v2"),
+      turns: [],
+      read: async () => {
+        readStarted.resolve();
+        await releaseRead.promise;
+        return {
+          source: fileSource("pre-resume-lock", "v2"),
+          cursor: { offset: 1 },
+          turns: [
+            {
+              backendTurnId: "synced-while-unlocked",
+              status: "complete",
+              startedAt: "2026-04-20T12:00:00.000Z",
+              updatedAt: "2026-04-20T12:01:00.000Z",
+              userText: "outside prompt",
+              assistantText: "outside answer",
+            },
+          ],
+        };
+      },
+      invoke: async (ctx) => {
+        completeTask(target.workspaceDir, "t1");
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          aborted: false,
+          sessionId: ctx.resumeSessionId,
+          transcript: "resumed live attempt",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    }),
+  });
+
+  await readStarted.promise;
+  assert.equal(existsSync(join(target.workspaceDir, ".task-state.lock")), false);
+  withTaskStateLock(target.workspaceDir, () => {});
+  releaseRead.resolve();
+
+  const resumed = await resume;
+  assert.deepEqual(
+    resumed.manifest.attemptRecords.map((record) => [
+      record.attemptNumber,
+      record.provenance.kind,
+      record.provenance.kind === "backend_session" ? record.provenance.backendTurnId : null,
+    ]),
+    [
+      [1, "task_runner", null],
+      [2, "backend_session", "synced-while-unlocked"],
+      [3, "task_runner", null],
+    ],
+  );
+  assert.equal(existsSync(join(target.workspaceDir, ".task-state.lock")), false);
 });
