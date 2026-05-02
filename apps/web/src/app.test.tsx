@@ -58,10 +58,12 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   collapsedColumnKeys: string[];
   drawerWidth: number;
   activeRightSurface: "detail" | "chat" | "notes" | "tasks";
+  drawerFullscreen: boolean;
 } = {
   collapsedColumnKeys: [],
   drawerWidth: 540,
   activeRightSurface: "detail",
+  drawerFullscreen: false,
 };
 
 class MockEventSource {
@@ -6366,11 +6368,17 @@ describe("web app", () => {
       "aria-pressed",
       "true",
     );
+    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toContain(
+      '"drawerFullscreen":true',
+    );
 
     await user.keyboard("f");
     expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
       "aria-pressed",
       "false",
+    );
+    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toContain(
+      '"drawerFullscreen":false',
     );
   });
 
@@ -6996,6 +7004,7 @@ describe("web app", () => {
       collapsedColumnKeys: [],
       drawerWidth: 570,
       activeRightSurface: "detail",
+      drawerFullscreen: false,
     });
 
     cleanup();
@@ -8856,6 +8865,7 @@ describe("web app", () => {
         collapsedColumnKeys: ["running"],
         drawerWidth: 540,
         activeRightSurface: "detail",
+        drawerFullscreen: false,
       }),
     );
     expect(
@@ -8873,6 +8883,7 @@ describe("web app", () => {
         collapsedColumnKeys: [],
         drawerWidth: 540,
         activeRightSurface: "detail",
+        drawerFullscreen: false,
       }),
     );
     expect(

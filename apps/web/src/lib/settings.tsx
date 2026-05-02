@@ -282,6 +282,10 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
       record.activeRightSurface === "tasks"
         ? record.activeRightSurface
         : DEFAULT_DASHBOARD_VIEW_STATE.activeRightSurface,
+    drawerFullscreen:
+      typeof record.drawerFullscreen === "boolean"
+        ? record.drawerFullscreen
+        : DEFAULT_DASHBOARD_VIEW_STATE.drawerFullscreen,
     collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)
       ? record.collapsedColumnKeys.filter((key): key is string => typeof key === "string")
       : DEFAULT_DASHBOARD_VIEW_STATE.collapsedColumnKeys,
@@ -329,9 +333,15 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
         collapsedColumnKeys: viewState.collapsedColumnKeys,
         drawerWidth: viewState.drawerWidth,
         activeRightSurface: viewState.activeRightSurface,
+        drawerFullscreen: viewState.drawerFullscreen,
       }),
     );
-  }, [viewState.activeRightSurface, viewState.collapsedColumnKeys, viewState.drawerWidth]);
+  }, [
+    viewState.activeRightSurface,
+    viewState.collapsedColumnKeys,
+    viewState.drawerFullscreen,
+    viewState.drawerWidth,
+  ]);
 
   useEffect(() => {
     if (previousDaemonTokenRef.current === daemonToken) {
