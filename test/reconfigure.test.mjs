@@ -27,6 +27,12 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
+function writeLauncher(baseDir, name, body) {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}.yaml`), body);
+}
+
 function writeScript(baseDir, name, body) {
   const path = join(baseDir, name);
   writeFileSync(path, body);
@@ -69,6 +75,7 @@ async function initRunIn(baseDir, opts = {}) {
       webVars: {},
       backend: mockBackend(opts.backendId ?? loaded.config.backend),
       initialize: true,
+      runGroupId: opts.runGroupId,
       callerCwd: baseDir,
       overrides: opts.overrides,
     });
@@ -181,6 +188,157 @@ Assignment for {{target}} on {{branch}}.
     changedVarKeys: ["branch"],
     messageChanged: true,
   });
+});
+
+test("reconfigure: re-interpolates and re-freezes launcher args from patched vars", async () => {
+  const dir = tempDir();
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: wrap
+args:
+  - "{{flavor}}"
+  - "{{run_group_id}}"
+`,
+  );
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+launcher:
+  command: agent-wrap
+  args:
+    - agent-owned
+---
+Agent for {{flavor}}.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+cwd: worktrees/{{run_group_id}}/{{flavor}}
+vars:
+  flavor:
+    type: string
+    required: true
+tasks:
+  - id: t1
+    title: Ship {{flavor}}
+---
+Assignment.
+`,
+  );
+
+  const init = await initRunIn(dir, {
+    cliVars: { flavor: "alpha" },
+    overrides: { launcher: "shared" },
+  });
+  assert.deepEqual(init.manifest.launcher, {
+    kind: "prefix",
+    command: "wrap",
+    args: ["alpha", init.runId],
+    name: "shared",
+    source: "named",
+  });
+
+  const detail = await withSharedRuntimeEnv(dir, () =>
+    reconfigureRun(init.runId, {
+      vars: { flavor: "beta" },
+    }),
+  );
+  const manifest = readManifest(init.workspaceDir);
+
+  const expectedLauncher = {
+    kind: "prefix",
+    command: "wrap",
+    args: ["beta", init.runId],
+    name: "shared",
+    source: "named",
+  };
+  assert.equal(detail.runId, init.runId);
+  assert.equal(manifest.cwd, init.manifest.cwd);
+  assert.deepEqual(manifest.launcher, expectedLauncher);
+  assert.deepEqual(manifest.resetSeed.launcher, expectedLauncher);
+});
+
+test("reconfigure: ignores leaked env run group when re-freezing launcher", async () => {
+  const dir = tempDir();
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: wrap
+args:
+  - "{{flavor}}"
+  - "{{run_group_id}}"
+`,
+  );
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+launcher: shared
+---
+Agent for {{flavor}}.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+cwd: worktrees/{{run_group_id}}/{{flavor}}
+vars:
+  flavor:
+    type: string
+    required: true
+tasks:
+  - id: t1
+    title: Ship {{flavor}}
+---
+Assignment.
+`,
+  );
+
+  const init = await initRunIn(dir, {
+    cliVars: { flavor: "alpha" },
+    runGroupId: "original-group",
+  });
+
+  const detail = await withSharedRuntimeEnv(dir, () =>
+    withEnv({ TASK_RUNNER_RUN_GROUP_ID: "leaked-group" }, () =>
+      reconfigureRun(init.runId, {
+        vars: { flavor: "beta" },
+      }),
+    ),
+  );
+  const manifest = readManifest(init.workspaceDir);
+
+  const expectedLauncher = {
+    kind: "prefix",
+    command: "wrap",
+    args: ["beta", "original-group"],
+    name: "shared",
+    source: "named",
+  };
+  assert.equal(detail.runId, init.runId);
+  assert.equal(manifest.runGroupId, "original-group");
+  assert.equal(manifest.cwd, init.manifest.cwd);
+  assert.ok(manifest.cwd.includes("original-group"));
+  assert.ok(!manifest.cwd.includes("leaked-group"));
+  assert.deepEqual(manifest.launcher, expectedLauncher);
+  assert.deepEqual(manifest.resetSeed.launcher, expectedLauncher);
 });
 
 test("reconfigure: empty and unchanged-message patches are no-ops", async () => {

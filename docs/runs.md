@@ -156,12 +156,13 @@ task-runner run \
   "Optional message to the worker"
 ```
 
-Fresh `run` resolves agent and assignment, resolves cwd
-(`--cwd` → assignment `cwd` → caller cwd), resolves variables, enforces
+Fresh `run` resolves agent and assignment, resolves variables, selects the
+run id and run group id, resolves cwd (`--cwd` → assignment `cwd` →
+caller cwd) with injected variables such as `{{run_group_id}}`, enforces
 locked fields, creates the workspace, resolves the selected backend's
-extra argv, freezes the manifest, composes the brief, and invokes the
-backend — except for passive runs, which stop after initialization and
-freeze an empty backend-args list.
+extra argv and launcher, freezes the manifest, composes the brief, and
+invokes the backend — except for passive runs, which stop after
+initialization and freeze an empty backend-args list.
 
 If a run launches another `task-runner` process from inside a worker, the
 child run automatically freezes `parentRunId` and can inherit parent vars
@@ -189,6 +190,12 @@ does not dump the worker brief to stdout — fetch it explicitly with
 `task-runner run brief <run-id>`. Non-passive initialized runs must be
 promoted with `task-runner run ready <run-id>` before the first
 `run --resume-run`.
+
+When `init` reinitializes an existing initialized run with `--run-id`, the
+run preserves its frozen run group. `--group-id` and
+`TASK_RUNNER_RUN_GROUP_ID` are fresh-workspace defaults; use
+`task-runner run set-group` or `clear-group` to change an existing run's
+membership.
 
 `init` and `run ready` accept schedule input through `--schedule-at
 <iso>`, `--schedule-delay <duration>`, or `--schedule-cron <expr>`.
@@ -383,6 +390,13 @@ the same value in `manifest.resetSeed`. `run clear-group` resets a
 non-running run to its singleton group, where `runGroupId` equals
 `runId`. Both mutations are cycle-checked because group membership can
 affect dependency reachability.
+
+Group mutation does not re-interpolate frozen run surfaces. Existing
+`manifest.cwd`, `manifest.launcher`, brief text, task text, and reset-seed
+launcher/cwd values keep the concrete strings resolved when the run was
+created. Initialized-run reconfigure can replace frozen launcher values
+from the rebuilt seed, but group mutation still does not re-interpolate
+them.
 
 ### Dependencies
 

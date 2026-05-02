@@ -240,6 +240,29 @@ Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
 `pi`, and Codex stdio). Passive runs and Codex websocket/UDS runs keep
 the built-in `direct` launcher.
 
+Launcher command and args are runtime-interpolated before they are frozen
+into the manifest. A short-term persistent-container workflow can combine
+a run-group workspace path with a launcher wrapper:
+
+```yaml
+# assignment.md
+cwd: "/home/kevin/agent-workspaces/{{run_group_id}}/repo"
+```
+
+```yaml
+# agent.md
+launcher:
+  command: aw-tr-launch
+  args:
+    - agent-dev
+    - "{{cwd}}"
+    - "{{run_group_id}}"
+```
+
+Task-runner does not manage the container lifecycle or cleanup. The
+wrapper receives the frozen cwd and run group id so it can enter a
+workspace that another process prepared.
+
 Agents may also author backend-owned argv tokens:
 
 ```yaml
@@ -411,7 +434,7 @@ these caller-local inputs:
 - `--parent-run <run-id>` or local `TASK_RUNNER_PARENT_RUN_ID` becomes
   request `parentRunId` for fresh `run` / `init`
 - `--group-id <group-id>` or local `TASK_RUNNER_RUN_GROUP_ID` becomes
-  request `runGroupId` for fresh `run` / `init`
+  request `runGroupId` for fresh `run` / new `init`
 
 The Codex UDS transport shape is `{ type: "uds", path:
 "/absolute/socket/path" }`; it is WebSocket-over-UDS for Codex
@@ -423,10 +446,13 @@ instead of guessing. Resume reuses the frozen manifest transport. These
 env vars remain Codex-specific inputs, not generic daemon env passthrough.
 
 Named launcher lookup follows the same freeze-first model. Fresh runs
-resolve the final launcher once, store it on the manifest and reset
-seed, and reuse it on resume/reset. In connected mode the daemon is
-authoritative for named launcher resolution because it owns the config
-root.
+resolve and interpolate the final launcher once, store it on the manifest
+and reset seed, and reuse it on resume/reset. In connected mode the daemon
+is authoritative for named launcher resolution because it owns the config
+root. Changing a run's group later updates `runGroupId`, but it does not
+rewrite already frozen cwd, launcher, brief, or task text.
+Reinitializing an existing initialized run preserves its frozen run group;
+use `task-runner run set-group` or `clear-group` to mutate membership.
 
 ## Command index
 
@@ -520,7 +546,9 @@ The rest are focused topic pages:
 | `TASK_RUNNER_LISTEN` | Daemon listen URL |
 | `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks |
 | `TASK_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
-| `TASK_RUNNER_RUN_GROUP_ID` | Default run group for fresh runs when `--group-id` is omitted |
+| `TASK_RUNNER_RUN_ID` | Active run id provided to backend wrapper processes |
+| `TASK_RUNNER_RUN_GROUP_ID` | Default run group for fresh runs when `--group-id` is omitted; active run group id provided to backend wrapper processes |
+| `TASK_RUNNER_CWD` | Active backend attempt cwd provided to backend wrapper processes |
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary |
 | `TASK_RUNNER_CODEX_UDS_PATH` | Default WebSocket-over-UDS transport socket path for fresh Codex runs when no explicit `backendConfig.codex.transport` was authored |

@@ -155,10 +155,10 @@ Connected-mode runtime selection stays explicit:
 
 - the client does not forward arbitrary env vars to the daemon
 - if the client passes `--parent-run <run-id>` or has
-  `TASK_RUNNER_PARENT_RUN_ID` set, fresh `run` / `init` requests
+  `TASK_RUNNER_PARENT_RUN_ID` set, fresh `run` / new `init` requests
   synthesize structured `parentRunId`
 - if the client passes `--group-id <group-id>` or has
-  `TASK_RUNNER_RUN_GROUP_ID` set, fresh `run` / `init` requests
+  `TASK_RUNNER_RUN_GROUP_ID` set, fresh `run` / new `init` requests
   synthesize structured `runGroupId`
 - caller-local `TASK_RUNNER_CODEX_UDS_PATH` and
   `TASK_RUNNER_CODEX_WS_URL` are not forwarded; daemon-owned Codex runs

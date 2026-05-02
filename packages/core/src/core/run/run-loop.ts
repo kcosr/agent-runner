@@ -32,7 +32,7 @@ import { resolveAssignmentHooks } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
 import type { ResolvedHookDescriptor } from "../hooks/types.js";
 import { validateRunGroupId } from "./groups.js";
-import { resolveFreshLauncherConfig } from "./launchers.js";
+import { interpolateResolvedLauncher, resolveFreshLauncherConfig } from "./launchers.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -58,6 +58,7 @@ import {
 } from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
 import {
+  type RecursionState,
   buildChildRecursionEnv,
   checkRecursionDepth,
   readParentRunIdFromEnv,
@@ -401,6 +402,8 @@ function buildResumeSessionManifest(
 }
 
 const MAX_TITLE_LENGTH = 200;
+const TASK_RUNNER_RUN_ID_ENV = "TASK_RUNNER_RUN_ID";
+const TASK_RUNNER_CWD_ENV = "TASK_RUNNER_CWD";
 
 function validateAddedTaskTitle(title: string, index: number): void {
   const trimmed = title.trim();
@@ -1028,17 +1031,33 @@ function validateRequiredVars(
 function buildInjectedVars(params: {
   runtimeVars: Record<string, unknown>;
   runId: string;
+  runGroupId: string;
   cwd: string;
   assignmentName: string | undefined;
 }): Record<string, unknown> {
   return {
     ...params.runtimeVars,
     run_id: params.runId,
+    run_group_id: params.runGroupId,
     cwd: params.cwd,
     config_dir: resolveTaskRunnerConfigDir(),
     state_dir: resolveTaskRunnerStateDir(),
     task_runner_cmd: resolveTaskRunnerCommand(),
     ...(params.assignmentName !== undefined ? { assignment_name: params.assignmentName } : {}),
+  };
+}
+
+function buildBackendInvokeEnv(params: {
+  recursionState: RecursionState;
+  runId: string;
+  runGroupId: string;
+  cwd: string;
+}): Record<string, string> {
+  return {
+    ...(process.env as Record<string, string>),
+    ...buildChildRecursionEnv(params.recursionState, params.runId, params.runGroupId),
+    [TASK_RUNNER_RUN_ID_ENV]: params.runId,
+    [TASK_RUNNER_CWD_ENV]: params.cwd,
   };
 }
 
@@ -1420,9 +1439,34 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (!reusesFrozenSetup) {
     validateRequiredVars(varsSchema, runtimeVars, "initial");
   }
-  let cwd = reusesFrozenSetup
-    ? resume.manifest.cwd
-    : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd, runtimeVars);
+  const reusingWorkspace = resume !== undefined;
+  const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
+  let runGroupId =
+    reusingWorkspace && resume
+      ? resume.manifest.runGroupId
+      : (explicitRunGroupId ??
+        (envRunGroupId === null ? null : validateRunGroupId(envRunGroupId)) ??
+        lineageChain[0]?.manifest.runGroupId ??
+        runId);
+  const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
+  let cwd = reusesFrozenSetup ? resume.manifest.cwd : (opts.callerCwd ?? process.cwd());
+  let injectedVars = buildInjectedVars({
+    runtimeVars,
+    runId,
+    runGroupId,
+    cwd,
+    assignmentName,
+  });
+  if (!reusesFrozenSetup) {
+    cwd = resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd, injectedVars);
+    injectedVars = buildInjectedVars({
+      runtimeVars,
+      runId,
+      runGroupId,
+      cwd,
+      assignmentName,
+    });
+  }
   let repo = reusesFrozenSetup ? resume.manifest.repo : deriveRepoKey(cwd);
   let backendConfig = reusesFrozenSetup
     ? resolveManifestBackendConfig(resume.manifest)
@@ -1432,13 +1476,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     : resolveFreshBackendArgs(effectiveBackendName, agentConfig);
   let launcher = reusesFrozenSetup
     ? cloneResolvedLauncherConfig(resume.manifest.launcher)
-    : resolveFreshLauncherConfig({
-        backend: currentBackend,
-        backendConfig,
-        agentLauncher: loaded.launcher,
-        overrideLauncher: overrides?.launcher,
-        cwd,
-      });
+    : interpolateResolvedLauncher(
+        resolveFreshLauncherConfig({
+          backend: currentBackend,
+          backendConfig,
+          agentLauncher: loaded.launcher,
+          overrideLauncher: overrides?.launcher,
+          cwd,
+        }),
+        injectedVars,
+      );
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   let timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   let unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
@@ -1462,25 +1509,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
   }
 
-  const reusingWorkspace = resume !== undefined;
-  const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
-  let runGroupId = reusesFrozenSetup
-    ? resume.manifest.runGroupId
-    : (explicitRunGroupId ??
-      (envRunGroupId === null ? null : validateRunGroupId(envRunGroupId)) ??
-      lineageChain[0]?.manifest.runGroupId ??
-      runId);
   const workspaceDir =
     reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDirForRepo(repo, runId);
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentSeedPath = workspaceAssignmentPath(workspaceDir);
-  const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
-  let injectedVars = buildInjectedVars({
-    runtimeVars,
-    runId,
-    cwd,
-    assignmentName,
-  });
   const resolvedHookDescriptors =
     isResume || priorReady
       ? (resume?.manifest.resolvedHooks ?? [])
@@ -1542,6 +1574,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const now = new Date().toISOString();
 
   if (!isResume && !priorReady) {
+    const prePrepareInjectedVars = injectedVars;
     const defaultInitialPrompt = buildFreshInitialPrompt(
       agentInstructions,
       assignmentInstructions,
@@ -1679,38 +1712,37 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     effort = (prepareState.manifest.effort ?? undefined) as RunOverrides["effort"];
     timeoutSec = prepareState.manifest.timeoutSec;
     unrestricted = prepareState.manifest.unrestricted;
-    launcher = resolveFreshLauncherConfig({
-      backend: currentBackend,
-      backendConfig,
-      agentLauncher: loaded.launcher,
-      overrideLauncher: overrides?.launcher,
-      cwd,
-    });
-    prepareState.manifest.launcher = cloneResolvedLauncherConfig(launcher);
     runGroupId = prepareState.manifest.runGroupId;
     runtimeVars = { ...prepareState.manifest.runtimeVars };
     runtimeVarSources = cloneRuntimeVarSources(prepareState.manifest.runtimeVarSources);
+    validateRequiredVars(varsSchema, runtimeVars, "prepare");
+    injectedVars = buildInjectedVars({
+      runtimeVars,
+      runId,
+      runGroupId,
+      cwd,
+      assignmentName,
+    });
+    launcher = interpolateResolvedLauncher(
+      resolveFreshLauncherConfig({
+        backend: currentBackend,
+        backendConfig,
+        agentLauncher: loaded.launcher,
+        overrideLauncher: overrides?.launcher,
+        cwd,
+      }),
+      injectedVars,
+    );
+    prepareState.manifest.launcher = cloneResolvedLauncherConfig(launcher);
     hookState = { ...prepareState.manifest.hookState };
     hookAttachments = prepareState.manifest.attachments.map((attachment) => ({ ...attachment }));
     hookNote = prepareState.manifest.note;
     hookPinned = prepareState.manifest.pinned;
     hookLockedFields = [...prepareState.manifest.lockedFields];
-    validateRequiredVars(varsSchema, runtimeVars, "prepare");
-    injectedVars = buildInjectedVars({
-      runtimeVars,
-      runId,
-      cwd,
-      assignmentName,
-    });
     tasks = syncFreshTasksToFinalInjectedVars(
       loadedAssignment,
       tasks,
-      buildInjectedVars({
-        runtimeVars: resolvedVars.values,
-        runId,
-        cwd: prepareManifest.cwd,
-        assignmentName,
-      }),
+      prePrepareInjectedVars,
       injectedVars,
     );
   }
@@ -2573,13 +2605,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,
         cwd,
-        env: {
-          ...(process.env as Record<string, string>),
-          // Increment recursion depth so a nested `task-runner run` spawned
-          // by this backend can detect it. Always last so it overrides any
-          // stale value the parent inherited.
-          ...buildChildRecursionEnv(recursionState, manifest.runId, manifest.runGroupId),
-        },
+        env: buildBackendInvokeEnv({
+          recursionState,
+          runId: manifest.runId,
+          runGroupId: manifest.runGroupId,
+          cwd,
+        }),
         model,
         effort,
         backendConfig: cloneBackendConfig(backendConfig),
