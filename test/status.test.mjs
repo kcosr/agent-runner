@@ -532,7 +532,7 @@ test("run status --field capabilities exposes the current run capability contrac
     canReconfigure: false,
     reconfigureReason: "not_initialized",
     taskMutation: {
-      canSetStatus: false,
+      canSetStatus: true,
       canEditNotes: true,
       canAdd: false,
     },

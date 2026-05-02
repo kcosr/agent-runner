@@ -435,7 +435,7 @@ export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMu
     case "aborted":
     case "error":
       return {
-        canSetStatus: false,
+        canSetStatus: true,
         canEditNotes: true,
         canAdd: false,
       };

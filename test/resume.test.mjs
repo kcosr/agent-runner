@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
-import { readStatus, readyRun } from "../packages/core/dist/core/commands/service.js";
+import { readStatus, readyRun, setTask } from "../packages/core/dist/core/commands/service.js";
 import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
@@ -750,6 +750,56 @@ test("resume: unfinished tasks can resume with an implicit continue prompt", asy
   assert.equal(second.exitCode, 0);
   assert.equal(second.manifest.status, "success");
   assert.equal(second.manifest.sessions.at(-1)?.message, null);
+});
+
+test("resume: terminal task status edits feed the existing implicit continue gate", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      completeAllTasksFromPrompt(ctx.prompt);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-terminal-edit",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+  assert.equal(first.manifest.status, "success");
+
+  await withSharedRuntimeEnv(dir, () => setTask(first.runId, "t1", { status: "pending" }));
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
+  const second = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      assert.equal(ctx.prompt, "Continue working through the remaining task list items.");
+      patchManifest(first.workspaceDir, (manifest) => {
+        manifest.finalTasks.t1.status = "completed";
+        manifest.finalTasks.t2.status = "completed";
+        manifest.finalTasks.t3.status = "completed";
+        manifest.tasksCompleted = 3;
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-terminal-edit",
+        transcript: "continued",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+    overrides: {},
+    resume: target,
+  });
+
+  assert.equal(second.exitCode, 0);
+  assert.equal(second.manifest.status, "success");
 });
 
 test("resume: blocked-only task state does not resume implicitly", async () => {

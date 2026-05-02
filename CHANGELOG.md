@@ -347,6 +347,10 @@
 
 ### Changed
 
+- Terminal non-passive runs now allow task status edits through the
+  existing task mutation path while still rejecting task add and preserving
+  historical lifecycle fields until normal resume execution changes them.
+  ([#132](https://github.com/kcosr/task-runner/pull/132))
 - The web dashboard now persists selected drawer fullscreen mode across
   reloads.
   ([#131](https://github.com/kcosr/task-runner/pull/131))

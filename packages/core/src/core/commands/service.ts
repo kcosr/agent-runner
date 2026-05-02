@@ -476,10 +476,13 @@ function requireTaskMutationAllowed(
     if (capabilities.canAdd) {
       return capabilities;
     }
-    if (capabilities.canEditNotes && !capabilities.canSetStatus) {
+    if (manifest.backend !== "passive" && isTerminalStatus(manifest.status)) {
       throw new CommandError(
         `cannot add tasks to a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> --add-task "..." instead`,
       );
+    }
+    if (manifest.status === "ready") {
+      throw new CommandError(`cannot add tasks while run ${manifest.runId} is ready`);
     }
   }
 
@@ -1996,15 +1999,10 @@ export function setTask(
     if (
       update.status !== undefined &&
       update.status !== task.status &&
-      !capabilities.canSetStatus
+      resolved.manifest.status === "ready"
     ) {
-      if (resolved.manifest.status === "ready") {
-        throw new CommandError(
-          `cannot change task status while run ${resolved.manifest.runId} is ready`,
-        );
-      }
       throw new CommandError(
-        `cannot change task status on a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> with a follow-up message instead`,
+        `cannot change task status while run ${resolved.manifest.runId} is ready`,
       );
     }
     if (update.status !== undefined) {

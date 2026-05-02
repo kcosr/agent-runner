@@ -104,8 +104,9 @@ taskMutation: {
 | State           | `canSetStatus` | `canEditNotes` | `canAdd` |
 |-----------------|----------------|----------------|----------|
 | `initialized`   | true           | true           | true*    |
+| `ready`         | false          | true           | false    |
 | `running`       | true           | true           | false    |
-| terminal (any)  | false          | true           | false    |
+| terminal (any)  | true           | true           | false    |
 
 *`canAdd` is disabled when `tasks` is in `lockedFields`.
 

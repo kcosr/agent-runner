@@ -959,6 +959,27 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.equal(updated.task.status, "completed");
       assert.equal(updated.task.notes, "Handled through daemon RPC.");
 
+      patchManifest(child.workspaceDir, (manifest) => {
+        manifest.status = "success";
+        manifest.endedAt = "2026-04-20T10:00:00.000Z";
+        manifest.exitCode = 0;
+        manifest.finalTasks.t1.status = "completed";
+        manifest.tasksCompleted = 1;
+      });
+      const terminalUpdated = await client.call("tasks.set", {
+        target: child.runId,
+        taskId: "t1",
+        status: "pending",
+      });
+      assert.equal(terminalUpdated.task.status, "pending");
+      const terminalDetail = await client.call("runs.get", { target: child.runId });
+      assert.equal(terminalDetail.run.status, "success");
+      assert.deepEqual(terminalDetail.run.capabilities.taskMutation, {
+        canSetStatus: true,
+        canEditNotes: true,
+        canAdd: false,
+      });
+
       const readied = await client.call("runs.ready", {
         target: init.runId,
       });

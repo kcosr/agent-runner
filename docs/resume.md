@@ -73,6 +73,10 @@ injects an implicit continue message:
 
 > Continue working through the remaining task list items.
 
+Resume evaluates the current manifest task list, so task status edits made
+after a terminal non-passive run can make that run runnable again without
+changing the previous terminal lifecycle record.
+
 ## Archived runs
 
 Non-passive archived runs must be unarchived before resume:
