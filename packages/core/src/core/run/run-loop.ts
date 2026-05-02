@@ -1441,12 +1441,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   }
   const reusingWorkspace = resume !== undefined;
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
-  let runGroupId = reusesFrozenSetup
-    ? resume.manifest.runGroupId
-    : (explicitRunGroupId ??
-      (envRunGroupId === null ? null : validateRunGroupId(envRunGroupId)) ??
-      lineageChain[0]?.manifest.runGroupId ??
-      runId);
+  let runGroupId =
+    reusingWorkspace && resume
+      ? resume.manifest.runGroupId
+      : (explicitRunGroupId ??
+        (envRunGroupId === null ? null : validateRunGroupId(envRunGroupId)) ??
+        lineageChain[0]?.manifest.runGroupId ??
+        runId);
   const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
   let cwd = reusesFrozenSetup ? resume.manifest.cwd : (opts.callerCwd ?? process.cwd());
   let injectedVars = buildInjectedVars({

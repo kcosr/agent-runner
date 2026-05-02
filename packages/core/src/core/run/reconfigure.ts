@@ -1,7 +1,7 @@
 import { copyFileSync, rmSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { resolveBackend } from "../../backends/registry.js";
-import { loadAgentConfig, loadAssignmentConfig } from "../../config/loader.js";
+import { loadAgentConfig, loadAssignmentConfig, loadLauncherConfig } from "../../config/loader.js";
 import type { ReconfigureRunPatch, RunDetail } from "../../contracts/runs.js";
 import { toRunDetail } from "../../contracts/runs.js";
 import { cloneBackendConfig, cloneResolvedBackendArgs } from "../backends/types.js";
@@ -143,10 +143,20 @@ function agentOwnsFrozenNamedLauncher(loaded: LoadedAgent, launcherName: string)
   if (launcher === undefined) {
     return false;
   }
-  if (launcher.kind === "name") {
-    return launcher.name === launcherName;
+  switch (launcher.kind) {
+    case "name":
+      return launcher.name === launcherName;
+    case "path": {
+      const loadedLauncher = loadLauncherConfig(launcher.path);
+      return loadedLauncher.kind === "prefix" && loadedLauncher.name === launcherName;
+    }
+    case "inline":
+      return false;
+    default: {
+      const unreachable: never = launcher;
+      return unreachable;
+    }
   }
-  return true;
 }
 
 function buildReconfigureOverrides(
