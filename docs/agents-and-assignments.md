@@ -359,6 +359,12 @@ directory; named refs still resolve from `${TASK_RUNNER_CONFIG_DIR}/tasks`.
 Task-local path hooks inside loaded tasks are made absolute relative to
 the task-list file before they are frozen into the run.
 
+Security: a repo-local `tasks.yml` may declare task-local `hooks[]`
+entries with `path: ./...` references. Those hook modules are loaded
+and executed by task-runner on task transitions. Treat any repository
+used with `task-list` as trusted code, or avoid task-local path hooks in
+repo-local task lists.
+
 If the hook replaces tasks, the replacement list becomes the frozen
 manifest task set. Resume, reset, ready-start, initialized reconfigure,
 and recurring reset/clone do not re-read the repo-local task-list file.

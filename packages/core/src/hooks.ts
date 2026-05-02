@@ -12,9 +12,11 @@ export {
   type HookMutations,
   type HookResult,
   type HookTaskPatch,
+  type HookContextTasks,
   type PrepareHookContext,
   type ResolvedTask,
   type ResolvedHookDescriptor,
   type TaskTransitionHookContext,
   type TaskTransitionResult,
 } from "./core/hooks/types.js";
+export type { TaskTransitionHookEntry } from "./core/config/schema.js";

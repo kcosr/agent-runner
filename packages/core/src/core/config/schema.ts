@@ -164,6 +164,17 @@ const taskIdSchema = z
   .regex(/^[A-Za-z0-9._:/-]+$/, "task id must match [A-Za-z0-9._:/-]+")
   .max(128);
 
+function taskIdsAreUnique<T>(tasks: readonly T[], getId: (task: T) => string | null): boolean {
+  const ids = new Set<string>();
+  for (const task of tasks) {
+    const id = getId(task);
+    if (id === null) continue;
+    if (ids.has(id)) return false;
+    ids.add(id);
+  }
+  return true;
+}
+
 const taskMetadataSchema = z.object({
   title: z
     .string()
@@ -181,17 +192,9 @@ export const taskDefSchema = taskMetadataSchema.extend({
 export const taskDefListSchema = z
   .array(taskDefSchema)
   .max(100)
-  .refine(
-    (tasks) => {
-      const ids = new Set<string>();
-      for (const task of tasks) {
-        if (ids.has(task.id)) return false;
-        ids.add(task.id);
-      }
-      return true;
-    },
-    { message: "task ids must be unique" },
-  );
+  .refine((tasks) => taskIdsAreUnique(tasks, (task) => task.id), {
+    message: "task ids must be unique",
+  });
 
 export const resolvedTaskSchema = taskDefSchema
   .required({
@@ -202,18 +205,11 @@ export const resolvedTaskSchema = taskDefSchema
 
 export const resolvedTaskListSchema = z
   .array(resolvedTaskSchema)
+  .min(1, "setTasks must include at least one task")
   .max(100)
-  .refine(
-    (tasks) => {
-      const ids = new Set<string>();
-      for (const task of tasks) {
-        if (ids.has(task.id)) return false;
-        ids.add(task.id);
-      }
-      return true;
-    },
-    { message: "task ids must be unique" },
-  );
+  .refine((tasks) => taskIdsAreUnique(tasks, (task) => task.id), {
+    message: "task ids must be unique",
+  });
 
 export const taskDefinitionConfigSchema = taskMetadataSchema.extend({
   schemaVersion: z.literal(1),
@@ -413,18 +409,10 @@ export const authoredAssignmentConfigSchema = assignmentConfigBaseSchema
   .extend({
     tasks: z.array(authoredAssignmentTaskEntrySchema).max(100).default([]),
   })
-  .refine(
-    (c) => {
-      const ids = new Set<string>();
-      for (const task of c.tasks) {
-        if (typeof task === "string") continue;
-        if (ids.has(task.id)) return false;
-        ids.add(task.id);
-      }
-      return true;
-    },
-    { message: "task ids must be unique", path: ["tasks"] },
-  );
+  .refine((c) => taskIdsAreUnique(c.tasks, (task) => (typeof task === "string" ? null : task.id)), {
+    message: "task ids must be unique",
+    path: ["tasks"],
+  });
 
 export const assignmentConfigSchema = assignmentConfigBaseSchema
   .extend({

@@ -1236,6 +1236,14 @@ Work.
       },
     ],
   );
+  assert.deepEqual(
+    initManifest.resolvedHooks.filter((descriptor) => descriptor.taskScopeId === "original"),
+    [],
+  );
+  assert.equal(
+    initManifest.resolvedHooks.some((descriptor) => descriptor.source.name === "old-local-guard"),
+    false,
+  );
 
   await withSharedRuntimeEnv(dir, () =>
     setTask(initialized.runId, "replacement", { status: "completed" }),
@@ -2097,6 +2105,129 @@ Work.
   const assignmentSeed = readFileSync(join(outcome.workspaceDir, "assignment-seed.md"), "utf8");
   assert.match(assignmentSeed, /replacement-one/);
   assert.doesNotMatch(assignmentSeed, /original/);
+});
+
+test("latest prepare setTasks mutation wins", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const firstScript = writeNodeScript(
+    dir,
+    "prepare-set-tasks-first.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    setTasks: [
+      { id: "first-only", title: "First only", body: "", hooks: [] },
+    ],
+  },
+}));\n`,
+  );
+  const secondScript = writeNodeScript(
+    dir,
+    "prepare-set-tasks-second.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    setTasks: [
+      { id: "second-one", title: "Second one", body: "", hooks: [] },
+      { id: "second-two", title: "Second two", body: "", hooks: [] },
+    ],
+  },
+}));\n`,
+  );
+  writeAssignment(
+    dir,
+    "latest-set-tasks-work",
+    `---
+schemaVersion: 1
+name: latest-set-tasks-work
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(firstScript)}
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(secondScript)}
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async () => {
+      throw new Error("backend should not run during init");
+    },
+    {},
+    { assignmentName: "latest-set-tasks-work", backendId: "claude", initialize: true },
+  );
+
+  assert.deepEqual(Object.keys(outcome.manifest.finalTasks), ["second-one", "second-two"]);
+  assert.equal(outcome.manifest.tasksTotal, 2);
+  assert.equal(outcome.manifest.finalTasks["first-only"], undefined);
+  assert.deepEqual(
+    outcome.manifest.resolvedHooks.filter((descriptor) => descriptor.taskScopeId === "first-only"),
+    [],
+  );
+});
+
+test("prepare setTasks rejects empty replacement lists", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const scriptPath = writeNodeScript(
+    dir,
+    "prepare-empty-set-tasks.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    setTasks: [],
+  },
+}));\n`,
+  );
+  writeAssignment(
+    dir,
+    "empty-set-tasks-work",
+    `---
+schemaVersion: 1
+name: empty-set-tasks-work
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("backend should not run after rejected setTasks");
+        },
+        {},
+        { assignmentName: "empty-set-tasks-work", backendId: "claude", initialize: true },
+      ),
+    /setTasks must include at least one task/,
+  );
 });
 
 test("command builtin status mode can block before attempts without invoking the backend", async () => {

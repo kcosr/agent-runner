@@ -249,25 +249,48 @@ cleanup.
 
 ```yaml
 # assignment.md
-cwd: "/srv/agent-workspaces/{{run_group_id}}/repo" # host cwd
+cwd: "{{host_workspace_root}}/{{run_group_id}}/repo" # host cwd
 vars:
   repo_url:
     type: string
     required: true
+    sources: [cli, web]
   branch:
     type: string
     required: true
-  container_cwd:
+    sources: [cli, web]
+  host_workspace_root:
     type: string
-    required: true
+    default: /srv/agent-workspaces
+    sources: [cli, web]
+  container_workspace_root:
+    type: string
+    default: /workspace/agent-workspaces
+    sources: [cli, web]
+  image:
+    type: string
+    default: agent-dev
+    sources: [cli, web]
 hooks:
   prepare:
-    - builtin: git-worktree
+    - builtin: command
       with:
-        repo: "{{repo_url}}"
-        from: "{{branch}}"
-        branch: "task-runner-{{run_id}}"
-        path: "{{cwd}}"
+        mode: status
+        command: bash
+        cwd: /
+        args:
+          - -lc
+          - |
+            set -euo pipefail
+            target="{{cwd}}"
+            mkdir -p "$(dirname "$target")"
+            if [ -d "$target/.git" ]; then
+              git -C "$target" fetch origin "{{branch}}" --prune
+              git -C "$target" checkout "{{branch}}"
+              git -C "$target" reset --hard "origin/{{branch}}"
+            else
+              git clone --branch "{{branch}}" "{{repo_url}}" "$target"
+            fi
 ```
 
 ```yaml
@@ -275,15 +298,14 @@ hooks:
 launcher:
   command: aw-tr-launch
   args:
-    - agent-dev
-    - "{{container_cwd}}"
-    - "{{run_group_id}}"
+    - "{{image}}"
+    - "{{container_workspace_root}}/{{run_group_id}}/repo"
 ```
 
 In this pattern the clone/update happens on the host at `{{cwd}}`. The
-launcher wrapper receives `{{container_cwd}}` and the run group id so it
-can enter an already-running container that sees the same repository at
-its own mount path.
+launcher wrapper receives the matching container cwd so it can enter an
+already-running container that sees the same repository at its own mount
+path.
 
 Agents may also author backend-owned argv tokens:
 

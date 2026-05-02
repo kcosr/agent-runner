@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, isAbsolute } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import type { RunAttachment } from "../../contracts/attachments.js";
 import { shortId } from "../../util/short-id.js";
@@ -217,16 +217,7 @@ function applyTaskPatches(
 }
 
 function cloneResolvedTask(task: ResolvedTask): ResolvedTask {
-  return {
-    id: task.id,
-    title: task.title,
-    body: task.body,
-    hooks: task.hooks.map((hook) => ({
-      ...hook,
-      when: hook.when === undefined || hook.when === null ? hook.when : { ...hook.when },
-      with: hook.with === undefined || hook.with === null ? hook.with : structuredClone(hook.with),
-    })),
-  };
+  return structuredClone(task);
 }
 
 function taskMapFromResolvedTasks(tasks: readonly ResolvedTask[]): {
@@ -242,7 +233,14 @@ function taskMapFromResolvedTasks(tasks: readonly ResolvedTask[]): {
 
   const next = new Map<string, TaskState>();
   const resolvedTasks: ResolvedTask[] = [];
-  for (const task of parsed.data) {
+  for (const [taskIndex, task] of parsed.data.entries()) {
+    for (const [hookIndex, hook] of task.hooks.entries()) {
+      if (hook.path !== undefined && !isAbsolute(hook.path)) {
+        throw new HookRuntimeError(
+          `hook setTasks[${taskIndex}.hooks.${hookIndex}.path]: path hooks must be absolute`,
+        );
+      }
+    }
     resolvedTasks.push(cloneResolvedTask(task));
     next.set(task.id, {
       id: task.id,
@@ -331,17 +329,22 @@ async function applyMutations(
     state.manifest.pinned = mutate.pinned;
   }
 
-  if (mutate.patchTasks) {
-    applyTaskPatches(state.tasks, mutate.patchTasks);
-  }
-
   if (mutate.setTasks) {
     if (options.phase !== "prepare") {
       throw new HookRuntimeError("hook setTasks mutations are only allowed during prepare");
     }
+    if (mutate.patchTasks) {
+      throw new HookRuntimeError(
+        "hook cannot combine patchTasks and setTasks in the same mutation",
+      );
+    }
     const replacement = taskMapFromResolvedTasks(mutate.setTasks);
     state.tasks = replacement.taskMap;
     state.replacementTasks = replacement.resolvedTasks;
+  }
+
+  if (mutate.patchTasks) {
+    applyTaskPatches(state.tasks, mutate.patchTasks);
   }
 
   if (mutate.attachments) {

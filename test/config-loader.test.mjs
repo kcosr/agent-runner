@@ -1432,6 +1432,21 @@ test("loadRepoLocalTaskList rejects invalid yaml", () =>
     );
   }));
 
+test("loadRepoLocalTaskList rejects yaml document separators", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+    const taskListPath = join(rootDir, ".task-runner", "tasks.yml");
+    mkdirSync(dirname(taskListPath), { recursive: true });
+    writeFileSync(taskListPath, "schemaVersion: 1\ntasks: []\n---\nextra: ignored\n");
+    assert.throws(
+      () => loadRepoLocalTaskList(taskListPath),
+      (error) => {
+        assert.ok(error instanceof TaskListConfigError);
+        assert.match(error.message, /YAML document separators are not supported/);
+        return true;
+      },
+    );
+  }));
+
 test("loadRepoLocalTaskList rejects missing schemaVersion and unsupported top-level keys", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
     const taskListPath = join(rootDir, ".task-runner", "tasks.yml");

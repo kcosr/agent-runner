@@ -25,7 +25,7 @@ name: container-agent
 command: aw-tr-launch
 args:
   - "{{image}}"
-  - "{{container_workspace_root}}/mdyr1n/repo"
+  - "{{container_workspace_root}}/{{run_group_id}}/repo"
 ```
 
 ```md
@@ -44,7 +44,7 @@ Explore the target codebase and keep task notes concrete.
 ---
 schemaVersion: 1
 name: explore-container
-cwd: "{{host_workspace_root}}/mdyr1n/repo"
+cwd: "{{host_workspace_root}}/{{run_group_id}}/repo"
 vars:
   repo_url:
     type: enum
@@ -72,12 +72,24 @@ vars:
     values: [agent-dev]
 hooks:
   prepare:
-    - builtin: git-worktree
+    - builtin: command
       with:
-        repo: "{{repo_url}}"
-        from: "{{branch}}"
-        branch: "task-runner-{{run_id}}"
-        path: "{{cwd}}"
+        mode: status
+        command: bash
+        cwd: /
+        args:
+          - -lc
+          - |
+            set -euo pipefail
+            target="{{cwd}}"
+            mkdir -p "$(dirname "$target")"
+            if [ -d "$target/.git" ]; then
+              git -C "$target" fetch origin "{{branch}}" --prune
+              git -C "$target" checkout "{{branch}}"
+              git -C "$target" reset --hard "origin/{{branch}}"
+            else
+              git clone --branch "{{branch}}" "{{repo_url}}" "$target"
+            fi
     - builtin: task-list
       with:
         path: "{{cwd}}/.task-runner/tasks.yml"
@@ -101,12 +113,13 @@ task-runner run \
   --var branch=main
 ```
 
-The prepare hooks clone or update the repository at the host cwd
-`/home/kevin/agent-workspaces/mdyr1n/repo` by default. The launcher
-receives the container cwd `/workspace/agent-workspaces/mdyr1n/repo`,
-which must already be mounted into the container by external lifecycle
-tooling. `aw-tr-launch` is expected to append the backend command and
-backend args after the launcher args:
+The prepare hooks clone or update the repository at
+`${host_workspace_root}/<run-group-id>/repo` on the host. The launcher
+receives the matching container cwd
+`${container_workspace_root}/<run-group-id>/repo`, which must already be
+mounted into the container by external lifecycle tooling. `aw-tr-launch`
+is expected to append the backend command and backend args after the
+launcher args:
 
 ```bash
 aw-tr-launch <image> <container-cwd> <backend-command> <backend-args...>

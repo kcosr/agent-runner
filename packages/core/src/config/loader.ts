@@ -838,9 +838,13 @@ function launcherCanonicalNameFromPath(sourcePath: string): string {
 function loadYamlData(
   sourcePath: string,
   createError: (issues: string, cause?: unknown) => Error,
+  options: { rejectDocumentSeparators?: boolean } = {},
 ): unknown {
   try {
     const raw = readFileSync(sourcePath, "utf8");
+    if (options.rejectDocumentSeparators && /^---\s*$/m.test(raw)) {
+      throw new Error("YAML document separators are not supported");
+    }
     return matter(`---\n${raw}\n---\n`).data;
   } catch (error) {
     throw createError(
@@ -1072,6 +1076,7 @@ function parseTaskListYaml(sourcePath: string): TaskListConfig {
   const configData = loadYamlData(
     sourcePath,
     (issues, cause) => new TaskListConfigError(sourcePath, issues, cause),
+    { rejectDocumentSeparators: true },
   );
   const parsed = taskListConfigSchema.safeParse(configData);
   if (!parsed.success) {
