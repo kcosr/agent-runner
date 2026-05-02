@@ -450,6 +450,7 @@ Work.
     manifest.endedAt = "2026-04-20T10:00:00.000Z";
     manifest.exitCode = 0;
   });
+  const beforeRejection = lifecycleSnapshot(readManifest(outcome.workspaceDir));
 
   const rejected = runCliExpectFail(
     ["task", "set", outcome.runId, "t1", "--status", "completed", "--notes", "not yet"],
@@ -463,6 +464,7 @@ Work.
   assert.equal(manifest.finalTasks.t1.status, "pending");
   assert.equal(manifest.finalTasks.t1.notes, "");
   assert.equal(manifest.note, "terminal hook rejected");
+  assert.deepEqual(lifecycleSnapshot(manifest), beforeRejection);
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "completed", "--notes", "OK"], {
     cwd: dir,
