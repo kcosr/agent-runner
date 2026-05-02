@@ -810,9 +810,9 @@ export function useRunsDashboardState() {
     onError: (error: Error) => {
       setActionError(error.message);
     },
-    onSuccess: (_result, { runId }) => {
+    onSuccess: async (_result, { runId }) => {
       setActionError(undefined);
-      void invalidateRunQueries(runId);
+      await invalidateRunQueries(runId);
     },
   });
   const queueResumeMessageMutation = useMutation({

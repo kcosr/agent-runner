@@ -451,6 +451,9 @@
 
 ### Fixed
 
+- Web dashboard Chat resume submissions now stay pending until the
+  selected run refreshes, preventing the composer draft from disappearing
+  before the card/detail state shows the resumed live run.
 - Web dashboard Chat now refreshes timeline history after subscribed
   backend-session sync imports new attempts, so watched sessions update
   without reselecting the run, while archived runs remain unsubscribed.

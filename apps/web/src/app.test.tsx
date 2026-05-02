@@ -2768,9 +2768,11 @@ describe("web app", () => {
     expect(within(chat).queryByText(/prior attempt/i)).not.toBeInTheDocument();
   });
 
-  it("submits Chat composer messages through resume and clears the draft on success", async () => {
+  it("keeps Chat resume submissions pending until refreshed detail shows the live run", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resumeBody: { overrides?: { message?: string } } | undefined;
+    let resumeRequested = false;
+    let resolveDetailRefresh: ((response: Response) => void) | undefined;
     installFetchMock(
       {
         runs: [makeRun()],
@@ -2778,9 +2780,18 @@ describe("web app", () => {
       },
       {
         handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1") && (!init?.method || init.method === "GET")) {
+            if (!resumeRequested) {
+              return undefined;
+            }
+            return new Promise<Response>((resolve) => {
+              resolveDetailRefresh = resolve;
+            });
+          }
           if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
             return undefined;
           }
+          resumeRequested = true;
           resumeBody =
             typeof init.body === "string" && init.body.length > 0
               ? (JSON.parse(init.body) as { overrides?: { message?: string } })
@@ -2807,9 +2818,29 @@ describe("web app", () => {
     await waitFor(() => {
       expect(resumeBody).toEqual({ overrides: { message: "Continue from chat" } });
     });
+    expect(message).toHaveValue("  Continue from chat  ");
+    const pendingSendButton = screen.getByRole("button", { name: "Send" });
+    expect(pendingSendButton).toBeDisabled();
+    expect(pendingSendButton).toHaveAttribute("title", "Sending...");
+
+    resolveDetailRefresh?.(
+      new Response(
+        JSON.stringify({
+          run: makeDetail({
+            runId: "run-1",
+            isLive: true,
+            status: "running",
+            capabilities: { canAbort: true, canResume: false },
+          }),
+        }),
+        { status: 200 },
+      ),
+    );
+
     await waitFor(() => {
       expect(message).toHaveValue("");
     });
+    expect(screen.getByRole("button", { name: "Queue" })).toBeDisabled();
   });
 
   it("disables the Chat composer for archived runs", async () => {
