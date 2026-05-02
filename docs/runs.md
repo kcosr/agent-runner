@@ -191,6 +191,12 @@ does not dump the worker brief to stdout — fetch it explicitly with
 promoted with `task-runner run ready <run-id>` before the first
 `run --resume-run`.
 
+When `init` reinitializes an existing initialized run with `--run-id`, the
+run preserves its frozen run group. `--group-id` and
+`TASK_RUNNER_RUN_GROUP_ID` are fresh-workspace defaults; use
+`task-runner run set-group` or `clear-group` to change an existing run's
+membership.
+
 `init` and `run ready` accept schedule input through `--schedule-at
 <iso>`, `--schedule-delay <duration>`, or `--schedule-cron <expr>`.
 Exactly one source is required when schedule flags are present.

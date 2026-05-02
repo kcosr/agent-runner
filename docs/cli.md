@@ -155,6 +155,9 @@ task-runner init \
 
 `init` does not dump the worker brief to stdout — fetch it with
 `task-runner run brief <run-id>`.
+When `init` reinitializes an existing initialized run via `--run-id`, the
+run keeps its frozen run group even if `--group-id` is present. Use
+`task-runner run set-group` or `clear-group` to change group membership.
 
 Launcher precedence on fresh run/init is:
 

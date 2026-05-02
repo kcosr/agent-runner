@@ -322,31 +322,32 @@ blocked with the rest completed or blocked → `blocked`; otherwise
    allowed scalar surfaces, then schema-validate)
    Named and explicit-path task refs are resolved here, before runtime
    interpolation.
-2. resolves vars in authored `sources` order (`cli`, `env`, `parent`)
+2. enforces locked fields
+3. resolves vars in authored `sources` order (`cli`, `env`, `parent`)
    and applies `default` / `required` only after every source fails
-3. allocates or reuses the run id and resolves `runGroupId` from explicit
-   request, `TASK_RUNNER_RUN_GROUP_ID`, nearest parent lineage, or the
-   singleton run id
-4. builds injected runtime variables, then resolves cwd:
+4. allocates or reuses the run id and resolves `runGroupId`. Fresh
+   workspaces use explicit request, `TASK_RUNNER_RUN_GROUP_ID`, nearest
+   parent lineage, or the singleton run id; reinitializing an existing
+   initialized run preserves the frozen manifest group.
+5. builds injected runtime variables, then resolves cwd:
    `--cwd` → assignment `cwd` → caller cwd
-5. rebuilds injected variables with the final cwd and enforces locked
-   fields
-6. captures `repo` from the resolved cwd and creates the run workspace
-7. resolves selected backendConfig through the backend (for Codex
+6. rebuilds injected variables with the final cwd
+7. captures `repo` from the resolved cwd and creates the run workspace
+8. resolves selected backendConfig through the backend (for Codex
    transport: authored backendConfig → request override → current process
    UDS/WS env → stdio default)
-8. resolves the selected backend's authored `backendArgs` into frozen
+9. resolves the selected backend's authored `backendArgs` into frozen
    `resolvedBackendArgs` (passive resolves to `[]`)
-9. resolves launcher precedence (`--launcher` override → agent launcher →
+10. resolves launcher precedence (`--launcher` override → agent launcher →
    `direct`, with passive and Codex websocket/UDS forced to `direct`) and
    runtime-interpolates prefix launcher command/args
-10. builds the provisional prepare manifest
-11. runs prepare hooks, then freezes final cwd/runtime vars/backend
+11. builds the provisional prepare manifest
+12. runs prepare hooks, then freezes final cwd/runtime vars/backend
     outputs, task text, and launcher values
-12. composes and stores `brief`
-13. imports complete backend-owned history when `--backend-session-id`
+13. composes and stores `brief`
+14. imports complete backend-owned history when `--backend-session-id`
    is present and the backend supports history reads
-14. invokes the backend, or leaves the run initialized if the backend is
+15. invokes the backend, or leaves the run initialized if the backend is
    `passive`
 
 Nested `task-runner` invocations automatically carry

@@ -189,7 +189,7 @@
   ([#119](https://github.com/kcosr/task-runner/pull/119))
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,
-  `--group-id` overrides fresh run/init grouping, and
+  `--group-id` overrides fresh run/new init grouping, and
   `run set-group` / `run clear-group` mutate non-running runs.
   ([#111](https://github.com/kcosr/task-runner/pull/111))
 - Added group dependencies with `task-runner run add-dep --group

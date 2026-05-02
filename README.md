@@ -434,7 +434,7 @@ these caller-local inputs:
 - `--parent-run <run-id>` or local `TASK_RUNNER_PARENT_RUN_ID` becomes
   request `parentRunId` for fresh `run` / `init`
 - `--group-id <group-id>` or local `TASK_RUNNER_RUN_GROUP_ID` becomes
-  request `runGroupId` for fresh `run` / `init`
+  request `runGroupId` for fresh `run` / new `init`
 
 The Codex UDS transport shape is `{ type: "uds", path:
 "/absolute/socket/path" }`; it is WebSocket-over-UDS for Codex
@@ -451,6 +451,8 @@ and reset seed, and reuse it on resume/reset. In connected mode the daemon
 is authoritative for named launcher resolution because it owns the config
 root. Changing a run's group later updates `runGroupId`, but it does not
 rewrite already frozen cwd, launcher, brief, or task text.
+Reinitializing an existing initialized run preserves its frozen run group;
+use `task-runner run set-group` or `clear-group` to mutate membership.
 
 ## Command index
 
