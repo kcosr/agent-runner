@@ -300,7 +300,11 @@ Mutation rules (non-passive):
   `task add`
 - running runs allow `task set` and `task append-notes`, but not
   `task add`
-- terminal runs allow notes edits, not status changes
+- terminal non-passive runs allow `task set` and `task append-notes`,
+  but not `task add`; these edits update coordination task state while
+  lifecycle fields such as `status`, `endedAt`, `exitCode`, sessions,
+  attempts, and backend session id remain the historical execution
+  record until a later run execution changes them normally
 
 Passive runs are driven externally through the task CLI. Their effective
 status is derived from the task set (all completed → `success`; any

@@ -212,7 +212,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
       canReconfigure: false,
       reconfigureReason: "not_initialized",
       taskMutation: {
-        canSetStatus: false,
+        canSetStatus: true,
         canEditNotes: true,
         canAdd: false,
       },
@@ -260,7 +260,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     canReconfigure: false,
     reconfigureReason: "not_initialized",
     taskMutation: {
-      canSetStatus: false,
+      canSetStatus: true,
       canEditNotes: true,
       canAdd: false,
     },
@@ -806,7 +806,7 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canReconfigure: false,
     reconfigureReason: "archived",
     taskMutation: {
-      canSetStatus: false,
+      canSetStatus: true,
       canEditNotes: true,
       canAdd: false,
     },

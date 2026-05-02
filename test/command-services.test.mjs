@@ -1514,6 +1514,13 @@ test("command services: readyRun promotes initialized runs and tightens task and
     assert.equal(appended.task.notes, "Ready notes");
 
     assert.throws(
+      () => addTask(target.runId, { title: "Ready follow-up" }),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`cannot add tasks while run ${target.runId} is ready`).test(err.message),
+    );
+
+    assert.throws(
       () => addRunDependency(target.runId, { type: "run", runId: dependency.runId }),
       (err) =>
         err instanceof CommandError &&

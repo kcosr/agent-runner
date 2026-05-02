@@ -148,6 +148,19 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+function lifecycleSnapshot(manifest) {
+  return {
+    status: manifest.status,
+    endedAt: manifest.endedAt,
+    exitCode: manifest.exitCode,
+    sessions: manifest.sessions,
+    attemptRecords: manifest.attemptRecords,
+    totalSessionCount: manifest.totalSessionCount,
+    totalAttemptCount: manifest.totalAttemptCount,
+    backendSessionId: manifest.backendSessionId,
+  };
+}
+
 function taskGuardedAssignment({ requireAny, omitWith } = {}) {
   return `---
 schemaVersion: 1
@@ -388,6 +401,77 @@ Work.
   manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.finalTasks.t1.status, "completed");
   assert.equal(manifest.finalTasks.t1.notes, "OK to ship");
+});
+
+test("task set: terminal non-passive status edits run task-transition hooks and roll back on rejection", async () => {
+  const dir = tempDir();
+  writeBundle(
+    dir,
+    `---
+schemaVersion: 1
+name: task-cmd-work
+maxRetries: 1
+hooks:
+  taskTransition:
+    - path: ./hooks/terminal-guard.mts
+      when:
+        source: ["task-set"]
+        toStatus: ["completed"]
+tasks:
+  - id: t1
+    title: First
+    body: Do thing one.
+---
+Work.
+`,
+  );
+  writeAssignmentHook(
+    dir,
+    "task-cmd-work",
+    "terminal-guard.mts",
+    `export default {
+  name: "terminal-guard",
+  taskTransition(ctx) {
+    if (ctx.transition.to.notes.includes("OK")) {
+      return { accept: true, mutate: { note: "terminal hook accepted" } };
+    }
+    return {
+      accept: false,
+      reason: "terminal completion needs OK",
+      mutate: { note: "terminal hook rejected" },
+    };
+  },
+};
+`,
+  );
+  const outcome = await initRun(dir);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-20T10:00:00.000Z";
+    manifest.exitCode = 0;
+  });
+
+  const rejected = runCliExpectFail(
+    ["task", "set", outcome.runId, "t1", "--status", "completed", "--notes", "not yet"],
+    { cwd: dir },
+  );
+  assert.equal(rejected.status, 3);
+  assert.match(rejected.stderr, /terminal completion needs OK/);
+
+  let manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "success");
+  assert.equal(manifest.finalTasks.t1.status, "pending");
+  assert.equal(manifest.finalTasks.t1.notes, "");
+  assert.equal(manifest.note, "terminal hook rejected");
+
+  runCli(["task", "set", outcome.runId, "t1", "--status", "completed", "--notes", "OK"], {
+    cwd: dir,
+  });
+  manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "success");
+  assert.equal(manifest.finalTasks.t1.status, "completed");
+  assert.equal(manifest.finalTasks.t1.notes, "OK");
+  assert.equal(manifest.note, "terminal hook accepted");
 });
 
 test("task set: native task-transition when matching composes task id, source, and status filters", async () => {
@@ -1187,22 +1271,31 @@ test("task set: notes-only update on terminal non-passive run ignores workspace 
   assert.equal(after.finalTasks.t2.status, "completed");
 });
 
-test("task set: rejects status changes on a terminal non-passive run", async () => {
+test("task set: accepts status changes on a terminal non-passive run without rewriting lifecycle history", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
 
-  const manifestPath = join(outcome.workspaceDir, "run.json");
-  const m = JSON.parse(readFileSync(manifestPath, "utf8"));
-  m.status = "success";
-  m.endedAt = new Date().toISOString();
-  writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-20T10:00:00.000Z";
+    manifest.exitCode = 0;
+    manifest.backendSessionId = "sess-terminal";
+  });
+  const before = readManifest(outcome.workspaceDir);
+  const lifecycleBefore = lifecycleSnapshot(before);
 
-  const result = runCliExpectFail(["task", "set", outcome.runId, "t1", "--status", "completed"], {
+  const out = runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], {
     cwd: dir,
   });
-  assert.equal(result.status, 3);
-  assert.match(result.stderr, /cannot change task status on a terminal non-passive run/);
+  assert.match(out, /updated t1 \(status=completed\)/);
+
+  const after = readManifest(outcome.workspaceDir);
+  assert.deepEqual(lifecycleSnapshot(after), lifecycleBefore);
+  assertTimestampAdvanced(before.updatedAt, after.updatedAt, "terminal task set updatedAt");
+  assert.equal(after.finalTasks.t1.status, "completed");
+  assert.equal(after.tasksCompleted, 1);
+  assert.equal(after.tasksTotal, 2);
   assert.deepEqual(readCapabilities(outcome.runId, dir), {
     canArchive: true,
     canUnarchive: false,
@@ -1215,7 +1308,7 @@ test("task set: rejects status changes on a terminal non-passive run", async () 
     canReconfigure: false,
     reconfigureReason: "not_initialized",
     taskMutation: {
-      canSetStatus: false,
+      canSetStatus: true,
       canEditNotes: true,
       canAdd: false,
     },

@@ -249,6 +249,48 @@ test("audit log is created lazily for a logless run and task updates stay compac
   assert.equal(readAuditRaw(init.workspaceDir).includes("Do thing one."), false);
 });
 
+test("terminal non-passive status edits emit normal task.updated audit records", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-active",
+    assignmentName: "audit-active-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }),
+    initialize: true,
+  });
+  patchManifest(init.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-20T10:00:00.000Z";
+    manifest.exitCode = 0;
+  });
+
+  runCli(["task", "set", init.runId, "t1", "--status", "in_progress"], { cwd: dir });
+
+  const records = readAuditRecords(init.workspaceDir);
+  const updated = records.at(-1);
+  assert.equal(updated.eventType, "task.updated");
+  assert.equal(updated.source, "task_command");
+  assert.equal(updated.taskId, "t1");
+  assert.equal(updated.taskTitle, "First");
+  assert.equal(updated.command, "set");
+  assert.equal(updated.statusBefore, "pending");
+  assert.equal(updated.statusAfter, "in_progress");
+  assert.equal(updated.notesChanged, false);
+
+  const history = readAuditHistory(init.workspaceDir, init.runId, { limit: 1 });
+  assert.equal(history.events[0]?.event.type, "task.updated");
+  assert.deepEqual(history.events[0]?.event.fields, {
+    taskId: "t1",
+    taskTitle: "First",
+    command: "set",
+    statusBefore: "pending",
+    statusAfter: "in_progress",
+    notesChanged: false,
+  });
+});
+
 test("audit history uses last persisted cursor and skips malformed rows", async () => {
   const dir = tempDir();
   writeAuditBundle(dir);
