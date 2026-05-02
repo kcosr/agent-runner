@@ -11,6 +11,112 @@ separate `backendArgs.<name>.extraArgs` tokens. Custom backend modules
 live under `${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/` and are
 trusted local code, not sandboxed plugin packages.
 
+## Containerized exploratory codebase assistant
+
+This pattern keeps repository preparation on the host while invoking the
+agent inside a pre-existing container. Task-runner does not create,
+start, stop, or clean up the container; the launcher is only a subprocess
+prefix.
+
+```yaml
+# ~/.config/task-runner/launchers/container-agent.yaml
+schemaVersion: 1
+name: container-agent
+command: aw-tr-launch
+args:
+  - "{{image}}"
+  - "{{container_workspace_root}}/mdyr1n/repo"
+```
+
+```md
+<!-- ~/.config/task-runner/agents/container-codex/agent.md -->
+---
+schemaVersion: 1
+name: container-codex
+backend: codex
+launcher: container-agent
+---
+Explore the target codebase and keep task notes concrete.
+```
+
+```md
+<!-- ~/.config/task-runner/assignments/explore-container/assignment.md -->
+---
+schemaVersion: 1
+name: explore-container
+cwd: "{{host_workspace_root}}/mdyr1n/repo"
+vars:
+  repo_url:
+    type: enum
+    required: true
+    sources: [cli, web]
+    values:
+      - git@github.com:org/repo-one.git
+      - git@github.com:org/repo-two.git
+  branch:
+    type: string
+    required: true
+    sources: [cli, web]
+  host_workspace_root:
+    type: string
+    default: /home/kevin/agent-workspaces
+    sources: [cli, web]
+  container_workspace_root:
+    type: string
+    default: /workspace/agent-workspaces
+    sources: [cli, web]
+  image:
+    type: enum
+    default: agent-dev
+    sources: [cli, web]
+    values: [agent-dev]
+hooks:
+  prepare:
+    - builtin: git-worktree
+      with:
+        repo: "{{repo_url}}"
+        from: "{{branch}}"
+        branch: "task-runner-{{run_id}}"
+        path: "{{cwd}}"
+    - builtin: task-list
+      with:
+        path: "{{cwd}}/.task-runner/tasks.yml"
+        mode: replace
+        missing: continue
+        empty: keep-existing
+tasks:
+  - id: orient
+    title: Orient to the repository
+---
+Inspect the repository at the prepared cwd and report what matters.
+```
+
+Run it with separate host and container roots:
+
+```bash
+task-runner run \
+  --agent container-codex \
+  --assignment explore-container \
+  --var repo_url=git@github.com:org/repo-one.git \
+  --var branch=main
+```
+
+The prepare hooks clone or update the repository at the host cwd
+`/home/kevin/agent-workspaces/mdyr1n/repo` by default. The launcher
+receives the container cwd `/workspace/agent-workspaces/mdyr1n/repo`,
+which must already be mounted into the container by external lifecycle
+tooling. `aw-tr-launch` is expected to append the backend command and
+backend args after the launcher args:
+
+```bash
+aw-tr-launch <image> <container-cwd> <backend-command> <backend-args...>
+```
+
+If the prepared repo does not contain `.task-runner/tasks.yml`, the
+assignment falls back to its authored `orient` task. If the file exists
+but is invalid, prepare fails. Once a run is initialized, resume and
+reset use the frozen task list and do not re-read the repo-local file.
+
 ## Bundled agents
 
 ### `implementer`

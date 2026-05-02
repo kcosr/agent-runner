@@ -1,5 +1,6 @@
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import matter from "gray-matter";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { BackendConfigError, resolveBackend } from "../../backends/registry.js";
 import {
@@ -11,7 +12,7 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
-import { appendTextFileDurable } from "../../util/write-file-atomic.js";
+import { appendTextFileDurable, writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import {
   cloneBackendConfig,
   cloneResolvedBackendArgs,
@@ -27,8 +28,8 @@ import type {
 import { interpolate } from "../config/interpolate.js";
 import { type ResolvedLauncherConfig, cloneResolvedLauncherConfig } from "../config/launchers.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
-import type { LockableField, VarDef } from "../config/schema.js";
-import { resolveAssignmentHooks } from "../hooks/loader.js";
+import type { LockableField, TaskDef, VarDef } from "../config/schema.js";
+import { resolveAssignmentHooks, resolveTaskLocalHookDescriptors } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
 import type { ResolvedHookDescriptor } from "../hooks/types.js";
 import { validateRunGroupId } from "./groups.js";
@@ -504,6 +505,30 @@ function copyFrozenAssignmentSeed(sourceManifest: RunManifest, targetWorkspaceDi
   const targetAssignmentPath = workspaceAssignmentPath(targetWorkspaceDir);
   mkdirSync(dirname(targetAssignmentPath), { recursive: true });
   copyFileSync(workspaceAssignmentPath(sourceManifest.workspaceDir), targetAssignmentPath);
+}
+
+function taskSeedEntries(tasks: Map<string, TaskState>): Array<{
+  id: string;
+  title: string;
+  body?: string;
+}> {
+  return Array.from(tasks.values()).map((task) => ({
+    id: task.id,
+    title: task.title,
+    ...(task.body.length > 0 ? { body: task.body } : {}),
+  }));
+}
+
+function writeAssignmentSeedSnapshot(
+  assignment: LoadedAssignment,
+  targetPath: string,
+  tasks: Map<string, TaskState>,
+): void {
+  const rendered = matter.stringify(assignment.instructions, {
+    ...(assignment.sourceConfig ?? assignment.config),
+    tasks: taskSeedEntries(tasks),
+  });
+  writeTextFileAtomic(targetPath, rendered.endsWith("\n") ? rendered : `${rendered}\n`);
 }
 
 function copyFrozenAgentSeed(sourceManifest: RunManifest, targetWorkspaceDir: string): void {
@@ -1119,6 +1144,25 @@ function syncFreshTasksToFinalInjectedVars(
   return synced;
 }
 
+function syncReplacementTasksToFinalInjectedVars(
+  replacementTasks: readonly TaskDef[],
+  currentTasks: Map<string, TaskState>,
+  finalInjectedVars: Record<string, unknown>,
+): Map<string, TaskState> {
+  const synced = new Map<string, TaskState>();
+  for (const task of replacementTasks) {
+    const existing = currentTasks.get(task.id);
+    synced.set(task.id, {
+      id: task.id,
+      title: interpolate(task.title, finalInjectedVars),
+      body: interpolate(task.body ?? "", finalInjectedVars),
+      status: existing?.status ?? "pending",
+      notes: existing?.notes ?? "",
+    });
+  }
+  return synced;
+}
+
 function resolveRuntimeBackend(backendId: string, fallback: Backend): Backend {
   if (backendId === fallback.id) {
     return fallback;
@@ -1517,6 +1561,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume || priorReady
       ? (resume?.manifest.resolvedHooks ?? [])
       : (opts.resolvedHooksOverride ?? resolveAssignmentHooks(loadedAssignment, injectedVars));
+  let finalResolvedHookDescriptors = resolvedHookDescriptors;
   const initialSchedule =
     !isResume && !priorReady
       ? (() => {
@@ -1542,6 +1587,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         ? [...resume.manifest.lockedFields]
         : null
       : null;
+  let shouldWriteFinalTaskSeedSnapshot = false;
 
   let tasks: Map<string, TaskState>;
   if (isResume && resume) {
@@ -1739,12 +1785,30 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     hookNote = prepareState.manifest.note;
     hookPinned = prepareState.manifest.pinned;
     hookLockedFields = [...prepareState.manifest.lockedFields];
-    tasks = syncFreshTasksToFinalInjectedVars(
-      loadedAssignment,
-      tasks,
-      prePrepareInjectedVars,
-      injectedVars,
-    );
+    if (prepareState.replacementTasks) {
+      shouldWriteFinalTaskSeedSnapshot = true;
+      tasks = syncReplacementTasksToFinalInjectedVars(
+        prepareState.replacementTasks,
+        tasks,
+        injectedVars,
+      );
+      const rootHookDescriptors = resolvedHookDescriptors.filter(
+        (descriptor) => descriptor.taskScopeId === null,
+      );
+      const taskHookDescriptors = resolveTaskLocalHookDescriptors(
+        prepareState.replacementTasks,
+        loadedAssignment?.sourcePath ?? workspaceDir,
+        injectedVars,
+      );
+      finalResolvedHookDescriptors = [...taskHookDescriptors, ...rootHookDescriptors];
+    } else {
+      tasks = syncFreshTasksToFinalInjectedVars(
+        loadedAssignment,
+        tasks,
+        prePrepareInjectedVars,
+        injectedVars,
+      );
+    }
   }
 
   // If the caller is importing an existing backend session, validate it
@@ -1937,7 +2001,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
       execution,
       brief: initialPrompt,
-      resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
+      resolvedHooks: finalResolvedHookDescriptors.map((descriptor) => ({
         ...descriptor,
         source: { ...descriptor.source },
         when: descriptor.when ? { ...descriptor.when } : null,
@@ -2008,7 +2072,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   if ((resume === undefined || isReinitialize) && loadedAssignment?.sourcePath) {
     if (loadedAssignment.sourcePath !== assignmentSeedPath) {
-      copyFileSync(loadedAssignment.sourcePath, assignmentSeedPath);
+      if (shouldWriteFinalTaskSeedSnapshot) {
+        writeAssignmentSeedSnapshot(loadedAssignment, assignmentSeedPath, tasks);
+      } else {
+        copyFileSync(loadedAssignment.sourcePath, assignmentSeedPath);
+      }
     }
   } else if (isReinitialize) {
     rmSync(assignmentSeedPath, { force: true });

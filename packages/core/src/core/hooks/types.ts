@@ -1,6 +1,6 @@
 import type { TaskStatus } from "../../assignment/model.js";
 import type { RunAttachment } from "../../contracts/attachments.js";
-import type { HookPhase, LockableField } from "../config/schema.js";
+import type { HookPhase, LockableField, TaskTransitionHookEntry } from "../config/schema.js";
 import type { ManifestStatus, RunManifest } from "../run/manifest.js";
 
 export interface HookSourceDescriptor {
@@ -55,6 +55,13 @@ export interface HookTaskPatch {
   notesAppend?: string;
 }
 
+export interface ResolvedTask {
+  id: string;
+  title: string;
+  body: string;
+  hooks: TaskTransitionHookEntry[];
+}
+
 export interface HookAttachmentAdd {
   sourcePath: string;
   name?: string;
@@ -82,6 +89,7 @@ export interface HookMutations {
   note?: string | null;
   pinned?: boolean;
   patchTasks?: HookTaskPatch[];
+  setTasks?: ResolvedTask[];
   attachments?: {
     add?: HookAttachmentAdd[];
     remove?: string[];

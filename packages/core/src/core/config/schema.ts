@@ -178,12 +178,56 @@ export const taskDefSchema = taskMetadataSchema.extend({
   body: z.string().optional().default(""),
 });
 
+export const taskDefListSchema = z
+  .array(taskDefSchema)
+  .max(100)
+  .refine(
+    (tasks) => {
+      const ids = new Set<string>();
+      for (const task of tasks) {
+        if (ids.has(task.id)) return false;
+        ids.add(task.id);
+      }
+      return true;
+    },
+    { message: "task ids must be unique" },
+  );
+
+export const resolvedTaskSchema = taskDefSchema
+  .required({
+    body: true,
+    hooks: true,
+  })
+  .strict();
+
+export const resolvedTaskListSchema = z
+  .array(resolvedTaskSchema)
+  .max(100)
+  .refine(
+    (tasks) => {
+      const ids = new Set<string>();
+      for (const task of tasks) {
+        if (ids.has(task.id)) return false;
+        ids.add(task.id);
+      }
+      return true;
+    },
+    { message: "task ids must be unique" },
+  );
+
 export const taskDefinitionConfigSchema = taskMetadataSchema.extend({
   schemaVersion: z.literal(1),
   id: taskIdSchema.optional(),
 });
 
 export const authoredAssignmentTaskEntrySchema = z.union([z.string().trim().min(1), taskDefSchema]);
+
+export const taskListConfigSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    tasks: z.array(authoredAssignmentTaskEntrySchema).max(100),
+  })
+  .strict();
 
 export const assignmentHooksSchema = z
   .object({
@@ -384,19 +428,9 @@ export const authoredAssignmentConfigSchema = assignmentConfigBaseSchema
 
 export const assignmentConfigSchema = assignmentConfigBaseSchema
   .extend({
-    tasks: z.array(taskDefSchema).max(100).default([]),
+    tasks: taskDefListSchema.default([]),
   })
-  .refine(
-    (c) => {
-      const ids = new Set<string>();
-      for (const t of c.tasks) {
-        if (ids.has(t.id)) return false;
-        ids.add(t.id);
-      }
-      return true;
-    },
-    { message: "task ids must be unique", path: ["tasks"] },
-  );
+  .strict();
 
 export type AssignmentConfig = z.infer<typeof assignmentConfigSchema>;
 export type AuthoredAssignmentConfig = z.infer<typeof authoredAssignmentConfigSchema>;
@@ -406,6 +440,8 @@ export type AssignmentHookEntry = z.infer<typeof hookEntrySelectorSchema> & {
 export type AssignmentHooks = z.infer<typeof assignmentHooksSchema>;
 export type AuthoredAssignmentTaskEntry = z.infer<typeof authoredAssignmentTaskEntrySchema>;
 export type TaskDef = z.infer<typeof taskDefSchema>;
+export type ResolvedTaskDef = z.infer<typeof resolvedTaskSchema>;
 export type TaskDefinitionConfig = z.infer<typeof taskDefinitionConfigSchema>;
+export type TaskListConfig = z.infer<typeof taskListConfigSchema>;
 export type TaskTransitionHookEntry = z.infer<typeof taskTransitionHookEntrySchema>;
 export type VarDef = z.infer<typeof varDefSchema>;

@@ -121,6 +121,10 @@
 
 ### Added
 
+- Added the `task-list` prepare hook for replacing assignment tasks from
+  repo-local `.task-runner/tasks.yml` files after host-side prepare steps;
+  replacement tasks are frozen into the manifest/reset seed and are not
+  re-read on resume or reset.
 - Added run-group-aware runtime interpolation for fresh cwd values and
   launcher command/args, plus `TASK_RUNNER_RUN_ID`,
   `TASK_RUNNER_RUN_GROUP_ID`, and `TASK_RUNNER_CWD` backend wrapper env.

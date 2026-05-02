@@ -12,6 +12,7 @@ import {
   LauncherConfigError,
   LauncherNotFoundError,
   TaskConfigError,
+  TaskListConfigError,
   TaskNotFoundError,
   listAgentDefinitions,
   listAgents,
@@ -22,6 +23,7 @@ import {
   loadAgentConfig,
   loadAssignmentConfig,
   loadLauncherConfig,
+  loadRepoLocalTaskList,
   loadTaskConfig,
   resolveAgentPath,
   resolveAssignmentPath,
@@ -1332,6 +1334,204 @@ Assignment body.
         { id: "absolute-task", title: "Absolute checklist", body: "Review absolute checklist." },
         { id: "inline-task", title: "Inline task", body: "Inline body" },
       ],
+    );
+  }));
+
+test("loadRepoLocalTaskList resolves inline, named, relative, parent-relative, and absolute task refs", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeTask(
+      configDir,
+      "orient",
+      `---
+schemaVersion: 1
+title: Orient repo
+---
+Read README.md.
+`,
+    );
+    const taskListDir = join(rootDir, ".task-runner");
+    const nestedTasksDir = join(taskListDir, "tasks");
+    mkdirSync(nestedTasksDir, { recursive: true });
+    writeFileSync(
+      join(nestedTasksDir, "config.md"),
+      `---
+schemaVersion: 1
+title: Configure runtime
+---
+Tune config.
+`,
+    );
+    const siblingTaskPath = join(rootDir, "sibling.md");
+    writeFileSync(
+      siblingTaskPath,
+      `---
+schemaVersion: 1
+title: Sibling task
+---
+Check sibling.
+`,
+    );
+    const absoluteTaskPath = join(rootDir, "absolute.md");
+    writeFileSync(
+      absoluteTaskPath,
+      `---
+schemaVersion: 1
+id: absolute-custom
+title: Absolute task
+hooks:
+  - path: ./hooks/absolute.mjs
+---
+Check absolute.
+`,
+    );
+    mkdirSync(join(taskListDir, "hooks"), { recursive: true });
+    writeFileSync(join(taskListDir, "hooks", "absolute.mjs"), "export default { name: 'x' };\n");
+
+    const taskListPath = join(taskListDir, "tasks.yml");
+    writeFileSync(
+      taskListPath,
+      `schemaVersion: 1
+tasks:
+  - orient
+  - ./tasks/config.md
+  - ../sibling.md
+  - ${absoluteTaskPath}
+  - id: inline-task
+    title: Inline task
+    body: Inline body
+`,
+    );
+
+    const tasks = loadRepoLocalTaskList(taskListPath);
+    assert.deepEqual(
+      tasks.map((task) => ({ id: task.id, title: task.title, body: task.body })),
+      [
+        { id: "orient", title: "Orient repo", body: "Read README.md." },
+        { id: "config", title: "Configure runtime", body: "Tune config." },
+        { id: "sibling", title: "Sibling task", body: "Check sibling." },
+        { id: "absolute-custom", title: "Absolute task", body: "Check absolute." },
+        { id: "inline-task", title: "Inline task", body: "Inline body" },
+      ],
+    );
+    assert.equal(tasks[3].hooks[0].path, join(taskListDir, "hooks", "absolute.mjs"));
+  }));
+
+test("loadRepoLocalTaskList rejects invalid yaml", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+    const taskListPath = join(rootDir, ".task-runner", "tasks.yml");
+    mkdirSync(dirname(taskListPath), { recursive: true });
+    writeFileSync(taskListPath, "schemaVersion: 1\ntasks:\n  - [unterminated\n");
+    assert.throws(
+      () => loadRepoLocalTaskList(taskListPath),
+      (error) => {
+        assert.ok(error instanceof TaskListConfigError);
+        assert.match(error.message, /Invalid task list config/);
+        assert.match(error.message, /tasks\.yml/);
+        return true;
+      },
+    );
+  }));
+
+test("loadRepoLocalTaskList rejects missing schemaVersion and unsupported top-level keys", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+    const taskListPath = join(rootDir, ".task-runner", "tasks.yml");
+    mkdirSync(dirname(taskListPath), { recursive: true });
+    writeFileSync(taskListPath, "tasks: []\nextra: true\n");
+    assert.throws(
+      () => loadRepoLocalTaskList(taskListPath),
+      (error) => {
+        assert.ok(error instanceof TaskListConfigError);
+        assert.match(error.message, /schemaVersion/);
+        assert.match(error.message, /Unrecognized key/);
+        return true;
+      },
+    );
+  }));
+
+test("loadRepoLocalTaskList rejects missing task refs, duplicate ids, and invalid task hooks", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+    const taskListPath = join(rootDir, ".task-runner", "tasks.yml");
+    mkdirSync(dirname(taskListPath), { recursive: true });
+    writeFileSync(taskListPath, "schemaVersion: 1\ntasks:\n  - missing-task\n");
+    assert.throws(
+      () => loadRepoLocalTaskList(taskListPath),
+      (error) => {
+        assert.ok(error instanceof TaskListConfigError);
+        assert.match(error.message, /missing-task/);
+        return true;
+      },
+    );
+
+    writeFileSync(
+      taskListPath,
+      `schemaVersion: 1
+tasks:
+  - id: dup
+    title: One
+  - id: dup
+    title: Two
+`,
+    );
+    assert.throws(
+      () => loadRepoLocalTaskList(taskListPath),
+      (error) => {
+        assert.ok(error instanceof TaskListConfigError);
+        assert.match(error.message, /task ids must be unique/);
+        return true;
+      },
+    );
+
+    writeFileSync(
+      taskListPath,
+      `schemaVersion: 1
+tasks:
+  - id: bad-title
+    title: "bad\\ntitle"
+`,
+    );
+    assert.throws(
+      () => loadRepoLocalTaskList(taskListPath),
+      (error) => {
+        assert.ok(error instanceof TaskListConfigError);
+        assert.match(error.message, /single line/);
+        return true;
+      },
+    );
+
+    writeFileSync(
+      taskListPath,
+      `schemaVersion: 1
+tasks:
+${Array.from({ length: 101 }, (_value, index) => `  - id: t${index}\n    title: Task ${index}`).join("\n")}
+`,
+    );
+    assert.throws(
+      () => loadRepoLocalTaskList(taskListPath),
+      (error) => {
+        assert.ok(error instanceof TaskListConfigError);
+        assert.match(error.message, /at most 100/);
+        return true;
+      },
+    );
+
+    writeFileSync(
+      taskListPath,
+      `schemaVersion: 1
+tasks:
+  - id: bad-hook
+    title: Bad hook
+    hooks:
+      - builtin: a
+        name: b
+`,
+    );
+    assert.throws(
+      () => loadRepoLocalTaskList(taskListPath),
+      (error) => {
+        assert.ok(error instanceof TaskListConfigError);
+        assert.match(error.message, /exactly one of `builtin`, `name`, or `path`/);
+        return true;
+      },
     );
   }));
 

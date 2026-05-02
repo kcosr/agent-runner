@@ -13,6 +13,7 @@ export {
   type HookResult,
   type HookTaskPatch,
   type PrepareHookContext,
+  type ResolvedTask,
   type ResolvedHookDescriptor,
   type TaskTransitionHookContext,
   type TaskTransitionResult,
