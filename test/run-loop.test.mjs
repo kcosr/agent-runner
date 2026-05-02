@@ -14,7 +14,12 @@ import { test } from "node:test";
 import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { BackendConfigError, loadCustomBackends } from "../packages/core/dist/backends/registry.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
-import { readStatus, resetRun, setTask } from "../packages/core/dist/core/commands/service.js";
+import {
+  readStatus,
+  resetRun,
+  setRunGroup,
+  setTask,
+} from "../packages/core/dist/core/commands/service.js";
 import {
   findRunManifestsById,
   resolveResumeTarget,
@@ -246,36 +251,41 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
     invoke: mockInvoke,
   };
   const capture = createRunEventCapture();
-  return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig(options.agentName ?? "three", baseDir);
-    const loadedAssignment = options.resume
-      ? undefined
-      : loadAssignmentConfig(options.assignmentName ?? "three-work", baseDir);
-    const originalCwd = process.cwd();
-    process.chdir(baseDir);
-    try {
-      const outcome = await runAgent({
-        loaded,
-        loadedAssignment,
-        cliVars: {},
-        parentRunId: options.parentRunId ?? null,
-        backend,
-        overrides,
-        callerCwd: options.callerCwd,
-        execution: options.execution,
-        resume: options.resume,
-        bootstrapBackendSessionId: options.bootstrapBackendSessionId,
-        emitEvent: capture.emitEvent,
-      });
-      return {
-        outcome,
-        stdout: capture.stdout(),
-        stderr: capture.stderr(),
-      };
-    } finally {
-      process.chdir(originalCwd);
-    }
-  });
+  return withSharedRuntimeEnv(baseDir, () =>
+    withEnv(options.env ?? {}, async () => {
+      const loaded = loadAgentConfig(options.agentName ?? "three", baseDir);
+      const loadedAssignment = options.resume
+        ? undefined
+        : loadAssignmentConfig(options.assignmentName ?? "three-work", baseDir);
+      const originalCwd = process.cwd();
+      process.chdir(baseDir);
+      try {
+        const outcome = await runAgent({
+          loaded,
+          loadedAssignment,
+          cliVars: options.cliVars ?? {},
+          webVars: options.webVars ?? {},
+          parentRunId: options.parentRunId ?? null,
+          runGroupId: options.runGroupId ?? null,
+          backend,
+          overrides,
+          callerCwd: options.callerCwd,
+          execution: options.execution,
+          resume: options.resume,
+          initialize: options.initialize,
+          bootstrapBackendSessionId: options.bootstrapBackendSessionId,
+          emitEvent: capture.emitEvent,
+        });
+        return {
+          outcome,
+          stdout: capture.stdout(),
+          stderr: capture.stderr(),
+        };
+      } finally {
+        process.chdir(originalCwd);
+      }
+    }),
+  );
 }
 
 async function initWithOptions(
@@ -1243,6 +1253,191 @@ test("explicit --cwd override beats assignment cwd and callerCwd", async () => {
   );
 
   assert.equal(seenCwd, join(callerDir, "override-root"));
+});
+
+test("run_group_id interpolates explicit assignment cwd, task text, and backend env", async () => {
+  const dir = tempDir();
+  const expectedCwd = join(dir, "workspaces", "shared-123", "repo");
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "group-work",
+    `---
+schemaVersion: 1
+name: group-work
+cwd: ${JSON.stringify(join(dir, "workspaces", "{{run_group_id}}", "repo"))}
+tasks:
+  - id: t1
+    title: Group {{run_group_id}}
+    body: Work in {{cwd}} for {{run_id}}.
+---
+Assignment group {{run_group_id}} cwd {{cwd}}.
+`,
+  );
+
+  let seenCwd;
+  let seenEnv;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      seenEnv = ctx.env;
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-group",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    {
+      assignmentName: "group-work",
+      runGroupId: "shared-123",
+      env: {
+        TASK_RUNNER_RUN_ID: "stale-run",
+        TASK_RUNNER_RUN_GROUP_ID: "stale-group",
+        TASK_RUNNER_CWD: "stale-cwd",
+      },
+    },
+  );
+
+  assert.equal(outcome.manifest.runGroupId, "shared-123");
+  assert.equal(outcome.manifest.cwd, expectedCwd);
+  assert.equal(seenCwd, expectedCwd);
+  assert.equal(outcome.manifest.finalTasks.t1.title, "Group shared-123");
+  assert.equal(outcome.manifest.finalTasks.t1.body, `Work in ${expectedCwd} for ${outcome.runId}.`);
+  assert.ok(outcome.manifest.brief.includes(`Assignment group shared-123 cwd ${expectedCwd}.`));
+  assert.equal(seenEnv.TASK_RUNNER_RUN_ID, outcome.runId);
+  assert.equal(seenEnv.TASK_RUNNER_RUN_GROUP_ID, "shared-123");
+  assert.equal(seenEnv.TASK_RUNNER_CWD, expectedCwd);
+});
+
+test("run_group_id defaults to singleton run id for assignment cwd interpolation", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "singleton-group-work",
+    `---
+schemaVersion: 1
+name: singleton-group-work
+cwd: ${JSON.stringify(join(dir, "workspaces", "{{run_group_id}}", "repo"))}
+tasks:
+  - id: t1
+    title: Group {{run_group_id}}
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "singleton-group-work" },
+  );
+
+  assert.equal(outcome.manifest.runGroupId, outcome.runId);
+  assert.equal(outcome.manifest.cwd, join(dir, "workspaces", outcome.runId, "repo"));
+  assert.equal(outcome.manifest.finalTasks.t1.title, `Group ${outcome.runId}`);
+});
+
+test("run_group_id interpolates fresh --cwd overrides", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+  const expectedCwd = join(dir, "workspaces", "cli-g1", "repo");
+  let seenCwd;
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { cwd: join(dir, "workspaces", "{{run_group_id}}", "repo") },
+    { runGroupId: "cli-g1" },
+  );
+
+  assert.equal(outcome.manifest.cwd, expectedCwd);
+  assert.equal(seenCwd, expectedCwd);
+});
+
+test("command prepare hook args freeze run_group_id and cwd interpolation", async () => {
+  const dir = tempDir();
+  const expectedCwd = join(dir, "hook-workspaces", "hook-g1", "repo");
+  mkdirSync(expectedCwd, { recursive: true });
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "hook-group-work",
+    `---
+schemaVersion: 1
+name: hook-group-work
+cwd: ${JSON.stringify(join(dir, "hook-workspaces", "{{run_group_id}}", "repo"))}
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: status
+        command: /bin/true
+        args:
+          - "{{run_group_id}}"
+          - "{{cwd}}"
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "hook-group-work", runGroupId: "hook-g1" },
+  );
+
+  assert.deepEqual(outcome.manifest.resolvedHooks[0].config.args, ["hook-g1", expectedCwd]);
 });
 
 test("prepare named hooks freeze resolved descriptors and prepare outputs across init and resume", async () => {
@@ -3438,6 +3633,291 @@ Agent prompt.
     source: "named",
   });
   assert.deepEqual(outcome.manifest.resetSeed.launcher, outcome.manifest.launcher);
+});
+
+test("fresh runs interpolate named and inline launcher command and args", async () => {
+  const dir = tempDir();
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: "{{cwd}}/bin/wrap"
+args:
+  - "{{run_group_id}}"
+  - "{{cwd}}"
+`,
+  );
+  writeAgent(
+    dir,
+    "named-launcher-agent",
+    `---
+schemaVersion: 1
+name: named-launcher-agent
+backend: claude
+launcher: shared
+---
+Agent prompt.
+`,
+  );
+  writeAgent(
+    dir,
+    "inline-launcher-agent",
+    `---
+schemaVersion: 1
+name: inline-launcher-agent
+backend: claude
+launcher:
+  command: "{{cwd}}/bin/inline"
+  args:
+    - "{{run_group_id}}"
+    - "{{cwd}}"
+---
+Agent prompt.
+`,
+  );
+
+  const namedCwd = join(dir, "named-cwd");
+  const { outcome: named } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { cwd: namedCwd },
+    { agentName: "named-launcher-agent", runGroupId: "launch-g1" },
+  );
+  assert.deepEqual(named.manifest.launcher, {
+    kind: "prefix",
+    command: `${namedCwd}/bin/wrap`,
+    args: ["launch-g1", namedCwd],
+    name: "shared",
+    source: "named",
+  });
+  assert.deepEqual(named.manifest.resetSeed.launcher, named.manifest.launcher);
+
+  const inlineCwd = join(dir, "inline-cwd");
+  const { outcome: inline } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { cwd: inlineCwd },
+    { agentName: "inline-launcher-agent", runGroupId: "launch-g2" },
+  );
+  assert.deepEqual(inline.manifest.launcher, {
+    kind: "prefix",
+    command: `${inlineCwd}/bin/inline`,
+    args: ["launch-g2", inlineCwd],
+    name: null,
+    source: "inline",
+  });
+  assert.deepEqual(inline.manifest.resetSeed.launcher, inline.manifest.launcher);
+});
+
+test("resume reuses frozen interpolated launcher and cwd after launcher and group changes", async () => {
+  const dir = tempDir();
+  const frozenCwd = join(dir, "workspaces", "freeze-g1", "repo");
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+cwd: ${JSON.stringify(join(dir, "workspaces", "{{run_group_id}}", "repo"))}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: "{{cwd}}/bin/wrap"
+args: ["{{run_group_id}}"]
+`,
+  );
+  writeAgent(
+    dir,
+    "launcher-agent",
+    `---
+schemaVersion: 1
+name: launcher-agent
+backend: claude
+launcher: shared
+---
+Agent prompt.
+`,
+  );
+
+  const { outcome: first } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-freeze",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { agentName: "launcher-agent", runGroupId: "freeze-g1" },
+  );
+  const frozenLauncher = {
+    kind: "prefix",
+    command: `${frozenCwd}/bin/wrap`,
+    args: ["freeze-g1"],
+    name: "shared",
+    source: "named",
+  };
+  assert.deepEqual(first.manifest.launcher, frozenLauncher);
+
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: mutated
+args: [mutated]
+`,
+  );
+  await withSharedRuntimeEnv(dir, () => setRunGroup(first.runId, { runGroupId: "mutated-g2" }));
+
+  let resumedCwd;
+  let resumedLauncher;
+  const { outcome: resumed } = await runWithMock(
+    dir,
+    async (ctx) => {
+      resumedCwd = ctx.cwd;
+      resumedLauncher = ctx.launcher;
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-freeze",
+        transcript: "resumed",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { message: "resume after group change" },
+    {
+      agentName: "launcher-agent",
+      resume: resolveResumeTarget(first.workspaceDir),
+    },
+  );
+
+  assert.equal(resumed.manifest.runGroupId, "mutated-g2");
+  assert.equal(resumedCwd, frozenCwd);
+  assert.deepEqual(resumedLauncher, frozenLauncher);
+  assert.deepEqual(resumed.manifest.launcher, frozenLauncher);
+});
+
+test("reset restores frozen interpolated launcher without re-reading source or env", async () => {
+  const dir = tempDir();
+  const frozenCwd = join(dir, "workspaces", "reset-g1", "repo");
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+cwd: ${JSON.stringify(join(dir, "workspaces", "{{run_group_id}}", "repo"))}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: "{{cwd}}/bin/wrap"
+args: ["{{run_group_id}}"]
+`,
+  );
+  writeAgent(
+    dir,
+    "launcher-agent",
+    `---
+schemaVersion: 1
+name: launcher-agent
+backend: claude
+launcher: shared
+---
+Agent prompt.
+`,
+  );
+
+  const { outcome: initialized } = await runWithMock(
+    dir,
+    async () => {
+      throw new Error("backend should not be invoked during init");
+    },
+    {},
+    { agentName: "launcher-agent", runGroupId: "reset-g1", initialize: true },
+  );
+  const frozenLauncher = {
+    kind: "prefix",
+    command: `${frozenCwd}/bin/wrap`,
+    args: ["reset-g1"],
+    name: "shared",
+    source: "named",
+  };
+  assert.deepEqual(initialized.manifest.resetSeed.launcher, frozenLauncher);
+
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: mutated
+args: [mutated]
+`,
+  );
+  const manifestPath = join(initialized.workspaceDir, "run.json");
+  const mutated = JSON.parse(readFileSync(manifestPath, "utf8"));
+  mutated.launcher = { kind: "direct", name: "direct" };
+  writeFileSync(manifestPath, `${JSON.stringify(mutated, null, 2)}\n`);
+
+  const reset = await withSharedRuntimeEnv(dir, () =>
+    withEnv({ TASK_RUNNER_RUN_GROUP_ID: "env-g2" }, () => resetRun(initialized.workspaceDir)),
+  );
+  assert.equal(reset.manifest.cwd, frozenCwd);
+  assert.deepEqual(reset.manifest.launcher, frozenLauncher);
+  assert.deepEqual(reset.manifest.resetSeed.launcher, frozenLauncher);
 });
 
 test("fresh runs keep passive and external codex transports on direct launcher", async () => {

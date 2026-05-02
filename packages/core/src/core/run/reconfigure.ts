@@ -30,7 +30,7 @@ import {
   appendRunReconfiguredEvent,
   commandRunEventContext,
 } from "./run-events.js";
-import { LockedFieldError, VarResolutionError, runAgent } from "./run-loop.js";
+import { LockedFieldError, type RunOverrides, VarResolutionError, runAgent } from "./run-loop.js";
 import { withTaskStateLockAsync } from "./workspace-state.js";
 
 type AuditEnvelopeEmitter = (envelope: RunAuditEnvelope) => void;
@@ -99,14 +99,15 @@ function buildReconfigureCliVars(
 
 function buildLoadedAgent(manifest: RunManifest): LoadedAgent {
   const loaded = loadedAgentFromManifest(manifest);
+  if (manifest.agent.sourcePath === null) {
+    return loaded;
+  }
+  const sourceLoaded = loadAgentConfig(workspaceAgentPath(manifest.workspaceDir));
   return {
     ...loaded,
-    instructions:
-      manifest.agent.sourcePath === null
-        ? loaded.instructions
-        : loadAgentConfig(workspaceAgentPath(manifest.workspaceDir)).instructions,
-    sourcePath:
-      manifest.agent.sourcePath === null ? null : workspaceAgentPath(manifest.workspaceDir),
+    instructions: sourceLoaded.instructions,
+    launcher: sourceLoaded.launcher,
+    sourcePath: workspaceAgentPath(manifest.workspaceDir),
     config: {
       ...loaded.config,
       lockedFields: [],
@@ -135,6 +136,36 @@ function buildLoadedAssignment(
       message: message ?? undefined,
     },
   };
+}
+
+function agentOwnsFrozenNamedLauncher(loaded: LoadedAgent, launcherName: string): boolean {
+  const launcher = loaded.launcher;
+  if (launcher === undefined) {
+    return false;
+  }
+  if (launcher.kind === "name") {
+    return launcher.name === launcherName;
+  }
+  return true;
+}
+
+function buildReconfigureOverrides(
+  previous: RunManifest,
+  loaded: LoadedAgent,
+  loadedAssignment: LoadedAssignment | undefined,
+  nextMessage: string | null,
+): RunOverrides {
+  const overrides: RunOverrides =
+    loadedAssignment === undefined && nextMessage !== null ? { message: nextMessage } : {};
+  if (
+    previous.launcher.kind === "prefix" &&
+    previous.launcher.source === "named" &&
+    previous.launcher.name !== null &&
+    !agentOwnsFrozenNamedLauncher(loaded, previous.launcher.name)
+  ) {
+    overrides.launcher = previous.launcher.name;
+  }
+  return overrides;
 }
 
 function lockedFieldValue(manifest: RunManifest, field: LockableField): unknown {
@@ -197,7 +228,7 @@ function restoreFrozenManifestFields(
     effort: previous.effort,
     backendConfig: cloneBackendConfig(previous.backendConfig),
     resolvedBackendArgs: cloneResolvedBackendArgs(previous.resolvedBackendArgs),
-    launcher: cloneResolvedLauncherConfig(previous.launcher),
+    launcher: cloneResolvedLauncherConfig(next.launcher),
     name: previous.name,
     note: previous.note,
     pinned: previous.pinned,
@@ -325,8 +356,7 @@ async function reconfigureResolvedRun(
       source: { ...descriptor.source },
       when: descriptor.when ? { ...descriptor.when } : null,
     })),
-    overrides:
-      loadedAssignment === undefined && nextMessage !== null ? { message: nextMessage } : {},
+    overrides: buildReconfigureOverrides(previous, loaded, loadedAssignment, nextMessage),
   });
 
   assertReconfigureLockedFields(previous, outcome.manifest);

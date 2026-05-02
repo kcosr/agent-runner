@@ -149,6 +149,7 @@ ones:
 | Key | Value |
 |-----|-------|
 | `run_id` | the run's short id |
+| `run_group_id` | the selected run group id for the run |
 | `cwd` | the resolved working directory |
 | `config_dir` | the resolved task-runner config root |
 | `state_dir` | the resolved task-runner state root |
@@ -158,6 +159,9 @@ ones:
 These cannot be overridden by `--var`. When a run has no assignment,
 `assignment_name` is omitted, so `{{assignment_name}}` remains
 uninterpolated under the normal undefined-value rule.
+`run_group_id` is runner-injected; it is not stored in
+`manifest.runtimeVars` unless an assignment separately declares a
+different variable.
 
 ## Runtime interpolation syntax
 
@@ -172,8 +176,11 @@ Runtime interpolation is applied to:
 
 - Agent role instructions
 - Assignment instructions
+- Fresh `cwd` values from `--cwd` or assignment frontmatter
 - Task titles and bodies
 - Caller instructions
+- Assignment hook `with`, `when`, and `path` values
+- Fresh resolved launcher `command` and `args[]` values
 
 Values are stringified with `String(value)` before substitution.
 

@@ -38,6 +38,21 @@ All non-passive backends accept per-agent:
 Every backend receives a `cwd`, a resume session id (when present), and a
 display name. Session state is bound to the resolved cwd.
 
+Backend invoke contexts also receive a small runtime env overlay for
+wrapper scripts:
+
+| Variable | Value |
+|----------|-------|
+| `TASK_RUNNER_RUN_ID` | active manifest run id |
+| `TASK_RUNNER_RUN_GROUP_ID` | active manifest run group id |
+| `TASK_RUNNER_CWD` | active backend attempt cwd |
+
+These values override same-named variables inherited from the parent
+process. `TASK_RUNNER_RUN_GROUP_ID` keeps its existing role as the default
+group source for nested task-runner runs. Runtime vars, backend config,
+messages, model, effort, and resolved backend args are not exported as env
+vars.
+
 Launchers are subprocess-only. They wrap the spawned backend command for
 `claude`, `cursor`, `pi`, and Codex stdio. They do not apply to the
 `passive` backend, Codex websocket transport, or Codex UDS transport.

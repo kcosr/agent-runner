@@ -215,6 +215,24 @@ resolves the name against its own `${TASK_RUNNER_CONFIG_DIR}` and freezes
 the result into the manifest. Resume and reset reuse that frozen
 launcher; they do not re-read current launcher files.
 
+Launcher `command` and `args[]` strings are runtime-interpolated after
+launcher lookup and before the manifest is frozen. Named launchers, named
+`--launcher` overrides, and inline agent launchers can use the same
+runner-injected variables as other fresh-run text surfaces:
+
+```yaml
+launcher:
+  command: aw-tr-launch
+  args:
+    - agent-dev
+    - "{{cwd}}"
+    - "{{run_group_id}}"
+```
+
+The built-in `direct` launcher has no command or args to interpolate.
+Unknown launcher tokens follow the normal `{{key}}` interpolation rule:
+they remain literal.
+
 ## Assignment definition
 
 An assignment file is markdown with a YAML frontmatter block followed by the
@@ -264,6 +282,18 @@ hooks:                              # optional hook arrays by phase
 lockedFields: []                    # optional lockable fields
 ---
 ```
+
+Assignment `cwd` is runtime-interpolated on fresh run/init before it is
+resolved relative to the caller cwd. This supports shared run-group
+workspace layouts without adding a runtime provider:
+
+```yaml
+cwd: "/home/kevin/agent-workspaces/{{run_group_id}}/repo"
+```
+
+If no explicit or inherited run group is selected, `{{run_group_id}}`
+uses the singleton group id, which is the run id. Unknown tokens in `cwd`
+still fail at run creation with the existing unresolved-token error.
 
 Task definitions must match:
 

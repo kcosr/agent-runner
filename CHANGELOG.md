@@ -121,6 +121,9 @@
 
 ### Added
 
+- Added run-group-aware runtime interpolation for fresh cwd values and
+  launcher command/args, plus `TASK_RUNNER_RUN_ID`,
+  `TASK_RUNNER_RUN_GROUP_ID`, and `TASK_RUNNER_CWD` backend wrapper env.
 - Added backend-owned session history import and sync for Claude and
   Codex runs. Bootstrap `--backend-session-id` imports complete prior
   backend turns, pre-resume sync updates history before allocating new

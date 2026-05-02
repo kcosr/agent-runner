@@ -322,23 +322,31 @@ blocked with the rest completed or blocked → `blocked`; otherwise
    allowed scalar surfaces, then schema-validate)
    Named and explicit-path task refs are resolved here, before runtime
    interpolation.
-2. resolves cwd: `--cwd` → assignment `cwd` → caller cwd
-3. resolves vars in authored `sources` order (`cli`, `env`, `parent`)
+2. resolves vars in authored `sources` order (`cli`, `env`, `parent`)
    and applies `default` / `required` only after every source fails
-4. enforces locked fields
-5. captures `repo` from the resolved cwd and creates the run workspace
-6. resolves selected backendConfig through the backend (for Codex
+3. allocates or reuses the run id and resolves `runGroupId` from explicit
+   request, `TASK_RUNNER_RUN_GROUP_ID`, nearest parent lineage, or the
+   singleton run id
+4. builds injected runtime variables, then resolves cwd:
+   `--cwd` → assignment `cwd` → caller cwd
+5. rebuilds injected variables with the final cwd and enforces locked
+   fields
+6. captures `repo` from the resolved cwd and creates the run workspace
+7. resolves selected backendConfig through the backend (for Codex
    transport: authored backendConfig → request override → current process
    UDS/WS env → stdio default)
-7. resolves the selected backend's authored `backendArgs` into frozen
+8. resolves the selected backend's authored `backendArgs` into frozen
    `resolvedBackendArgs` (passive resolves to `[]`)
-8. resolves launcher precedence (`--launcher` override → agent launcher →
-   `direct`, with passive and Codex websocket/UDS forced to `direct`)
-9. freezes the initial manifest
-10. composes and stores `brief`
-11. imports complete backend-owned history when `--backend-session-id`
+9. resolves launcher precedence (`--launcher` override → agent launcher →
+   `direct`, with passive and Codex websocket/UDS forced to `direct`) and
+   runtime-interpolates prefix launcher command/args
+10. builds the provisional prepare manifest
+11. runs prepare hooks, then freezes final cwd/runtime vars/backend
+    outputs, task text, and launcher values
+12. composes and stores `brief`
+13. imports complete backend-owned history when `--backend-session-id`
    is present and the backend supports history reads
-12. invokes the backend, or leaves the run initialized if the backend is
+14. invokes the backend, or leaves the run initialized if the backend is
    `passive`
 
 Nested `task-runner` invocations automatically carry
@@ -569,8 +577,8 @@ frozen manifest or reset seed rather than current agent files.
 ## Launcher freezing
 
 Launcher resolution also happens exactly once, at fresh-run/init time.
-The resolved launcher is stored on both `manifest.launcher` and
-`manifest.resetSeed.launcher`.
+The resolved launcher is runtime-interpolated and stored on both
+`manifest.launcher` and `manifest.resetSeed.launcher`.
 
 - Embedded / local fresh runs resolve named launchers from the caller's
   config root.
@@ -579,6 +587,16 @@ The resolved launcher is stored on both `manifest.launcher` and
 - The built-in `direct` launcher is always available and reserved.
 - Launchers only affect subprocess-backed execution. Passive runs and
   Codex websocket/UDS transport keep `direct`.
+- Resume, ready-start, reset, and recurring reset/clone reuse the frozen
+  launcher. Initialized-run reconfigure rebuilds initialized surfaces from
+  the frozen seeds and re-freezes launcher values when vars or message
+  changes require a new seed.
+
+Run group mutation is intentionally not a re-interpolation operation.
+`run set-group` and `run clear-group` update `manifest.runGroupId` and
+`manifest.resetSeed.runGroupId`, but previously frozen cwd, launcher,
+brief, and task strings keep the values resolved when the initialized
+manifest was built.
 
 ## Public command contract
 

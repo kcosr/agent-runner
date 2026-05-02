@@ -1,10 +1,12 @@
 import { resolveCodexTransportConfig } from "../../backends/codex.js";
 import { LauncherConfigError, loadLauncherConfig } from "../../config/loader.js";
 import type { Backend } from "../backends/types.js";
+import { interpolate } from "../config/interpolate.js";
 import {
   type AgentLauncherReference,
   DIRECT_LAUNCHER_NAME,
   type ResolvedLauncherConfig,
+  cloneResolvedLauncherConfig,
   isNamedLauncherOverride,
 } from "../config/launchers.js";
 
@@ -79,4 +81,19 @@ export function resolveFreshLauncherConfig(args: {
       return unreachable;
     }
   }
+}
+
+export function interpolateResolvedLauncher(
+  launcher: ResolvedLauncherConfig,
+  vars: Record<string, unknown>,
+): ResolvedLauncherConfig {
+  const cloned = cloneResolvedLauncherConfig(launcher);
+  if (cloned.kind === "direct") {
+    return cloned;
+  }
+  return {
+    ...cloned,
+    command: interpolate(cloned.command, vars),
+    args: cloned.args.map((arg) => interpolate(arg, vars)),
+  };
 }
