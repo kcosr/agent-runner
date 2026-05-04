@@ -12,6 +12,7 @@ import {
   parseCursorSessionHistoryStore,
 } from "../packages/core/dist/backends/cursor.js";
 import {
+  CURSOR_STORE_CREATED_AT,
   cursorRootBlob,
   idFor,
   writeCursorStore,
@@ -284,8 +285,17 @@ test("cursor history resolves and reads the deterministic store source", async (
       resolvedBackendArgs: [],
     });
     assert.equal(resolved.available, true);
-    assert.equal(resolved.source.kind, "file");
-    assert.equal(resolved.source.path, path);
+    assert.deepEqual(resolved.source, {
+      kind: "custom",
+      label: path,
+      changeToken: {
+        kind: "cursor-store",
+        path,
+        agentId: sessionId,
+        latestRootBlobId: idFor(250),
+        createdAt: CURSOR_STORE_CREATED_AT,
+      },
+    });
 
     const result = await cursorBackend.readSessionHistory({
       sessionId,
@@ -295,7 +305,8 @@ test("cursor history resolves and reads the deterministic store source", async (
       source: resolved.source,
       mode: "bootstrap",
     });
-    assert.deepEqual(result.cursor, { kind: "file", size: resolved.source.size });
+    assert.deepEqual(result.source, resolved.source);
+    assert.deepEqual(result.cursor, { kind: "cursor-store", latestRootBlobId: idFor(250) });
     assert.equal(result.turns.length, 1);
     assert.equal(result.turns[0].assistantText, "Answer");
   });

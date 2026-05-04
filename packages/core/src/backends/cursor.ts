@@ -6,6 +6,7 @@ import type { Backend, BackendInvokeContext, BackendInvokeResult } from "../core
 import type {
   BackendSessionHistoryContext,
   BackendSessionHistoryResult,
+  BackendSessionHistorySource,
   BackendSessionHistorySourceContext,
   BackendSessionHistorySourceResult,
   BackendSyncedTurn,
@@ -20,7 +21,6 @@ import {
   isRecord,
   normalizeBackendModel,
   realFileIsUnderRoot,
-  sessionHistoryFileSource,
   silentTranscriptFallback,
   streamBoundarySeparator,
 } from "./shared.js";
@@ -34,6 +34,14 @@ const CURSOR_INTERNAL_USER_PREFIXES = [
 ] as const;
 
 interface CursorStoreMeta {
+  agentId: string;
+  latestRootBlobId: string;
+  createdAt: number;
+}
+
+interface CursorStoreChangeToken {
+  kind: "cursor-store";
+  path: string;
   agentId: string;
   latestRootBlobId: string;
   createdAt: number;
@@ -118,6 +126,72 @@ function readCursorMeta(db: Database.Database): CursorStoreMeta {
     latestRootBlobId: parsed.latestRootBlobId,
     createdAt: parsed.createdAt,
   };
+}
+
+function validateCursorStore(
+  path: string,
+  sessionId: string,
+): { ok: true; meta: CursorStoreMeta } | { ok: false; reason: string } {
+  let db: Database.Database;
+  try {
+    db = openCursorStore(path);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `cursor store is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  try {
+    const meta = readCursorMeta(db);
+    if (meta.agentId !== sessionId) {
+      return {
+        ok: false,
+        reason: `cursor store agentId "${meta.agentId}" does not match session "${sessionId}"`,
+      };
+    }
+    return { ok: true, meta };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+function cursorStoreChangeToken(path: string, meta: CursorStoreMeta): CursorStoreChangeToken {
+  return {
+    kind: "cursor-store",
+    path,
+    agentId: meta.agentId,
+    latestRootBlobId: meta.latestRootBlobId,
+    createdAt: meta.createdAt,
+  };
+}
+
+function cursorSessionHistorySource(
+  path: string,
+  meta: CursorStoreMeta,
+): BackendSessionHistorySource {
+  return {
+    kind: "custom",
+    label: path,
+    changeToken: cursorStoreChangeToken(path, meta),
+  };
+}
+
+function cursorStoreSourcePath(source: BackendSessionHistorySource): string {
+  if (
+    source.kind !== "custom" ||
+    !isRecord(source.changeToken) ||
+    source.changeToken.kind !== "cursor-store" ||
+    typeof source.changeToken.path !== "string"
+  ) {
+    throw new Error("cursor session history source must be a cursor store");
+  }
+  return source.changeToken.path;
 }
 
 function readCursorBlob(
@@ -453,69 +527,47 @@ async function validateCursorSession(ctx: ValidateSessionContext): Promise<Valid
     return { valid: false, reason: invalidReason };
   }
   const path = cursorStoreDbPath(ctx.cwd, ctx.sessionId);
-
-  let db: Database.Database;
-  try {
-    db = openCursorStore(path);
-  } catch (error) {
-    return {
-      valid: false,
-      reason: `cursor store is unreadable: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-
-  try {
-    const meta = readCursorMeta(db);
-    if (meta.agentId !== ctx.sessionId) {
-      return {
-        valid: false,
-        reason: `cursor store agentId "${meta.agentId}" does not match session "${ctx.sessionId}"`,
-      };
-    }
-    return { valid: true };
-  } catch (error) {
-    return {
-      valid: false,
-      reason: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    db.close();
-  }
+  const validation = validateCursorStore(path, ctx.sessionId);
+  return validation.ok ? { valid: true } : { valid: false, reason: validation.reason };
 }
 
 async function resolveCursorSessionHistorySource(
   ctx: BackendSessionHistorySourceContext,
 ): Promise<BackendSessionHistorySourceResult> {
-  const validation = await validateCursorSession({
-    sessionId: ctx.sessionId,
-    cwd: ctx.cwd,
-    env: ctx.env,
-    backendConfig: ctx.backendConfig,
-    resolvedBackendArgs: ctx.resolvedBackendArgs,
-  });
-  if (!validation.valid) {
-    return { available: false, reason: validation.reason };
+  const invalidReason = cursorSessionIdInvalidReason(ctx.sessionId);
+  if (invalidReason !== null) {
+    return { available: false, reason: invalidReason };
   }
 
   const path = cursorStoreDbPath(ctx.cwd, ctx.sessionId);
+  const validation = validateCursorStore(path, ctx.sessionId);
+  if (!validation.ok) {
+    return { available: false, reason: validation.reason };
+  }
+
   if (!realFileIsUnderRoot(cursorChatsRoot(), path)) {
     return { available: false, reason: "cursor store escaped the chats root" };
   }
-  return { available: true, source: sessionHistoryFileSource(path) };
+  return { available: true, source: cursorSessionHistorySource(path, validation.meta) };
 }
 
 async function readCursorSessionHistory(
   ctx: BackendSessionHistoryContext,
 ): Promise<BackendSessionHistoryResult> {
-  if (ctx.source.kind !== "file") {
-    throw new Error("cursor session history source must be a file");
+  const path = cursorStoreSourcePath(ctx.source);
+  const validation = validateCursorStore(path, ctx.sessionId);
+  if (!validation.ok) {
+    throw new Error(validation.reason);
   }
-  const source = sessionHistoryFileSource(ctx.source.path);
+  const source = cursorSessionHistorySource(path, validation.meta);
   return {
     source,
-    cursor: { kind: "file", size: source.size },
+    cursor: {
+      kind: "cursor-store",
+      latestRootBlobId: validation.meta.latestRootBlobId,
+    },
     turns: parseCursorSessionHistoryStore({
-      path: ctx.source.path,
+      path,
       sessionId: ctx.sessionId,
       mode: ctx.mode,
     }),

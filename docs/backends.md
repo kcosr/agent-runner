@@ -185,12 +185,13 @@ returns either:
   read for that session
 - `{ available: true, source }` with a persistable source descriptor
 
-Built-ins use `file` sources for local history files. Custom backends can
-return `{ kind: "custom", label, changeToken }`; `changeToken` must be
+Most built-ins use `file` sources for local history files. Custom backends
+can return `{ kind: "custom", label, changeToken }`; `changeToken` must be
 JSON-persistable and should change whenever `readSessionHistory` needs to
 run again. `label` is a human-readable source name for diagnostics and
 audit context. For `file` sources, task-runner stores path, size, and
-mtime as the source change token.
+mtime as the source change token. Cursor uses a custom SQLite source token
+based on its session root pointer instead of filesystem mtime.
 
 `readSessionHistory(ctx)` receives the resolved source, the previous
 cursor when one exists, and a mode of `"bootstrap"` or `"sync"`. It
@@ -327,7 +328,9 @@ context and return the same invoke result shape.
   store, imports visible user/assistant JSON message blobs as complete
   turns, ignores Cursor internal context blobs, unwraps `<user_query>`
   content, and prefers Cursor `final_answer` assistant text when present.
-  Sync mode tracks the latest no-answer user turn as open.
+  Sync mode tracks the latest no-answer user turn as open. Cursor sync uses
+  `meta[0].latestRootBlobId` as its change token so active SQLite WAL writes
+  are detected before a store checkpoint updates `store.db` mtime.
 
 ## `pi`
 
