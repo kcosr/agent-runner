@@ -223,6 +223,38 @@ test("pi history parser reports malformed jsonl with file and line", async () =>
   );
 });
 
+test("pi history parser skips malformed trailing partial lines", async () => {
+  const dir = tempDir();
+  const path = join(dir, "session-partial.jsonl");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path,
+    `${JSON.stringify(sessionRecords()[0])}\n${JSON.stringify({
+      type: "message",
+      timestamp: "2026-05-01T00:00:01.000Z",
+      message: { role: "user", content: "Question" },
+    })}\n{not-json`,
+  );
+
+  assert.deepEqual(
+    await parsePiSessionHistoryJsonl({
+      path,
+      sessionId: "pi-session-1",
+      mode: "sync",
+    }),
+    [
+      {
+        backendTurnId: "pi:pi-session-1:line:1",
+        status: "open",
+        startedAt: "2026-05-01T00:00:01.000Z",
+        updatedAt: "2026-05-01T00:00:01.000Z",
+        userText: "Question",
+        assistantText: null,
+      },
+    ],
+  );
+});
+
 test("pi history parser rejects empty or non-session histories", async () => {
   const dir = tempDir();
   const emptyPath = join(dir, "empty.jsonl");

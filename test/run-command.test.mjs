@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { encodePiSessionDir } from "../packages/core/dist/backends/pi.js";
 import {
   ResumeError,
   RunCommandError,
@@ -21,6 +22,30 @@ function patchManifest(workspaceDir, mutator) {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   mutator(manifest);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function writePiSession(piHome, cwd, sessionId) {
+  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(cwd));
+  mkdirSync(bucketDir, { recursive: true });
+  writeFileSync(
+    join(bucketDir, `2026-05-01T00-00-00-000Z_${sessionId}.jsonl`),
+    `${[
+      { type: "session", cwd },
+      {
+        type: "message",
+        id: "pi-user-1",
+        timestamp: "2026-05-01T00:00:00.000Z",
+        message: { role: "user", content: "Question" },
+      },
+      {
+        type: "message",
+        timestamp: "2026-05-01T00:00:01.000Z",
+        message: { role: "assistant", content: "Answer" },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n")}\n`,
+  );
 }
 
 test("executeRunCommand can initialize an ad-hoc passive run without an agent file", async () =>
@@ -290,6 +315,31 @@ test("executeRunCommand accepts cursor bootstrap session import with a valid sto
       assert.equal(outcome.manifest.attemptRecords.length, 1);
       assert.equal(outcome.manifest.attemptRecords[0].provenance.kind, "backend_session");
       assert.equal(outcome.manifest.attemptRecords[0].provenance.backend, "cursor");
+    });
+  }));
+
+test("executeRunCommand accepts pi bootstrap session import with a valid history file", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ rootDir }) => {
+    const sessionId = "pi-session-1";
+    await withEnv({ PI_HOME: rootDir }, async () => {
+      writePiSession(rootDir, process.cwd(), sessionId);
+
+      const outcome = await executeRunCommand({
+        initialize: true,
+        backendSessionId: sessionId,
+        cliVars: {},
+        overrides: {
+          backend: "pi",
+          message: "Seed an ad-hoc pi run.",
+        },
+      });
+
+      assert.equal(outcome.manifest.status, "initialized");
+      assert.equal(outcome.manifest.backend, "pi");
+      assert.equal(outcome.manifest.backendSessionId, sessionId);
+      assert.equal(outcome.manifest.attemptRecords.length, 1);
+      assert.equal(outcome.manifest.attemptRecords[0].provenance.kind, "backend_session");
+      assert.equal(outcome.manifest.attemptRecords[0].provenance.backend, "pi");
     });
   }));
 

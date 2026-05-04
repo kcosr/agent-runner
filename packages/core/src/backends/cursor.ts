@@ -285,19 +285,15 @@ function finishCursorTurn(
   });
 }
 
-function parseCursorMessageBlob(id: string, data: Buffer): CursorMessageBlob {
+function parseCursorMessageBlob(id: string, data: Buffer): CursorMessageBlob | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(data.toString("utf8")) as unknown;
-  } catch (error) {
-    throw new Error(
-      `cursor store message blob "${id}" is malformed JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  } catch {
+    return null;
   }
   if (!isRecord(parsed) || typeof parsed.role !== "string") {
-    throw new Error(
-      `cursor store message blob "${id}" must decode to a JSON object with string role`,
-    );
+    return null;
   }
   return { id, message: parsed };
 }
@@ -396,27 +392,33 @@ export function parseCursorSessionHistoryStore(params: {
   }
 
   try {
-    const meta = readCursorMeta(db);
-    if (meta.agentId !== params.sessionId) {
-      throw new Error(
-        `cursor store agentId "${meta.agentId}" does not match session "${params.sessionId}"`,
-      );
-    }
-    const readBlob = db.prepare("SELECT data FROM blobs WHERE id = ?");
-    const rootBlob = readCursorBlob(readBlob, meta.latestRootBlobId);
-    if (rootBlob === null) {
-      throw new Error(`cursor store root blob "${meta.latestRootBlobId}" is missing`);
-    }
-    const orderedIds = parseCursorRootBlobMessageIds(rootBlob);
-    const accumulator = createCursorTurnAccumulator(meta.createdAt);
-    for (const id of orderedIds) {
-      const blob = readCursorBlob(readBlob, id);
-      if (blob === null) {
-        throw new Error(`cursor store message blob "${id}" is missing`);
+    const readStore = db.transaction(() => {
+      const meta = readCursorMeta(db);
+      if (meta.agentId !== params.sessionId) {
+        throw new Error(
+          `cursor store agentId "${meta.agentId}" does not match session "${params.sessionId}"`,
+        );
       }
-      applyCursorMessageToTurns(accumulator, parseCursorMessageBlob(id, blob));
-    }
-    return finishCursorTurns(accumulator, params.mode);
+      const readBlob = db.prepare("SELECT data FROM blobs WHERE id = ?");
+      const rootBlob = readCursorBlob(readBlob, meta.latestRootBlobId);
+      if (rootBlob === null) {
+        throw new Error(`cursor store root blob "${meta.latestRootBlobId}" is missing`);
+      }
+      const orderedIds = parseCursorRootBlobMessageIds(rootBlob);
+      const accumulator = createCursorTurnAccumulator(meta.createdAt);
+      for (const id of orderedIds) {
+        const blob = readCursorBlob(readBlob, id);
+        if (blob === null) {
+          throw new Error(`cursor store message blob "${id}" is missing`);
+        }
+        const messageBlob = parseCursorMessageBlob(id, blob);
+        if (messageBlob !== null) {
+          applyCursorMessageToTurns(accumulator, messageBlob);
+        }
+      }
+      return finishCursorTurns(accumulator, params.mode);
+    });
+    return readStore();
   } finally {
     db.close();
   }

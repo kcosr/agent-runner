@@ -191,7 +191,7 @@ test("cursor history parser returns two complete turns and prefers final answers
   });
 });
 
-test("cursor history parser rejects malformed root and message blobs", async () => {
+test("cursor history parser rejects malformed root and missing blobs, and ignores non-message blobs", async () => {
   const home = tempDir();
   const cwd = "/repo";
 
@@ -232,17 +232,30 @@ test("cursor history parser rejects malformed root and message blobs", async () 
     const malformedBlobPath = writeCursorStore({
       cwd,
       sessionId: "bad-blob",
-      messageIds: [idFor(3)],
-      messages: [[idFor(3), Buffer.from("{not-json", "utf8")]],
+      messageIds: [idFor(3), idFor(4), idFor(5), idFor(6)],
+      messages: [
+        [idFor(3), Buffer.from("{not-json", "utf8")],
+        [idFor(4), { content: "object without role" }],
+        [idFor(5), { role: "user", content: "Question" }],
+        [idFor(6), { role: "assistant", content: "Answer" }],
+      ],
     });
-    assert.throws(
-      () =>
-        parseCursorSessionHistoryStore({
-          path: malformedBlobPath,
-          sessionId: "bad-blob",
-          mode: "bootstrap",
-        }),
-      /message blob "0303.*" is malformed JSON/,
+    assert.deepEqual(
+      parseCursorSessionHistoryStore({
+        path: malformedBlobPath,
+        sessionId: "bad-blob",
+        mode: "bootstrap",
+      }),
+      [
+        {
+          backendTurnId: idFor(5),
+          status: "complete",
+          startedAt: "2026-05-01T00:00:00.000Z",
+          updatedAt: "2026-05-01T00:00:00.001Z",
+          userText: "Question",
+          assistantText: "Answer",
+        },
+      ],
     );
   });
 });
