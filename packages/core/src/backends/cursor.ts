@@ -47,6 +47,11 @@ interface CursorStoreChangeToken {
   createdAt: number;
 }
 
+interface CursorStoreSnapshot {
+  meta: CursorStoreMeta;
+  turns: BackendSyncedTurn[];
+}
+
 interface CursorMessageBlob {
   id: string;
   message: Record<string, unknown>;
@@ -451,11 +456,44 @@ function finishCursorTurns(
   return accumulator.turns;
 }
 
-export function parseCursorSessionHistoryStore(params: {
+function readCursorStoreSnapshot(
+  db: Database.Database,
+  params: {
+    sessionId: string;
+    mode: "bootstrap" | "sync";
+  },
+): CursorStoreSnapshot {
+  const meta = readCursorMeta(db);
+  if (meta.agentId !== params.sessionId) {
+    throw new Error(
+      `cursor store agentId "${meta.agentId}" does not match session "${params.sessionId}"`,
+    );
+  }
+  const readBlob = db.prepare("SELECT data FROM blobs WHERE id = ?");
+  const rootBlob = readCursorBlob(readBlob, meta.latestRootBlobId);
+  if (rootBlob === null) {
+    throw new Error(`cursor store root blob "${meta.latestRootBlobId}" is missing`);
+  }
+  const orderedIds = parseCursorRootBlobMessageIds(rootBlob);
+  const accumulator = createCursorTurnAccumulator(meta.createdAt);
+  for (const id of orderedIds) {
+    const blob = readCursorBlob(readBlob, id);
+    if (blob === null) {
+      throw new Error(`cursor store message blob "${id}" is missing`);
+    }
+    const messageBlob = parseCursorMessageBlob(id, blob);
+    if (messageBlob !== null) {
+      applyCursorMessageToTurns(accumulator, messageBlob);
+    }
+  }
+  return { meta, turns: finishCursorTurns(accumulator, params.mode) };
+}
+
+function readCursorSessionHistoryStore(params: {
   path: string;
   sessionId: string;
   mode: "bootstrap" | "sync";
-}): BackendSyncedTurn[] {
+}): CursorStoreSnapshot {
   let db: Database.Database;
   try {
     db = openCursorStore(params.path);
@@ -466,36 +504,19 @@ export function parseCursorSessionHistoryStore(params: {
   }
 
   try {
-    const readStore = db.transaction(() => {
-      const meta = readCursorMeta(db);
-      if (meta.agentId !== params.sessionId) {
-        throw new Error(
-          `cursor store agentId "${meta.agentId}" does not match session "${params.sessionId}"`,
-        );
-      }
-      const readBlob = db.prepare("SELECT data FROM blobs WHERE id = ?");
-      const rootBlob = readCursorBlob(readBlob, meta.latestRootBlobId);
-      if (rootBlob === null) {
-        throw new Error(`cursor store root blob "${meta.latestRootBlobId}" is missing`);
-      }
-      const orderedIds = parseCursorRootBlobMessageIds(rootBlob);
-      const accumulator = createCursorTurnAccumulator(meta.createdAt);
-      for (const id of orderedIds) {
-        const blob = readCursorBlob(readBlob, id);
-        if (blob === null) {
-          throw new Error(`cursor store message blob "${id}" is missing`);
-        }
-        const messageBlob = parseCursorMessageBlob(id, blob);
-        if (messageBlob !== null) {
-          applyCursorMessageToTurns(accumulator, messageBlob);
-        }
-      }
-      return finishCursorTurns(accumulator, params.mode);
-    });
+    const readStore = db.transaction(() => readCursorStoreSnapshot(db, params));
     return readStore();
   } finally {
     db.close();
   }
+}
+
+export function parseCursorSessionHistoryStore(params: {
+  path: string;
+  sessionId: string;
+  mode: "bootstrap" | "sync";
+}): BackendSyncedTurn[] {
+  return readCursorSessionHistoryStore(params).turns;
 }
 
 function findSessionId(value: unknown): string | null {
@@ -555,22 +576,19 @@ async function readCursorSessionHistory(
   ctx: BackendSessionHistoryContext,
 ): Promise<BackendSessionHistoryResult> {
   const path = cursorStoreSourcePath(ctx.source);
-  const validation = validateCursorStore(path, ctx.sessionId);
-  if (!validation.ok) {
-    throw new Error(validation.reason);
-  }
-  const source = cursorSessionHistorySource(path, validation.meta);
+  const snapshot = readCursorSessionHistoryStore({
+    path,
+    sessionId: ctx.sessionId,
+    mode: ctx.mode,
+  });
+  const source = cursorSessionHistorySource(path, snapshot.meta);
   return {
     source,
     cursor: {
       kind: "cursor-store",
-      latestRootBlobId: validation.meta.latestRootBlobId,
+      latestRootBlobId: snapshot.meta.latestRootBlobId,
     },
-    turns: parseCursorSessionHistoryStore({
-      path,
-      sessionId: ctx.sessionId,
-      mode: ctx.mode,
-    }),
+    turns: snapshot.turns,
   };
 }
 
@@ -683,10 +701,9 @@ function processLine(state: StreamState, line: string): void {
 
   if (event.type === "assistant") {
     const text = cursorStreamAssistantText(event);
-    if (
-      text !== null &&
-      (typeof event.timestamp_ms === "number" || state.streamedText.length === 0)
-    ) {
+    // Cursor marks incremental assistant chunks with timestamp_ms; recap events omit it.
+    const isIncrementalAssistantChunk = typeof event.timestamp_ms === "number";
+    if (text !== null && (isIncrementalAssistantChunk || state.streamedText.length === 0)) {
       appendCursorDelta(state, text);
       return;
     }

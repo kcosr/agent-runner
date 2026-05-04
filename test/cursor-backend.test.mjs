@@ -266,7 +266,7 @@ test("cursor backend inserts a boundary separator before the next partial output
   );
 });
 
-test("cursor backend emits a fallback delta when only the final result transcript exists", async () => {
+test("cursor backend streams an assistant event when no prior text was emitted", async () => {
   const dir = tempDir();
   const command = writeFakeCursorAgent(dir);
   const events = [];
