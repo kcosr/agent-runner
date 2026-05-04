@@ -289,6 +289,10 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     backend: "claude",
     model: "claude-sonnet-4-6",
     effort: "medium",
+    launcher: {
+      kind: "direct",
+      name: "direct",
+    },
     name: "demo session",
     note: null,
     pinned: false,
@@ -345,6 +349,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     callerInstructions: "Caller docs",
     lockedFields: ["backend"],
     runtimeVars: {},
+    runtimeVarSources: {},
     execution: {
       hostMode: "embedded",
       controller: {
@@ -464,7 +469,15 @@ test("run contracts: schedules project onto summary/detail with derived state", 
 test("run contracts: toRunDetail redacts inherited env vars from runtimeVarSources", () => {
   const detail = toRunDetail({
     manifest: buildManifest({
+      runGroupId: "group-parent",
       parentRunId: "run-parent",
+      launcher: {
+        kind: "prefix",
+        command: "ssh",
+        args: ["worker"],
+        name: "ssh-worker",
+        source: "named",
+      },
       runtimeVars: {
         visible: "plain",
         inherited_secret: "token-123",
@@ -482,6 +495,20 @@ test("run contracts: toRunDetail redacts inherited env vars from runtimeVarSourc
   });
 
   assert.equal(detail.parentRunId, "run-parent");
+  assert.equal(detail.runGroupId, "group-parent");
+  assert.deepEqual(detail.launcher, {
+    kind: "prefix",
+    name: "ssh-worker",
+    source: "named",
+  });
+  assert.deepEqual(detail.runtimeVarSources, {
+    inherited_secret: {
+      source: "parent",
+      envName: "LINEAGE_SECRET",
+      inheritedFromRunId: "run-parent",
+      redacted: true,
+    },
+  });
   assert.deepEqual(detail.runtimeVars, {
     visible: "plain",
     inherited_secret: {

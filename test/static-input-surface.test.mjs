@@ -15,6 +15,10 @@ const PLAN_FEATURE_ASSIGNMENT_PATH = new URL(
   "../assignments/plan-feature/assignment.md",
   import.meta.url,
 ).pathname;
+const PLAN_REVIEW_ASSIGNMENT_PATH = new URL(
+  "../assignments/plan-review/assignment.md",
+  import.meta.url,
+).pathname;
 const CODE_REVIEW_ASSIGNMENT_PATH = new URL(
   "../assignments/code-review/assignment.md",
   import.meta.url,
@@ -124,6 +128,10 @@ test("static input surface: review assignments expose the correct CLI/Web inputs
       loadedAgent,
       loadAssignmentConfig(CODE_REVIEW_DIRECT_ASSIGNMENT_PATH, REPO_ROOT),
     );
+    const planReview = resolveStaticInputSurface(
+      loadedAgent,
+      loadAssignmentConfig(PLAN_REVIEW_ASSIGNMENT_PATH, REPO_ROOT),
+    );
 
     assert.deepEqual(
       implementationReview.assignmentInputs.map((field) => field.key),
@@ -143,6 +151,14 @@ test("static input surface: review assignments expose the correct CLI/Web inputs
     assert.ok(
       !directReview.assignmentInputs.some((field) => field.key === "implementation_run_id"),
     );
+
+    assert.deepEqual(
+      planReview.assignmentInputs.map((field) => field.key),
+      ["initialized_run_id", "planning_run_id"],
+    );
+    assert.equal(fieldByKey(planReview.assignmentInputs, "initialized_run_id").required, true);
+    assert.equal(fieldByKey(planReview.assignmentInputs, "planning_run_id").required, true);
+    assert.ok(!planReview.assignmentInputs.some((field) => field.key === "plan_draft"));
   }));
 
 test("static input surface: backend choices include loaded custom backend names", async () =>

@@ -112,6 +112,11 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
     callerInstructions: null,
     lockedFields: [],
     runtimeVars: {},
+    runtimeVarSources: {},
+    launcher: {
+      kind: "direct",
+      name: "direct",
+    },
     execution: {
       hostMode: "embedded",
       controller: { kind: "embedded" },

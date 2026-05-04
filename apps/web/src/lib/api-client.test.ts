@@ -30,6 +30,10 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
     backend: "codex",
     model: "gpt-5.4",
     effort: "high",
+    launcher: {
+      kind: "direct",
+      name: "direct",
+    },
     name: "Build dashboard",
     backendSessionId: null,
     cwd: "/tmp/task-runner",
@@ -68,6 +72,7 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
     callerInstructions: null,
     lockedFields: [],
     runtimeVars: {},
+    runtimeVarSources: {},
     execution: {
       hostMode: "embedded",
       controller: { kind: "embedded" },
@@ -445,6 +450,10 @@ describe("api client", () => {
               backend: "codex",
               model: "gpt-5.4",
               effort: "high",
+              launcher: {
+                kind: "direct",
+                name: "direct",
+              },
               name: "Build dashboard",
               note: null,
               pinned: false,
@@ -518,6 +527,7 @@ describe("api client", () => {
               callerInstructions: null,
               lockedFields: [],
               runtimeVars: {},
+              runtimeVarSources: {},
               execution: {
                 hostMode: "embedded",
                 controller: { kind: "embedded" },
@@ -583,6 +593,10 @@ describe("api client", () => {
                 backend: "codex",
                 model: "gpt-5.4",
                 effort: "high",
+                launcher: {
+                  kind: "direct",
+                  name: "direct",
+                },
                 name: "Build dashboard",
                 note: null,
                 pinned: false,
@@ -615,6 +629,7 @@ describe("api client", () => {
                 callerInstructions: null,
                 lockedFields: [],
                 runtimeVars: {},
+                runtimeVarSources: {},
                 execution: {
                   hostMode: "embedded",
                   controller: { kind: "embedded" },
@@ -702,6 +717,10 @@ describe("api client", () => {
                 backend: "codex",
                 model: "gpt-5.4",
                 effort: "high",
+                launcher: {
+                  kind: "direct",
+                  name: "direct",
+                },
                 name: "Build dashboard",
                 note: null,
                 pinned: false,
@@ -759,6 +778,7 @@ describe("api client", () => {
                 callerInstructions: null,
                 lockedFields: [],
                 runtimeVars: {},
+                runtimeVarSources: {},
                 execution: {
                   hostMode: "embedded",
                   controller: { kind: "embedded" },
@@ -918,6 +938,10 @@ describe("api client", () => {
               backend: "codex",
               model: "gpt-5.4",
               effort: "high",
+              launcher: {
+                kind: "direct",
+                name: "direct",
+              },
               name: "Build dashboard",
               note: "Reset seed note",
               pinned: true,
@@ -950,6 +974,7 @@ describe("api client", () => {
               callerInstructions: null,
               lockedFields: [],
               runtimeVars: {},
+              runtimeVarSources: {},
               execution: {
                 hostMode: "embedded",
                 controller: { kind: "embedded" },
@@ -2132,6 +2157,10 @@ describe("api client", () => {
               backend: "passive",
               model: null,
               effort: null,
+              launcher: {
+                kind: "direct",
+                name: "direct",
+              },
               name: null,
               note: null,
               pinned: false,
@@ -2164,6 +2193,7 @@ describe("api client", () => {
               callerInstructions: null,
               lockedFields: [],
               runtimeVars: {},
+              runtimeVarSources: {},
               execution: {
                 hostMode: "embedded",
                 controller: { kind: "embedded" },

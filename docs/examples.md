@@ -99,11 +99,12 @@ Meta-assignment that converts a free-form feature brief into an
 executable task-runner plan. The driver agent orients, captures the
 feature, checks contract dimensions (with an ambiguity gate), surveys
 impact, scans for duplication, assesses risks, produces a contract
-artifact, drafts a plan from a template, runs a nested `plan-review`,
-applies fixes until approval, produces a human-facing summary, attaches
-both artifacts to the planning run, blocks on caller approval for
-delayed implementer creation, and emits generated implementation plans
-that end with a terminal `push_branch_and_create_pr` task.
+artifact, drafts a temp assignment from a template, produces a
+human-facing summary, attaches both artifacts to the planning run,
+initializes the implementer run, runs nested `plan-review` against that
+initialized run, applies fixes until approval, and emits generated
+implementation plans that end with a terminal `push_branch_and_create_pr`
+task.
 
 Notable feature uses:
 
@@ -111,10 +112,11 @@ Notable feature uses:
   questions when contract dimensions are unresolved.
 - **Locked task list** prevents silent deferrals.
 - **Nested reviews** via `plan-review` invoked as a child `task-runner
-  run`.
-- **Attachment coupling**: approved draft (`assignment-seed.md`) and
-  summary are attached to the planning run and later discovered by
-  implementation via `attachment list --scope group`.
+  run` against the initialized implementer run plus planning run.
+- **Attachment coupling**: `assignment-seed.md` and summary are attached
+  to the planning run and later discovered by implementation via
+  `attachment list --scope group`; download group rows with row
+  `ownerRunId` plus row `id`.
 - **Lineage-backed inheritance**: planner-created child runs auto-link to
   the planning run and can inherit vars such as `worktree_path` and
   `worktree_base_ref` through `sources: [parent]` instead of repeating
@@ -123,13 +125,17 @@ Notable feature uses:
   to `origin/main`, but callers can override it for pre-merge
   end-to-end tests that should create generated implementation worktrees
   from another ref.
-- **Approval-gated delayed creation**: the planning run prepares the
-  draft/summary/handoff first, then blocks on
-  `create_implementer_run_after_approval` until the caller resumes the
-  same run with approval.
-- **Backend-accurate handoff**: after delayed `init`, the caller
-  inspects `run brief <new-run-id>` and then executes the initialized
-  implementer run with `run --resume-run <new-run-id>`.
+- **Initialized-run review**: planning creates the implementer run in
+  `initialized`, reviews it with `plan-review`, and only then hands it
+  to the caller for `run ready`.
+- **Same-run review fixes**: if initialized-run review blocks, the
+  planner updates temp artifacts, replaces planning-run attachments,
+  reinitializes the same implementer run with `init --run-id`, and
+  resumes the same `plan-review` run for a delta pass.
+- **Backend-accurate handoff**: callers inspect
+  `run inspect <new-run-id>`, group attachments, and
+  `run brief <new-run-id>` before promoting/executing the initialized
+  implementer run with `run ready` and `run --resume-run`.
 - **Terminal publish step**: generated implementation plans end with
   `push_branch_and_create_pr`, which records branch/push/PR evidence as
   part of the normal successful workflow.
@@ -138,18 +144,21 @@ Notable feature uses:
 
 - Path: `assignments/plan-review/assignment.md`
 - Vars:
-  - `plan_draft` (string, required) — absolute path to the draft
-    assignment file being reviewed.
+  - `initialized_run_id` (string, required) — initialized implementer run
+    whose frozen task state is being reviewed.
   - `planning_run_id` (string, required) — canonical run id whose task
-    notes carry the brief, contract, assumptions, and evidence.
+    notes and group attachments carry the brief, contract, assumptions,
+    summary, and seed artifact.
 
-Nested review assignment for `plan-feature`. Checks contract fidelity,
+Nested review assignment for `plan-feature`. It runs `run inspect` on
+the initialized implementer run, downloads planning-run
+`assignment-seed.md` and `assignment-summary.md` through group attachment
+rows using row `ownerRunId` plus row `id`, then checks contract fidelity,
 task graph structure, task-id/verifiability, and workflow wiring.
 Produces a synthesis and an explicit approval decision in the
 `approval` task — exit code 0 signals approval, exit code 2 signals
-blocked. On resume, performs a delta-focused re-review rather than a
-full re-walk. Review checks now also cover the `sources` var model and
-descendant worktree inheritance wiring.
+blocked. On resume, performs a delta-focused re-review of the current
+initialized run and refreshed attachments.
 
 ### `code-review`
 
@@ -199,8 +208,8 @@ subagents for parallelism.
 
 | Agent | Typical assignment | Notes |
 |-------|-------------------|-------|
-| `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review` and blocks for caller approval before delayed implementer creation. |
-| `implementer` | generated plan assignment | Created by `plan-feature` after approval; inspect `run brief` and then execute with `run --resume-run`. |
+| `planner` | `plan-feature` | Produces an initialized implementer run and planning-run attachments; uses nested `plan-review` before caller handoff. |
+| `implementer` | generated plan assignment | Created by `plan-feature`; inspect `run inspect`, group attachments, and `run brief`, then promote/execute with `run ready` and `run --resume-run`. |
 | `code-reviewer` | `plan-review`, `code-review`, or `code-review-direct` | Nested and direct review surfaces. |
 | `doc-reviewer` | `doc-review` | Review-only, writes no files. |
 | any | `repo-orientation` / `familiarize` | Quick or deep onboarding before other work. |
@@ -209,12 +218,12 @@ subagents for parallelism.
 ## Special features in use
 
 - **Ambiguity gate** — `plan-feature` `capture_feature` task.
-- **Approval-gated creation** — `plan-feature` keeps the planning run
-  blocked until the caller resumes it with approval to create the
-  implementer run.
-- **Backend-accurate execution handoff** — after delayed `init`, callers
-  inspect `run brief` and then execute the initialized implementer run
-  with `run --resume-run` instead of assuming a passive-only workflow.
+- **Initialized-run review** — `plan-feature` initializes the implementer
+  run before review, then `plan-review` inspects that run plus group
+  planning attachments.
+- **Backend-accurate execution handoff** — callers inspect `run inspect`,
+  group attachments, and `run brief`, then execute the initialized
+  implementer run with `run ready` and `run --resume-run`.
 - **Locked tasks** — `plan-feature` template locks the task list so
   executors cannot silently drop or reorder tasks.
 - **Dependencies** — planning → implementation → code-review workflows

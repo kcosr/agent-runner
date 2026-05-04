@@ -121,6 +121,10 @@
 
 ### Added
 
+- Added `task-runner run inspect <run-id>` as a text-only
+  review/debug/audit snapshot with full brief, caller instructions, task
+  bodies/notes, runtime var source summaries, and group attachment owner
+  rows.
 - Added run-group-aware runtime interpolation for fresh cwd values and
   launcher command/args, plus `TASK_RUNNER_RUN_ID`,
   `TASK_RUNNER_RUN_GROUP_ID`, and `TASK_RUNNER_CWD` backend wrapper env.
@@ -354,6 +358,9 @@
 
 ### Changed
 
+- Changed bundled `plan-feature` and `plan-review` to review initialized
+  implementer runs plus planning-run group attachments instead of
+  draft-path-only review.
 - Terminal non-passive runs now allow task status edits through the
   existing task mutation path while still rejecting task add and preserving
   historical lifecycle fields until normal resume execution changes them.

@@ -112,6 +112,7 @@ import {
   renderRunClearDependencies,
   renderRunClearGroup,
   renderRunDelete,
+  renderRunInspect,
   renderRunList,
   renderRunQueueResumeMessage,
   renderRunQueuedResumeMessages,
@@ -153,6 +154,7 @@ Commands:
   run status <id>         Read a run and print its current status.
   run audit <id>          Read the persisted audit history for a run.
   run brief <id>          Print the canonical worker handoff for a run.
+  run inspect <id>        Print a deterministic review/debug snapshot.
   run reconfigure <id>    Patch vars/message for an initialized run.
   run queue-message <id> <text>
                           Queue a follow-up message for a live run.
@@ -229,6 +231,8 @@ Task command options:
   --name <text>           (attachment add) Optional display name.
   --mime-type <type>      (attachment add) Optional MIME type override.
   --scope <run|group>     (attachment list) Attachment listing scope.
+  --attachments-scope <run|group>
+                          (run inspect) Attachment listing scope.
 
 Host selection:
   --connect <ws-url>      Route the command through the daemon host.
@@ -843,6 +847,67 @@ async function runRunBrief(parsed: ParsedArgs, connect?: DaemonConnectContext): 
   }
 }
 
+async function runRunInspect(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
+  try {
+    if (parsed.outputFormatExplicit) {
+      throw new CommandError("run inspect does not support --output-format");
+    }
+    if (parsed.fields.length > 0) {
+      throw new CommandError("run inspect does not support --field");
+    }
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed, {
+      allowInspectAttachmentScope: true,
+    });
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run inspect only supports <run-id>, --attachments-scope, and --connect (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const target = normalizeRunIdTarget(parsed.positionals[0], "run inspect");
+    if (!target) {
+      process.stderr.write("task-runner: run inspect requires a run id\n");
+      process.stderr.write("Usage: task-runner run inspect <id> [--attachments-scope run|group]\n");
+      process.exit(3);
+    }
+    if (parsed.positionals.length > 1) {
+      process.stderr.write(
+        `task-runner: run inspect takes exactly one run id; got "${parsed.positionals[1]}"\n`,
+      );
+      process.exit(3);
+    }
+    const attachmentsScope = parsed.inspectAttachmentsScope ?? "group";
+    const result =
+      connect === undefined
+        ? {
+            detail: getRun(target),
+            brief: getRunBrief(target),
+            attachments: getAttachmentList(target, { scope: attachmentsScope }),
+          }
+        : await withDaemonClient(connect, async (client) => {
+            const [detailResult, briefResult, attachments] = await Promise.all([
+              client.call<{ run: ReturnType<typeof getRun> }>("runs.get", { target }),
+              client.call<{ brief: string }>("runs.brief", { target }),
+              client.listAttachments(target, { scope: attachmentsScope }),
+            ]);
+            return {
+              detail: detailResult.run,
+              brief: briefResult.brief,
+              attachments,
+            };
+          });
+    process.stdout.write(
+      renderRunInspect({
+        ...result,
+        attachmentsScope,
+      }),
+    );
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
 function queuedMessageText(parsed: ParsedArgs): string | undefined {
   if (parsed.positionals.length < 2) {
     return undefined;
@@ -1254,6 +1319,7 @@ function unsupportedFlagsForGroupedCommand(
     allowAttachmentName?: boolean;
     allowAttachmentMimeType?: boolean;
     allowAttachmentScope?: boolean;
+    allowInspectAttachmentScope?: boolean;
     allowDependencyRef?: boolean;
     allowScheduleInitFlags?: boolean;
     allowRunScheduleFlags?: boolean;
@@ -1313,6 +1379,8 @@ function unsupportedFlagsForGroupedCommand(
   }
   if (!opts.allowAttachmentScope && parsed.attachmentScope !== undefined)
     unsupported.push("--scope");
+  if (!opts.allowInspectAttachmentScope && parsed.inspectAttachmentsScope !== undefined)
+    unsupported.push("--attachments-scope");
   if (!opts.allowLimit && parsed.limit !== undefined) unsupported.push("--limit");
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
   if (!opts.allowMessageFile && parsed.messageFile !== undefined)
@@ -2888,6 +2956,9 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "brief") {
       await runRunBrief(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "inspect") {
+      await runRunInspect(parsed, daemonConnect);
     }
     if (parsed.subcommand === "reconfigure") {
       await runReconfigureCommand(parsed, daemonConnect);

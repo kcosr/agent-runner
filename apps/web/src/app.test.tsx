@@ -380,6 +380,11 @@ function makeDetail(
     callerInstructions: null,
     lockedFields: ["tasks"],
     runtimeVars: {},
+    runtimeVarSources: {},
+    launcher: {
+      kind: "direct",
+      name: "direct",
+    },
     capabilities: {
       canArchive: false,
       canUnarchive: false,

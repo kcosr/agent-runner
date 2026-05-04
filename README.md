@@ -137,6 +137,7 @@ task-runner run \
 ```bash
 task-runner status
 task-runner run status <run-id>
+task-runner run inspect <run-id>
 task-runner run brief <run-id>
 task-runner run audit <run-id>
 task-runner task list <run-id>
@@ -462,7 +463,7 @@ use `task-runner run set-group` or `clear-group` to mutate membership.
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon (WS JSON-RPC + HTTP/SSE + web UI) |
 | `status` | Print system/environment status |
-| `run status\|brief\|audit` | Print run state, the composed worker handoff, or persisted audit history |
+| `run status\|inspect\|brief\|audit` | Print run state, a review/debug snapshot, the composed worker handoff, or persisted audit history |
 | `task list\|show\|set\|append-notes\|add` | Run task-state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
 | `list agents\|assignments\|launchers\|tasks\|runs` | Enumerate definitions and runs |
@@ -483,7 +484,8 @@ See [docs/cli.md](docs/cli.md) for the full flag-by-flag reference.
 Key rules:
 
 - `task-runner status` takes no run id and reports config/state/daemon info.
-- `task-runner run status`, `task-runner run brief`, and `task-runner run audit` accept a run id, not a workspace path.
+- `task-runner run status`, `task-runner run inspect`, `task-runner run brief`, and `task-runner run audit` accept a run id, not a workspace path.
+- `run inspect` is text-only (no `--output-format`, no `--field`) and defaults to group-scoped attachments.
 - `run brief` is text-only (no `--output-format`, no `--field`).
 - `run audit --output-format json` returns `{ runId, events, lastCursor }`; text output renders the persisted audit envelopes chronologically.
 - `run status --output-format json` returns the shared `RunDetail` DTO, including full `note` text plus `pinned`.

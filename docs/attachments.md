@@ -93,6 +93,15 @@ method.
 task-runner attachment download <run-id> <attachment-id> <output-path>
 ```
 
+For group-scoped list rows, `<run-id>` must be the row `ownerRunId`.
+Attachments may belong to another run in the group, so do not assume the
+run you listed from owns every row:
+
+```bash
+task-runner attachment list <run-id> --scope group --output-format json
+task-runner attachment download <ownerRunId-from-row> <id-from-row> /tmp/artifacts/
+```
+
 If `<output-path>` ends with `/`, it is treated as a directory and the
 filename is derived from the attachment. Otherwise it is treated as an
 exact file path. The command errors if the destination already exists or

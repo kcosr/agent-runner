@@ -98,6 +98,25 @@ export const runTaskMutationCapabilitiesSchema: z.ZodType<RunTaskMutationCapabil
   canAdd: z.boolean(),
 });
 
+const runtimeVarSourceRecordSchema = z.object({
+  source: z.enum(["cli", "web", "env", "parent", "default", "hook"]),
+  envName: z.string().optional(),
+  inheritedFromRunId: z.string().optional(),
+  redacted: z.boolean().optional(),
+});
+
+const runLauncherDetailSchema = z.union([
+  z.object({
+    kind: z.literal("direct"),
+    name: z.literal("direct"),
+  }),
+  z.object({
+    kind: z.literal("prefix"),
+    name: z.string().nullable(),
+    source: z.enum(["builtin", "named", "inline"]),
+  }),
+]);
+
 const runExecutionSchema = z
   .object({
     hostMode: z.enum(["embedded", "daemon"]),
@@ -323,6 +342,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   backend: z.string(),
   model: z.string().nullable(),
   effort: z.string().nullable(),
+  launcher: runLauncherDetailSchema,
   name: z.string().nullable(),
   note: z.string().nullable(),
   pinned: z.boolean(),
@@ -360,6 +380,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   callerInstructions: z.string().nullable(),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)),
   runtimeVars: z.record(z.string(), z.unknown()),
+  runtimeVarSources: z.record(z.string(), runtimeVarSourceRecordSchema),
   execution: runExecutionSchema,
   capabilities: runCapabilitiesSchema,
 });

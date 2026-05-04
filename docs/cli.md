@@ -13,7 +13,7 @@ All commands accept `--help` / `-h`.
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon / control plane |
 | `status` | Print system/environment status |
-| `run status\|brief\|audit` | Print run state, the composed worker handoff, or persisted audit history |
+| `run status\|inspect\|brief\|audit` | Print run state, a review/debug snapshot, the composed worker handoff, or persisted audit history |
 | `task list\|show\|set\|append-notes\|add` | Run task-state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
 | `list agents\|assignments\|launchers\|tasks\|runs` | Enumerate definitions and runs |
@@ -238,6 +238,29 @@ Print the composed worker handoff for a run. Text-only — does not support
 ```bash
 task-runner run brief <run-id>
 ```
+
+## `run inspect <run-id>`
+
+Print a deterministic text snapshot for review, debugging, and audit. It
+includes run metadata, lifecycle/session state, runtime vars using the
+redacted `RunDetail` display values, dependency rows, attachments, caller
+instructions, the full worker brief, full task bodies/notes, and useful
+follow-up commands.
+
+```bash
+task-runner run inspect <run-id> [--attachments-scope run|group]
+```
+
+- Run-id-only. Paths and `..` are not accepted.
+- Text-only. `--output-format` and `--field` are rejected; use
+  `run status --output-format json` and
+  `attachment list --output-format json` for machine-readable data.
+- `--attachments-scope group` is the default and includes rows from every
+  run in the same run group. Use `--attachments-scope run` for target-run
+  attachments only.
+- Group attachment rows print `owner=<ownerRunId>`. Download those rows
+  with the row `ownerRunId` plus row `id`, not necessarily the inspected
+  run id.
 
 ## `run audit <run-id>`
 

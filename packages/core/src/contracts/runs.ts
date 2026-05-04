@@ -13,8 +13,10 @@ import type {
   RunDependencyRef,
   RunExecution,
   RunSchedule,
+  RuntimeVarSourceRecord,
   TaskSnapshot,
 } from "../core/run/manifest.js";
+import { cloneRuntimeVarSources } from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
 import { type RunScheduleState, deriveScheduleState } from "../core/run/schedule.js";
 import { deriveEffectiveStatus } from "../core/run/status.js";
@@ -32,6 +34,14 @@ export type {
 export type { RunDependencyRef } from "../core/run/manifest.js";
 export type { QueuedResumeMessage } from "../core/run/manifest.js";
 export type { RunSchedule, RunScheduleState };
+
+export type RunLauncherDetail =
+  | { kind: "direct"; name: "direct" }
+  | {
+      kind: "prefix";
+      name: string | null;
+      source: "builtin" | "named" | "inline";
+    };
 
 export interface RunActiveTask {
   id: string;
@@ -161,6 +171,7 @@ export interface RunDetail {
   backend: string;
   model: string | null;
   effort: string | null;
+  launcher: RunLauncherDetail;
   name: string | null;
   note: string | null;
   pinned: boolean;
@@ -196,6 +207,7 @@ export interface RunDetail {
   callerInstructions: string | null;
   lockedFields: LockableField[];
   runtimeVars: Record<string, unknown>;
+  runtimeVarSources: Record<string, RuntimeVarSourceRecord>;
   execution: RunExecution;
   capabilities: RunCapabilities;
 }
@@ -534,6 +546,17 @@ export function deriveRunCapabilities(
   };
 }
 
+function toRunLauncherDetail(launcher: RunManifest["launcher"]): RunLauncherDetail {
+  if (launcher.kind === "direct") {
+    return { kind: "direct", name: "direct" };
+  }
+  return {
+    kind: "prefix",
+    name: launcher.name,
+    source: launcher.source,
+  };
+}
+
 export function toRunDetail(result: RunDetailInput): RunDetail {
   const { manifest } = result;
   const relatedManifests =
@@ -564,6 +587,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     backend: manifest.backend,
     model: manifest.model,
     effort: manifest.effort,
+    launcher: toRunLauncherDetail(manifest.launcher),
     name: manifest.name,
     note: manifest.note,
     pinned: manifest.pinned,
@@ -621,6 +645,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     callerInstructions: manifest.callerInstructions,
     lockedFields: [...manifest.lockedFields],
     runtimeVars: redactRuntimeVarsForDisplay(manifest),
+    runtimeVarSources: cloneRuntimeVarSources(manifest.runtimeVarSources),
     execution: manifest.execution,
     capabilities: deriveRunCapabilities(manifest, dependencyState),
   };
