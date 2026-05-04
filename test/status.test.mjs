@@ -469,7 +469,7 @@ Worker assignment body.
   assert.match(text, /Full task notes\./);
   assert.match(
     text,
-    /alpha_secret: \{\"redacted\":true,\"source\":\"env\",\"envName\":\"ALPHA_SECRET\"\}/,
+    /alpha_secret: <redacted> \(source: source=env, envName=ALPHA_SECRET, redacted=true\)/,
   );
   assert.doesNotMatch(text, /raw-secret/);
   assert.ok(text.indexOf("alpha_secret:") < text.indexOf("beta:"));

@@ -657,7 +657,10 @@ tasks:
       you agree with, apply the fix and cite changed files or artifact sections
       in Notes. For each finding you decline, write a short justification.
 
-      Before resuming the same review run, perform all five steps:
+      If `review_initialized_plan` reached `success` on the first pass and
+      there are no findings to apply, mark this task complete with a one-line
+      note saying so. Otherwise, before resuming the same review run, perform
+      all five steps:
 
       1. Update or recreate the draft assignment file in the temp scratch directory.
       2. Regenerate or update `assignment-summary.md` in the same temp scratch directory.

@@ -28,6 +28,7 @@ import type {
   TaskDetailsResult,
   TaskListResult,
 } from "@task-runner/core/core/commands/service.js";
+import { workspaceAssignmentPath } from "@task-runner/core/core/run/manifest.js";
 import { formatSchedule } from "@task-runner/core/core/run/schedule.js";
 import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
 import type { HostMode } from "../daemon/config.js";
@@ -150,6 +151,14 @@ function formatRunInspectExecution(detail: RunDetail): string {
 }
 
 function formatRunInspectRuntimeValue(value: unknown): string {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "redacted" in value &&
+    value.redacted === true
+  ) {
+    return "<redacted>";
+  }
   if (typeof value === "string") {
     return value;
   }
@@ -180,23 +189,15 @@ function formatRunInspectRuntimeSource(detail: RunDetail, name: string): string 
   return parts.join(", ");
 }
 
-function formatRunInspectDependency(
-  dependency: RunDependencyRef | RunDetail["dependencies"][number],
-): string {
+function formatRunInspectDependency(dependency: RunDetail["dependencies"][number]): string {
   if (dependency.type === "run") {
-    if ("missing" in dependency) {
-      const status = dependency.missing
-        ? "missing"
-        : `${dependency.effectiveStatus ?? dependency.status}${dependency.satisfied ? " ready" : " not-ready"}`;
-      return `run ${dependency.runId}  status=${status}  name=${dependency.name ?? "Unnamed"}`;
-    }
-    return `run ${dependency.runId}`;
+    const status = dependency.missing
+      ? "missing"
+      : `${dependency.effectiveStatus ?? dependency.status}${dependency.satisfied ? " ready" : " not-ready"}`;
+    return `run ${dependency.runId}  status=${status}  name=${dependency.name ?? "Unnamed"}`;
   }
-  if ("missing" in dependency) {
-    const status = dependency.missing ? "missing" : dependency.satisfied ? "ready" : "not-ready";
-    return `group ${dependency.groupId}  status=${status}  successful=${dependency.successful}/${dependency.total}  unsatisfied=${dependency.unsatisfied}  archivedExcluded=${dependency.archivedExcluded}`;
-  }
-  return `group ${dependency.groupId}`;
+  const status = dependency.missing ? "missing" : dependency.satisfied ? "ready" : "not-ready";
+  return `group ${dependency.groupId}  status=${status}  successful=${dependency.successful}/${dependency.total}  unsatisfied=${dependency.unsatisfied}  archivedExcluded=${dependency.archivedExcluded}`;
 }
 
 function formatRunInspectAttachment(attachment: AttachmentListEntry): string {
@@ -222,7 +223,7 @@ export function renderRunInspect(input: RunInspectRenderInput): string {
     return left.id.localeCompare(right.id);
   });
   const assignmentWorkspacePath = detail.assignment
-    ? `${detail.workspaceDir}/assignment-seed.md`
+    ? workspaceAssignmentPath(detail.workspaceDir)
     : "none";
   const activeTask = detail.activeTask
     ? `${detail.activeTask.id} - ${detail.activeTask.title}`
@@ -331,12 +332,15 @@ export function renderRunInspect(input: RunInspectRenderInput): string {
   lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
   lines.push(`  ${taskRunnerCmd} run status ${detail.runId} --output-format json`);
   lines.push(`  ${taskRunnerCmd} attachment list ${detail.runId} --scope group`);
-  lines.push(
-    `  ${taskRunnerCmd} run ready ${detail.runId}        # only when status is initialized and canReady is true`,
-  );
-  lines.push(
-    `  ${taskRunnerCmd} run --resume-run ${detail.runId} # when status/capabilities make resume relevant`,
-  );
+  if (detail.capabilities.canReady) {
+    lines.push(`  ${taskRunnerCmd} run ready ${detail.runId}`);
+  }
+  if (detail.capabilities.canResume || detail.status === "ready") {
+    lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId}`);
+  }
+  if (detail.archivedAt !== null && detail.capabilities.canUnarchive) {
+    lines.push(`  ${taskRunnerCmd} run unarchive ${detail.runId}`);
+  }
 
   return `${lines.join("\n")}\n`;
 }

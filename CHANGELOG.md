@@ -361,6 +361,8 @@
 - Changed bundled `plan-feature` and `plan-review` to review initialized
   implementer runs plus planning-run group attachments instead of
   draft-path-only review.
+- `RunDetail` JSON now includes required display-safe `launcher` and
+  `runtimeVarSources` fields for run-detail consumers.
 - Terminal non-passive runs now allow task status edits through the
   existing task mutation path while still rejecting task add and preserving
   historical lifecycle fields until normal resume execution changes them.
