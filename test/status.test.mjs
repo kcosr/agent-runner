@@ -1,6 +1,14 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -489,6 +497,15 @@ test("run inspect CLI prints terminal runs and rejects unsupported inspect flags
   assert.match(ok, /Lifecycle status: success/);
   assert.match(ok, /Worker brief:/);
   assert.match(ok, /Useful commands:/);
+
+  const tempPath = runCli(["run", "inspect", outcome.runId, "--temp-file"], { cwd: dir }).trim();
+  assert.match(tempPath, new RegExp(`task-runner-inspect-${outcome.runId}-.*\\.txt$`));
+  assert.equal(statSync(tempPath).mode & 0o777, 0o600);
+  const tempText = readFileSync(tempPath, "utf8");
+  assert.match(tempText, new RegExp(`-- run inspect ${outcome.runId} --`));
+  assert.match(tempText, /Lifecycle status: success/);
+  assert.doesNotMatch(tempPath, /Lifecycle status: success/);
+  unlinkSync(tempPath);
 
   const pathTarget = runCliExpectFail(["run", "inspect", outcome.workspaceDir], { cwd: dir });
   assert.equal(pathTarget.status, 3);

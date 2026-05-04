@@ -1838,7 +1838,7 @@ test("built-in plan-review reviews initialized runs and group planning artifacts
   assert.ok(structureTask);
   assert.ok(workflowTask);
   assert.ok(approvalTask);
-  assert.match(orientTask.body ?? "", /run inspect \{\{initialized_run_id\}\}/);
+  assert.match(orientTask.body ?? "", /run inspect \{\{initialized_run_id\}\} --temp-file/);
   assert.match(
     orientTask.body ?? "",
     /attachment list \{\{initialized_run_id\}\} --scope group --output-format json/,

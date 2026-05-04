@@ -138,6 +138,7 @@ task-runner run \
 task-runner status
 task-runner run status <run-id>
 task-runner run inspect <run-id>
+task-runner run inspect <run-id> --temp-file
 task-runner run brief <run-id>
 task-runner run audit <run-id>
 task-runner task list <run-id>
@@ -485,7 +486,7 @@ Key rules:
 
 - `task-runner status` takes no run id and reports config/state/daemon info.
 - `task-runner run status`, `task-runner run inspect`, `task-runner run brief`, and `task-runner run audit` accept a run id, not a workspace path.
-- `run inspect` is text-only (no `--output-format`, no `--field`) and defaults to group-scoped attachments.
+- `run inspect` is text-only (no `--output-format`, no `--field`) and defaults to group-scoped attachments. Use `--temp-file` to write long inspect output to a private temp file and print only the path.
 - `run brief` is text-only (no `--output-format`, no `--field`).
 - `run audit --output-format json` returns `{ runId, events, lastCursor }`; text output renders the persisted audit envelopes chronologically.
 - `run status --output-format json` returns the shared `RunDetail` DTO, including full `note` text plus `pinned`.

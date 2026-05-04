@@ -248,7 +248,7 @@ instructions, the full worker brief, full task bodies/notes, and useful
 follow-up commands.
 
 ```bash
-task-runner run inspect <run-id> [--attachments-scope run|group]
+task-runner run inspect <run-id> [--attachments-scope run|group] [--temp-file]
 ```
 
 - Run-id-only. Paths and `..` are not accepted.
@@ -258,6 +258,9 @@ task-runner run inspect <run-id> [--attachments-scope run|group]
 - `--attachments-scope group` is the default and includes rows from every
   run in the same run group. Use `--attachments-scope run` for target-run
   attachments only.
+- `--temp-file` writes the same text snapshot to a private temp file and
+  prints only the path on stdout. Use it when a terminal or agent harness
+  might truncate long inspect output.
 - Group attachment rows print `owner=<ownerRunId>`. Download those rows
   with the row `ownerRunId` plus row `id`, not necessarily the inspected
   run id.

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import {
   type RunCommandOverrides,
   addDependency,
@@ -233,6 +235,8 @@ Task command options:
   --scope <run|group>     (attachment list) Attachment listing scope.
   --attachments-scope <run|group>
                           (run inspect) Attachment listing scope.
+  --temp-file             (run inspect) Write text output to a temp file and
+                          print only the path.
 
 Host selection:
   --connect <ws-url>      Route the command through the daemon host.
@@ -857,17 +861,20 @@ async function runRunInspect(parsed: ParsedArgs, connect?: DaemonConnectContext)
     }
     const unsupported = unsupportedFlagsForGroupedCommand(parsed, {
       allowInspectAttachmentScope: true,
+      allowInspectTempFile: true,
     });
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run inspect only supports <run-id>, --attachments-scope, and --connect (got ${unsupported.join(", ")})\n`,
+        `task-runner: run inspect only supports <run-id>, --attachments-scope, --temp-file, and --connect (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
     const target = normalizeRunIdTarget(parsed.positionals[0], "run inspect");
     if (!target) {
       process.stderr.write("task-runner: run inspect requires a run id\n");
-      process.stderr.write("Usage: task-runner run inspect <id> [--attachments-scope run|group]\n");
+      process.stderr.write(
+        "Usage: task-runner run inspect <id> [--attachments-scope run|group] [--temp-file]\n",
+      );
       process.exit(3);
     }
     if (parsed.positionals.length > 1) {
@@ -896,16 +903,26 @@ async function runRunInspect(parsed: ParsedArgs, connect?: DaemonConnectContext)
               attachments,
             };
           });
-    process.stdout.write(
-      renderRunInspect({
-        ...result,
-        attachmentsScope,
-      }),
-    );
+    const rendered = renderRunInspect({
+      ...result,
+      attachmentsScope,
+    });
+    if (parsed.inspectTempFile) {
+      process.stdout.write(`${writeInspectTempFile(target, rendered)}\n`);
+    } else {
+      process.stdout.write(rendered);
+    }
     process.exit(0);
   } catch (err) {
     exitCommandFailure(err, connect?.connectUrl);
   }
+}
+
+function writeInspectTempFile(runId: string, contents: string): string {
+  const safeRunId = runId.replace(/[^A-Za-z0-9._-]/g, "_");
+  const path = join(tmpdir(), `task-runner-inspect-${safeRunId}-${randomUUID()}.txt`);
+  writeFileSync(path, contents, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  return path;
 }
 
 function queuedMessageText(parsed: ParsedArgs): string | undefined {
@@ -1320,6 +1337,7 @@ function unsupportedFlagsForGroupedCommand(
     allowAttachmentMimeType?: boolean;
     allowAttachmentScope?: boolean;
     allowInspectAttachmentScope?: boolean;
+    allowInspectTempFile?: boolean;
     allowDependencyRef?: boolean;
     allowScheduleInitFlags?: boolean;
     allowRunScheduleFlags?: boolean;
@@ -1381,6 +1399,7 @@ function unsupportedFlagsForGroupedCommand(
     unsupported.push("--scope");
   if (!opts.allowInspectAttachmentScope && parsed.inspectAttachmentsScope !== undefined)
     unsupported.push("--attachments-scope");
+  if (!opts.allowInspectTempFile && parsed.inspectTempFile) unsupported.push("--temp-file");
   if (!opts.allowLimit && parsed.limit !== undefined) unsupported.push("--limit");
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
   if (!opts.allowMessageFile && parsed.messageFile !== undefined)

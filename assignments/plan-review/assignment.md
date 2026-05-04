@@ -47,15 +47,17 @@ tasks:
     body: |
       Treat run `{{initialized_run_id}}` as the canonical
       execution object. Read it and the planning evidence before
-      reviewing anything, saving the outputs in
-      `/tmp/task-runner-plan-review-{{run_id}}` for later review
+      reviewing anything. Save the long inspect output with
+      `--temp-file`; save the JSON outputs and downloaded artifacts
+      in `/tmp/task-runner-plan-review-{{run_id}}` for later review
       tasks to reuse:
 
           mkdir -p /tmp/task-runner-plan-review-{{run_id}}
-          {{task_runner_cmd}} run inspect {{initialized_run_id}} > /tmp/task-runner-plan-review-{{run_id}}/initialized-inspect.txt
+          inspect_path=$({{task_runner_cmd}} run inspect {{initialized_run_id}} --temp-file)
           {{task_runner_cmd}} run status {{initialized_run_id}} --output-format json > /tmp/task-runner-plan-review-{{run_id}}/initialized-status.json
           {{task_runner_cmd}} run status {{planning_run_id}} --output-format json --field tasks > /tmp/task-runner-plan-review-{{run_id}}/planning-tasks.json
           {{task_runner_cmd}} attachment list {{initialized_run_id}} --scope group --output-format json > /tmp/task-runner-plan-review-{{run_id}}/group-attachments.json
+          printf '%s\n' "$inspect_path" > /tmp/task-runner-plan-review-{{run_id}}/initialized-inspect-path.txt
 
       In `group-attachments.json`, find rows whose `name` is
       `assignment-seed.md` and `assignment-summary.md`. Download
@@ -75,6 +77,7 @@ tasks:
       Summarize in Notes:
         - initialized run id, lifecycle status, effective status,
           cwd, run group, and display name
+        - the inspect temp file path from `initialized-inspect-path.txt`
         - the feature the initialized run claims to implement
         - high-level task shape from the initialized run's tasks
         - whether `assignment-seed.md` and `assignment-summary.md`
@@ -98,9 +101,10 @@ tasks:
         - initialized run orient/feature context and task bodies
         - downloaded `assignment-summary.md`
         - downloaded `assignment-seed.md`
-        - worker brief from `initialized-inspect.txt`
+        - worker brief from the inspect temp file listed in
+          `initialized-inspect-path.txt`
         - caller instructions from `initialized-status.json` or
-          `initialized-inspect.txt`
+          the inspect temp file listed in `initialized-inspect-path.txt`
 
       Look for:
         - feature brief details that disappeared or drifted

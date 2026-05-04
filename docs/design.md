@@ -209,14 +209,15 @@ The workflow template teaches the worker to use:
 The public read surface is:
 
 ```bash
-task-runner run inspect <run-id>
+task-runner run inspect <run-id> [--temp-file]
 task-runner run brief <run-id>
 task-runner run audit <run-id>
 ```
 
 `run inspect` is the deterministic text review/debug surface. It embeds
 the full worker brief but does not replace `run brief` as the canonical
-worker handoff.
+worker handoff. `--temp-file` writes the snapshot to a private temp file
+and prints only the path for long-output agent workflows.
 `run brief` is text-only. It is not projected through `run status --field ...`.
 `run audit` is the raw persisted audit-history read surface.
 
@@ -609,7 +610,7 @@ manifest was built.
 
 - `task-runner status`
 - `task-runner run status <run-id>`
-- `task-runner run inspect <run-id>`
+- `task-runner run inspect <run-id> [--temp-file]`
 - `task-runner run brief <run-id>`
 - `task-runner run audit <run-id>`
 - `task-runner task list <run-id>`

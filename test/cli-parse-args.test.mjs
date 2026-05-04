@@ -172,11 +172,14 @@ test("parseArgs: run brief parses as a grouped run subcommand", () => {
 });
 
 test("parseArgs: run inspect parses as a grouped run subcommand with attachment scope", () => {
-  const parsed = parseArgs(argv("run", "inspect", "abc123", "--attachments-scope", "run"));
+  const parsed = parseArgs(
+    argv("run", "inspect", "abc123", "--attachments-scope", "run", "--temp-file"),
+  );
   assert.equal(parsed.command, "run");
   assert.equal(parsed.subcommand, "inspect");
   assert.deepEqual(parsed.positionals, ["abc123"]);
   assert.equal(parsed.inspectAttachmentsScope, "run");
+  assert.equal(parsed.inspectTempFile, true);
 });
 
 test("parseArgs: run inspect attachment scope validates values", () => {

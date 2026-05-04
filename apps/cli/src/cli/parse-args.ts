@@ -58,6 +58,7 @@ export interface ParsedArgs {
   attachmentMimeType?: string;
   attachmentScope?: AttachmentScope;
   inspectAttachmentsScope?: AttachmentScope;
+  inspectTempFile?: boolean;
   connect?: string;
   connectHost?: string;
   connectLocalPort?: string;
@@ -345,6 +346,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
         );
       }
       result.inspectAttachmentsScope = next as AttachmentScope;
+    } else if (arg === "--temp-file") {
+      result.inspectTempFile = true;
     } else if (arg === "--clear") {
       result.clear = true;
     } else if (arg === "--detach") {
