@@ -84,7 +84,7 @@ test("cursor backend merges streamed and final transcripts when they differ", as
           `${JSON.stringify({ type: "partial_output", text: " world" })}\n`,
           `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Hello world" } })}\n`,
           `${JSON.stringify({ type: "tool_call", tool: "shell", arguments: "echo hi" })}\n`,
-          `${JSON.stringify({ type: "result", result: { result: "Final answer" } })}\n`,
+          `${JSON.stringify({ type: "result", result: "Final answer" })}\n`,
         ]),
       },
       model: "provider/gpt-5.4",
@@ -125,6 +125,42 @@ test("cursor backend merges streamed and final transcripts when they differ", as
   );
 });
 
+test("cursor backend parses assistant stream-json chunks and top-level result", async () => {
+  const dir = tempDir();
+  const command = writeFakeCursorAgent(dir);
+  const events = [];
+
+  const result = await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+    cursorBackend.invoke({
+      prompt: "Still there?",
+      cwd: dir,
+      env: {
+        ...process.env,
+        CURSOR_TEST_STDOUT_JSON: JSON.stringify([
+          `${JSON.stringify({ type: "system", subtype: "init", session_id: "sess-current" })}\n`,
+          `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "Still there?" }] }, session_id: "sess-current" })}\n`,
+          `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Yep" }] }, session_id: "sess-current", timestamp_ms: 1 })}\n`,
+          `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: " -" }] }, session_id: "sess-current", timestamp_ms: 2 })}\n`,
+          `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: " still here." }] }, session_id: "sess-current", timestamp_ms: 3 })}\n`,
+          `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Yep - still here." }] }, session_id: "sess-current" })}\n`,
+          `${JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "Yep - still here.", session_id: "sess-current" })}\n`,
+        ]),
+      },
+      resolvedBackendArgs: [],
+      timeoutSec: 10,
+      emit: (event) => events.push(event),
+    }),
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.sessionId, "sess-current");
+  assert.equal(result.transcript, "Yep - still here.");
+  assert.deepEqual(
+    events.filter((event) => event.type === "agent_message_delta").map((event) => event.text),
+    ["Yep", " -", " still here."],
+  );
+});
+
 test("cursor backend rejects malformed stream-json output", async () => {
   const dir = tempDir();
   const command = writeFakeCursorAgent(dir);
@@ -150,7 +186,7 @@ test("cursor backend rejects malformed stream-json output", async () => {
   assert.deepEqual(rawStdoutLines, ["not-json\n", "still-raw\n", "tail"]);
 });
 
-test("cursor backend rejects successful runs without a final result.result string", async () => {
+test("cursor backend rejects successful runs without a final result string", async () => {
   const dir = tempDir();
   const command = writeFakeCursorAgent(dir);
 
@@ -170,7 +206,7 @@ test("cursor backend rejects successful runs without a final result.result strin
           timeoutSec: 10,
         }),
       ),
-    /without a valid final result\.result string/,
+    /without a valid final result string/,
   );
 });
 
@@ -215,7 +251,7 @@ test("cursor backend inserts a boundary separator before the next partial output
           `${JSON.stringify({ type: "partial_output", text: "Hello world." })}\n`,
           `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Hello world." } })}\n`,
           `${JSON.stringify({ type: "partial_output", text: "Next message." })}\n`,
-          `${JSON.stringify({ type: "result", result: { result: "Final answer" } })}\n`,
+          `${JSON.stringify({ type: "result", result: "Final answer" })}\n`,
         ]),
       },
       resolvedBackendArgs: [],
@@ -243,7 +279,7 @@ test("cursor backend emits a fallback delta when only the final result transcrip
         ...process.env,
         CURSOR_TEST_STDOUT_JSON: JSON.stringify([
           `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Final answer" } })}\n`,
-          `${JSON.stringify({ type: "result", result: { result: "Final answer" } })}\n`,
+          `${JSON.stringify({ type: "result", result: "Final answer" })}\n`,
         ]),
       },
       resolvedBackendArgs: [],

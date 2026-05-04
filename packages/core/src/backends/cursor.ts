@@ -571,8 +571,28 @@ function captureSessionId(state: StreamState, event: Record<string, unknown>): v
 }
 
 function parseResultText(event: Record<string, unknown>): string | null {
-  if (!isRecord(event.result)) return null;
-  return typeof event.result.result === "string" ? event.result.result : null;
+  return typeof event.result === "string" ? event.result : null;
+}
+
+function cursorStreamAssistantText(event: Record<string, unknown>): string | null {
+  if (!isRecord(event.message) || event.message.role !== "assistant") {
+    return null;
+  }
+  const text = cursorContentText(event.message, "assistant");
+  return text.length > 0 ? text : null;
+}
+
+function appendCursorDelta(state: StreamState, delta: string): void {
+  if (state.pendingBoundary) {
+    const separator = streamBoundarySeparator(state.streamedText, delta);
+    if (separator.length > 0) {
+      state.streamedText += separator;
+      state.onText(separator);
+    }
+    state.pendingBoundary = false;
+  }
+  state.streamedText += delta;
+  state.onText(delta);
 }
 
 function processLine(state: StreamState, line: string): void {
@@ -605,21 +625,26 @@ function processLine(state: StreamState, line: string): void {
       state.parseError = new Error("cursor partial_output record is missing string text");
       return;
     }
-    const delta = event.text;
-    if (state.pendingBoundary) {
-      const separator = streamBoundarySeparator(state.streamedText, delta);
-      if (separator.length > 0) {
-        state.streamedText += separator;
-        state.onText(separator);
-      }
-      state.pendingBoundary = false;
-    }
-    state.streamedText += delta;
-    state.onText(delta);
+    appendCursorDelta(state, event.text);
     return;
   }
 
-  if (event.type === "assistant" || event.type === "tool_call") {
+  if (event.type === "assistant") {
+    const text = cursorStreamAssistantText(event);
+    if (
+      text !== null &&
+      (typeof event.timestamp_ms === "number" || state.streamedText.length === 0)
+    ) {
+      appendCursorDelta(state, text);
+      return;
+    }
+    if (state.streamedText.length > 0) {
+      state.pendingBoundary = true;
+    }
+    return;
+  }
+
+  if (event.type === "tool_call") {
     if (state.streamedText.length > 0) {
       state.pendingBoundary = true;
     }
@@ -677,7 +702,7 @@ export const cursorBackend: Backend = {
     }
     if (result.exitCode === 0 && state.resultText === null) {
       throw new Error(
-        "cursor stream-json completed successfully without a valid final result.result string",
+        "cursor stream-json completed successfully without a valid final result string",
       );
     }
 
