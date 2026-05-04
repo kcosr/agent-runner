@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { HttpError } from "./http-errors.js";
 import { TASK_RUNNER_DAEMON_AUTH_ENABLED_ENV, TASK_RUNNER_DAEMON_TOKEN_ENV } from "./protocol.js";
 
-export type DaemonAuthConfig =
+type DaemonAuthConfig =
   | {
       enabled: false;
     }

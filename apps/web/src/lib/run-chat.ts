@@ -14,7 +14,7 @@ interface RunChatRowBase {
   turnDivider?: RunChatTurnDivider;
 }
 
-export interface RunChatUserRow extends RunChatRowBase {
+interface RunChatUserRow extends RunChatRowBase {
   kind: "user";
   sessionIndex: number;
   source: "initial" | "resume";

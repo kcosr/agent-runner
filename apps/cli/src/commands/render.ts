@@ -40,18 +40,18 @@ interface SystemStatusResult {
   daemon: DaemonInfo | null;
 }
 
-export interface RunQueuedResumeMessagesResult {
+interface RunQueuedResumeMessagesResult {
   runId: string;
   queuedResumeMessages: QueuedResumeMessage[];
 }
 
-export interface QueueResumeMessageCliResult {
+interface QueueResumeMessageCliResult {
   runId: string;
   queuedResumeMessage: QueuedResumeMessage;
   queuedResumeMessageCount: number;
 }
 
-export interface RemoveQueuedResumeMessageCliResult {
+interface RemoveQueuedResumeMessageCliResult {
   runId: string;
   removedMessageId: string;
   queuedResumeMessageCount: number;

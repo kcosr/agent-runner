@@ -7,6 +7,7 @@ import {
   RunCommandError,
   executeRunCommand,
 } from "../packages/core/dist/run-command.js";
+import { idFor, writeCursorStore } from "./helpers/cursor-store.mjs";
 import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 function writeLauncher(baseDir, name, body, ext = ".yaml") {
@@ -259,23 +260,37 @@ test("executeRunCommand rejects passive execution with a command-level error", a
     );
   }));
 
-test("executeRunCommand rejects cursor bootstrap session import with a command-level error", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
-    await assert.rejects(
-      () =>
-        executeRunCommand({
-          initialize: true,
-          backendSessionId: "cursor-chat-1",
-          cliVars: {},
-          overrides: {
-            backend: "cursor",
-            message: "Seed an ad-hoc cursor run.",
-          },
-        }),
-      (err) =>
-        err instanceof RunCommandError &&
-        /--backend-session-id is unsupported for cursor/.test(err.message),
-    );
+test("executeRunCommand accepts cursor bootstrap session import with a valid store", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ rootDir }) => {
+    const sessionId = "cursor-chat-1";
+    await withEnv({ HOME: rootDir }, async () => {
+      writeCursorStore({
+        cwd: process.cwd(),
+        sessionId,
+        messageIds: [idFor(1), idFor(2)],
+        messages: [
+          [idFor(1), { role: "user", content: "Question" }],
+          [idFor(2), { role: "assistant", content: "Answer" }],
+        ],
+      });
+
+      const outcome = await executeRunCommand({
+        initialize: true,
+        backendSessionId: sessionId,
+        cliVars: {},
+        overrides: {
+          backend: "cursor",
+          message: "Seed an ad-hoc cursor run.",
+        },
+      });
+
+      assert.equal(outcome.manifest.status, "initialized");
+      assert.equal(outcome.manifest.backend, "cursor");
+      assert.equal(outcome.manifest.backendSessionId, sessionId);
+      assert.equal(outcome.manifest.attemptRecords.length, 1);
+      assert.equal(outcome.manifest.attemptRecords[0].provenance.kind, "backend_session");
+      assert.equal(outcome.manifest.attemptRecords[0].provenance.backend, "cursor");
+    });
   }));
 
 test("executeRunCommand rejects launcher overrides on resume before backend execution", async () =>

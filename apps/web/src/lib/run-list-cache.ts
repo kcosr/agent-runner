@@ -3,7 +3,7 @@ import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { runQueryKeys } from "./query.js";
 import { sortRunsByStartedAtDesc } from "./run-order.js";
 
-export interface RunListQueryMetadata {
+interface RunListQueryMetadata {
   includeArchived: boolean;
   runGroupId: string | null;
 }

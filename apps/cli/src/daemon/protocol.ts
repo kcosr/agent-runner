@@ -71,7 +71,7 @@ export interface JsonRpcNotification {
   params?: unknown;
 }
 
-export interface StreamDataNotification {
+interface StreamDataNotification {
   jsonrpc: "2.0";
   method: "stream.data";
   params: {
@@ -81,7 +81,7 @@ export interface StreamDataNotification {
   };
 }
 
-export interface StreamEndNotification {
+interface StreamEndNotification {
   jsonrpc: "2.0";
   method: "stream.end";
   params: {
@@ -90,7 +90,7 @@ export interface StreamEndNotification {
   };
 }
 
-export interface StreamErrorNotification {
+interface StreamErrorNotification {
   jsonrpc: "2.0";
   method: "stream.error";
   params: {
@@ -100,7 +100,7 @@ export interface StreamErrorNotification {
   };
 }
 
-export interface StreamCancelNotification {
+interface StreamCancelNotification {
   jsonrpc: "2.0";
   method: "stream.cancel";
   params: {
@@ -109,7 +109,7 @@ export interface StreamCancelNotification {
   };
 }
 
-export interface StreamWindowNotification {
+interface StreamWindowNotification {
   jsonrpc: "2.0";
   method: "stream.window";
   params: {
@@ -348,29 +348,24 @@ export interface TaskResult {
   task: RunTaskSummary;
 }
 
-/** @protocol */
 export interface AttachmentsListResult {
   attachments: AttachmentListEntry[];
 }
 
-/** @protocol */
 export interface AttachmentsRemoveResult {
   result: RunAttachmentRemoveResult;
 }
 
-/** @protocol */
 export interface AttachmentsUploadOpenResult {
   streamId: string;
   maxBytes: number;
   maxChunkBytes: number;
 }
 
-/** @protocol */
 export interface AttachmentsUploadFinishResult {
   attachment: RunAttachment;
 }
 
-/** @protocol */
 export interface AttachmentsDownloadResult {
   attachment: RunAttachment;
   streamId: string;
