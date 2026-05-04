@@ -217,6 +217,9 @@ function taskRunnerAttemptMatchesBackendTurn(
   if (record.prompt !== (turn.userText ?? "")) {
     return false;
   }
+  if (manifest.backend === "cursor") {
+    return true;
+  }
   const turnStartedAt = Date.parse(turn.startedAt);
   const turnUpdatedAt = Date.parse(turn.updatedAt);
   const recordStartedAt = Date.parse(record.startedAt);

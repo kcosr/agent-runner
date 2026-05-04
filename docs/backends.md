@@ -9,7 +9,7 @@ semantics.
 |-----------|--------------------------------------|-----------------------|
 | `claude`  | `claude` CLI (`--print`, streaming)  | session UUID on disk  |
 | `codex`   | `codex app-server` (stdio, WS, UDS)  | thread id             |
-| `cursor`  | `cursor-agent` CLI                   | session id (deferred) |
+| `cursor`  | `cursor-agent` CLI                   | session id + store db |
 | `pi`      | `pi` CLI (`--mode rpc`)              | session id + cwd hdr  |
 | `passive` | none                                 | free-form string      |
 
@@ -185,12 +185,13 @@ returns either:
   read for that session
 - `{ available: true, source }` with a persistable source descriptor
 
-Built-ins use `file` sources for local JSONL histories. Custom backends
-can return `{ kind: "custom", label, changeToken }`; `changeToken` must
-be JSON-persistable and should change whenever `readSessionHistory` needs
-to run again. `label` is a human-readable source name for diagnostics
-and audit context. For `file` sources, task-runner stores path, size,
-and mtime as the source change token.
+Most built-ins use `file` sources for local history files. Custom backends
+can return `{ kind: "custom", label, changeToken }`; `changeToken` must be
+JSON-persistable and should change whenever `readSessionHistory` needs to
+run again. `label` is a human-readable source name for diagnostics and
+audit context. For `file` sources, task-runner stores path, size, and
+mtime as the source change token. Cursor uses a custom SQLite source token
+based on its session root pointer instead of filesystem mtime.
 
 `readSessionHistory(ctx)` receives the resolved source, the previous
 cursor when one exists, and a mode of `"bootstrap"` or `"sync"`. It
@@ -235,7 +236,7 @@ imports as public API for custom modules:
 - [`codex`](../packages/core/src/backends/codex.ts) shows backend-owned
   `resolveConfig()` and config validation.
 - [`pi`](../packages/core/src/backends/pi.ts) shows backend session
-  validation and resume id handling.
+  validation, history import/sync, and resume id handling.
 
 A few built-in names have product policy outside the generic backend
 contract: `passive` has externally driven run behavior, `codex` has
@@ -315,8 +316,21 @@ context and return the same invoke result shape.
   [extra args...] <prompt>`
 - Session id extracted from JSON stream events.
 - No effort support.
-- No session-on-disk validation; resume validity is determined on first
-  invocation.
+- Session storage: Cursor stores chat state at
+  `~/.cursor/chats/<md5(cwd)>/<session-id>/store.db`. The cwd hash uses
+  the exact run cwd string.
+- Bootstrap `--backend-session-id` validation opens that deterministic
+  SQLite store read-only, decodes `meta[0]`, and requires its `agentId` to
+  match the supplied session id. Empty/path-like ids, missing stores,
+  malformed metadata, and agent id mismatches are rejected before import or
+  resume.
+- Session history import/sync reads the ordered root blob ids from the
+  store, imports visible user/assistant JSON message blobs as complete
+  turns, ignores Cursor internal context blobs, unwraps `<user_query>`
+  content, and prefers Cursor `final_answer` assistant text when present.
+  Sync mode tracks the latest no-answer user turn as open. Cursor sync uses
+  `meta[0].latestRootBlobId` as its change token so active SQLite WAL writes
+  are detected before a store checkpoint updates `store.db` mtime.
 
 ## `pi`
 
@@ -327,12 +341,17 @@ context and return the same invoke result shape.
   `message_start`, `message_update`, `message_end`, `agent_end`,
   `extension_ui_request`, `extension_error`.
 - Session storage: under `PI_HOME` (or `~/.pi`) at
-  `agent/sessions/<cwd-encoded>/<session-id>.jsonl`. The cwd encoding
-  replaces `/` with `-` and wraps the whole path in `--...--` sentinels.
+  `agent/sessions/<cwd-encoded>/<timestamp>_<session-id>.jsonl`. The cwd
+  encoding replaces `/` with `-` and wraps the whole path in `--...--`
+  sentinels.
 - Resume requires the session file to exist and its header `cwd` to match
   the current run cwd exactly. Mismatches are rejected.
 - When bootstrap-importing an existing session via
   `--backend-session-id`, the same cwd validation applies.
+- Session history import/sync reads the cwd-bound JSONL file, imports
+  complete visible user/assistant turns, ignores thinking/tool-only
+  assistant content, and tracks the latest sync-mode no-answer user turn as
+  open.
 - Effort mapping: each level maps through `--thinking off|minimal|low|
   medium|high|xhigh`.
 - Unsupported extension UI prompts from Pi are automatically cancelled

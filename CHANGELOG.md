@@ -132,6 +132,9 @@
   runs stay synchronized while clients watch them through
   `run.backend_session_history_synced` audit events.
   ([#131](https://github.com/kcosr/task-runner/pull/131))
+- Added backend-owned session history import and sync for Pi JSONL
+  sessions and Cursor deterministic `store.db` sessions.
+  ([#135](https://github.com/kcosr/task-runner/pull/135))
 - Added `TASK_RUNNER_BACKEND_SESSION_SYNC=false` to disable backend-owned
   session history import, pre-resume sync, and daemon subscribed-run
   polling for the current process.

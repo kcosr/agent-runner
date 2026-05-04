@@ -58,9 +58,16 @@ function fileSource(path, token = "v1") {
   };
 }
 
-function historyBackend({ turns, source = fileSource("history"), invoke, read, resolve }) {
+function historyBackend({
+  id = "claude",
+  turns,
+  source = fileSource("history"),
+  invoke,
+  read,
+  resolve,
+}) {
   return {
-    id: "claude",
+    id,
     async validateSessionId() {
       return { valid: true };
     },
@@ -405,6 +412,54 @@ test("sync upgrades an overlapping task-runner attempt instead of double-countin
   assert.equal(first.manifest.attemptRecords[0].provenance.kind, "backend_session");
   assert.equal(first.manifest.attemptRecords[0].provenance.backendTurnId, "backend-turn-live");
   assert.equal(first.manifest.sessions[0].provenance.kind, "backend_session");
+});
+
+test("cursor sync matches task-runner attempts without real timestamp overlap", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const first = await runIn(dir, {
+    backend: historyBackend({
+      id: "cursor",
+      turns: [],
+      invoke: async () => ({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        sessionId: "cursor-session-synthetic",
+        transcript: "live answer",
+        rawStdout: "",
+        rawStderr: "",
+      }),
+    }),
+  });
+  first.manifest.backend = "cursor";
+  const liveAttempt = first.manifest.attemptRecords[0];
+
+  const result = await syncBackendSessionHistory({
+    manifest: first.manifest,
+    backend: historyBackend({
+      id: "cursor",
+      source: fileSource("cursor-synthetic", "v2"),
+      turns: [
+        {
+          backendTurnId: "cursor-turn-live",
+          status: "complete",
+          startedAt: "2026-05-01T00:00:00.000Z",
+          updatedAt: "2026-05-01T00:00:01.000Z",
+          userText: liveAttempt.prompt,
+          assistantText: "live answer",
+        },
+      ],
+    }),
+    mode: "sync",
+  });
+
+  assert.equal(result.status, "synced");
+  assert.equal(first.manifest.attemptRecords.length, 1);
+  assert.equal(first.manifest.totalAttemptCount, 1);
+  assert.equal(first.manifest.attemptRecords[0].provenance.kind, "backend_session");
+  assert.equal(first.manifest.attemptRecords[0].provenance.backendTurnId, "cursor-turn-live");
 });
 
 test("sync upgrades an overlapping retry attempt without promoting the mixed session", async () => {

@@ -229,26 +229,13 @@ test("findPiSessionFile locates a session id inside the cwd-scoped Pi bucket", a
   });
 });
 
-test("findPiSessionFile matches a bare session-id filename", async () => {
-  const dir = tempDir();
-  const piHome = join(dir, ".pi-home");
-  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(dir));
-  const sessionPath = join(bucketDir, "pi-session-1.jsonl");
-  mkdirSync(bucketDir, { recursive: true });
-  writeFileSync(sessionPath, `${JSON.stringify({ type: "session", cwd: dir })}\n`);
-
-  await withEnv({ PI_HOME: piHome }, () => {
-    assert.equal(findPiSessionFile(dir, "pi-session-1"), sessionPath);
-  });
-});
-
 test("findPiSessionFile returns null when the cwd bucket has no matching file", async () => {
   const dir = tempDir();
   const piHome = join(dir, ".pi-home");
   const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(dir));
   mkdirSync(bucketDir, { recursive: true });
   writeFileSync(join(bucketDir, "2026-04-18T01-22-57-578Z_other-session.jsonl"), "{}\n");
-  mkdirSync(join(bucketDir, "pi-session-1.jsonl"), { recursive: true });
+  writeFileSync(join(bucketDir, "pi-session-1.jsonl"), "{}\n");
 
   await withEnv({ PI_HOME: piHome }, () => {
     assert.equal(findPiSessionFile(dir, "pi-session-1"), null);

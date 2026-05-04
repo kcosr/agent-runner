@@ -1,4 +1,4 @@
-import { createReadStream, realpathSync, statSync } from "node:fs";
+import { closeSync, createReadStream, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, relative } from "node:path";
 import { createInterface } from "node:readline";
 import type { BackendSessionHistorySource } from "../core/backends/types.js";
@@ -57,6 +57,48 @@ function fileErrorCode(error: unknown): string {
   return "";
 }
 
+function fileEndsWithNewline(path: string): boolean {
+  const stats = statSync(path);
+  if (stats.size === 0) {
+    return false;
+  }
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(1);
+    readSync(fd, buffer, 0, 1, stats.size - 1);
+    return buffer[0] === 0x0a;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function parseJsonlRecordLine(
+  line: string,
+  lineNumber: number,
+  sourceName: string,
+  fileName: string,
+): JsonlRecordLine | null {
+  if (line.trim().length === 0) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (!isRecord(parsed)) {
+      throw new JsonlHistoryReadError(
+        `failed to parse ${sourceName} session history ${fileName}:${lineNumber + 1}: record is not an object`,
+      );
+    }
+    return { record: parsed, lineNumber };
+  } catch (error) {
+    if (error instanceof JsonlHistoryReadError) {
+      throw error;
+    }
+    throw new JsonlHistoryReadError(
+      `failed to parse ${sourceName} session history ${fileName}:${lineNumber + 1}: invalid JSON`,
+    );
+  }
+}
+
 export async function readJsonlRecordLines(
   path: string,
   sourceName: string,
@@ -64,33 +106,44 @@ export async function readJsonlRecordLines(
   const records: JsonlRecordLine[] = [];
   let lineNumber = 0;
   const fileName = basename(path);
+  let pendingLine: { line: string; lineNumber: number } | null = null;
   const lines = createInterface({
     input: createReadStream(path, { encoding: "utf8" }),
     crlfDelay: Number.POSITIVE_INFINITY,
   });
   try {
     for await (const line of lines) {
-      if (line.trim().length === 0) {
-        lineNumber++;
-        continue;
-      }
-      try {
-        const parsed = JSON.parse(line) as unknown;
-        if (!isRecord(parsed)) {
-          throw new JsonlHistoryReadError(
-            `failed to parse ${sourceName} session history ${fileName}:${lineNumber + 1}: record is not an object`,
-          );
-        }
-        records.push({ record: parsed, lineNumber });
-      } catch (error) {
-        if (error instanceof JsonlHistoryReadError) {
-          throw error;
-        }
-        throw new JsonlHistoryReadError(
-          `failed to parse ${sourceName} session history ${fileName}:${lineNumber + 1}: invalid JSON`,
+      if (pendingLine !== null) {
+        const parsed = parseJsonlRecordLine(
+          pendingLine.line,
+          pendingLine.lineNumber,
+          sourceName,
+          fileName,
         );
+        if (parsed !== null) {
+          records.push(parsed);
+        }
       }
+      pendingLine = { line, lineNumber };
       lineNumber++;
+    }
+    if (pendingLine !== null) {
+      try {
+        const parsed = parseJsonlRecordLine(
+          pendingLine.line,
+          pendingLine.lineNumber,
+          sourceName,
+          fileName,
+        );
+        if (parsed !== null) {
+          records.push(parsed);
+        }
+      } catch (error) {
+        if (!fileEndsWithNewline(path)) {
+          return records;
+        }
+        throw error;
+      }
     }
   } catch (error) {
     if (error instanceof JsonlHistoryReadError) {

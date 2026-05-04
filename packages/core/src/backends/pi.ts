@@ -1,11 +1,16 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { closeSync, openSync, readSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
   Backend,
   BackendInvokeContext,
   BackendInvokeResult,
+  BackendSessionHistoryContext,
+  BackendSessionHistoryResult,
+  BackendSessionHistorySourceContext,
+  BackendSessionHistorySourceResult,
+  BackendSyncedTurn,
   EffortLevel,
   ValidateSessionContext,
   ValidateSessionResult,
@@ -16,6 +21,9 @@ import {
   composePersistedTranscript,
   createLineFeeder,
   isRecord,
+  readJsonlRecordLines,
+  realFileIsUnderRoot,
+  sessionHistoryFileSource,
   silentTranscriptFallback,
   streamBoundarySeparator,
 } from "./shared.js";
@@ -109,9 +117,40 @@ export function buildPiArgs(
   return args;
 }
 
+const PI_SESSION_HEADER_READ_CHUNK_SIZE = 4_096;
+const PI_SESSION_HEADER_READ_LIMIT = 65_536;
+const PI_TIMESTAMPED_SESSION_FILE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_(.+)\.jsonl$/u;
+
+function readFirstLineSync(path: string): string {
+  const fd = openSync(path, "r");
+  try {
+    const chunks: Buffer[] = [];
+    let bytesReadTotal = 0;
+    while (bytesReadTotal < PI_SESSION_HEADER_READ_LIMIT) {
+      const chunk = Buffer.allocUnsafe(
+        Math.min(PI_SESSION_HEADER_READ_CHUNK_SIZE, PI_SESSION_HEADER_READ_LIMIT - bytesReadTotal),
+      );
+      const bytesRead = readSync(fd, chunk, 0, chunk.length, bytesReadTotal);
+      if (bytesRead === 0) {
+        break;
+      }
+      const used = chunk.subarray(0, bytesRead);
+      const newlineIndex = used.indexOf(0x0a);
+      if (newlineIndex >= 0) {
+        chunks.push(used.subarray(0, newlineIndex));
+        return Buffer.concat(chunks).toString("utf8").replace(/\r$/u, "");
+      }
+      chunks.push(used);
+      bytesReadTotal += bytesRead;
+    }
+    return Buffer.concat(chunks).toString("utf8").replace(/\r$/u, "");
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function parsePiSessionHeader(sessionPath: string): PiSessionHeader {
-  const file = readFileSync(sessionPath, "utf8");
-  const [firstLine = ""] = file.split(/\r?\n/, 1);
+  const firstLine = readFirstLineSync(sessionPath);
   if (firstLine.trim().length === 0) {
     throw new Error("session file is empty");
   }
@@ -158,40 +197,47 @@ function piSessionsBucketDir(cwd: string): string {
   return join(piHomeRoot(), "agent", "sessions", encodePiSessionDir(cwd));
 }
 
+function piSessionFileNameMatches(name: string, sessionId: string): boolean {
+  const match = PI_TIMESTAMPED_SESSION_FILE_RE.exec(name);
+  return match?.[1] === sessionId;
+}
+
 export function findPiSessionFile(cwd: string, sessionId: string): string | null {
   const bucketDir = piSessionsBucketDir(cwd);
-  if (!existsSync(bucketDir)) {
-    return null;
-  }
-
   try {
+    const matches: string[] = [];
     for (const entry of readdirSync(bucketDir, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      if (entry.name === `${sessionId}.jsonl` || entry.name.endsWith(`_${sessionId}.jsonl`)) {
-        return join(bucketDir, entry.name);
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+      if (piSessionFileNameMatches(entry.name, sessionId)) {
+        matches.push(entry.name);
       }
     }
+    const match = matches.sort().at(-1);
+    return match === undefined ? null : join(bucketDir, match);
   } catch {
     return null;
   }
-  return null;
 }
 
-async function validatePiSession(ctx: ValidateSessionContext): Promise<ValidateSessionResult> {
-  const sessionId = ctx.sessionId.trim();
+type ResolvedPiSessionFile =
+  | { ok: true; path: string; header: PiSessionHeader }
+  | { ok: false; reason: string };
+
+function resolvePiSessionFile(cwd: string, rawSessionId: string): ResolvedPiSessionFile {
+  const sessionId = rawSessionId.trim();
   if (sessionId.length === 0) {
+    return { ok: false, reason: "pi session id cannot be empty" };
+  }
+  const bucketDir = piSessionsBucketDir(cwd);
+  const sessionPath = findPiSessionFile(cwd, sessionId);
+  if (sessionPath === null) {
     return {
-      valid: false,
-      reason: "pi session id cannot be empty",
+      ok: false,
+      reason: `pi session "${sessionId}" not found under cwd "${cwd}"\n  expected directory: ${bucketDir}\n  the session must have been created with the same working directory; pi keys session storage by encoded cwd.`,
     };
   }
-  const sessionPath = findPiSessionFile(ctx.cwd, sessionId);
-  if (sessionPath === null) {
-    const bucketDir = piSessionsBucketDir(ctx.cwd);
-    return {
-      valid: false,
-      reason: `pi session "${sessionId}" not found under cwd "${ctx.cwd}"\n  expected directory: ${bucketDir}\n  the session must have been created with the same working directory; pi keys session storage by encoded cwd.`,
-    };
+  if (!realFileIsUnderRoot(bucketDir, sessionPath)) {
+    return { ok: false, reason: "pi session file escaped the cwd bucket" };
   }
 
   let header: PiSessionHeader;
@@ -199,33 +245,173 @@ async function validatePiSession(ctx: ValidateSessionContext): Promise<ValidateS
     header = readPiSessionHeader(sessionPath);
   } catch (error) {
     return {
-      valid: false,
+      ok: false,
       reason: `pi session "${sessionId}" has an unreadable header: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  if (header.cwd !== ctx.cwd) {
+  if (header.cwd !== cwd) {
     return {
-      valid: false,
-      reason: `pi session "${sessionId}" belongs to cwd "${header.cwd}", not "${ctx.cwd}"`,
+      ok: false,
+      reason: `pi session "${sessionId}" belongs to cwd "${header.cwd}", not "${cwd}"`,
     };
   }
-  return { valid: true };
+  return { ok: true, path: sessionPath, header };
 }
 
-function extractAssistantText(message: unknown): string {
-  if (!isRecord(message)) return "";
+async function validatePiSession(ctx: ValidateSessionContext): Promise<ValidateSessionResult> {
+  const resolved = resolvePiSessionFile(ctx.cwd, ctx.sessionId);
+  return resolved.ok ? { valid: true } : { valid: false, reason: resolved.reason };
+}
+
+interface PiHistoryTurnBuilder {
+  backendTurnId: string;
+  startedAt: string;
+  updatedAt: string;
+  userText: string;
+  assistantText: string;
+}
+
+function extractPiMessageText(
+  message: Record<string, unknown>,
+  role: "user" | "assistant",
+): string {
   const content = message.content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
 
   let combined = "";
   for (const item of content) {
-    if (!isRecord(item)) continue;
-    if (typeof item.text === "string") {
+    if (role === "assistant" && isRecord(item) && item.type !== "text") continue;
+    if (isRecord(item) && typeof item.text === "string") {
       combined += item.text;
     }
   }
   return combined;
+}
+
+function piHistoryTurnId(
+  record: Record<string, unknown>,
+  sessionId: string,
+  lineNumber: number,
+): string {
+  if (typeof record.id === "string" && record.id.length > 0) {
+    return record.id;
+  }
+  return `pi:${sessionId}:line:${lineNumber}`;
+}
+
+function finishPiTurn(
+  turns: BackendSyncedTurn[],
+  current: PiHistoryTurnBuilder,
+  status: "complete" | "open",
+): void {
+  turns.push({
+    backendTurnId: current.backendTurnId,
+    status,
+    startedAt: current.startedAt,
+    updatedAt: current.updatedAt,
+    userText: current.userText,
+    assistantText: current.assistantText.length > 0 ? current.assistantText : null,
+  });
+}
+
+export async function parsePiSessionHistoryJsonl(params: {
+  path: string;
+  sessionId: string;
+  mode: "bootstrap" | "sync";
+}): Promise<BackendSyncedTurn[]> {
+  const records = await readJsonlRecordLines(params.path, "Pi");
+  const header = records[0]?.record;
+  if (header === undefined) {
+    throw new Error("Pi session history is empty");
+  }
+  if (header.type !== "session") {
+    throw new Error('Pi session history first record must have type "session"');
+  }
+
+  const turns: BackendSyncedTurn[] = [];
+  let current: PiHistoryTurnBuilder | null = null;
+
+  let isHeaderRecord = true;
+  for (const { record, lineNumber } of records) {
+    if (isHeaderRecord) {
+      isHeaderRecord = false;
+      continue;
+    }
+    const timestamp = typeof record.timestamp === "string" ? record.timestamp : null;
+    if (record.type !== "message" || !isRecord(record.message)) {
+      continue;
+    }
+    const message = record.message;
+    const role = message.role;
+    if (role === "user" && timestamp !== null) {
+      if (current !== null && current.assistantText.length > 0) {
+        finishPiTurn(turns, current, "complete");
+      }
+      current = {
+        backendTurnId: piHistoryTurnId(record, params.sessionId, lineNumber),
+        startedAt: timestamp,
+        updatedAt: timestamp,
+        userText: extractPiMessageText(message, "user"),
+        assistantText: "",
+      };
+      continue;
+    }
+    if (role === "assistant" && current !== null && timestamp !== null) {
+      const assistantText = extractPiMessageText(message, "assistant");
+      if (assistantText.length > 0) {
+        current.assistantText += streamBoundarySeparator(current.assistantText, assistantText);
+        current.assistantText += assistantText;
+        current.updatedAt = timestamp;
+      }
+    }
+  }
+
+  if (current !== null) {
+    if (current.assistantText.length > 0) {
+      finishPiTurn(turns, current, "complete");
+    } else if (params.mode === "sync") {
+      finishPiTurn(turns, current, "open");
+    }
+  }
+  return turns;
+}
+
+async function resolvePiSessionHistorySource(
+  ctx: BackendSessionHistorySourceContext,
+): Promise<BackendSessionHistorySourceResult> {
+  const resolved = resolvePiSessionFile(ctx.cwd, ctx.sessionId);
+  if (!resolved.ok) {
+    return { available: false, reason: resolved.reason };
+  }
+  return { available: true, source: sessionHistoryFileSource(resolved.path) };
+}
+
+async function readPiSessionHistory(
+  ctx: BackendSessionHistoryContext,
+): Promise<BackendSessionHistoryResult> {
+  if (ctx.source.kind !== "file") {
+    throw new Error("pi session history source must be a file");
+  }
+  const source = sessionHistoryFileSource(ctx.source.path);
+  return {
+    source,
+    cursor: { kind: "file", size: source.size },
+    turns: await parsePiSessionHistoryJsonl({
+      path: ctx.source.path,
+      sessionId: ctx.sessionId,
+      mode: ctx.mode,
+    }),
+  };
+}
+
+function extractAssistantText(message: unknown): string {
+  if (!isRecord(message)) return "";
+  return extractPiMessageText(message, "assistant");
 }
 
 function emitAssistantUpdate(state: PiStreamState, nextText: string): void {
@@ -687,6 +873,8 @@ export async function setPiSessionName(ctx: {
 export const piBackend: Backend = {
   id: "pi",
   validateSessionId: validatePiSession,
+  resolveSessionHistorySource: resolvePiSessionHistorySource,
+  readSessionHistory: readPiSessionHistory,
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const processHandle = await createPiProcess(ctx);
 

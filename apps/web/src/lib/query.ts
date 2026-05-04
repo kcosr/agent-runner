@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 
-export interface RunListKeyOptions {
+interface RunListKeyOptions {
   includeArchived: boolean;
   runGroupId?: string | null;
 }

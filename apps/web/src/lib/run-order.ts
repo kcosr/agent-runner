@@ -1,9 +1,9 @@
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 
-export const DASHBOARD_SORT_FIELDS = ["startedAt", "updatedAt", "endedAt"] as const;
+const DASHBOARD_SORT_FIELDS = ["startedAt", "updatedAt", "endedAt"] as const;
 export type DashboardSortField = (typeof DASHBOARD_SORT_FIELDS)[number];
 
-export const DASHBOARD_SORT_DIRECTIONS = ["desc", "asc"] as const;
+const DASHBOARD_SORT_DIRECTIONS = ["desc", "asc"] as const;
 export type DashboardSortDirection = (typeof DASHBOARD_SORT_DIRECTIONS)[number];
 
 export function isDashboardSortField(value: unknown): value is DashboardSortField {
@@ -20,7 +20,7 @@ function compareTimestamp(left: string, right: string, direction: DashboardSortD
   return direction === "desc" ? right.localeCompare(left) : left.localeCompare(right);
 }
 
-export function compareRunsByStartedAtDesc(left: RunSummary, right: RunSummary): number {
+function compareRunsByStartedAtDesc(left: RunSummary, right: RunSummary): number {
   const byStartedAt = right.startedAt.localeCompare(left.startedAt);
   if (byStartedAt !== 0) {
     return byStartedAt;

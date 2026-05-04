@@ -193,7 +193,9 @@ when possible:
 - **Claude** — session storage encoded by cwd; validated on-disk.
 - **Codex** — `thread/read` RPC validates the thread exists and cwd
   matches.
-- **Cursor** — validation deferred to first invocation.
+- **Cursor** — deterministic store at
+  `~/.cursor/chats/<md5(cwd)>/<session-id>/store.db`; validated read-only
+  against `meta[0].agentId`.
 - **Pi** — session file must exist under `PI_HOME` / `~/.pi` with a
   matching `cwd` header.
 
