@@ -8,7 +8,7 @@ import {
 } from "../../config/runtime-paths.js";
 import { importDefaultOrModule } from "../../util/module-loader.js";
 import type { LoadedAssignment } from "../config/loaded.js";
-import type { HookPhase } from "../config/schema.js";
+import type { HookPhase, TaskDef } from "../config/schema.js";
 import { HookConfigError } from "./errors.js";
 import { builtinHookModule } from "./registry.js";
 import type {
@@ -50,8 +50,8 @@ function resolveNamedHookPath(id: string, env: NodeJS.ProcessEnv): string {
   );
 }
 
-function resolvePathHookPath(path: string, assignment: LoadedAssignment): string {
-  const baseDir = resolve(assignment.sourcePath, "..");
+function resolvePathHookPath(path: string, sourcePath: string): string {
+  const baseDir = resolve(sourcePath, "..");
   const resolvedPath = isAbsolute(path) ? path : resolve(baseDir, path);
   if (!existsSync(resolvedPath)) {
     throw new HookConfigError(`hook path ${resolvedPath} was not found`);
@@ -101,83 +101,120 @@ export function resolveAssignmentHooks(
   }
 
   const descriptors: ResolvedHookDescriptor[] = [];
-  const configDir = resolveTaskRunnerConfigDir(env);
-  const pushResolvedDescriptor = (
-    phase: HookPhase,
-    index: number,
-    entry: {
-      builtin?: string;
-      name?: string;
-      path?: string;
-      when?: unknown;
-      with?: unknown;
-    },
-    scope: {
-      taskScopeId?: string;
-      hookIdPrefix?: string;
-    } = {},
-  ) => {
-    const config = interpolateHookValue(entry.with, vars);
-    const when = interpolateHookValue(entry.when ?? null, vars) as HookWhen | null;
-    const scopeTaskId = scope.taskScopeId ?? null;
-    validateTaskScopedWhen(phase, index, scopeTaskId, when);
-    const hookIdPrefix = scope.hookIdPrefix ? `${scope.hookIdPrefix}:` : "";
-    if (entry.builtin) {
-      descriptors.push({
-        hookId: `${phase}:${hookIdPrefix}${index}:${entry.builtin}`,
-        phase,
-        source: { builtin: entry.builtin },
-        resolvedPath: null,
-        taskScopeId: scopeTaskId,
-        when,
-        config,
-      });
-      return;
-    }
-    if (entry.name) {
-      descriptors.push({
-        hookId: `${phase}:${hookIdPrefix}${index}:${entry.name}`,
-        phase,
-        source: { name: entry.name, path: `${configDir}/hooks/${entry.name}` },
-        resolvedPath: resolveNamedHookPath(entry.name, env),
-        taskScopeId: scopeTaskId,
-        when,
-        config,
-      });
-      return;
-    }
-    if (!entry.path) {
-      throw new HookConfigError(`hook ${phase}[${index}] is missing a hook source`);
-    }
-    descriptors.push({
-      hookId: `${phase}:${hookIdPrefix}${index}:${entry.path}`,
-      phase,
-      source: { path: entry.path },
-      resolvedPath: resolvePathHookPath(
-        interpolateHookValue(entry.path, vars) as string,
-        assignment,
-      ),
-      taskScopeId: scopeTaskId,
-      when,
-      config,
-    });
-  };
-
-  assignment.config.tasks.forEach((task) => {
-    task.hooks.forEach((entry, index) => {
-      pushResolvedDescriptor("taskTransition", index, entry, {
-        taskScopeId: task.id,
-        hookIdPrefix: `task:${task.id}`,
-      });
-    });
+  pushTaskLocalHookDescriptors({
+    descriptors,
+    tasks: assignment.config.tasks,
+    sourcePath: assignment.sourcePath,
+    vars,
+    env,
   });
 
   for (const phase of Object.keys(assignment.config.hooks) as HookPhase[]) {
     const entries = assignment.config.hooks[phase];
     entries.forEach((entry, index) => {
-      pushResolvedDescriptor(phase, index, entry);
+      pushResolvedDescriptor(descriptors, phase, index, entry, assignment.sourcePath, vars, env);
     });
   }
+  return descriptors;
+}
+
+function pushResolvedDescriptor(
+  descriptors: ResolvedHookDescriptor[],
+  phase: HookPhase,
+  index: number,
+  entry: {
+    builtin?: string;
+    name?: string;
+    path?: string;
+    when?: unknown;
+    with?: unknown;
+  },
+  sourcePath: string,
+  vars: Record<string, unknown>,
+  env: NodeJS.ProcessEnv,
+  scope: {
+    taskScopeId?: string;
+    hookIdPrefix?: string;
+  } = {},
+) {
+  const configDir = resolveTaskRunnerConfigDir(env);
+  const config = interpolateHookValue(entry.with, vars);
+  const when = interpolateHookValue(entry.when ?? null, vars) as HookWhen | null;
+  const scopeTaskId = scope.taskScopeId ?? null;
+  validateTaskScopedWhen(phase, index, scopeTaskId, when);
+  const hookIdPrefix = scope.hookIdPrefix ? `${scope.hookIdPrefix}:` : "";
+  if (entry.builtin) {
+    descriptors.push({
+      hookId: `${phase}:${hookIdPrefix}${index}:${entry.builtin}`,
+      phase,
+      source: { builtin: entry.builtin },
+      resolvedPath: null,
+      taskScopeId: scopeTaskId,
+      when,
+      config,
+    });
+    return;
+  }
+  if (entry.name) {
+    descriptors.push({
+      hookId: `${phase}:${hookIdPrefix}${index}:${entry.name}`,
+      phase,
+      source: { name: entry.name, path: `${configDir}/hooks/${entry.name}` },
+      resolvedPath: resolveNamedHookPath(entry.name, env),
+      taskScopeId: scopeTaskId,
+      when,
+      config,
+    });
+    return;
+  }
+  if (!entry.path) {
+    throw new HookConfigError(`hook ${phase}[${index}] is missing a hook source`);
+  }
+  descriptors.push({
+    hookId: `${phase}:${hookIdPrefix}${index}:${entry.path}`,
+    phase,
+    source: { path: entry.path },
+    resolvedPath: resolvePathHookPath(interpolateHookValue(entry.path, vars) as string, sourcePath),
+    taskScopeId: scopeTaskId,
+    when,
+    config,
+  });
+}
+
+function pushTaskLocalHookDescriptors(options: {
+  descriptors: ResolvedHookDescriptor[];
+  tasks: readonly TaskDef[];
+  sourcePath: string;
+  vars: Record<string, unknown>;
+  env: NodeJS.ProcessEnv;
+}): void {
+  for (const task of options.tasks) {
+    task.hooks.forEach((entry, index) => {
+      pushResolvedDescriptor(
+        options.descriptors,
+        "taskTransition",
+        index,
+        entry,
+        options.sourcePath,
+        options.vars,
+        options.env,
+        {
+          taskScopeId: task.id,
+          hookIdPrefix: `task:${task.id}`,
+        },
+      );
+    });
+  }
+}
+
+export function resolveTaskLocalHookDescriptors(
+  tasks: readonly TaskDef[],
+  sourcePath: string,
+  vars: Record<string, unknown>,
+  env: NodeJS.ProcessEnv = process.env,
+): ResolvedHookDescriptor[] {
+  const descriptors: ResolvedHookDescriptor[] = [];
+  pushTaskLocalHookDescriptors({ descriptors, tasks, sourcePath, vars, env });
   return descriptors;
 }
 

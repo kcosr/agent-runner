@@ -416,3 +416,83 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   assert.equal(cloneManifest.schedule.recurrence.mode, "clone");
   assert.equal(cloneManifest.resetSeed.parentRunId, reuse.runId);
 });
+
+test("run-loop schedules: reset and clone recurrence preserve task-list replacement tasks", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const taskListDir = join(dir, ".task-runner");
+  mkdirSync(taskListDir, { recursive: true });
+  const taskListPath = join(taskListDir, "tasks.yml");
+  writeFileSync(
+    taskListPath,
+    `schemaVersion: 1
+tasks:
+  - id: replacement
+    title: Replacement
+`,
+  );
+  writeFileSync(
+    join(dir, "assignments", "scheduled-work", "assignment.md"),
+    `---
+schemaVersion: 1
+name: scheduled-work
+hooks:
+  prepare:
+    - builtin: task-list
+      with:
+        path: ${JSON.stringify(taskListPath)}
+        mode: replace
+        missing: continue
+        empty: keep-existing
+tasks:
+  - id: original
+    title: Original
+maxRetries: 0
+---
+Scheduled work.
+`,
+  );
+
+  const reset = await initRun(dir, {
+    schedule: { cron: "*/5 * * * *", timezone: "UTC", mode: "reset" },
+  });
+  assert.deepEqual(Object.keys(reset.manifest.finalTasks), ["replacement"]);
+  writeFileSync(taskListPath, "schemaVersion: 1\ntasks:\n  - [invalid\n");
+  readyInitializedRun(dir, reset.runId);
+  setDue(reset.workspaceDir);
+  await runReady(dir, reset.runId, (ctx) =>
+    setTaskStatusesForPrompt(ctx.prompt, { replacement: "completed" }, dir),
+  );
+  const resetManifest = readManifest(reset.workspaceDir);
+  assert.equal(resetManifest.status, "ready");
+  assert.deepEqual(Object.keys(resetManifest.finalTasks), ["replacement"]);
+  assert.equal(resetManifest.finalTasks.replacement.status, "pending");
+
+  writeFileSync(
+    taskListPath,
+    `schemaVersion: 1
+tasks:
+  - id: replacement
+    title: Replacement
+`,
+  );
+  const clone = await initRun(dir, {
+    schedule: { cron: "*/5 * * * *", timezone: "UTC", mode: "clone" },
+  });
+  writeFileSync(taskListPath, "schemaVersion: 1\ntasks:\n  - id: changed\n    title: Changed\n");
+  readyInitializedRun(dir, clone.runId);
+  setDue(clone.workspaceDir);
+  await runReady(dir, clone.runId, (ctx) =>
+    setTaskStatusesForPrompt(ctx.prompt, { replacement: "completed" }, dir),
+  );
+
+  const cloneManifest = repoManifests(dir, clone.manifest.repo).find(
+    (manifest) =>
+      manifest.runId !== clone.runId &&
+      manifest.status === "ready" &&
+      manifest.schedule?.recurrence?.mode === "clone",
+  );
+  assert.ok(cloneManifest);
+  assert.deepEqual(Object.keys(cloneManifest.finalTasks), ["replacement"]);
+  assert.equal(cloneManifest.finalTasks.replacement.status, "pending");
+});

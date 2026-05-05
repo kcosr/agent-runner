@@ -11,11 +11,13 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
+import { reconfigureRun } from "../packages/core/dist/app/service.js";
 import { codexBackend } from "../packages/core/dist/backends/codex.js";
 import { BackendConfigError, loadCustomBackends } from "../packages/core/dist/backends/registry.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
   readStatus,
+  readyRun,
   resetRun,
   setRunGroup,
   setTask,
@@ -1125,6 +1127,385 @@ Work on the repo. Plan at {{cwd}}.
   );
 });
 
+test("task-list replacement rebuilds task-local hooks and keeps assignment-level hook order", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeNamedHook(
+    dir,
+    "old-local-guard",
+    `export default {
+  name: "old-local-guard",
+  taskTransition() {
+    throw new Error("old task-local hook should not remain after replacement");
+  },
+};
+`,
+  );
+  writeNamedHook(
+    dir,
+    "assignment-guard",
+    `export default {
+  name: "assignment-guard",
+  taskTransition(ctx) {
+    return {
+      accept: true,
+      mutate: {
+        state: {
+          hookOrder: ((ctx.state.hookOrder ?? "") + "assignment"),
+        },
+      },
+    };
+  },
+};
+`,
+  );
+  const repoTaskDir = join(dir, ".task-runner");
+  const repoHookDir = join(repoTaskDir, "hooks");
+  mkdirSync(repoHookDir, { recursive: true });
+  writeFileSync(
+    join(repoHookDir, "replacement-local.mjs"),
+    `export default {
+  name: "replacement-local",
+  taskTransition(ctx) {
+    return {
+      accept: true,
+      mutate: {
+        state: {
+          hookOrder: ((ctx.state.hookOrder ?? "") + "local,"),
+        },
+      },
+    };
+  },
+};
+`,
+  );
+  const taskListPath = join(repoTaskDir, "tasks.yml");
+  writeFileSync(
+    taskListPath,
+    `schemaVersion: 1
+tasks:
+  - id: replacement
+    title: Replacement
+    hooks:
+      - path: ./hooks/replacement-local.mjs
+`,
+  );
+  writeAssignment(
+    dir,
+    "replacement-hook-order-work",
+    `---
+schemaVersion: 1
+name: replacement-hook-order-work
+hooks:
+  prepare:
+    - builtin: task-list
+      with:
+        path: ${JSON.stringify(taskListPath)}
+        mode: replace
+        missing: continue
+        empty: keep-existing
+  taskTransition:
+    - name: assignment-guard
+tasks:
+  - id: original
+    title: Original
+    hooks:
+      - name: old-local-guard
+---
+Work.
+`,
+  );
+
+  const initialized = await initWithOptions(dir, "replacement-hook-order-work");
+  const initManifest = JSON.parse(readFileSync(join(initialized.workspaceDir, "run.json"), "utf8"));
+  assert.deepEqual(
+    initManifest.resolvedHooks
+      .filter((descriptor) => descriptor.phase === "taskTransition")
+      .map((descriptor) => ({
+        taskScopeId: descriptor.taskScopeId,
+        source: descriptor.source.name ?? descriptor.source.path,
+      })),
+    [
+      {
+        taskScopeId: "replacement",
+        source: join(repoHookDir, "replacement-local.mjs"),
+      },
+      {
+        taskScopeId: null,
+        source: "assignment-guard",
+      },
+    ],
+  );
+  assert.deepEqual(
+    initManifest.resolvedHooks.filter((descriptor) => descriptor.taskScopeId === "original"),
+    [],
+  );
+  assert.equal(
+    initManifest.resolvedHooks.some((descriptor) => descriptor.source.name === "old-local-guard"),
+    false,
+  );
+
+  await withSharedRuntimeEnv(dir, () =>
+    setTask(initialized.runId, "replacement", { status: "completed" }),
+  );
+  const finalManifest = JSON.parse(
+    readFileSync(join(initialized.workspaceDir, "run.json"), "utf8"),
+  );
+  assert.equal(finalManifest.hookState.hookOrder, "local,assignment");
+});
+
+test("task-list prepare hook preserves existing tasks for missing and empty task-list files", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const missingPath = join(dir, ".task-runner", "missing.yml");
+  writeAssignment(
+    dir,
+    "missing-task-list-work",
+    `---
+schemaVersion: 1
+name: missing-task-list-work
+hooks:
+  prepare:
+    - builtin: task-list
+      with:
+        path: ${JSON.stringify(missingPath)}
+        mode: replace
+        missing: continue
+        empty: keep-existing
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+
+  const missing = await initWithOptions(dir, "missing-task-list-work");
+  assert.deepEqual(Object.keys(missing.manifest.finalTasks), ["original"]);
+
+  const taskListDir = join(dir, ".task-runner");
+  mkdirSync(taskListDir, { recursive: true });
+  const emptyPath = join(taskListDir, "empty.yml");
+  writeFileSync(emptyPath, "schemaVersion: 1\ntasks: []\n");
+  writeAssignment(
+    dir,
+    "empty-task-list-work",
+    `---
+schemaVersion: 1
+name: empty-task-list-work
+hooks:
+  prepare:
+    - builtin: task-list
+      with:
+        path: ${JSON.stringify(emptyPath)}
+        mode: replace
+        missing: continue
+        empty: keep-existing
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+
+  const empty = await initWithOptions(dir, "empty-task-list-work");
+  assert.deepEqual(Object.keys(empty.manifest.finalTasks), ["original"]);
+});
+
+test("task-list prepare hook fails invalid config and invalid task-list files with path-bearing errors", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const taskListDir = join(dir, ".task-runner");
+  mkdirSync(taskListDir, { recursive: true });
+
+  const cases = [
+    {
+      name: "bad-yaml",
+      file: "bad-yaml.yml",
+      body: "schemaVersion: 1\ntasks:\n  - [unterminated\n",
+      expected: /bad-yaml\.yml/,
+    },
+    {
+      name: "bad-schema",
+      file: "bad-schema.yml",
+      body: "schemaVersion: 2\ntasks: []\n",
+      expected: /schemaVersion/,
+    },
+    {
+      name: "bad-ref",
+      file: "bad-ref.yml",
+      body: "schemaVersion: 1\ntasks:\n  - missing-task\n",
+      expected: /missing-task/,
+    },
+    {
+      name: "bad-shape",
+      file: "bad-shape.yml",
+      body: 'schemaVersion: 1\ntasks:\n  - id: bad\n    title: "bad\\ntitle"\n',
+      expected: /single line/,
+    },
+    {
+      name: "duplicate",
+      file: "duplicate.yml",
+      body: "schemaVersion: 1\ntasks:\n  - id: dup\n    title: One\n  - id: dup\n    title: Two\n",
+      expected: /task ids must be unique/,
+    },
+    {
+      name: "too-many",
+      file: "too-many.yml",
+      body: `schemaVersion: 1
+tasks:
+${Array.from({ length: 101 }, (_value, index) => `  - id: t${index}\n    title: Task ${index}`).join("\n")}
+`,
+      expected: /at most 100/,
+    },
+  ];
+
+  for (const entry of cases) {
+    const taskListPath = join(taskListDir, entry.file);
+    writeFileSync(taskListPath, entry.body);
+    writeAssignment(
+      dir,
+      `task-list-${entry.name}`,
+      `---
+schemaVersion: 1
+name: task-list-${entry.name}
+hooks:
+  prepare:
+    - builtin: task-list
+      with:
+        path: ${JSON.stringify(taskListPath)}
+        mode: replace
+        missing: continue
+        empty: keep-existing
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+    );
+    await assert.rejects(
+      () => initWithOptions(dir, `task-list-${entry.name}`),
+      (error) => {
+        assert.match(error.message, entry.expected);
+        assert.match(error.message, new RegExp(entry.file.replace(".", "\\.")));
+        return true;
+      },
+    );
+  }
+
+  writeAssignment(
+    dir,
+    "task-list-bad-config",
+    `---
+schemaVersion: 1
+name: task-list-bad-config
+hooks:
+  prepare:
+    - builtin: task-list
+      with:
+        path: ${JSON.stringify(join(taskListDir, "missing.yml"))}
+        mode: append
+        missing: continue
+        empty: keep-existing
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+  await assert.rejects(
+    () => initWithOptions(dir, "task-list-bad-config"),
+    /task-list hook mode must be "replace"/,
+  );
+});
+
+test("task-list replacement is frozen across reconfigure, ready-start, resume, and reset", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const taskListDir = join(dir, ".task-runner");
+  mkdirSync(taskListDir, { recursive: true });
+  const taskListPath = join(taskListDir, "tasks.yml");
+  writeFileSync(
+    taskListPath,
+    `schemaVersion: 1
+tasks:
+  - id: replacement
+    title: Replacement {{target}}
+    body: Frozen {{target}}
+`,
+  );
+  writeAssignment(
+    dir,
+    "task-list-freeze-work",
+    `---
+schemaVersion: 1
+name: task-list-freeze-work
+vars:
+  target:
+    type: string
+    default: alpha
+hooks:
+  prepare:
+    - builtin: task-list
+      with:
+        path: ${JSON.stringify(taskListPath)}
+        mode: replace
+        missing: continue
+        empty: keep-existing
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+
+  const initialized = await initWithOptions(dir, "task-list-freeze-work");
+  assert.equal(initialized.manifest.finalTasks.replacement.title, "Replacement alpha");
+  assert.equal(initialized.manifest.finalTasks.original, undefined);
+
+  writeFileSync(taskListPath, "schemaVersion: 1\ntasks:\n  - [invalid\n");
+  await withSharedRuntimeEnv(dir, () =>
+    reconfigureRun(initialized.runId, { vars: { target: "beta" } }),
+  );
+  const reconfiguredManifest = JSON.parse(
+    readFileSync(join(initialized.workspaceDir, "run.json"), "utf8"),
+  );
+  assert.equal(reconfiguredManifest.finalTasks.replacement.title, "Replacement alpha");
+  assert.equal(reconfiguredManifest.finalTasks.original, undefined);
+
+  await withSharedRuntimeEnv(dir, () => readyRun(initialized.runId));
+  const readyResumeTarget = withSharedRuntimeEnv(dir, () => resolveResumeTarget(initialized.runId));
+  const resumed = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { replacement: "completed" }, dir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-task-list-freeze",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { resume: readyResumeTarget, backendId: "claude" },
+  );
+  assert.equal(resumed.outcome.manifest.finalTasks.replacement.title, "Replacement alpha");
+  assert.equal(resumed.outcome.manifest.finalTasks.replacement.status, "completed");
+  assert.equal(resumed.outcome.manifest.finalTasks.original, undefined);
+
+  const reset = await withSharedRuntimeEnv(dir, () => resetRun(initialized.runId));
+  assert.equal(reset.manifest.finalTasks.replacement.title, "Replacement alpha");
+  assert.equal(reset.manifest.finalTasks.replacement.status, "pending");
+  assert.equal(reset.manifest.finalTasks.original, undefined);
+});
+
 test("taskTransition hooks receive canonical run and assignment context", async () => {
   const dir = tempDir();
   const assignmentPath = writeAssignment(
@@ -1656,6 +2037,199 @@ Work.
   );
 });
 
+test("command builtin json prepare hooks can replace the fresh task list with setTasks", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const scriptPath = writeNodeScript(
+    dir,
+    "prepare-set-tasks.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    setTasks: [
+      { id: "replacement-one", title: "Replacement {{scope}}", body: "Body {{scope}}", hooks: [] },
+      { id: "replacement-two", title: "Second replacement", body: "", hooks: [] },
+    ],
+  },
+}));\n`,
+  );
+  writeAssignment(
+    dir,
+    "set-tasks-work",
+    `---
+schemaVersion: 1
+name: set-tasks-work
+vars:
+  scope:
+    type: string
+    default: prepared
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async () => {
+      throw new Error("backend should not run during init");
+    },
+    {},
+    { assignmentName: "set-tasks-work", backendId: "claude", initialize: true },
+  );
+
+  assert.deepEqual(Object.keys(outcome.manifest.finalTasks), [
+    "replacement-one",
+    "replacement-two",
+  ]);
+  assert.equal(outcome.manifest.finalTasks["replacement-one"].title, "Replacement prepared");
+  assert.equal(outcome.manifest.finalTasks["replacement-one"].body, "Body prepared");
+  assert.equal(outcome.manifest.finalTasks["replacement-one"].status, "pending");
+  assert.equal(outcome.manifest.finalTasks["replacement-one"].notes, "");
+  assert.equal(outcome.manifest.tasksTotal, 2);
+  assert.deepEqual(Object.keys(outcome.manifest.resetSeed.finalTasks), [
+    "replacement-one",
+    "replacement-two",
+  ]);
+  assert.match(outcome.manifest.brief, /task-runner task list/);
+  const assignmentSeed = readFileSync(join(outcome.workspaceDir, "assignment-seed.md"), "utf8");
+  assert.match(assignmentSeed, /replacement-one/);
+  assert.doesNotMatch(assignmentSeed, /original/);
+});
+
+test("latest prepare setTasks mutation wins", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const firstScript = writeNodeScript(
+    dir,
+    "prepare-set-tasks-first.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    setTasks: [
+      { id: "first-only", title: "First only", body: "", hooks: [] },
+    ],
+  },
+}));\n`,
+  );
+  const secondScript = writeNodeScript(
+    dir,
+    "prepare-set-tasks-second.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    setTasks: [
+      { id: "second-one", title: "Second one", body: "", hooks: [] },
+      { id: "second-two", title: "Second two", body: "", hooks: [] },
+    ],
+  },
+}));\n`,
+  );
+  writeAssignment(
+    dir,
+    "latest-set-tasks-work",
+    `---
+schemaVersion: 1
+name: latest-set-tasks-work
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(firstScript)}
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(secondScript)}
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async () => {
+      throw new Error("backend should not run during init");
+    },
+    {},
+    { assignmentName: "latest-set-tasks-work", backendId: "claude", initialize: true },
+  );
+
+  assert.deepEqual(Object.keys(outcome.manifest.finalTasks), ["second-one", "second-two"]);
+  assert.equal(outcome.manifest.tasksTotal, 2);
+  assert.equal(outcome.manifest.finalTasks["first-only"], undefined);
+  assert.deepEqual(
+    outcome.manifest.resolvedHooks.filter((descriptor) => descriptor.taskScopeId === "first-only"),
+    [],
+  );
+});
+
+test("prepare setTasks rejects empty replacement lists", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const scriptPath = writeNodeScript(
+    dir,
+    "prepare-empty-set-tasks.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    setTasks: [],
+  },
+}));\n`,
+  );
+  writeAssignment(
+    dir,
+    "empty-set-tasks-work",
+    `---
+schemaVersion: 1
+name: empty-set-tasks-work
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: original
+    title: Original
+---
+Work.
+`,
+  );
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("backend should not run after rejected setTasks");
+        },
+        {},
+        { assignmentName: "empty-set-tasks-work", backendId: "claude", initialize: true },
+      ),
+    /setTasks must include at least one task/,
+  );
+});
+
 test("command builtin status mode can block before attempts without invoking the backend", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_AGENT);
@@ -1754,6 +2328,57 @@ Work.
         { assignmentName: "three-work", backendId: "claude" },
       ),
     /malformed JSON output/,
+  );
+});
+
+test("non-prepare hooks reject setTasks mutations", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const scriptPath = writeNodeScript(
+    dir,
+    "before-set-tasks.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    setTasks: [
+      { id: "late", title: "Late replacement", body: "", hooks: [] },
+    ],
+  },
+}));\n`,
+  );
+  writeAssignment(
+    dir,
+    "late-set-tasks-work",
+    `---
+schemaVersion: 1
+name: late-set-tasks-work
+hooks:
+  beforeAttempt:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("backend should not run after rejected beforeAttempt setTasks");
+        },
+        {},
+        { assignmentName: "late-set-tasks-work", backendId: "claude" },
+      ),
+    /hook setTasks mutations are only allowed during prepare/,
   );
 });
 

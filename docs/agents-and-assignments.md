@@ -312,6 +312,65 @@ Assignments may also mix reusable task refs with inline task objects:
   as explicit task file paths
 - inline objects stay local to the assignment
 
+Repo-local task lists can also be loaded at prepare time with the
+first-party `task-list` hook. This is for workflows where an earlier
+prepare hook clones or updates a repository on the host and the actual
+task list lives inside that repository:
+
+```yaml
+hooks:
+  prepare:
+    - builtin: task-list
+      with:
+        path: "{{cwd}}/.task-runner/tasks.yml"
+        mode: replace
+        missing: continue
+        empty: keep-existing
+```
+
+The hook config is strict. The only supported keys are `path`, `mode`,
+`missing`, and `empty`; the only supported values are
+`mode: replace`, `missing: continue`, and `empty: keep-existing`.
+`path` is runtime-interpolated like other hook config strings. A missing
+repo-local task-list file continues with the assignment-authored tasks,
+and an existing empty task list also keeps those tasks. An existing file
+with invalid YAML, unsupported schema keys, missing task refs, duplicate
+ids, invalid task shapes, or invalid task-local hooks fails prepare.
+
+The repo-local task-list file is YAML:
+
+```yaml
+schemaVersion: 1
+tasks:
+  - orient
+  - ./tasks/review.md
+  - id: local-check
+    title: Check local behavior
+    body: |
+      Inspect the repository-specific state.
+    hooks:
+      - path: ./hooks/local-guard.mjs
+```
+
+Task-list entries use the same task entry shape as assignment `tasks`:
+inline task objects, named task refs, and explicit relative or absolute
+task file paths. Relative file refs resolve from the task-list file's
+directory; named refs still resolve from `${TASK_RUNNER_CONFIG_DIR}/tasks`.
+Task-local path hooks inside loaded tasks are made absolute relative to
+the task-list file before they are frozen into the run.
+
+Security: a repo-local `tasks.yml` may declare task-local `hooks[]`
+entries with `path: ./...` references. Those hook modules are loaded
+and executed by task-runner on task transitions. Treat any repository
+used with `task-list` as trusted code, or avoid task-local path hooks in
+repo-local task lists.
+
+If the hook replaces tasks, the replacement list becomes the frozen
+manifest task set. Resume, reset, ready-start, initialized reconfigure,
+and recurring reset/clone do not re-read the repo-local task-list file.
+Changing or deleting `.task-runner/tasks.yml` after init affects only a
+new fresh run or reinit, not the existing run.
+
 Named task definitions are markdown files under
 `${TASK_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`:
 
@@ -491,10 +550,12 @@ Hook mutation boundaries:
 
 - `prepare` may mutate run config (`cwd`, backend/model/effort,
   timeout/unrestricted, prompts, locked fields), runtime vars, hook
-  state, note/pin metadata, task patches, and attachments. Backend args
-  are resolved from the final selected backend after prepare changes.
+  state, note/pin metadata, task patches, full task replacement through
+  `setTasks`, and attachments. Backend args are resolved from the final
+  selected backend after prepare changes.
 - non-prepare phases may mutate run config, hook state, note/pin
-  metadata, task patches, and attachments, but not runtime vars.
+  metadata, task patches, and attachments, but not runtime vars or
+  `setTasks`.
 - task-transition hooks run transactionally around `task set`,
   `task append-notes`, `task add`, and the run loop's own task writes.
   If a task-transition hook rejects, the requested task edit rolls back,
@@ -506,6 +567,11 @@ Built-in hooks:
 - `git-worktree` runs in `prepare` and `beforeAttempt`. It ensures a git
   worktree, switches the run `cwd` to that path, and in `prepare` also
   projects `worktree_path` into runtime vars.
+- `task-list` runs in `prepare`. It reads a repo-local YAML task list and
+  replaces the run task set when the file exists and is non-empty. Missing
+  files continue, empty lists keep the assignment-authored tasks, invalid
+  existing files fail prepare, and the resulting task list is frozen for
+  resume/reset.
 - `command` runs in every phase. `mode: status` treats exit code `0` as
   success and a non-zero exit code as block/reject. `mode: json`
   requires exit code `0` and parses a full hook result from stdout;

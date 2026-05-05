@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { basename, dirname, extname, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import matter from "gray-matter";
 import {
   type AgentLauncherReference,
@@ -13,11 +13,14 @@ import {
   type AuthoredAssignmentConfig,
   type LauncherDefinitionConfig,
   type TaskDef,
+  type TaskListConfig,
   agentConfigSchema,
   assignmentConfigSchema,
   authoredAssignmentConfigSchema,
   launcherDefinitionSchema,
+  taskDefListSchema,
   taskDefinitionConfigSchema,
+  taskListConfigSchema,
 } from "../core/config/schema.js";
 import {
   definitionLayout,
@@ -110,6 +113,17 @@ export class TaskConfigError extends Error {
   ) {
     super(`Invalid task config at ${sourcePath}:\n${issues}`);
     this.name = "TaskConfigError";
+  }
+}
+
+export class TaskListConfigError extends Error {
+  constructor(
+    public readonly sourcePath: string,
+    public readonly issues: string,
+    public override readonly cause?: unknown,
+  ) {
+    super(`Invalid task list config at ${sourcePath}:\n${issues}`);
+    this.name = "TaskListConfigError";
   }
 }
 
@@ -821,8 +835,23 @@ function launcherCanonicalNameFromPath(sourcePath: string): string {
   return canonicalDefinitionIdFromPath("launcher", sourcePath);
 }
 
-function toLauncherIssues(issues: { path: PathSegment[]; message: string }[]): string {
-  return formatConfigIssues(issues);
+function loadYamlData(
+  sourcePath: string,
+  createError: (issues: string, cause?: unknown) => Error,
+  options: { rejectDocumentSeparators?: boolean } = {},
+): unknown {
+  try {
+    const raw = readFileSync(sourcePath, "utf8");
+    if (options.rejectDocumentSeparators && /^---\s*$/m.test(raw)) {
+      throw new Error("YAML document separators are not supported");
+    }
+    return matter(`---\n${raw}\n---\n`).data;
+  } catch (error) {
+    throw createError(
+      error instanceof Error ? `  - ${error.message}` : `  - ${String(error)}`,
+      error,
+    );
+  }
 }
 
 function loadLauncherYaml(sourcePath: string): unknown {
@@ -834,15 +863,7 @@ function loadLauncherYaml(sourcePath: string): unknown {
     );
   }
 
-  try {
-    const raw = readFileSync(sourcePath, "utf8");
-    return matter(`---\n${raw}\n---\n`).data;
-  } catch (error) {
-    throw new LauncherConfigError(
-      sourcePath,
-      error instanceof Error ? `  - ${error.message}` : `  - ${String(error)}`,
-    );
-  }
+  return loadYamlData(sourcePath, (issues) => new LauncherConfigError(sourcePath, issues));
 }
 
 function loadLauncherDefinitionFromPath(
@@ -852,7 +873,7 @@ function loadLauncherDefinitionFromPath(
   const configData = loadLauncherYaml(sourcePath);
   const parsed = launcherDefinitionSchema.safeParse(configData);
   if (!parsed.success) {
-    throw new LauncherConfigError(sourcePath, toLauncherIssues(parsed.error.issues));
+    throw new LauncherConfigError(sourcePath, formatConfigIssues(parsed.error.issues));
   }
 
   const config = parsed.data;
@@ -958,12 +979,12 @@ function resolveNamedTaskPath(name: string): { path: string; searched: string[] 
   return resolveNamedFilePath(resolveTasksRoot(), name, [".md"]);
 }
 
-function resolveTaskPath(ref: string, assignmentSourcePath: string): string {
-  const resolved = resolveStringRef(ref, dirname(assignmentSourcePath));
+function resolveTaskPath(ref: string, taskListSourcePath: string): string {
+  const resolved = resolveStringRef(ref, dirname(taskListSourcePath));
   if (resolved.kind === "path") {
     if (!existsSync(resolved.path)) {
       throw new AssignmentConfigError(
-        assignmentSourcePath,
+        taskListSourcePath,
         `  - task reference "${ref}" not found at ${resolved.path}`,
       );
     }
@@ -973,7 +994,7 @@ function resolveTaskPath(ref: string, assignmentSourcePath: string): string {
   const { path, searched } = resolveNamedTaskPath(resolved.name);
   if (!path) {
     throw new AssignmentConfigError(
-      assignmentSourcePath,
+      taskListSourcePath,
       `  - task reference "${ref}" not found\n    searched:\n${searched.map((candidate) => `      - ${candidate}`).join("\n")}`,
     );
   }
@@ -1013,14 +1034,14 @@ function loadTaskDefinitionFromPath(
   };
 }
 
-function resolveAssignmentTasks(
-  config: AuthoredAssignmentConfig,
+function resolveAuthoredTaskEntriesFromSource(
+  tasks: AuthoredAssignmentConfig["tasks"],
   sourcePath: string,
   options: { strictIdentity: boolean },
 ): TaskDef[] {
   const resolvedTasks: TaskDef[] = [];
 
-  for (const [index, entry] of config.tasks.entries()) {
+  for (const [index, entry] of tasks.entries()) {
     if (typeof entry !== "string") {
       resolvedTasks.push(entry);
       continue;
@@ -1041,6 +1062,64 @@ function resolveAssignmentTasks(
   }
 
   return resolvedTasks;
+}
+
+function resolveAssignmentTasks(
+  config: AuthoredAssignmentConfig,
+  sourcePath: string,
+  options: { strictIdentity: boolean },
+): TaskDef[] {
+  return resolveAuthoredTaskEntriesFromSource(config.tasks, sourcePath, options);
+}
+
+function parseTaskListYaml(sourcePath: string): TaskListConfig {
+  const configData = loadYamlData(
+    sourcePath,
+    (issues, cause) => new TaskListConfigError(sourcePath, issues, cause),
+    { rejectDocumentSeparators: true },
+  );
+  const parsed = taskListConfigSchema.safeParse(configData);
+  if (!parsed.success) {
+    throw new TaskListConfigError(sourcePath, formatConfigIssues(parsed.error.issues));
+  }
+  return parsed.data;
+}
+
+function absolutizeTaskHookPaths(tasks: readonly TaskDef[], sourcePath: string): TaskDef[] {
+  return tasks.map((task) => ({
+    ...task,
+    hooks: task.hooks.map((hook) => {
+      if (hook.path === undefined) {
+        return hook;
+      }
+      return {
+        ...hook,
+        path: isAbsolute(hook.path) ? hook.path : resolve(dirname(sourcePath), hook.path),
+      };
+    }),
+  }));
+}
+
+export function loadRepoLocalTaskList(sourcePath: string): TaskDef[] {
+  const config = parseTaskListYaml(sourcePath);
+  let tasks: TaskDef[];
+  try {
+    tasks = resolveAuthoredTaskEntriesFromSource(config.tasks, sourcePath, {
+      strictIdentity: true,
+    });
+  } catch (error) {
+    if (error instanceof AssignmentConfigError) {
+      throw new TaskListConfigError(sourcePath, error.issues);
+    }
+    throw error;
+  }
+
+  const resolvedTasks = taskDefListSchema.safeParse(tasks);
+  if (!resolvedTasks.success) {
+    throw new TaskListConfigError(sourcePath, formatConfigIssues(resolvedTasks.error.issues));
+  }
+
+  return absolutizeTaskHookPaths(resolvedTasks.data, sourcePath);
 }
 
 function loadAgentDefinitionFromPath(
@@ -1106,6 +1185,7 @@ function loadAssignmentDefinitionFromPath(
 
   return {
     config: resolvedConfig.data,
+    sourceConfig: authored.config,
     instructions: authored.instructions,
     sourcePath,
   };

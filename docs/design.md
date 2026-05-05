@@ -92,6 +92,15 @@ plain task shape before run creation; runtime still performs later
 `{{var}}` interpolation against the resolved tasks during brief
 construction.
 
+Assignments can also replace the authored task list during `prepare`
+through a hook `setTasks` mutation. The first-party `task-list` hook uses
+that mutation to load a repo-local YAML file, typically
+`.task-runner/tasks.yml`, after earlier prepare hooks have cloned or
+updated the host cwd. The repo-local file uses `schemaVersion: 1` and a
+strict `tasks:` array with the same inline/ref task entries as
+assignment `tasks`. Missing repo-local files continue with the authored
+assignment tasks; invalid existing files fail prepare.
+
 Canonical definition identity comes from the on-disk key:
 
 - agents: slash-relative directory under `agents/`
@@ -240,17 +249,21 @@ Fresh `run` / `init`:
 3. run `prepare` hooks before the first manifest write
 4. freeze the resolved descriptors plus any prepare-time mutations into
    `manifest.resolvedHooks`, `manifest.runtimeVars`, `manifest.cwd`,
-   `manifest.hookState`, prompt state, attachments, and reset seed
+   `manifest.hookState`, prompt state, attachments, final task list, and
+   reset seed
 
-Resume and reset do not re-run prepare hooks from current source files.
-They reuse the frozen manifest descriptor/config and the prepare outputs
-captured at first write.
+Resume, reset, ready-start, initialized reconfigure, and recurring
+reset/clone do not re-run prepare hooks from current source files. They
+reuse the frozen manifest descriptor/config and the prepare outputs
+captured at first write, including replacement task lists.
 
 Phase behavior:
 
-- `prepare` may mutate runtime vars and all other hook-owned run state.
+- `prepare` may mutate runtime vars, replace the full task list with
+  `setTasks`, and mutate all other hook-owned run state.
 - `beforeAttempt`, `afterAttempt`, and `afterExit` may continue, block,
-  or request a follow-up prompt reinvocation.
+  or request a follow-up prompt reinvocation. Non-prepare `setTasks`
+  mutations are rejected.
 - `taskTransition` wraps all task mutations from the run loop and task
   command surfaces. Task-local `tasks[].hooks[]` run before root
   `hooks.taskTransition[]`, and rejections roll back the requested task
@@ -272,6 +285,16 @@ is handled natively by task-local placement or task-transition
 The built-in `git-worktree` hook runs in `prepare` and `beforeAttempt`.
 It creates or reuses a worktree, switches the run cwd to that path, and
 in `prepare` also projects `worktree_path` into runtime vars.
+
+The built-in `task-list` hook runs in `prepare` only. Its config is
+strictly `{ path, mode: "replace", missing: "continue",
+empty: "keep-existing" }`. When the file is missing it continues without
+mutating tasks. When the file exists and is empty it keeps the
+assignment-authored tasks. When the file exists and is invalid, prepare
+fails. When the file exists and contains tasks, it emits `setTasks`; the
+resolved replacement task list, task-local hooks, manifest
+`finalTasks`, `tasksTotal`, `tasksCompleted`, `resetSeed.finalTasks`,
+`assignment-seed.md`, and `brief` are all built from that replacement.
 
 Declarative `when` support remains narrow: attempt-phase hooks support
 `when.sessionIndex` and `when.attemptIndexInSession`, while task-transition
@@ -343,7 +366,7 @@ blocked with the rest completed or blocked → `blocked`; otherwise
    runtime-interpolates prefix launcher command/args
 11. builds the provisional prepare manifest
 12. runs prepare hooks, then freezes final cwd/runtime vars/backend
-    outputs, task text, and launcher values
+    outputs, task list, task text, task-local hooks, and launcher values
 13. composes and stores `brief`
 14. imports complete backend-owned history when `--backend-session-id`
    is present and the backend supports history reads
@@ -452,6 +475,9 @@ It uses the frozen agent, assignment, hooks, launcher, tasks, cwd,
 schedule, selected backend args, and backend-specific config already
 stored on the manifest, rerenders the brief/reset seed, and commits the
 replacement manifest only after validation and prepare/rendering succeed.
+If the initialized run was created from a repo-local task-list
+replacement, reconfigure uses the frozen replacement tasks and does not
+re-read the repo-local task-list file.
 It appends
 `run.reconfigured` with changed var keys and a message-changed boolean,
 not secret values or message text.

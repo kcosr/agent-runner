@@ -4,6 +4,7 @@ import type { AgentLauncherReference } from "./launchers.js";
 import {
   type AgentConfig,
   type AssignmentConfig,
+  type AuthoredAssignmentConfig,
   DEFAULT_AGENT_TIMEOUT_SEC,
   DEFAULT_AGENT_UNRESTRICTED,
   type LockableField,
@@ -27,6 +28,7 @@ export interface LoadedAgent {
 
 export interface LoadedAssignment {
   config: AssignmentConfig;
+  sourceConfig?: AuthoredAssignmentConfig;
   instructions: string;
   sourcePath: string;
 }

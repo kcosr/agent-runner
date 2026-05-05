@@ -1,8 +1,8 @@
-import { basename } from "node:path";
+import { basename, isAbsolute } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import type { RunAttachment } from "../../contracts/attachments.js";
 import { shortId } from "../../util/short-id.js";
-import type { LockableField } from "../config/schema.js";
+import { type HookPhase, type LockableField, resolvedTaskListSchema } from "../config/schema.js";
 import {
   getAttachment,
   removeAttachmentFiles,
@@ -29,6 +29,7 @@ import type {
   HookResult,
   PrepareHookContext,
   ResolvedHookDescriptor,
+  ResolvedTask,
   TaskTransitionHookContext,
   TaskTransitionHookWhen,
   TaskTransitionResult,
@@ -56,6 +57,7 @@ interface AttemptResultSnapshot {
 interface HookExecutionState {
   manifest: RunManifest;
   tasks: Map<string, TaskState>;
+  replacementTasks: ResolvedTask[] | null;
   initialPrompt: string;
   attemptPrompt: string;
   eventContext: RunEventWriteContext;
@@ -214,11 +216,48 @@ function applyTaskPatches(
   }
 }
 
+function cloneResolvedTask(task: ResolvedTask): ResolvedTask {
+  return structuredClone(task);
+}
+
+function taskMapFromResolvedTasks(tasks: readonly ResolvedTask[]): {
+  taskMap: Map<string, TaskState>;
+  resolvedTasks: ResolvedTask[];
+} {
+  const parsed = resolvedTaskListSchema.safeParse(tasks);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const path = issue?.path.length ? `[${issue.path.join(".")}]` : "";
+    throw new HookRuntimeError(`hook setTasks${path}: ${issue?.message ?? "invalid tasks"}`);
+  }
+
+  const next = new Map<string, TaskState>();
+  const resolvedTasks: ResolvedTask[] = [];
+  for (const [taskIndex, task] of parsed.data.entries()) {
+    for (const [hookIndex, hook] of task.hooks.entries()) {
+      if (hook.path !== undefined && !isAbsolute(hook.path)) {
+        throw new HookRuntimeError(
+          `hook setTasks[${taskIndex}.hooks.${hookIndex}.path]: path hooks must be absolute`,
+        );
+      }
+    }
+    resolvedTasks.push(cloneResolvedTask(task));
+    next.set(task.id, {
+      id: task.id,
+      title: task.title,
+      body: task.body,
+      status: "pending",
+      notes: "",
+    });
+  }
+  return { taskMap: next, resolvedTasks };
+}
+
 async function applyMutations(
   state: HookExecutionState,
   mutate: HookMutations | undefined,
   options: {
-    allowVars: boolean;
+    phase: HookPhase;
   },
 ): Promise<void> {
   if (!mutate) {
@@ -257,7 +296,7 @@ async function applyMutations(
   }
 
   if (mutate.vars) {
-    if (!options.allowVars) {
+    if (options.phase !== "prepare") {
       throw new HookRuntimeError("hook vars mutations are only allowed during prepare");
     }
     state.manifest.runtimeVars = {
@@ -288,6 +327,20 @@ async function applyMutations(
 
   if (mutate.pinned !== undefined) {
     state.manifest.pinned = mutate.pinned;
+  }
+
+  if (mutate.setTasks) {
+    if (options.phase !== "prepare") {
+      throw new HookRuntimeError("hook setTasks mutations are only allowed during prepare");
+    }
+    if (mutate.patchTasks) {
+      throw new HookRuntimeError(
+        "hook cannot combine patchTasks and setTasks in the same mutation",
+      );
+    }
+    const replacement = taskMapFromResolvedTasks(mutate.setTasks);
+    state.tasks = replacement.taskMap;
+    state.replacementTasks = replacement.resolvedTasks;
   }
 
   if (mutate.patchTasks) {
@@ -523,7 +576,7 @@ export async function runPrepareHooks(
         );
         continue;
       }
-      await applyMutations(state, hookResult.mutate, { allowVars: true });
+      await applyMutations(state, hookResult.mutate, { phase: "prepare" });
       if (hookResult.action === "block") {
         throw new HookRuntimeError(hookResult.reason);
       }
@@ -600,7 +653,7 @@ export async function runAttemptHooks(
         );
         continue;
       }
-      await applyMutations(state, result.mutate, { allowVars: false });
+      await applyMutations(state, result.mutate, { phase });
       recordHookAudit(
         state,
         descriptor,
@@ -690,7 +743,7 @@ export async function runTaskTransitionHooks(
         );
         continue;
       }
-      await applyMutations(state, result.mutate, { allowVars: false });
+      await applyMutations(state, result.mutate, { phase: "taskTransition" });
       recordHookAudit(
         state,
         descriptor,
@@ -738,6 +791,7 @@ export function createHookExecutionState(
   return {
     manifest,
     tasks,
+    replacementTasks: null,
     initialPrompt: prompts.initialPrompt,
     attemptPrompt: prompts.attemptPrompt ?? prompts.initialPrompt,
     eventContext,
@@ -763,6 +817,7 @@ export function cloneHookExecutionState(state: HookExecutionState): HookExecutio
       hookAudits: state.manifest.hookAudits.map((audit) => ({ ...audit })),
     },
     tasks: cloneTasks(state.tasks),
+    replacementTasks: state.replacementTasks?.map(cloneResolvedTask) ?? null,
     initialPrompt: state.initialPrompt,
     attemptPrompt: state.attemptPrompt,
     eventContext: { ...state.eventContext },

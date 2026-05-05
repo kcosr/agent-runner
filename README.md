@@ -241,12 +241,56 @@ Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
 the built-in `direct` launcher.
 
 Launcher command and args are runtime-interpolated before they are frozen
-into the manifest. A short-term persistent-container workflow can combine
-a run-group workspace path with a launcher wrapper:
+into the manifest. Container-backed workflows should keep the host
+workspace cwd and container cwd explicit: prepare hooks run from the host
+cwd, while the launcher receives the container cwd it should enter.
+Task-runner does not manage container lifecycle, startup, shutdown, or
+cleanup.
 
 ```yaml
 # assignment.md
-cwd: "/home/kevin/agent-workspaces/{{run_group_id}}/repo"
+cwd: "{{host_workspace_root}}/{{run_group_id}}/repo" # host cwd
+vars:
+  repo_url:
+    type: string
+    required: true
+    sources: [cli, web]
+  branch:
+    type: string
+    required: true
+    sources: [cli, web]
+  host_workspace_root:
+    type: string
+    default: /srv/agent-workspaces
+    sources: [cli, web]
+  container_workspace_root:
+    type: string
+    default: /workspace/agent-workspaces
+    sources: [cli, web]
+  image:
+    type: string
+    default: agent-dev
+    sources: [cli, web]
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: status
+        command: bash
+        cwd: /
+        args:
+          - -lc
+          - |
+            set -euo pipefail
+            target="{{cwd}}"
+            mkdir -p "$(dirname "$target")"
+            if [ -d "$target/.git" ]; then
+              git -C "$target" fetch origin "{{branch}}" --prune
+              git -C "$target" checkout "{{branch}}"
+              git -C "$target" reset --hard "origin/{{branch}}"
+            else
+              git clone --branch "{{branch}}" "{{repo_url}}" "$target"
+            fi
 ```
 
 ```yaml
@@ -254,14 +298,14 @@ cwd: "/home/kevin/agent-workspaces/{{run_group_id}}/repo"
 launcher:
   command: aw-tr-launch
   args:
-    - agent-dev
-    - "{{cwd}}"
-    - "{{run_group_id}}"
+    - "{{image}}"
+    - "{{container_workspace_root}}/{{run_group_id}}/repo"
 ```
 
-Task-runner does not manage the container lifecycle or cleanup. The
-wrapper receives the frozen cwd and run group id so it can enter a
-workspace that another process prepared.
+In this pattern the clone/update happens on the host at `{{cwd}}`. The
+launcher wrapper receives the matching container cwd so it can enter an
+already-running container that sees the same repository at its own mount
+path.
 
 Agents may also author backend-owned argv tokens:
 

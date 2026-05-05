@@ -9,6 +9,7 @@ import { cloneResolvedLauncherConfig } from "../config/launchers.js";
 import { loadedAgentFromManifest } from "../config/loaded.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import type { LockableField, VarDef } from "../config/schema.js";
+import { shouldReplayPrepareBuiltinOnReconfigure } from "../hooks/registry.js";
 import {
   type ResolvedResumeTarget,
   ResumeError,
@@ -361,11 +362,18 @@ async function reconfigureResolvedRun(
     resume: resolved,
     initialize: true,
     stageInitialize: true,
-    resolvedHooksOverride: previous.resolvedHooks.map((descriptor) => ({
-      ...descriptor,
-      source: { ...descriptor.source },
-      when: descriptor.when ? { ...descriptor.when } : null,
-    })),
+    resolvedHooksOverride: previous.resolvedHooks
+      .filter((descriptor) => {
+        if (descriptor.phase !== "prepare" || descriptor.source.builtin === undefined) {
+          return true;
+        }
+        return shouldReplayPrepareBuiltinOnReconfigure(descriptor.source.builtin);
+      })
+      .map((descriptor) => ({
+        ...descriptor,
+        source: { ...descriptor.source },
+        when: descriptor.when ? { ...descriptor.when } : null,
+      })),
     overrides: buildReconfigureOverrides(previous, loaded, loadedAssignment, nextMessage),
   });
 
