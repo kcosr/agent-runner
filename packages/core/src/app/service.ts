@@ -268,6 +268,10 @@ function toRunTimelineAttempt(
     exitCode: record.exitCode,
     timedOut: record.timedOut,
     live: false,
+    provenance:
+      record.provenance.kind === "backend_session"
+        ? { kind: "backend_session", mode: record.provenance.mode }
+        : { kind: "task_runner" },
   };
 }
 

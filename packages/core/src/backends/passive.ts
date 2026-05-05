@@ -18,6 +18,7 @@ export class PassiveBackendNotInvokableError extends Error {
 // before we ever get here, so `invoke` throwing is defense in depth.
 export const passiveBackend: Backend = {
   id: "passive",
+  launcherMode: "direct",
   async invoke(): Promise<BackendInvokeResult> {
     throw new PassiveBackendNotInvokableError();
   },

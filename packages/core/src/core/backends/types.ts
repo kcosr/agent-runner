@@ -2,7 +2,14 @@ import { isAbsolute } from "node:path";
 import type { ResolvedLauncherConfig } from "../config/launchers.js";
 import type { RunExecution } from "../run/manifest.js";
 
-export const BUILTIN_BACKEND_IDS = ["claude", "codex", "cursor", "pi", "passive"] as const;
+export const BUILTIN_BACKEND_IDS = [
+  "claude",
+  "codex",
+  "cursor",
+  "opencode",
+  "pi",
+  "passive",
+] as const;
 export type BuiltinBackendId = (typeof BUILTIN_BACKEND_IDS)[number];
 export type BackendName = string;
 export const RESERVED_BACKEND_NAMES: ReadonlySet<string> = new Set(BUILTIN_BACKEND_IDS);
@@ -174,7 +181,7 @@ export interface BackendSessionHistorySourceContext {
 
 export type BackendSessionHistorySourceResult =
   | { available: true; source: BackendSessionHistorySource }
-  | { available: false; reason: string };
+  | { available: false; reason: string; transient?: boolean };
 
 export type BackendSessionHistorySource =
   | {
@@ -221,10 +228,35 @@ export interface BackendSyncedTurn {
   assistantText: string | null;
 }
 
+export interface BackendSyncedTurnMatchContext {
+  prompt: string;
+  turn: BackendSyncedTurn;
+}
+
+export interface BackendSyncedTurnTimingContext {
+  attemptStartedAt: string;
+  attemptEndedAt: string | null;
+  turn: BackendSyncedTurn;
+}
+
+export interface BackendLauncherContext {
+  backendConfig?: unknown;
+}
+
+export interface BackendRenameSessionContext {
+  sessionId: string;
+  cwd: string;
+  env: Record<string, string>;
+  backendConfig?: unknown;
+  resolvedBackendArgs: ResolvedBackendArgs;
+  name: string | null;
+}
+
 export interface Backend {
   id: BackendName;
   sourcePath?: string;
   launcherMode?: "applies" | "direct";
+  launcherApplies?(ctx: BackendLauncherContext): boolean;
   resolveConfig?(ctx: BackendConfigResolutionContext): unknown | Promise<unknown>;
   invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult>;
   /**
@@ -259,4 +291,22 @@ export interface Backend {
    * must be JSON-persistable because task-runner stores them in run.json.
    */
   readSessionHistory?(ctx: BackendSessionHistoryContext): Promise<BackendSessionHistoryResult>;
+  /**
+   * Optional backend-owned equivalence check used when sync tries to
+   * identify a backend history turn that corresponds to an already-recorded
+   * task-runner attempt. Use this for backend storage quirks; exact prompt
+   * equality is always accepted before this hook is called.
+   */
+  taskRunnerPromptMatchesSyncedTurn?(ctx: BackendSyncedTurnMatchContext): boolean;
+  /**
+   * Optional backend-owned timing equivalence check used after sync has
+   * matched a backend history turn by session and prompt. Omitted means the
+   * task-runner attempt and backend turn timestamp windows must overlap.
+   */
+  taskRunnerAttemptTimingMatchesSyncedTurn?(ctx: BackendSyncedTurnTimingContext): boolean;
+  /**
+   * Optional backend-owned propagation for `run set-name` when the backend
+   * can persist names on its own session/thread object.
+   */
+  renameSession?(ctx: BackendRenameSessionContext): Promise<void>;
 }

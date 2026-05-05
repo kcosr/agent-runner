@@ -2234,6 +2234,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
             let syncResult: BackendSessionHistorySyncResult;
             try {
               syncResult = applyPreparedBackendSessionHistorySync({
+                backend: currentBackend,
                 manifest: latest,
                 mode: "sync",
                 prepared: syncPreparation,

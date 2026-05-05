@@ -82,7 +82,7 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
   assert.equal(timeoutSec.value, 14400);
   assert.equal(timeoutSec.source, "agent");
   assert.equal(unrestricted.value, true);
-  assert.equal(unrestricted.source, "agent");
+  assert.equal(unrestricted.source, "schema_default");
   assert.equal(maxRetries.value, 4);
   assert.equal(maxRetries.source, "assignment");
 

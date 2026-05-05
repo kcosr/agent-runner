@@ -119,6 +119,8 @@ traffic.
 | `TASK_RUNNER_CODEX_UDS_PATH` | Fresh Codex runs use this absolute socket path for WebSocket-over-UDS when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary (default `cursor-agent`) |
+| `TASK_RUNNER_OPENCODE_BIN` | OpenCode CLI binary (default `opencode`) |
+| `TASK_RUNNER_OPENCODE_DATA_DIR` | OpenCode data directory for session-history validation/sync; falls back to `OPENCODE_DATA_DIR`, then `${XDG_DATA_HOME:-~/.local/share}/opencode` |
 | `TASK_RUNNER_CAPTURE_BACKEND_STDOUT` | Write raw backend stdout sidecars to `attempts/NN.stdout.log` for local debugging |
 | `TASK_RUNNER_BACKEND_SESSION_SYNC` | Set to `false`, `0`, `no`, or `off` to disable backend-owned session history import, pre-resume sync, and daemon subscribed-run polling |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary (default `pi`) |
@@ -283,6 +285,7 @@ unaffected.
 ```bash
 # XDG defaults are usually fine; override only if needed.
 export TASK_RUNNER_CLAUDE_BIN=/opt/claude/bin/claude
+export TASK_RUNNER_OPENCODE_BIN=/opt/opencode/bin/opencode
 export TASK_RUNNER_PI_BIN=/opt/pi/bin/pi
 
 # Local daemon mode for shared state across terminals.

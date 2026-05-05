@@ -127,8 +127,8 @@ The canonical record is `run.json`. Important persisted fields:
 - `tasksCompleted`, `tasksTotal`
 - `brief` (composed worker handoff)
 - `callerInstructions`
-- `backendSessionId` (backend-native resume handle; Pi, Codex, Claude,
-  etc. each store their own flavor here)
+- `backendSessionId` (backend-native resume handle; Claude, Codex,
+  Cursor, OpenCode, Pi, etc. each store their own flavor here)
 - `backendSessionSync` (backend-owned history source, cursor, imported
   turn ids, open turn ids, and last sync/error metadata)
 - `runGroupId`

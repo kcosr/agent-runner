@@ -53,6 +53,7 @@ describe("applyEnvelope", () => {
         exitCode: null,
         timedOut: false,
         live: true,
+        provenance: { kind: "task_runner" },
       },
     ]);
   });
@@ -74,6 +75,7 @@ describe("applyEnvelope", () => {
             exitCode: null,
             timedOut: false,
             live: true,
+            provenance: { kind: "task_runner" },
           },
         ],
         lastCursor: 1,
@@ -109,6 +111,7 @@ describe("applyEnvelope", () => {
             exitCode: null,
             timedOut: false,
             live: true,
+            provenance: { kind: "task_runner" },
           },
         ],
         lastCursor: 1,
@@ -189,6 +192,7 @@ describe("applyEnvelope", () => {
             exitCode: null,
             timedOut: false,
             live: true,
+            provenance: { kind: "task_runner" },
           },
         ],
         lastCursor: 1,

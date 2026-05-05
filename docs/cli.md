@@ -85,8 +85,8 @@ Flags:
 - `--cwd <path>` — override the run cwd. Fresh-run precedence is
   `--cwd` → assignment `cwd` → caller cwd.
 - `--backend <id>` — override the agent's backend. Built-ins are
-  `claude`, `codex`, `cursor`, `pi`, and `passive`; custom backend names
-  are accepted and resolved through the backend registry.
+  `claude`, `codex`, `cursor`, `opencode`, `pi`, and `passive`; custom
+  backend names are accepted and resolved through the backend registry.
 - `--launcher <name>` — override the agent's launcher by named launcher
   id. Fresh-run/init only; forbidden on resume and ready-start.
   The built-in `direct` launcher is always available.

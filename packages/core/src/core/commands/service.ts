@@ -6,8 +6,7 @@ import {
   VALID_STATUSES,
   isValidStatus,
 } from "../../assignment/model.js";
-import { setCodexThreadName } from "../../backends/codex.js";
-import { setPiSessionName } from "../../backends/pi.js";
+import { resolveBackend } from "../../backends/registry.js";
 import {
   type DefinitionEntry,
   type DefinitionKind,
@@ -765,21 +764,13 @@ function validateAttachmentSourcePath(sourcePath: string): void {
 }
 
 async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
-  if (manifest.backend === "codex" && manifest.backendSessionId !== null) {
-    await setCodexThreadName({
-      threadId: manifest.backendSessionId,
-      cwd: manifest.cwd,
-      env: process.env as Record<string, string>,
-      backendConfig: manifest.backendConfig,
-      resolvedBackendArgs: manifest.resolvedBackendArgs,
-      name: manifest.name,
-    });
-  }
-  if (manifest.backend === "pi" && manifest.backendSessionId !== null) {
-    await setPiSessionName({
+  const backend = resolveBackend(manifest.backend);
+  if (backend.renameSession && manifest.backendSessionId !== null) {
+    await backend.renameSession({
       sessionId: manifest.backendSessionId,
       cwd: manifest.cwd,
       env: process.env as Record<string, string>,
+      backendConfig: manifest.backendConfig,
       resolvedBackendArgs: manifest.resolvedBackendArgs,
       name: manifest.name,
     });

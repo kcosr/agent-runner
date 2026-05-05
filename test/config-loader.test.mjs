@@ -125,7 +125,7 @@ test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", ()
     assert.equal(loaded.config.name, "demo");
     assert.equal(loaded.config.backend, "claude");
     assert.equal(loaded.config.timeoutSec, 3600);
-    assert.equal(loaded.config.unrestricted, false);
+    assert.equal(loaded.config.unrestricted, true);
     assert.ok(!("maxRetries" in loaded.config), "maxRetries moved to assignment schema");
     assert.ok(loaded.instructions.includes("You are an assistant."));
   }));

@@ -467,6 +467,13 @@ export const runTimelineAttemptSchema: z.ZodType<RunTimelineAttempt> = z.object(
   exitCode: z.number().int().nullable(),
   timedOut: z.boolean(),
   live: z.boolean(),
+  provenance: z.union([
+    z.object({ kind: z.literal("task_runner") }),
+    z.object({
+      kind: z.literal("backend_session"),
+      mode: z.union([z.literal("bootstrap"), z.literal("sync")]),
+    }),
+  ]),
 });
 
 export const runTimelineHistorySchema: z.ZodType<RunTimelineHistory> = z.object({

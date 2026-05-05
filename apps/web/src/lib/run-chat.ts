@@ -72,11 +72,16 @@ function toAssistantRow(
   };
 }
 
+function isBootstrapAttempt(attempt: RunTimelineAttempt): boolean {
+  return attempt.provenance.kind === "backend_session" && attempt.provenance.mode === "bootstrap";
+}
+
 function sessionUserMessage(
   sessionIndex: number,
   session: RunSessionSummary | undefined,
+  options: { includeInitial: boolean },
 ): string | null {
-  if (sessionIndex === 0) {
+  if (sessionIndex === 0 && !options.includeInitial) {
     return null;
   }
   return normalizedMessage(session?.message ?? null);
@@ -190,7 +195,10 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
   for (const sessionIndex of [...sessionIndexes].sort((left, right) => left - right)) {
     const session = sessionsByIndex.get(sessionIndex);
     const attempts = attemptsBySession.get(sessionIndex) ?? [];
-    const userMessage = sessionUserMessage(sessionIndex, session);
+    const hasBootstrapHistory = attempts.some(isBootstrapAttempt);
+    const userMessage = sessionUserMessage(sessionIndex, session, {
+      includeInitial: hasBootstrapHistory,
+    });
     const source = sessionSource(sessionIndex);
     if (userMessage !== null) {
       rows.push({
@@ -210,11 +218,12 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
       const systemMessage = normalizedMessage(attempt.prompt);
       const promptCoveredByUserMessage =
         sessionIndex > 0 && attempt.attemptIndexInSession === 0 && userMessage !== null;
-      const attemptDivider =
-        promptCoveredByUserMessage && userMessage !== null
-          ? undefined
-          : turnDivider(`attempt:${attempt.attemptNumber}`, attempt.startedAt);
-      if (systemMessage !== null && !promptCoveredByUserMessage) {
+      const promptCoveredByBootstrapHistory = isBootstrapAttempt(attempt) && userMessage !== null;
+      const promptCovered = promptCoveredByUserMessage || promptCoveredByBootstrapHistory;
+      const attemptDivider = promptCovered
+        ? undefined
+        : turnDivider(`attempt:${attempt.attemptNumber}`, attempt.startedAt);
+      if (systemMessage !== null && !promptCovered) {
         rows.push({
           id: `session:${sessionIndex}:system:${attempt.attemptNumber}`,
           kind: "system",
@@ -229,7 +238,7 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
       rows.push({
         id: `session:${sessionIndex}:assistant:${attempt.attemptNumber}`,
         kind: "assistant",
-        ...(systemMessage !== null && !promptCoveredByUserMessage
+        ...(systemMessage !== null && !promptCovered
           ? {}
           : attemptDivider
             ? { turnDivider: attemptDivider }

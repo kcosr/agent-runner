@@ -508,6 +508,7 @@ class SessionSyncManager {
           return;
         }
         const result = applyPreparedBackendSessionHistorySync({
+          backend,
           manifest: latest,
           mode: "sync",
           prepared,
@@ -657,6 +658,7 @@ function applyTimelineEnvelope(record: ActiveRunRecord, envelope: RunTimelineEnv
         exitCode: null,
         timedOut: false,
         live: true,
+        provenance: { kind: "task_runner" },
       };
       return;
     case "agent_message_delta":

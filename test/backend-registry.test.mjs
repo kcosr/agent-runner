@@ -21,11 +21,12 @@ function writeBackend(configDir, name, filename, source) {
   writeFileSync(join(dir, filename), source);
 }
 
-test("registry: claude, codex, cursor, pi, and passive are known", () => {
+test("registry: claude, codex, cursor, opencode, pi, and passive are known", () => {
   const known = knownBackends();
   assert.ok(known.includes("claude"));
   assert.ok(known.includes("codex"));
   assert.ok(known.includes("cursor"));
+  assert.ok(known.includes("opencode"));
   assert.ok(known.includes("pi"));
   assert.ok(known.includes("passive"));
 });
@@ -37,6 +38,8 @@ test("registry: resolveBackend returns the adapter", () => {
   assert.equal(codex.id, "codex");
   const cursor = resolveBackend("cursor");
   assert.equal(cursor.id, "cursor");
+  const opencode = resolveBackend("opencode");
+  assert.equal(opencode.id, "opencode");
   const pi = resolveBackend("pi");
   assert.equal(pi.id, "pi");
 });
@@ -295,6 +298,10 @@ test("registry: validates custom backend optional fields", async () => {
       validateSessionId: true,
       supportsBootstrapSessionImport: "yes",
       resolveConfig: {},
+      launcherApplies: true,
+      taskRunnerPromptMatchesSyncedTurn: true,
+      taskRunnerAttemptTimingMatchesSyncedTurn: true,
+      renameSession: true,
       launcherMode: "maybe"
     };`,
   );
@@ -308,6 +315,10 @@ test("registry: validates custom backend optional fields", async () => {
       /validateSessionId must be a function/.test(err.message) &&
       /supportsBootstrapSessionImport must be a boolean/.test(err.message) &&
       /resolveConfig must be a function/.test(err.message) &&
+      /launcherApplies must be a function/.test(err.message) &&
+      /taskRunnerPromptMatchesSyncedTurn must be a function/.test(err.message) &&
+      /taskRunnerAttemptTimingMatchesSyncedTurn must be a function/.test(err.message) &&
+      /renameSession must be a function/.test(err.message) &&
       /launcherMode must be "applies" or "direct"/.test(err.message),
   );
 });

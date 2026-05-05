@@ -27,6 +27,10 @@ export interface RunDetailStreamEvent {
 // Execution timeline events stay on the per-run timeline surface.
 export type RunTimelineEvent = RunEvent;
 
+export type RunTimelineAttemptProvenance =
+  | { kind: "task_runner" }
+  | { kind: "backend_session"; mode: "bootstrap" | "sync" };
+
 // One normalized attempt snapshot in the per-run timeline history response.
 export interface RunTimelineAttempt {
   attemptNumber: number;
@@ -40,6 +44,7 @@ export interface RunTimelineAttempt {
   exitCode: number | null;
   timedOut: boolean;
   live: boolean;
+  provenance: RunTimelineAttemptProvenance;
 }
 
 // Bootstrap payload for per-run timeline consumers before live continuation.

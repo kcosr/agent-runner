@@ -242,6 +242,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
     id: backendId,
     ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
     ...(backendId === "codex" ? { resolveConfig: codexBackend.resolveConfig } : {}),
+    ...(backendId === "codex" ? { launcherApplies: codexBackend.launcherApplies } : {}),
     ...(options.resolveConfig ? { resolveConfig: options.resolveConfig } : {}),
     ...(options.launcherMode ? { launcherMode: options.launcherMode } : {}),
     ...(options.validateSessionId ? { validateSessionId: options.validateSessionId } : {}),

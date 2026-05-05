@@ -1,4 +1,3 @@
-import { resolveCodexTransportConfig } from "../../backends/codex.js";
 import { LauncherConfigError, loadLauncherConfig } from "../../config/loader.js";
 import type { Backend } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
@@ -31,11 +30,7 @@ export function launcherAppliesToBackend(
   if (backend.id === "passive" || backend.launcherMode === "direct") {
     return false;
   }
-  if (backend.id !== "codex") {
-    return true;
-  }
-  const transportType = resolveCodexTransportConfig({ backendConfig }).type;
-  return transportType !== "ws" && transportType !== "uds";
+  return backend.launcherApplies?.({ backendConfig }) ?? true;
 }
 
 export function resolveFreshLauncherConfig(args: {

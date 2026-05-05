@@ -1154,6 +1154,7 @@ describe("api client", () => {
                     exitCode: 0,
                     timedOut: false,
                     live: false,
+                    provenance: { kind: "task_runner" },
                   },
                   {
                     attemptNumber: 2,
@@ -1168,6 +1169,7 @@ describe("api client", () => {
                     exitCode: null,
                     timedOut: false,
                     live: true,
+                    provenance: { kind: "task_runner" },
                   },
                 ],
               },
@@ -1189,6 +1191,7 @@ describe("api client", () => {
       attemptIndexInSession: 0,
       prompt: "Do the thing",
       live: false,
+      provenance: { kind: "task_runner" },
     });
     expect(history.attempts[1]).toMatchObject({
       attemptNumber: 2,
@@ -1196,6 +1199,7 @@ describe("api client", () => {
       attemptIndexInSession: 0,
       notices: "warning\n",
       live: true,
+      provenance: { kind: "task_runner" },
     });
   });
 

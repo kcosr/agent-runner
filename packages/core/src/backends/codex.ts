@@ -1345,10 +1345,23 @@ export async function setCodexThreadName(ctx: {
 
 export const codexBackend: Backend = {
   id: "codex",
+  launcherApplies: ({ backendConfig }) => {
+    const transportType = resolveCodexTransportConfig({ backendConfig }).type;
+    return transportType !== "ws" && transportType !== "uds";
+  },
   resolveConfig: resolveCodexBackendConfig,
   validateSessionId: validateCodexSession,
   resolveSessionHistorySource: resolveCodexSessionHistorySource,
   readSessionHistory: readCodexSessionHistory,
+  renameSession: ({ sessionId, cwd, env, backendConfig, resolvedBackendArgs, name }) =>
+    setCodexThreadName({
+      threadId: sessionId,
+      cwd,
+      env,
+      backendConfig,
+      resolvedBackendArgs,
+      name,
+    }),
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const startedAt = Date.now();
     const rawStdoutChunks: string[] = [];

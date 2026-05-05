@@ -1,7 +1,7 @@
 # Backends
 
 A backend is the runtime that executes the worker. task-runner ships with
-five built-in backends and can load trusted local custom backends. Each
+six built-in backends and can load trusted local custom backends. Each
 backend owns its own CLI/RPC shape, session handle, and cwd binding
 semantics.
 
@@ -10,6 +10,7 @@ semantics.
 | `claude`  | `claude` CLI (`--print`, streaming)  | session UUID on disk  |
 | `codex`   | `codex app-server` (stdio, WS, UDS)  | thread id             |
 | `cursor`  | `cursor-agent` CLI                   | session id + store db |
+| `opencode` | `opencode run --format json`        | session id + sqlite db |
 | `pi`      | `pi` CLI (`--mode rpc`)              | session id + cwd hdr  |
 | `passive` | none                                 | free-form string      |
 
@@ -20,7 +21,7 @@ A backend is chosen by (in order of precedence):
 1. `--backend <id>` on the CLI (ad-hoc agent synthesis).
 2. `agent.backend` in the agent frontmatter.
 
-Built-in backend ids: `claude`, `codex`, `cursor`, `pi`, `passive`.
+Built-in backend ids: `claude`, `codex`, `cursor`, `opencode`, `pi`, `passive`.
 Custom backend names are any non-empty string that does not conflict with
 a built-in name.
 
@@ -54,8 +55,9 @@ messages, model, effort, and resolved backend args are not exported as env
 vars.
 
 Launchers are subprocess-only. They wrap the spawned backend command for
-`claude`, `cursor`, `pi`, and Codex stdio. They do not apply to the
-`passive` backend, Codex websocket transport, or Codex UDS transport.
+`claude`, `cursor`, `opencode`, `pi`, and Codex stdio. They do not apply
+to the `passive` backend, Codex websocket transport, or Codex UDS
+transport.
 
 Backend args are also resolved once for the selected backend and frozen
 into the local run manifest. They are appended after task-runner's
@@ -93,12 +95,16 @@ The module must default-export a backend object with:
 - optional `validateSessionId(ctx)` as a function
 - optional `resolveSessionHistorySource(ctx)` as a function
 - optional `readSessionHistory(ctx)` as a function
+- optional `taskRunnerPromptMatchesSyncedTurn(ctx)` as a function
+- optional `taskRunnerAttemptTimingMatchesSyncedTurn(ctx)` as a function
 - optional `supportsBootstrapSessionImport` as a boolean
+- optional `launcherApplies(ctx)` as a function
 - optional `launcherMode` as `"applies"` or `"direct"`
+- optional `renameSession(ctx)` as a function
 
-Built-in names (`claude`, `codex`, `cursor`, `pi`, `passive`) are
-reserved. Import and validation errors include the backend name and
-resolved module path.
+Built-in names (`claude`, `codex`, `cursor`, `opencode`, `pi`,
+`passive`) are reserved. Import and validation errors include the backend
+name and resolved module path.
 
 Built-ins and custom backends use the same `Backend` contract. The run
 loop resolves a backend object, passes the same invoke context shape, and
@@ -209,6 +215,15 @@ attempts until a later sync reports them complete. If a backend returns a
 non-persistable cursor, source change token, or malformed turn,
 task-runner aborts the sync and leaves the prior manifest unchanged.
 
+When sync sees a backend history turn that may correspond to an
+already-recorded task-runner attempt, exact prompt equality is matched
+first. Backends with storage quirks can additionally implement
+`taskRunnerPromptMatchesSyncedTurn({ prompt, turn })` so sync can upgrade
+the existing attempt instead of importing a duplicate turn. Backends with
+history timestamps that do not overlap task-runner attempt timestamps can
+implement `taskRunnerAttemptTimingMatchesSyncedTurn(ctx)` to own that
+matching policy.
+
 Custom backend code is trusted local code. It is loaded into the
 task-runner process without sandboxing and cached for the process
 lifetime; daemon changes require a daemon restart, including the first
@@ -235,14 +250,17 @@ imports as public API for custom modules:
   backend patterns.
 - [`codex`](../packages/core/src/backends/codex.ts) shows backend-owned
   `resolveConfig()` and config validation.
+- [`opencode`](../packages/core/src/backends/opencode.ts) shows a
+  subprocess JSON-event backend with SQLite-backed session history.
 - [`pi`](../packages/core/src/backends/pi.ts) shows backend session
   validation, history import/sync, and resume id handling.
 
-A few built-in names have product policy outside the generic backend
-contract: `passive` has externally driven run behavior, `codex` has
-transport-specific launcher applicability, and `codex`/`pi` have built-in
-session rename helpers. Custom backends still receive the same invoke
-context and return the same invoke result shape.
+A few built-in backends use optional backend hooks: `codex` owns
+transport-specific launcher applicability and thread rename propagation,
+`pi` owns session rename propagation, `cursor` owns its sync timestamp
+matching policy, and `opencode` owns its stored-prompt equivalence rule.
+`passive` still has externally driven run behavior in core because it is
+a task-runner lifecycle mode, not an invokable subprocess backend.
 
 ## `claude`
 
@@ -332,6 +350,44 @@ context and return the same invoke result shape.
   `meta[0].latestRootBlobId` as its change token so active SQLite WAL writes
   are detected before a store checkpoint updates `store.db` mtime.
 
+## `opencode`
+
+- Binary: `$TASK_RUNNER_OPENCODE_BIN` or `opencode`.
+- Args: `run --format json [--model ...] [--variant <effort>]
+  [--session <session-id>] [--title ...]
+  [--dangerously-skip-permissions] [extra args...] <prompt>`.
+- Session id is captured from OpenCode JSON events as `sessionID`.
+- The OpenCode CLI is itself a headless/server-backed runtime: `opencode
+  run` starts an in-process server by default, while user-supplied extra
+  args may select OpenCode's own attach/agent behavior.
+- Live output is captured from `run --format json` text events when
+  OpenCode emits them. This is not a token-delta contract; OpenCode may
+  report a final text event for the completed response.
+- `--title` is passed during `run` invocation when task-runner has a run
+  name. The current OpenCode CLI does not expose a supported post-hoc
+  session rename command, so later `run set-name` changes remain
+  task-runner-local for OpenCode.
+- Session storage is OpenCode's SQLite database at
+  `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db`; tests and
+  wrappers can override it with `TASK_RUNNER_OPENCODE_DATA_DIR`, and
+  task-runner also honors OpenCode's `OPENCODE_DATA_DIR` when the
+  task-runner-specific override is unset.
+- Resume/import validation opens the SQLite database read-only, requires
+  the session id to exist, and requires the stored session `directory` to
+  equal the run cwd exactly. Empty/path-like ids are rejected. Read-only
+  SQLite opens use a 30s busy timeout; transient busy/locked reads are
+  reported as `source_busy` so sync can retry later instead of failing a
+  resume.
+- Session history import/sync reads OpenCode `message` and `part` rows,
+  pairs visible user text with assistant text parts by `parentID`, imports
+  complete turns, and tracks the latest unfinished sync turn as open until
+  OpenCode records completion metadata or a later user turn supersedes it.
+- OpenCode implements the backend prompt-match hook so sync recognizes
+  already-recorded task-runner attempts even when OpenCode stores the
+  user message with an extra JSON-string quoting layer.
+- Effort mapping passes `minimal`, `low`, `medium`, `high`; `xhigh` and
+  `max` map to `--variant max`; `off` omits `--variant`.
+
 ## `pi`
 
 - Binary: `$TASK_RUNNER_PI_BIN` or `pi`.
@@ -386,6 +442,8 @@ without perturbing task state.
 | `TASK_RUNNER_CODEX_UDS_PATH`   | Fresh Codex runs use this absolute socket path as the default WebSocket-over-UDS transport when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN`       | Cursor CLI binary (default `cursor-agent`) |
+| `TASK_RUNNER_OPENCODE_BIN`     | OpenCode CLI binary (default `opencode`) |
+| `TASK_RUNNER_OPENCODE_DATA_DIR` | OpenCode data directory for session-history validation/sync; falls back to `OPENCODE_DATA_DIR`, then `${XDG_DATA_HOME:-~/.local/share}/opencode` |
 | `TASK_RUNNER_PI_BIN`           | Pi CLI binary (default `pi`) |
 | `PI_HOME`                      | Pi session storage root (default `~/.pi`) |
 
@@ -405,8 +463,8 @@ Deeper recursion is rejected with a `RecursionDepthError`. See
 - Use `passive` whenever the work is driven externally (outer agent,
   manual operator, external orchestrator). You still get full manifest,
   attachments, dependencies, and audit trail.
-- Use `claude`, `codex`, `cursor`, or `pi` for interactive built-in
-  invocation. Pick the backend that corresponds to the CLI/app-server you
-  have installed and authenticated.
+- Use `claude`, `codex`, `cursor`, `opencode`, or `pi` for interactive
+  built-in invocation. Pick the backend that corresponds to the
+  CLI/app-server you have installed and authenticated.
 - Use a custom backend when the runtime is local trusted code that can own
   its config parsing and invocation semantics.

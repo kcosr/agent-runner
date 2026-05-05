@@ -15,6 +15,7 @@ import { importModule } from "../util/module-loader.js";
 import { claudeBackend } from "./claude.js";
 import { codexBackend } from "./codex.js";
 import { cursorBackend } from "./cursor.js";
+import { opencodeBackend } from "./opencode.js";
 import { passiveBackend } from "./passive.js";
 import { piBackend } from "./pi.js";
 import { isRecord } from "./shared.js";
@@ -23,6 +24,7 @@ const BUILTIN_BACKENDS: Record<string, Backend> = {
   claude: claudeBackend,
   codex: codexBackend,
   cursor: cursorBackend,
+  opencode: opencodeBackend,
   pi: piBackend,
   passive: passiveBackend,
 };
@@ -87,6 +89,9 @@ function validateCustomBackend(name: string, sourcePath: string, value: unknown)
     if (typeof value.invoke !== "function") {
       issues.push("invoke must be a function");
     }
+    if (value.launcherApplies !== undefined && typeof value.launcherApplies !== "function") {
+      issues.push("launcherApplies must be a function when present");
+    }
     if (value.validateSessionId !== undefined && typeof value.validateSessionId !== "function") {
       issues.push("validateSessionId must be a function when present");
     }
@@ -98,6 +103,21 @@ function validateCustomBackend(name: string, sourcePath: string, value: unknown)
     }
     if (value.readSessionHistory !== undefined && typeof value.readSessionHistory !== "function") {
       issues.push("readSessionHistory must be a function when present");
+    }
+    if (
+      value.taskRunnerPromptMatchesSyncedTurn !== undefined &&
+      typeof value.taskRunnerPromptMatchesSyncedTurn !== "function"
+    ) {
+      issues.push("taskRunnerPromptMatchesSyncedTurn must be a function when present");
+    }
+    if (
+      value.taskRunnerAttemptTimingMatchesSyncedTurn !== undefined &&
+      typeof value.taskRunnerAttemptTimingMatchesSyncedTurn !== "function"
+    ) {
+      issues.push("taskRunnerAttemptTimingMatchesSyncedTurn must be a function when present");
+    }
+    if (value.renameSession !== undefined && typeof value.renameSession !== "function") {
+      issues.push("renameSession must be a function when present");
     }
     if (
       value.supportsBootstrapSessionImport !== undefined &&
