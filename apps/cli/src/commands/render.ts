@@ -1,6 +1,7 @@
 import type { DefinitionDetail } from "@task-runner/core/app/service.js";
 import type {
   AttachmentListEntry,
+  AttachmentScope,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
@@ -27,6 +28,7 @@ import type {
   TaskDetailsResult,
   TaskListResult,
 } from "@task-runner/core/core/commands/service.js";
+import { workspaceAssignmentPath } from "@task-runner/core/core/run/manifest.js";
 import { formatSchedule } from "@task-runner/core/core/run/schedule.js";
 import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
 import type { HostMode } from "../daemon/config.js";
@@ -43,6 +45,13 @@ interface SystemStatusResult {
 interface RunQueuedResumeMessagesResult {
   runId: string;
   queuedResumeMessages: QueuedResumeMessage[];
+}
+
+export interface RunInspectRenderInput {
+  detail: RunDetail;
+  brief: string;
+  attachments: AttachmentListEntry[];
+  attachmentsScope: AttachmentScope;
 }
 
 interface QueueResumeMessageCliResult {
@@ -115,6 +124,225 @@ function formatRunSessionSummary(label: string, session: RunSessionSummary | nul
   return `${label}: ${session.attemptCount} / ${session.maxAttemptsPerSession} attempts (session ${
     session.sessionIndex + 1
   }, ${session.status})`;
+}
+
+function formatRunInspectSessionSummary(session: RunSessionSummary | null): string {
+  if (!session) {
+    return "none";
+  }
+  const exit = session.exitCode === null ? "none" : String(session.exitCode);
+  const ended = session.endedAt ?? "none";
+  return `session ${session.sessionIndex + 1} ${session.status}, attempts=${session.attemptCount}/${session.maxAttemptsPerSession}, started=${session.startedAt}, ended=${ended}, exit=${exit}`;
+}
+
+function formatRunInspectLauncher(detail: RunDetail): string {
+  if (detail.launcher.kind === "direct") {
+    return "direct";
+  }
+  const name = detail.launcher.name ? ` name=${detail.launcher.name}` : "";
+  return `prefix source=${detail.launcher.source}${name}`;
+}
+
+function formatRunInspectExecution(detail: RunDetail): string {
+  if (detail.execution.controller.kind === "embedded") {
+    return "embedded";
+  }
+  return `daemon ${detail.execution.controller.daemonInstanceId}`;
+}
+
+function formatRunInspectRuntimeValue(value: unknown): string {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "redacted" in value &&
+    value.redacted === true
+  ) {
+    return "<redacted>";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (value === undefined) {
+    return "undefined";
+  }
+  return JSON.stringify(value);
+}
+
+function formatRunInspectRuntimeSource(detail: RunDetail, name: string): string {
+  const source = detail.runtimeVarSources[name];
+  if (!source) {
+    return "unknown";
+  }
+  const parts = [`source=${source.source}`];
+  if (source.envName) {
+    parts.push(`envName=${source.envName}`);
+  }
+  if (source.inheritedFromRunId) {
+    parts.push(`inheritedFromRunId=${source.inheritedFromRunId}`);
+  }
+  if (source.redacted) {
+    parts.push("redacted=true");
+  }
+  return parts.join(", ");
+}
+
+function formatRunInspectDependency(dependency: RunDetail["dependencies"][number]): string {
+  if (dependency.type === "run") {
+    const status = dependency.missing
+      ? "missing"
+      : `${dependency.effectiveStatus ?? dependency.status}${dependency.satisfied ? " ready" : " not-ready"}`;
+    return `run ${dependency.runId}  status=${status}  name=${dependency.name ?? "Unnamed"}`;
+  }
+  const status = dependency.missing ? "missing" : dependency.satisfied ? "ready" : "not-ready";
+  return `group ${dependency.groupId}  status=${status}  successful=${dependency.successful}/${dependency.total}  unsatisfied=${dependency.unsatisfied}  archivedExcluded=${dependency.archivedExcluded}`;
+}
+
+function formatRunInspectAttachment(attachment: AttachmentListEntry): string {
+  return `${attachment.id}  owner=${attachment.ownerRunId}  name=${attachment.name}  type=${attachment.mimeType}  size=${formatBytes(attachment.size)}  added=${attachment.addedAt}`;
+}
+
+function indentBlock(value: string, spaces = 2): string[] {
+  const prefix = " ".repeat(spaces);
+  if (value.length === 0) {
+    return [`${prefix}(empty)`];
+  }
+  return value.split("\n").map((line) => `${prefix}${line}`);
+}
+
+export function renderRunInspect(input: RunInspectRenderInput): string {
+  const { detail, brief, attachmentsScope } = input;
+  const taskRunnerCmd = resolveTaskRunnerCommand();
+  const attachments = [...input.attachments].sort((left, right) => {
+    const byOwner = left.ownerRunId.localeCompare(right.ownerRunId);
+    if (byOwner !== 0) return byOwner;
+    const byAddedAt = left.addedAt.localeCompare(right.addedAt);
+    if (byAddedAt !== 0) return byAddedAt;
+    return left.id.localeCompare(right.id);
+  });
+  const assignmentWorkspacePath = detail.assignment
+    ? workspaceAssignmentPath(detail.workspaceDir)
+    : "none";
+  const activeTask = detail.activeTask
+    ? `${detail.activeTask.id} - ${detail.activeTask.title}`
+    : "none";
+  const schedule =
+    detail.schedule === null
+      ? "none"
+      : `${formatSchedule(detail.schedule)} (${detail.scheduleState})`;
+  const lines: string[] = [];
+
+  lines.push(`-- run inspect ${detail.runId} --`);
+  lines.push("");
+  lines.push("Metadata:");
+  lines.push(`  Run id: ${detail.runId}`);
+  lines.push(`  Display name: ${detail.name ?? "Unnamed"}`);
+  lines.push(`  Repo: ${detail.repo}`);
+  lines.push(`  Lifecycle status: ${detail.status}`);
+  lines.push(`  Effective status: ${detail.effectiveStatus}`);
+  lines.push(`  Exit code: ${detail.exitCode === null ? "none" : detail.exitCode}`);
+  lines.push(`  Started: ${detail.startedAt}`);
+  lines.push(`  Ended: ${detail.endedAt ?? "none"}`);
+  lines.push(`  Archived: ${detail.archivedAt ?? "none"}`);
+  lines.push(`  Cwd: ${detail.cwd}`);
+  lines.push(`  Workspace: ${detail.workspaceDir}`);
+  lines.push(`  Parent run: ${detail.parentRunId ?? "none"}`);
+  lines.push(`  Run group: ${detail.runGroupId ?? "none"}`);
+  lines.push(`  Agent: ${detail.agent.name}`);
+  lines.push(`  Agent source: ${detail.agent.sourcePath ?? "none"}`);
+  lines.push(`  Assignment: ${detail.assignment?.name ?? "none"}`);
+  lines.push(`  Assignment source: ${detail.assignment?.sourcePath ?? "none"}`);
+  lines.push(`  Assignment workspace path: ${assignmentWorkspacePath}`);
+  lines.push(`  Backend: ${detail.backend}`);
+  lines.push(`  Model: ${detail.model ?? "none"}`);
+  lines.push(`  Effort: ${detail.effort ?? "none"}`);
+  lines.push(`  Launcher: ${formatRunInspectLauncher(detail)}`);
+  lines.push(`  Unrestricted: ${detail.unrestricted}`);
+  lines.push(`  Execution: ${formatRunInspectExecution(detail)}`);
+  lines.push("");
+  lines.push("Lifecycle:");
+  lines.push(`  Tasks completed: ${detail.tasksCompleted}/${detail.tasksTotal}`);
+  lines.push(`  Total attempts: ${detail.totalAttemptCount}`);
+  lines.push(`  Total sessions: ${detail.totalSessionCount}`);
+  lines.push(`  Max attempts per session: ${detail.maxAttemptsPerSession}`);
+  lines.push(`  Current session: ${formatRunInspectSessionSummary(detail.currentSession)}`);
+  lines.push(`  Last session: ${formatRunInspectSessionSummary(detail.lastSession)}`);
+  lines.push(`  Backend session: ${detail.backendSessionId ?? "none"}`);
+  lines.push(`  Active task: ${activeTask}`);
+  lines.push(`  Schedule: ${schedule}`);
+  lines.push("");
+  lines.push("Runtime vars:");
+  const runtimeVarNames = Object.keys(detail.runtimeVars).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  if (runtimeVarNames.length === 0) {
+    lines.push("  none");
+  } else {
+    for (const name of runtimeVarNames) {
+      lines.push(
+        `  ${name}: ${formatRunInspectRuntimeValue(detail.runtimeVars[name])} (source: ${formatRunInspectRuntimeSource(detail, name)})`,
+      );
+    }
+  }
+  lines.push("");
+  lines.push("Dependencies:");
+  if (detail.dependencies.length === 0) {
+    lines.push("  none");
+  } else {
+    for (const dependency of detail.dependencies) {
+      lines.push(`  ${formatRunInspectDependency(dependency)}`);
+    }
+  }
+  lines.push("");
+  lines.push(`Attachments (scope: ${attachmentsScope}):`);
+  if (attachments.length === 0) {
+    lines.push("  none");
+  } else {
+    for (const attachment of attachments) {
+      lines.push(`  ${formatRunInspectAttachment(attachment)}`);
+    }
+  }
+  lines.push(
+    `  Download group rows with: ${taskRunnerCmd} attachment download <ownerRunId> <id> <output-path>`,
+  );
+  lines.push("");
+  lines.push("Caller instructions:");
+  lines.push(...indentBlock(detail.callerInstructions ?? "none", 0));
+  lines.push("");
+  lines.push("Worker brief:");
+  lines.push(...indentBlock(brief || "none", 0));
+  lines.push("");
+  lines.push("Tasks:");
+  if (detail.tasks.length === 0) {
+    lines.push("  none");
+  } else {
+    for (const task of detail.tasks) {
+      lines.push(`  [${task.status}] ${task.id} - ${task.title}`);
+      lines.push("  Body:");
+      lines.push(...indentBlock(task.body));
+      lines.push("  Notes:");
+      lines.push(...indentBlock(task.notes));
+    }
+  }
+  lines.push("");
+  lines.push("Useful commands:");
+  lines.push(`  ${taskRunnerCmd} run inspect ${detail.runId}`);
+  lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
+  lines.push(`  ${taskRunnerCmd} run status ${detail.runId} --output-format json`);
+  lines.push(`  ${taskRunnerCmd} attachment list ${detail.runId} --scope group`);
+  if (detail.capabilities.canReady) {
+    lines.push(`  ${taskRunnerCmd} run ready ${detail.runId}`);
+  }
+  if (detail.capabilities.canResume || detail.status === "ready") {
+    lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId}`);
+  }
+  if (detail.archivedAt !== null && detail.capabilities.canUnarchive) {
+    lines.push(`  ${taskRunnerCmd} run unarchive ${detail.runId}`);
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 export function renderRunStatus(detail: RunDetail): string {

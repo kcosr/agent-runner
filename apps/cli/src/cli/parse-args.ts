@@ -57,6 +57,8 @@ export interface ParsedArgs {
   attachmentName?: string;
   attachmentMimeType?: string;
   attachmentScope?: AttachmentScope;
+  inspectAttachmentsScope?: AttachmentScope;
+  inspectTempFile?: boolean;
   connect?: string;
   connectHost?: string;
   connectLocalPort?: string;
@@ -116,6 +118,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     (args[0] === "status" ||
       args[0] === "audit" ||
       args[0] === "brief" ||
+      args[0] === "inspect" ||
       args[0] === "reconfigure" ||
       args[0] === "ready" ||
       args[0] === "queue-message" ||
@@ -334,6 +337,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
         throw new Error(`--scope must be one of: ${ATTACHMENT_SCOPE_VALUES.join(", ")}`);
       }
       result.attachmentScope = next as AttachmentScope;
+    } else if (arg === "--attachments-scope") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--attachments-scope requires a value");
+      if (!(ATTACHMENT_SCOPE_VALUES as readonly string[]).includes(next)) {
+        throw new Error(
+          `--attachments-scope must be one of: ${ATTACHMENT_SCOPE_VALUES.join(", ")}`,
+        );
+      }
+      result.inspectAttachmentsScope = next as AttachmentScope;
+    } else if (arg === "--temp-file") {
+      result.inspectTempFile = true;
     } else if (arg === "--clear") {
       result.clear = true;
     } else if (arg === "--detach") {

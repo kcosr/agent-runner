@@ -1742,37 +1742,56 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
   assert.match(loaded.config.callerInstructions ?? "", /`worktree_base_ref` is optional/);
 
   const taskIds = loaded.config.tasks.map((task) => task.id);
-  assert.ok(taskIds.includes("create_initialized_implementer_run"));
+  assert.deepEqual(taskIds, [
+    "orient",
+    "capture_feature",
+    "survey_impact",
+    "check_existing_code",
+    "assess_risks_and_tests",
+    "produce_contract_artifact",
+    "draft_plan",
+    "produce_summary",
+    "attach_artifacts",
+    "create_initialized_implementer_run",
+    "review_initialized_plan",
+    "apply_review_fixes",
+    "handoff",
+  ]);
 
   const createTask = loaded.config.tasks.find(
     (task) => task.id === "create_initialized_implementer_run",
   );
+  const reviewTask = loaded.config.tasks.find((task) => task.id === "review_initialized_plan");
+  const fixesTask = loaded.config.tasks.find((task) => task.id === "apply_review_fixes");
+  const handoffTask = loaded.config.tasks.find((task) => task.id === "handoff");
   assert.ok(createTask);
+  assert.ok(reviewTask);
+  assert.ok(fixesTask);
+  assert.ok(handoffTask);
   assert.match(createTask.body ?? "", /--agent implementer/);
   assert.doesNotMatch(
     createTask.body ?? "",
     /Always use `--agent implementer --backend passive`|--agent implementer \\\n\s+--backend passive/,
   );
-  assert.match(
-    createTask.body ?? "",
-    /resulting implementer run is left in\s+`initialized`, not `ready`/,
-  );
-  assert.match(createTask.body ?? "", /--run-id <existing-implementer-run-id>/);
+  assert.match(createTask.body ?? "", /run is left `initialized`, not `ready`/);
+  assert.doesNotMatch(createTask.body ?? "", /--run-id <existing-implementer-run-id>/);
   assert.doesNotMatch(createTask.body ?? "", /--cwd <confirmed-worktree-dir>/);
-  assert.match(createTask.body ?? "", /cwd: "\{\{worktree_path\}\}"/);
-  assert.match(
-    createTask.body ?? "",
-    /Do not assume updating the draft file or refreshing the\s+planning-run attachments alone updates the implementer\s+run/i,
-  );
-  assert.match(createTask.body ?? "", /run ready <new-run-id>/);
-  assert.match(createTask.body ?? "", /run --resume-run <new-run-id>/);
+  assert.match(createTask.body ?? "", /sources: \[parent\]/);
+  assert.match(reviewTask.body ?? "", /--var initialized_run_id=<implementer-run-id>/);
+  assert.match(reviewTask.body ?? "", /--var planning_run_id=\{\{run_id\}\}/);
+  assert.match(fixesTask.body ?? "", /init --run-id <existing-implementer-run-id>/);
+  assert.match(fixesTask.body ?? "", /Updated initialized run and refreshed attachments/);
+  assert.match(handoffTask.body ?? "", /run inspect <implementer-run-id>/);
+  assert.match(handoffTask.body ?? "", /attachment download <ownerRunId> <id>/);
+  assert.match(handoffTask.body ?? "", /run brief <implementer-run-id>/);
+  assert.match(handoffTask.body ?? "", /run ready <implementer-run-id>/);
+  assert.match(handoffTask.body ?? "", /run --resume-run <implementer-run-id>/);
 
-  assert.match(loaded.config.callerInstructions ?? "", /run ready <new-run-id>/);
-  assert.match(loaded.config.callerInstructions ?? "", /run --resume-run <new-run-id>/);
-  assert.match(
-    loaded.config.callerInstructions ?? "",
-    /reinitialize the same initialized\s+implementer run from the updated draft/i,
-  );
+  assert.match(loaded.config.callerInstructions ?? "", /run inspect <implementer-run-id>/);
+  assert.match(loaded.config.callerInstructions ?? "", /run ready <implementer-run-id>/);
+  assert.match(loaded.config.callerInstructions ?? "", /run --resume-run <implementer-run-id>/);
+  assert.match(loaded.config.callerInstructions ?? "", /ownerRunId/);
+  assert.doesNotMatch(loaded.config.callerInstructions ?? "", /drafts\/<repo-name>/);
   assert.doesNotMatch(loaded.config.callerInstructions ?? "", /passive backend/i);
 });
 
@@ -1804,30 +1823,39 @@ test("built-in plan-feature template emits implement-prefixed assignment names",
   assert.doesNotMatch(template, /- id: final_commit/);
 });
 
-test("built-in plan-review tracks immediate-init revision handoff and terminal publish workflow", () => {
+test("built-in plan-review reviews initialized runs and group planning artifacts", () => {
   const loaded = loadAssignmentConfig(BUILTIN_PLAN_REVIEW_PATH);
+  assert.deepEqual(Object.keys(loaded.config.vars), ["initialized_run_id", "planning_run_id"]);
+  assert.equal(loaded.config.vars.plan_draft, undefined);
   const structureTask = loaded.config.tasks.find((task) => task.id === "review_task_structure");
   const workflowTask = loaded.config.tasks.find(
     (task) => task.id === "review_workflow_and_handoff",
   );
+  const orientTask = loaded.config.tasks.find((task) => task.id === "orient_inputs");
+  const approvalTask = loaded.config.tasks.find((task) => task.id === "approval");
 
+  assert.ok(orientTask);
   assert.ok(structureTask);
   assert.ok(workflowTask);
+  assert.ok(approvalTask);
+  assert.match(orientTask.body ?? "", /run inspect \{\{initialized_run_id\}\} --temp-file/);
+  assert.match(
+    orientTask.body ?? "",
+    /attachment list \{\{initialized_run_id\}\} --scope group --output-format json/,
+  );
+  assert.match(orientTask.body ?? "", /ownerRunId/);
   assert.match(structureTask.body ?? "", /push_branch_and_create_pr/);
   assert.doesNotMatch(structureTask.body ?? "", /final_commit/);
-  assert.match(workflowTask.body ?? "", /creates the implementer run during the/);
-  assert.match(workflowTask.body ?? "", /does \*\*not\*\* force/);
-  assert.match(
-    workflowTask.body ?? "",
-    /repo_root`, `worktree_slug`, `worktree_path`, and\s+`worktree_base_ref` vars/,
-  );
+  assert.match(structureTask.body ?? "", /implementation_run_id=\{\{initialized_run_id\}\}/);
   assert.match(structureTask.body ?? "", /worktree_base_ref/);
   assert.doesNotMatch(structureTask.body ?? "", /origin\/main/);
-  assert.match(workflowTask.body ?? "", /`cwd: "\{\{repo_root\}\}"`/);
-  assert.match(workflowTask.body ?? "", /refresh the planning run's/);
+  assert.match(workflowTask.body ?? "", /status is `initialized`/);
+  assert.match(workflowTask.body ?? "", /group-scoped attachment listing/);
+  assert.match(workflowTask.body ?? "", /removes\/replaces planning-run attachments/);
   assert.match(workflowTask.body ?? "", /init --run-id <implementer-run-id>/);
   assert.match(workflowTask.body ?? "", /run ready/);
   assert.match(workflowTask.body ?? "", /run --resume-run/);
+  assert.match(approvalTask.body ?? "", /APPROVED for handoff\./);
 });
 
 test("built-in implementer agent points reviewers at the run record, not workspace assignment.md", () => {

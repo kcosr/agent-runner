@@ -1,10 +1,22 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
-import { renderRunStatus, renderSystemStatus } from "../apps/cli/dist/commands/render.js";
+import {
+  renderRunInspect,
+  renderRunStatus,
+  renderSystemStatus,
+} from "../apps/cli/dist/commands/render.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { toRunDetail } from "../packages/core/dist/contracts/runs.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
@@ -79,6 +91,15 @@ function runCliExpectFail(args, opts = {}) {
       stderr: err.stderr?.toString() ?? "",
     };
   }
+}
+
+function runCli(args, opts = {}) {
+  return execFileSync("node", [CLI_PATH, ...args], {
+    cwd: opts.cwd ?? process.cwd(),
+    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()) },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 async function runFresh(baseDir) {
@@ -355,6 +376,152 @@ test("renderRunStatus shows ready promotion and execution hints separately", asy
   );
   assert.match(readyText, /To execute this run:/);
   assert.match(readyText, new RegExp(`task-runner run --resume-run ${outcome.runId}`));
+});
+
+test("renderRunInspect prints full initialized run context without raw redacted secrets", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(
+    dir,
+    "status-work",
+    `---
+schemaVersion: 1
+name: status-work
+callerInstructions: |
+  Review this before running.
+tasks:
+  - id: t1
+    title: First
+    body: |
+      Full task body.
+---
+Worker assignment body.
+`,
+  );
+  const outcome = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("status-agent", dir);
+    const loadedAssignment = loadAssignmentConfig("status-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: { id: "mock", invoke: async () => ({}) },
+        initialize: true,
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.launcher = {
+      kind: "prefix",
+      command: "ssh raw-secret",
+      args: ["--token", "raw-secret"],
+      name: "secret-launcher",
+      source: "named",
+    };
+    manifest.runtimeVars = {
+      beta: "plain",
+      alpha_secret: "raw-secret",
+    };
+    manifest.runtimeVarSources = {
+      beta: { source: "cli" },
+      alpha_secret: {
+        source: "env",
+        envName: "ALPHA_SECRET",
+        redacted: true,
+      },
+    };
+    manifest.finalTasks.t1.notes = "Full task notes.";
+  });
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  const detail = toRunDetail({ manifest, isLive: false });
+  const text = renderRunInspect({
+    detail,
+    brief: manifest.brief,
+    attachments: [
+      {
+        id: "att-b",
+        ownerRunId: "run-b",
+        name: "b.txt",
+        mimeType: "text/plain",
+        size: 2048,
+        sha256: "b",
+        addedAt: "2026-04-12T10:02:00.000Z",
+        relativePath: "attachments/att-b/b.txt",
+      },
+      {
+        id: "att-a",
+        ownerRunId: "run-a",
+        name: "a.txt",
+        mimeType: "text/plain",
+        size: 1,
+        sha256: "a",
+        addedAt: "2026-04-12T10:01:00.000Z",
+        relativePath: "attachments/att-a/a.txt",
+      },
+    ],
+    attachmentsScope: "group",
+  });
+
+  assert.match(text, new RegExp(`-- run inspect ${outcome.runId} --`));
+  assert.match(text, /Lifecycle status: initialized/);
+  assert.match(text, /Caller instructions:\nReview this before running\./);
+  assert.match(text, /Worker brief:\nAgent\./);
+  assert.match(text, /Launcher: prefix source=named name=secret-launcher/);
+  assert.doesNotMatch(text, /ssh raw-secret/);
+  assert.match(text, /Full task body\./);
+  assert.match(text, /Full task notes\./);
+  assert.match(
+    text,
+    /alpha_secret: <redacted> \(source: source=env, envName=ALPHA_SECRET, redacted=true\)/,
+  );
+  assert.doesNotMatch(text, /raw-secret/);
+  assert.ok(text.indexOf("alpha_secret:") < text.indexOf("beta:"));
+  assert.ok(text.indexOf("owner=run-a") < text.indexOf("owner=run-b"));
+  assert.match(text, /task-runner run inspect/);
+  assert.match(text, /task-runner run ready/);
+});
+
+test("run inspect CLI prints terminal runs and rejects unsupported inspect flags", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const ok = runCli(["run", "inspect", outcome.runId], { cwd: dir });
+  assert.match(ok, new RegExp(`-- run inspect ${outcome.runId} --`));
+  assert.match(ok, /Lifecycle status: success/);
+  assert.match(ok, /Worker brief:/);
+  assert.match(ok, /Useful commands:/);
+
+  const tempPath = runCli(["run", "inspect", outcome.runId, "--temp-file"], { cwd: dir }).trim();
+  assert.match(tempPath, new RegExp(`task-runner-inspect-${outcome.runId}-.*\\.txt$`));
+  assert.equal(statSync(tempPath).mode & 0o777, 0o600);
+  const tempText = readFileSync(tempPath, "utf8");
+  assert.match(tempText, new RegExp(`-- run inspect ${outcome.runId} --`));
+  assert.match(tempText, /Lifecycle status: success/);
+  assert.doesNotMatch(tempPath, /Lifecycle status: success/);
+  unlinkSync(tempPath);
+
+  const pathTarget = runCliExpectFail(["run", "inspect", outcome.workspaceDir], { cwd: dir });
+  assert.equal(pathTarget.status, 3);
+  assert.match(pathTarget.stderr, /run inspect accepts a run id, not a path/);
+
+  const field = runCliExpectFail(["run", "inspect", outcome.runId, "--field", "tasks"], {
+    cwd: dir,
+  });
+  assert.equal(field.status, 3);
+  assert.match(field.stderr, /run inspect does not support --field/);
+
+  const json = runCliExpectFail(["run", "inspect", outcome.runId, "--output-format", "json"], {
+    cwd: dir,
+  });
+  assert.equal(json.status, 3);
+  assert.match(json.stderr, /run inspect does not support --output-format/);
 });
 
 test("renderSystemStatus prints embedded-mode environment details", () => {

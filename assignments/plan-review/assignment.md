@@ -2,105 +2,154 @@
 schemaVersion: 1
 name: plan-review
 vars:
-  plan_draft:
+  initialized_run_id:
     type: string
     required: true
     sources: [cli, web]
-    description: Absolute path to the draft assignment file being reviewed.
+    description: Initialized implementer run id whose frozen task state is being reviewed.
   planning_run_id:
     type: string
     required: true
     sources: [cli, web]
     description: |
-      Canonical run id for the planning run whose task notes
-      contain the captured brief, contract, assumptions, and
-      planning evidence the draft should reflect.
+      Canonical planning run id whose task notes and group attachments
+      carry the feature brief, contract, assumptions, summary, and
+      assignment seed.
 callerInstructions: |
-  This run reviews a draft implementation plan before it is
-  handed back to the caller. It is typically launched as a
-  nested review from `plan-feature`, but it can also be run
-  directly against any draft-plus-planning-run pair.
+  This run reviews an initialized implementer run before it is
+  handed back to the caller for `run ready`. It is typically
+  launched as a nested review from `plan-feature`, but it can
+  also be run directly against any initialized-run/planning-run
+  pair.
+
+  The initialized implementer run is the canonical execution
+  object. Planning-run `assignment-seed.md` and
+  `assignment-summary.md` attachments are supporting audit and
+  human-review artifacts; use group-scoped attachment listing to
+  discover them from the initialized run.
 
   The final decision lives in `approval.notes`. Exit semantics
-  match the code reviewer: `success` (code 0) means the draft is
-  approved for handoff; `blocked` (code 2) means the planner must
-  revise the draft and resume this same review run for a delta
-  pass.
+  match the code reviewer: `success` (code 0) means the
+  initialized run is approved for handoff; `blocked` (code 2)
+  means the planner must refresh the planning artifacts,
+  reinitialize the same initialized run, and resume this same
+  review run for a delta pass.
 
       {{task_runner_cmd}} run status {{run_id}} --output-format json \
         --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
-  The planner should read both `synthesis` and `approval`, apply
-  the fixes it agrees with, then resume this same run with a
-  follow-up message describing what changed in the draft.
+  On resume, inspect the current initialized run and refreshed
+  group attachments again before deciding whether prior findings
+  are resolved.
 tasks:
   - id: orient_inputs
-    title: Load the draft and planning artifacts
+    title: Load initialized run and planning artifacts
     body: |
-      Read the draft plan file plus the planning run's task notes:
+      Treat run `{{initialized_run_id}}` as the canonical
+      execution object. Read it and the planning evidence before
+      reviewing anything. Save the long inspect output with
+      `--temp-file`; save the JSON outputs and downloaded artifacts
+      in `/tmp/task-runner-plan-review-{{run_id}}` for later review
+      tasks to reuse:
 
-          {{plan_draft}}
-          {{task_runner_cmd}} run status {{planning_run_id}} --output-format json --field tasks
+          mkdir -p /tmp/task-runner-plan-review-{{run_id}}
+          inspect_path=$({{task_runner_cmd}} run inspect {{initialized_run_id}} --temp-file)
+          {{task_runner_cmd}} run status {{initialized_run_id}} --output-format json > /tmp/task-runner-plan-review-{{run_id}}/initialized-status.json
+          {{task_runner_cmd}} run status {{planning_run_id}} --output-format json --field tasks > /tmp/task-runner-plan-review-{{run_id}}/planning-tasks.json
+          {{task_runner_cmd}} attachment list {{initialized_run_id}} --scope group --output-format json > /tmp/task-runner-plan-review-{{run_id}}/group-attachments.json
+          printf '%s\n' "$inspect_path" > /tmp/task-runner-plan-review-{{run_id}}/initialized-inspect-path.txt
 
-      First, confirm the draft exists and is readable. If it is
-      missing or obviously not a task-runner assignment, mark this
-      task `blocked` with the exact path and problem.
+      In `group-attachments.json`, find rows whose `name` is
+      `assignment-seed.md` and `assignment-summary.md`. Download
+      each one using that row's `ownerRunId` plus that row's `id`:
 
-      Then summarize in Notes:
-        - what feature the draft claims to implement
-        - the draft's task shape at a high level
-        - the feature brief / contract / surface inventory /
-          assumptions captured in the planning run notes
+          {{task_runner_cmd}} attachment download <ownerRunId> <id> /tmp/task-runner-plan-review-{{run_id}}/
 
-      This is context for the rest of the review, not a finding
+      Do not infer ownership from the initialized run id. Group
+      attachments commonly belong to the planning run, and the
+      download command must use the row owner.
+
+      If either artifact is missing, keep reviewing the initialized
+      run and mark this task `blocked` only when the missing artifact
+      prevents a faithful review. Otherwise record the missing item
+      as review context.
+
+      Summarize in Notes:
+        - initialized run id, lifecycle status, effective status,
+          cwd, run group, and display name
+        - the inspect temp file path from `initialized-inspect-path.txt`
+        - the feature the initialized run claims to implement
+        - high-level task shape from the initialized run's tasks
+        - whether `assignment-seed.md` and `assignment-summary.md`
+          were found and downloaded, including each row's
+          `ownerRunId`, `id`, and local download path
+        - planning evidence from the planning run task notes
+
+      This is context for the rest of the review, not a findings
       section.
   - id: review_contract_fidelity
     title: Review contract fidelity and scope discipline
     body: |
-      Compare the draft against the planner's captured evidence in
-      run `{{planning_run_id}}`.
+      Compare the initialized implementer run against the planning
+      evidence and downloaded artifacts. The initialized run's
+      frozen task state and brief are canonical for execution; the
+      downloaded `assignment-seed.md` and `assignment-summary.md`
+      are supporting evidence.
+
+      Compare:
+        - planning run task notes from `planning-tasks.json`
+        - initialized run orient/feature context and task bodies
+        - downloaded `assignment-summary.md`
+        - downloaded `assignment-seed.md`
+        - worker brief from the inspect temp file listed in
+          `initialized-inspect-path.txt`
+        - caller instructions from `initialized-status.json` or
+          the inspect temp file listed in `initialized-inspect-path.txt`
 
       Look for:
         - feature brief details that disappeared or drifted
         - contract fields, flags, outputs, error cases, or
           assumptions that were captured by the planner but are
-          missing or weakened in the draft
+          missing or weakened in the initialized run
         - Surface Inventory entries captured by the planner but
-          missing or weakened in the draft, including symmetric
-          peers or removal twins
+          missing or weakened in the initialized run, including
+          symmetric peers or removal twins
         - an explicit "no surfaces" inventory when the captured
           contract plainly introduces, modifies, or removes
           user-facing flags, routes, config keys, UI controls, or
           documented public surfaces
-        - new scope added by the draft that the planning evidence
-          does not justify
+        - new scope added by the initialized run that the planning
+          evidence does not justify
         - shared-path changes that test only the new behavior while
           omitting representative existing sibling behaviors flowing
           through the same parser, dispatcher, request/response
           builder, state reducer, serializer, config loader,
           lifecycle/workflow handler, database access layer, UI state
           transition, or other reused infrastructure
-        - instructions that quietly add fallback logic,
-          heuristics, alias fields, bridge routes, or
-          compatibility layers even though the planning evidence
-          called for a hot cut
+        - instructions that quietly add fallback logic, heuristics,
+          alias fields, bridge routes, or compatibility layers even
+          though the planning evidence called for a hot cut
 
-      A draft that silently changes the contract, weakens the
-      Surface Inventory, or sneaks in compatibility machinery the
-      plan did not call for is a HIGH-severity finding.
+      A meaningful drift between planning notes, summary, seed,
+      initialized run state, run brief, or caller instructions is a
+      finding. A change that weakens the contract or sneaks in
+      compatibility machinery the plan did not call for is HIGH
+      severity.
   - id: review_task_structure
-    title: Review task graph, ids, and verifiability
+    title: Review initialized task graph, ids, and verifiability
     body: |
-      Walk every task in `{{plan_draft}}`.
+      Walk every task in the initialized run's `RunDetail.tasks`
+      order. Do not review a construction file as the source of
+      truth; the initialized run's task state is what will execute.
 
       Check for:
         - semantic task ids that describe the work, rather than
           numeric prefixes or opaque labels
         - task ordering that matches the dependency chain
         - required workflow tasks still present when applicable:
-          orient, check gate, fresh-eyes pass, commit,
-          internal review, docs drift, self-check,
-          push_branch_and_create_pr
+          orient or scaffold preflight, check_gate, fresh-eyes
+          simplification, commit, internal_review, docs_drift,
+          self_check, and push_branch_and_create_pr
         - the scaffold/setup task explicitly requires the
           implementer to confirm the inherited `repo_root`,
           `worktree_slug`, `worktree_path`, and `worktree_base_ref`
@@ -117,202 +166,136 @@ tasks:
           already sufficient
         - every task body has concrete file paths, commands, or
           evidence requirements rather than vague placeholders
-        - no `<<PLACEHOLDER>>` markers remain anywhere in the draft
-        - the generated draft includes a Surface Inventory block in
-          the orientation task and a later task that verifies each
-          inventory entry's declaration/parser, consumer, and
-          integration test evidence
+        - no `<<PLACEHOLDER>>` markers remain anywhere in the
+          initialized task bodies, caller instructions, or brief
+        - the generated implementation workflow includes a Surface
+          Inventory block in orientation and a later task that
+          verifies each inventory entry's declaration/parser,
+          consumer, and integration test evidence
+        - the internal review task launches the bundled
+          `code-review` assignment from the initialized run worktree
+          and passes:
 
-      A placeholder left in the draft, a code-bearing task with no
-      meaningful `Done when:`, a missing first-attempt
-      worktree/setup sync preflight
-      preflight, or an id scheme that encodes array position
-      instead of meaning are all findings.
+              --var implementation_run_id={{initialized_run_id}}
+
+        - check-gate commands match the target repo's required
+          build, lint, test, and full-check commands
+        - docs-drift coverage exists when user-facing behavior,
+          commands, assignments, or docs change
+
+      A placeholder left in the initialized run, a code-bearing task
+      with no meaningful Done when block, a missing first-attempt
+      worktree/setup preflight, or an id scheme that encodes array
+      position instead of meaning is a finding.
   - id: review_workflow_and_handoff
     title: Review workflow wiring and caller handoff
     body: |
-      Review both the draft and the planning run for workflow
-      correctness.
+      Review initialized run state, planning artifacts, and handoff
+      instructions for workflow correctness.
 
-      In the draft, verify:
-        - the generated implementer draft declares inherited
-          `repo_root`, `worktree_slug`, `worktree_path`, and
-          `worktree_base_ref` vars with `sources: [parent]`
-        - the generated implementer draft sets
-          `cwd: "{{repo_root}}"` and uses a `git-worktree`
-          first-attempt hook wired to `repo_root`, `worktree_slug`,
-          `worktree_path`, and `worktree_base_ref` rather than
-          recomputing them inside task prose
-        - the generated implementer draft guards
-          `apply_review_fixes` with a task-local
-          `require-children-success` hook (or an equivalent
-          `taskTransition` hook using native `when.taskId`) with
-          `requireAny: true`, so the implementer cannot mark
-          review-fix work complete until the nested review run
-          actually reaches `success`
-        - the internal review step passes
-          `implementation_run_id={{run_id}}` so the code
-          reviewer sees the implementer run
-        - the internal review step keeps the reviewer in the same
-          worktree with `--cwd {{cwd}}` instead of re-deriving the
-          path or retyping lineage vars as CLI input
-        - descendant assignments use the `sources` model explicitly
-          and rely on `sources: [parent]` for inherited worktree or
-          lineage vars instead of old `source` / `either` contracts
-          or manual `--var` repetition
-        - the internal review step passes a short descriptive
-          `--name` (same topic, capitalized first word, no cwd /
-          repo / range noise, no redundant `Review` /
-          `Implementation` wording)
-        - the draft explains the recursion-depth requirement for
-          the nested code-review run
-        - the generated implementation workflow ends with a
-          final `push_branch_and_create_pr` task whose Notes
-          contract requires concrete branch / push / PR evidence
+      Verify the initialized run:
+        - status is `initialized`, not `ready` or already executed
+        - inherited vars include `repo_root`, `worktree_slug`,
+          `worktree_path`, and `worktree_base_ref` with source
+          metadata showing parent inheritance where expected
+        - cwd is the intended target worktree path
+        - run group matches the planning run group so group
+          attachments are discoverable
+        - brief matches the initialized tasks and tells the worker
+          to use the task CLI for progress
+        - caller instructions point the human at `run inspect`,
+          group attachments, `run brief`, `run ready`, and
+          `run --resume-run`
+        - dependencies, schedule, backend, model, launcher, and
+          unrestricted mode match the plan
 
-      In the planning run, verify:
-        - the planner attaches the approved draft and summary to
-          the planning run as `assignment-seed.md` and
-          `assignment-summary.md`
-        - the planner creates the implementer run during the
-          initial pass instead of leaving creation blocked for a
-          later approval resume
-        - the creation task records the implementer run id and
-          leaves that run in `initialized`, not `ready`
-        - the creation flow does **not** force `--backend passive`
-        - the creation flow includes a short descriptive `--name`
-          with the same format rule: capitalized first word,
-          about 2-4 words / 32 chars, and no cwd / repo / range
-          clutter or redundant `Plan` / `Review` /
-          `Implementation` wording
-        - the creation flow requires the planner to confirm the
-          target repo-root cwd plus the requested `worktree_slug`,
-          derived sibling `worktree_path`, and inherited
-          `worktree_base_ref` before running `init`, rather than
-          guessing from some other environment
-        - the creation and handoff flow explains that nested child
-          runs auto-link back to the implementer/planning lineage
-          and should inherit worktree vars through
-          `sources: [parent]` rather than retyping them as CLI vars
-        - when the approved draft already authors inherited
-          worktree cwd/vars, the creation flow avoids redundant
-          `--cwd` and `--var` overrides during `init`
-        - the creation flow says the planner keeps those
-          artifacts on the planning run rather than duplicating
-          them onto the new implementer run
-        - if caller feedback can arrive after the initial-pass
-          `init`, the workflow tells the planner to revise the
-          draft and summary, refresh the planning run's
-          `assignment-seed.md` and `assignment-summary.md`
-          attachments, and reinitialize the same initialized
-          implementer run with `init --run-id <implementer-run-id>`
-          instead of creating a second run or assuming attachment
-          refresh alone updates the implementer run
-        - the handoff tells the caller to review the planning-run
-          attachments and the initialized implementer run before
-          promoting that implementer run with `run ready`
-        - after initial-pass `init`, the execution handoff
-          inspects `run brief`, then promotes with `run ready`,
-          then executes with `run --resume-run`, rather than
-          describing a passive-only brief-first workflow
-        - the draft-review loop itself is reflected accurately in
-          the planner tasks and handoff notes
-        - the generated implementer orientation tells the
-          executor to read the run's tasks first and only then
-          optionally discover and download
-          `assignment-summary.md` through group-scoped attachment
-          listing for supplemental context
+      Verify the generated implementation workflow:
+        - descendant vars use `sources: [parent]` for inherited
+          worktree or lineage values instead of old singular
+          `source` / `either` contracts or manual `--var`
+          repetition
+        - first-attempt hooks use the inherited worktree values
+          instead of recomputing them inside task prose
+        - `apply_review_fixes` is guarded with a task-local
+          `require-children-success` hook or equivalent native
+          `taskTransition` hook with `requireAny: true`
+        - internal review keeps the reviewer in the same worktree
+          with `--cwd {{cwd}}` and uses a short descriptive `--name`
+        - the implementation workflow ends with
+          `push_branch_and_create_pr` and requires concrete branch,
+          push, and PR evidence
 
-      Missing or incorrect workflow wiring is usually HIGH
-      severity because it causes the caller or implementer to
-      fail even if the task list itself looks sound.
+      Verify the planning workflow and attachments:
+        - the planning run owns or still exposes
+          `assignment-seed.md` and `assignment-summary.md` through
+          group-scoped attachment listing
+        - downloaded attachment rows used explicit `ownerRunId` plus
+          row `id`
+        - artifacts were not duplicated onto the initialized run just
+          to simplify review
+        - if caller feedback arrives after the first initialized run,
+          the fix loop updates the temp assignment and summary,
+          removes/replaces planning-run attachments, reinitializes
+          the same initialized implementer run with
+          `init --run-id <implementer-run-id>`, then resumes this
+          same review run for a delta pass
+        - handoff tells the caller to review group attachments and
+          the initialized implementer run before promoting with
+          `run ready`
+
+      Missing or incorrect workflow wiring is usually HIGH severity
+      because it causes the caller or implementer to fail even if the
+      task list itself looks sound.
   - id: synthesis
     title: Top findings synthesis
     body: |
       Read back through the notes you wrote on
       `review_contract_fidelity`, `review_task_structure`, and
-      `review_workflow_and_handoff`, then build a ranked list of
-      the top findings.
+      `review_workflow_and_handoff`, then build a ranked list of the
+      top findings.
 
       Include:
-        - the top findings ordered by severity
-        - one sentence on whether the draft is close to ready or
-          needs significant revision
+        - top findings ordered by severity
+        - one sentence on whether the initialized run is close to
+          ready or needs significant revision
         - a one-sentence recommendation: approve or block
 
       If there are no real issues, say so plainly rather than
       padding the review.
   - id: approval
-    title: Final draft approval decision
+    title: Final initialized-run approval decision
     body: |
-      This task is the gate. `completed` means "this draft is
-      ready to hand back to the caller." `blocked` means "the
-      planner must revise the draft and rerun review."
+      This task is the gate. `completed` means "this initialized
+      run is ready to hand back to the caller." `blocked` means
+      "the planner must revise artifacts, reinitialize the same run,
+      and resume this review."
 
       Mark this task `blocked` if any of the following are true:
         - any HIGH or CRITICAL finding from the review is still open
         - the synthesis recommendation is "block"
-        - you are unsure whether the draft faithfully captures the
-          feature contract or workflow
+        - you are unsure whether the initialized run faithfully
+          captures the feature contract or workflow
 
       Mark this task `completed` only if all of the following hold:
         - every HIGH / CRITICAL finding is resolved or explicitly
           declined with written justification
         - the synthesis recommendation is "approve"
-        - you would stand behind this draft being handed back to
-          the caller as the plan to execute
+        - you would stand behind this initialized run being handed
+          back to the caller as the execution plan
 
       Write one of these decision records verbatim in Notes:
 
       Approval:
 
           APPROVED for handoff.
-          Rationale: <one to three sentences on why the draft meets the bar.>
+          Rationale: <one to three sentences on why the initialized run meets the bar.>
           Residual findings: <open MEDIUM/LOW items or "none".>
 
       Block:
 
-          BLOCKED — cannot approve.
+          BLOCKED - cannot approve.
           Unresolved: <bulleted list of the specific open conditions, each
             citing the underlying finding.>
           Path to approval: <short, concrete instructions on what the planner
-            must revise in the draft or handoff.>
+            must revise, refresh, reinitialize, or hand off.>
 ---
-You are reviewing a task-runner draft assignment, not the
-implementation code itself. Treat `{{cwd}}` as context for
-the repo the draft targets, but the primary review artifacts are:
-
-  - `{{plan_draft}}`
-  - `{{task_runner_cmd}} run status {{planning_run_id}} --output-format json --field tasks`
-
-Do not modify any file under `{{cwd}}` or `{{plan_draft}}`.
-Use the task CLI as the task interface for this run; do not rely
-on workspace files.
-
-Work the tasks in order. Earlier tasks establish the contract and
-workflow context the later tasks depend on.
-
-Each finding in a task's notes block should use this format:
-
-    [SEVERITY] file:line — short title
-      Observation: ...
-      Why it matters: ...
-      Suggested fix: ...
-
-Severity tags range from NIT → LOW → MEDIUM → HIGH → CRITICAL.
-
-If this run is resumed after the planner updates the draft, do a
-focused delta pass:
-
-1. Re-read your prior findings and prior `approval` notes.
-2. Inspect what changed in `{{plan_draft}}` and, if relevant, in
-   `{{planning_run_id}}`.
-3. For each prior finding, decide whether it is resolved, still
-   open, or only partially addressed.
-4. Scan the updated draft for any new issues introduced by the
-   revisions.
-5. Rewrite `synthesis` as a delta review, then re-evaluate
-   `approval` from scratch against the current draft.
-
-Do not delegate the synthesis or approval tasks. Those judgment
-calls need to stay in your own context.

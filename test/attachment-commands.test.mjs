@@ -225,6 +225,33 @@ test("attachment list defaults to group scope and supports explicit run scope", 
   assert.doesNotMatch(runOnlyText, /owner=/);
 });
 
+test("run inspect defaults to group attachments and supports explicit run attachment scope", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, { parentRunId: root.runId });
+  const rootFile = join(dir, "root.txt");
+  const targetFile = join(dir, "target.txt");
+  writeFileSync(rootFile, "root\n");
+  writeFileSync(targetFile, "target\n");
+
+  runCli(["attachment", "add", root.runId, rootFile], { cwd: dir });
+  runCli(["attachment", "add", target.runId, targetFile], { cwd: dir });
+
+  const defaultInspect = runCli(["run", "inspect", target.runId], { cwd: dir });
+  assert.match(defaultInspect, /Attachments \(scope: group\):/);
+  assert.match(defaultInspect, new RegExp(`owner=${root.runId}`));
+  assert.match(defaultInspect, new RegExp(`owner=${target.runId}`));
+  assert.match(defaultInspect, /Download group rows with: .*attachment download <ownerRunId> <id>/);
+
+  const runInspect = runCli(["run", "inspect", target.runId, "--attachments-scope", "run"], {
+    cwd: dir,
+  });
+  assert.match(runInspect, /Attachments \(scope: run\):/);
+  assert.doesNotMatch(runInspect, new RegExp(`owner=${root.runId}`));
+  assert.match(runInspect, new RegExp(`owner=${target.runId}`));
+});
+
 test("attachment list still uses run group when the target parent lineage is broken", async () => {
   const dir = tempDir();
   writeBundle(dir);

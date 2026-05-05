@@ -263,6 +263,7 @@ frozen manifest schedule and rejects new `--schedule-*` input.
 ```bash
 task-runner status
 task-runner run status <run-id> [--output-format json] [--field <name>]...
+task-runner run inspect <run-id> [--attachments-scope run|group] [--temp-file]
 task-runner run brief <run-id>
 task-runner run audit <run-id> [--output-format text|json] [--limit <n>]
 task-runner task list <run-id>
@@ -271,7 +272,13 @@ task-runner attachment list <run-id> [--scope run|group]
 ```
 
 - Top-level `status` reports system/environment status and takes no run id.
-- `run status`, `run brief`, and `run audit` are run-id-only.
+- `run status`, `run inspect`, `run brief`, and `run audit` are run-id-only.
+- `run inspect` is the text review/debug/audit snapshot. It embeds caller
+  instructions, the full worker brief, full task bodies and notes, and
+  group-scoped attachment owner rows by default.
+- `run inspect --temp-file` writes the snapshot to a private temp file and
+  prints only that file path, which is useful when the output may be
+  truncated by an agent harness.
 - `run brief` is text-only; no `--output-format` or `--field`.
 - `run audit --output-format json` returns `{ runId, events, lastCursor }`.
 - `run audit` text output is chronological rendering from the persisted

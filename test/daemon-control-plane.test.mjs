@@ -7098,6 +7098,15 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
     assert.match(statusViaEnv, new RegExp(`── run ${init.runId} ──`));
     assert.match(statusViaEnv, /Name:\s+Remote CLI name/);
 
+    const inspectText = runCli(
+      ["run", "inspect", init.runId, "--connect", listenUrl, "--attachments-scope", "run"],
+      { cwd: dir },
+    );
+    assert.match(inspectText, new RegExp(`-- run inspect ${init.runId} --`));
+    assert.match(inspectText, /Display name: Remote CLI name/);
+    assert.match(inspectText, /Attachments \(scope: run\):/);
+    assert.match(inspectText, /Worker brief:\nDaemon agent\./);
+
     const client = await DaemonClient.connect(listenUrl);
     try {
       const info = await client.call("daemon.info");
