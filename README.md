@@ -58,7 +58,7 @@ You can use `task-runner` in two main modes:
   tracking, briefs, attachments, and durable run state without handing
   execution over to task-runner.
 - **Active backend mode** — execute the run through a supported backend
-  (`claude`, `codex`, `cursor-agent`, `pi`). In this mode task-runner
+  (`claude`, `codex`, `cursor-agent`, `opencode`, `pi`). In this mode task-runner
   performs the run/retry loop itself and validates whether tasks were
   actually marked complete before the run is treated as done.
   Backend-native capabilities like skills, subagents, MCP servers, and
@@ -94,6 +94,7 @@ Requirements:
   - `claude`
   - `codex` (or a Codex app-server)
   - `cursor-agent`
+  - `opencode`
   - `pi`
 
 ### Option 1: local build / linked development install
@@ -237,7 +238,7 @@ task-runner show launcher ssh-docker
 ```
 
 Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
-`pi`, and Codex stdio). Passive runs and Codex websocket/UDS runs keep
+`opencode`, `pi`, and Codex stdio). Passive runs and Codex websocket/UDS runs keep
 the built-in `direct` launcher.
 
 Launcher command and args are runtime-interpolated before they are frozen
@@ -287,8 +288,8 @@ ${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)
 ```
 
 The module must default-export a backend object whose `id` exactly matches
-the directory name. Built-in names (`claude`, `codex`, `cursor`, `pi`,
-`passive`) are reserved. Custom backend code is trusted local code: it is
+the directory name. Built-in names (`claude`, `codex`, `cursor`, `opencode`,
+`pi`, `passive`) are reserved. Custom backend code is trusted local code: it is
 loaded into the task-runner process without sandboxing, cached for the
 process lifetime, and daemon changes require a daemon restart. Install any
 custom backend dependencies under the config directory, for example
@@ -554,6 +555,8 @@ The rest are focused topic pages:
 | `TASK_RUNNER_CODEX_UDS_PATH` | Default WebSocket-over-UDS transport socket path for fresh Codex runs when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendConfig.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary |
+| `TASK_RUNNER_OPENCODE_BIN` | OpenCode CLI binary |
+| `TASK_RUNNER_OPENCODE_DATA_DIR` | OpenCode data directory for session-history validation/sync; falls back to `OPENCODE_DATA_DIR` |
 | `TASK_RUNNER_CAPTURE_BACKEND_STDOUT` | Write raw backend stdout sidecars to `attempts/NN.stdout.log` for local debugging |
 | `TASK_RUNNER_BACKEND_SESSION_SYNC` | Set to `false`, `0`, `no`, or `off` to disable backend-owned session history import/sync |
 | `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC` | Minimum accepted one-time schedule delay (default `300`) |

@@ -63,6 +63,8 @@ function historyBackend({
   turns,
   source = fileSource("history"),
   invoke,
+  matches,
+  timingMatches,
   read,
   resolve,
 }) {
@@ -87,6 +89,8 @@ function historyBackend({
         turns,
       };
     },
+    ...(matches ? { taskRunnerPromptMatchesSyncedTurn: matches } : {}),
+    ...(timingMatches ? { taskRunnerAttemptTimingMatchesSyncedTurn: timingMatches } : {}),
     async invoke(ctx) {
       if (invoke) {
         return invoke(ctx);
@@ -441,6 +445,7 @@ test("cursor sync matches task-runner attempts without real timestamp overlap", 
     backend: historyBackend({
       id: "cursor",
       source: fileSource("cursor-synthetic", "v2"),
+      timingMatches: () => true,
       turns: [
         {
           backendTurnId: "cursor-turn-live",
@@ -460,6 +465,54 @@ test("cursor sync matches task-runner attempts without real timestamp overlap", 
   assert.equal(first.manifest.totalAttemptCount, 1);
   assert.equal(first.manifest.attemptRecords[0].provenance.kind, "backend_session");
   assert.equal(first.manifest.attemptRecords[0].provenance.backendTurnId, "cursor-turn-live");
+});
+
+test("opencode sync matches task-runner attempts when stored prompt is JSON-quoted", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const first = await runIn(dir, {
+    backend: historyBackend({
+      id: "opencode",
+      turns: [],
+      invoke: async () => ({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        sessionId: "opencode-session-quoted",
+        transcript: "live answer",
+        rawStdout: "",
+        rawStderr: "",
+      }),
+    }),
+  });
+  const liveAttempt = first.manifest.attemptRecords[0];
+
+  const result = await syncBackendSessionHistory({
+    manifest: first.manifest,
+    backend: historyBackend({
+      id: "opencode",
+      source: fileSource("opencode-quoted", "v2"),
+      matches: ({ prompt, turn }) => prompt === JSON.parse(turn.userText),
+      turns: [
+        {
+          backendTurnId: "opencode-turn-live",
+          status: "complete",
+          startedAt: liveAttempt.startedAt,
+          updatedAt: liveAttempt.endedAt,
+          userText: JSON.stringify(liveAttempt.prompt),
+          assistantText: "live answer",
+        },
+      ],
+    }),
+    mode: "sync",
+  });
+
+  assert.equal(result.status, "synced");
+  assert.equal(first.manifest.attemptRecords.length, 1);
+  assert.equal(first.manifest.totalAttemptCount, 1);
+  assert.equal(first.manifest.attemptRecords[0].provenance.kind, "backend_session");
+  assert.equal(first.manifest.attemptRecords[0].provenance.backendTurnId, "opencode-turn-live");
 });
 
 test("sync upgrades an overlapping retry attempt without promoting the mixed session", async () => {
@@ -676,6 +729,33 @@ test("sync skips source_unavailable without mutating the manifest", async () => 
   assert.deepEqual(JSON.parse(JSON.stringify(initial.manifest)), before);
 });
 
+test("sync skips transient source_busy without mutating the manifest", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const initial = await runIn(dir, {
+    backend: historyBackend({
+      source: fileSource("source-busy", "v1"),
+      turns: [],
+    }),
+    bootstrapBackendSessionId: "session-source-busy",
+    initialize: true,
+  });
+  const before = JSON.parse(JSON.stringify(initial.manifest));
+  const result = await syncBackendSessionHistory({
+    manifest: initial.manifest,
+    backend: {
+      ...historyBackend({ turns: [] }),
+      async resolveSessionHistorySource() {
+        return { available: false, reason: "database is locked", transient: true };
+      },
+    },
+    mode: "sync",
+  });
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "source_busy");
+  assert.deepEqual(JSON.parse(JSON.stringify(initial.manifest)), before);
+});
+
 test("reset clears imported backend history and sync state", async () => {
   const dir = tempDir();
   writeProject(dir);
@@ -839,6 +919,65 @@ test("pre-resume sync records source_unavailable as a resume failure", async () 
     "backend session history source is unavailable",
   );
   assert.equal(manifest.totalAttemptCount, 1);
+});
+
+test("pre-resume sync treats transient source_busy as a soft skip", async () => {
+  const dir = tempDir();
+  writeProject(dir);
+  const first = await runIn(dir, {
+    backend: historyBackend({
+      turns: [],
+      invoke: async () => ({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        sessionId: "session-busy",
+        transcript: "first live attempt",
+        rawStdout: "",
+        rawStderr: "",
+      }),
+    }),
+  });
+  const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(first.runId, dir));
+  const manifestPath = join(target.workspaceDir, "run.json");
+  const beforeResume = JSON.parse(readFileSync(manifestPath, "utf8"));
+  beforeResume.backendSessionSync = {
+    backend: "claude",
+    backendSessionId: "session-busy",
+    source: fileSource("pre-resume-busy", "v1"),
+    cursor: { offset: 1 },
+    lastSyncedAt: "2026-04-20T11:30:00.000Z",
+    lastError: null,
+    importedTurnIds: [],
+    openTurnIds: [],
+  };
+  writeFileSync(manifestPath, `${JSON.stringify(beforeResume, null, 2)}\n`);
+
+  const resumed = await runIn(dir, {
+    resume: target,
+    backend: historyBackend({
+      turns: [],
+      resolve: async () => ({ available: false, reason: "database is locked", transient: true }),
+      invoke: async (ctx) => {
+        completeTask(target.workspaceDir, "t1");
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          aborted: false,
+          sessionId: ctx.resumeSessionId,
+          transcript: "resumed live attempt",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    }),
+  });
+
+  assert.equal(resumed.manifest.status, "success");
+  assert.equal(resumed.manifest.backendSessionSync.lastError, null);
+  assert.equal(resumed.manifest.totalAttemptCount, 2);
 });
 
 test("pre-resume sync retries once when sync state changes during backend read", async () => {

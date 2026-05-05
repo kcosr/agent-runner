@@ -77,6 +77,11 @@ The manifest is the source of truth. Important fields:
 | `resetSeed` | snapshot used by `run reset` |
 | `execution` | `{ hostMode: "embedded" \| "daemon", controller }`; for daemon runs, `controller.daemonInstanceId` links back to the daemon instance |
 
+Timeline history exposes compact attempt provenance (`task_runner` or
+`backend_session` with `bootstrap`/`sync` mode) so clients can distinguish
+task-runner-authored attempts from backend-imported turns without reading
+the manifest directly.
+
 `RunSummary` and `RunDetail` also expose derived `scheduleState`:
 `none`, `paused`, `future`, or `due`. It is recomputed from
 `manifest.schedule` and the current time; it is not stored in

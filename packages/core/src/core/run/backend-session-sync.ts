@@ -34,6 +34,7 @@ export type BackendSessionHistorySyncResult =
         | "disabled"
         | "no_backend_session"
         | "unsupported"
+        | "source_busy"
         | "source_unavailable"
         | "unchanged";
       changed: false;
@@ -84,6 +85,14 @@ export function backendSessionHistorySyncEnabled(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isTransientBackendSessionHistoryError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { transient?: unknown }).transient === true
+  );
 }
 
 function stableJson(value: unknown): string {
@@ -193,7 +202,36 @@ function isBackendSessionAttempt(
   );
 }
 
+function promptsMatchBackendTurn(backend: Backend, turn: BackendSyncedTurn, prompt: string) {
+  const userText = turn.userText ?? "";
+  if (prompt === userText) {
+    return true;
+  }
+  return backend.taskRunnerPromptMatchesSyncedTurn?.({ prompt, turn }) === true;
+}
+
+function attemptTimingMatchesBackendTurn(
+  backend: Backend,
+  turn: BackendSyncedTurn,
+  record: AttemptRecord,
+): boolean {
+  const backendMatch = backend.taskRunnerAttemptTimingMatchesSyncedTurn?.({
+    attemptStartedAt: record.startedAt,
+    attemptEndedAt: record.endedAt,
+    turn,
+  });
+  if (backendMatch !== undefined) {
+    return backendMatch;
+  }
+  const turnStartedAt = Date.parse(turn.startedAt);
+  const turnUpdatedAt = Date.parse(turn.updatedAt);
+  const recordStartedAt = Date.parse(record.startedAt);
+  const recordEndedAt = record.endedAt === null ? recordStartedAt : Date.parse(record.endedAt);
+  return recordStartedAt <= turnUpdatedAt && recordEndedAt >= turnStartedAt;
+}
+
 function taskRunnerAttemptMatchesBackendTurn(
+  backend: Backend,
   manifest: RunManifest,
   backendSessionId: string,
   turn: BackendSyncedTurn,
@@ -214,20 +252,14 @@ function taskRunnerAttemptMatchesBackendTurn(
   if (!attemptMatches && !sessionMatches) {
     return false;
   }
-  if (record.prompt !== (turn.userText ?? "")) {
+  if (!promptsMatchBackendTurn(backend, turn, record.prompt)) {
     return false;
   }
-  if (manifest.backend === "cursor") {
-    return true;
-  }
-  const turnStartedAt = Date.parse(turn.startedAt);
-  const turnUpdatedAt = Date.parse(turn.updatedAt);
-  const recordStartedAt = Date.parse(record.startedAt);
-  const recordEndedAt = record.endedAt === null ? recordStartedAt : Date.parse(record.endedAt);
-  return recordStartedAt <= turnUpdatedAt && recordEndedAt >= turnStartedAt;
+  return attemptTimingMatchesBackendTurn(backend, turn, record);
 }
 
 function findExistingAttempt(
+  backend: Backend,
   manifest: RunManifest,
   backendSessionId: string,
   turn: BackendSyncedTurn,
@@ -237,7 +269,7 @@ function findExistingAttempt(
       isBackendSessionAttempt(manifest, backendSessionId, turn, record),
     ) ??
     manifest.attemptRecords.find((record) =>
-      taskRunnerAttemptMatchesBackendTurn(manifest, backendSessionId, turn, record),
+      taskRunnerAttemptMatchesBackendTurn(backend, manifest, backendSessionId, turn, record),
     )
   );
 }
@@ -326,6 +358,7 @@ function shouldPromoteSessionFromBackendTurn(session: SessionRecord): boolean {
 }
 
 function upsertCompleteTurn(params: {
+  backend: Backend;
   manifest: RunManifest;
   backendSessionId: string;
   turn: BackendSyncedTurn;
@@ -333,8 +366,8 @@ function upsertCompleteTurn(params: {
   source: BackendSessionHistorySource;
   syncedAt: string;
 }): { changed: boolean; addedAttemptNumber: number | null; createdLogPath: string | null } {
-  const { manifest, backendSessionId, turn, mode, source, syncedAt } = params;
-  const existingAttempt = findExistingAttempt(manifest, backendSessionId, turn);
+  const { backend, manifest, backendSessionId, turn, mode, source, syncedAt } = params;
+  const existingAttempt = findExistingAttempt(backend, manifest, backendSessionId, turn);
   const existingSession =
     findExistingSession(manifest, backendSessionId, turn) ??
     (existingAttempt
@@ -517,7 +550,7 @@ export async function prepareBackendSessionHistorySync(
   if (!sourceResult.available) {
     return {
       status: "skipped",
-      reason: "source_unavailable",
+      reason: sourceResult.transient === true ? "source_busy" : "source_unavailable",
       changed: false,
       source: null,
       importedTurnCount: previousState?.importedTurnIds.length ?? 0,
@@ -540,16 +573,31 @@ export async function prepareBackendSessionHistorySync(
     };
   }
 
-  const historyResult = await backend.readSessionHistory({
-    sessionId: backendSessionId,
-    cwd: manifest.cwd,
-    env,
-    backendConfig: cloneBackendConfig(manifest.backendConfig),
-    resolvedBackendArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),
-    source: sourceResult.source,
-    cursor: previousState?.cursor,
-    mode,
-  });
+  let historyResult: BackendSessionHistoryResult;
+  try {
+    historyResult = await backend.readSessionHistory({
+      sessionId: backendSessionId,
+      cwd: manifest.cwd,
+      env,
+      backendConfig: cloneBackendConfig(manifest.backendConfig),
+      resolvedBackendArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),
+      source: sourceResult.source,
+      cursor: previousState?.cursor,
+      mode,
+    });
+  } catch (error) {
+    if (isTransientBackendSessionHistoryError(error)) {
+      return {
+        status: "skipped",
+        reason: "source_busy",
+        changed: false,
+        source: null,
+        importedTurnCount: previousState?.importedTurnIds.length ?? 0,
+        openTurnCount: previousState?.openTurnIds.length ?? 0,
+      };
+    }
+    throw error;
+  }
   validateHistoryResult(historyResult);
 
   return {
@@ -561,11 +609,12 @@ export async function prepareBackendSessionHistorySync(
 }
 
 export function applyPreparedBackendSessionHistorySync(options: {
+  backend: Backend;
   manifest: RunManifest;
   mode: BackendSessionHistorySyncMode;
   prepared: PreparedBackendSessionHistorySync;
 }): BackendSessionHistorySyncResult {
-  const { manifest, mode, prepared } = options;
+  const { backend, manifest, mode, prepared } = options;
   const backendSessionId = prepared.backendSessionId;
   const historyResult = prepared.historyResult;
   const completeTurns = historyResult.turns.filter((turn) => turn.status === "complete");
@@ -579,6 +628,7 @@ export function applyPreparedBackendSessionHistorySync(options: {
   try {
     for (const turn of completeTurns) {
       const upsert = upsertCompleteTurn({
+        backend,
         manifest,
         backendSessionId,
         turn,
@@ -638,6 +688,7 @@ async function syncBackendSessionHistoryInternal(
     return prepared;
   }
   return applyPreparedBackendSessionHistorySync({
+    backend: options.backend,
     manifest: options.manifest,
     mode: options.mode,
     prepared,

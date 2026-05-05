@@ -98,6 +98,7 @@ export function applyEnvelope(
           exitCode: null,
           timedOut: false,
           live: true,
+          provenance: { kind: "task_runner" },
         });
         return { history: next, requiresReload: false, showStaleWarning: false };
       case "agent_message_delta": {

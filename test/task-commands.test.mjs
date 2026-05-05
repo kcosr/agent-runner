@@ -1028,7 +1028,7 @@ test("run reset: json output restores initialized state and removes attempt arti
   assert.equal(manifest.model, "claude-sonnet-4-6");
   assert.equal(manifest.effort, null);
   assert.equal(manifest.name, null);
-  assert.equal(manifest.unrestricted, false);
+  assert.equal(manifest.unrestricted, true);
   assert.equal(manifest.timeoutSec, 3600);
   assert.equal(manifest.backendSessionId, null);
   assert.ok(manifest.brief);

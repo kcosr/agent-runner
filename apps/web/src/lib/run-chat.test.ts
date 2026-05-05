@@ -35,6 +35,7 @@ function makeAttempt(overrides: Partial<RunTimelineAttempt>): RunTimelineAttempt
     exitCode: 0,
     timedOut: false,
     live: false,
+    provenance: { kind: "task_runner" },
     ...overrides,
   };
 }
@@ -378,6 +379,62 @@ describe("deriveRunChatRows", () => {
     });
   });
 
+  it("suppresses system rows for bootstrap-imported backend session prompts", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        sessions: [makeSession({ sessionIndex: 0, message: "Existing backend prompt" })],
+      }),
+      makeHistory([
+        makeAttempt({
+          sessionIndex: 0,
+          attemptNumber: 1,
+          prompt: "Existing backend prompt",
+          provenance: { kind: "backend_session", mode: "bootstrap" },
+        }),
+      ]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["session:0:user", "session:0:assistant:1"]);
+    expect(rows[0]).toMatchObject({
+      kind: "user",
+      source: "initial",
+      text: "Existing backend prompt",
+      turnDivider: {
+        id: "session:0",
+        timestamp: "2026-04-28T10:00:00.000Z",
+      },
+    });
+    expect(rows[1]).toMatchObject({
+      kind: "assistant",
+      transcript: "Assistant response",
+    });
+    expect(rows[1]).not.toHaveProperty("turnDivider");
+  });
+
+  it("keeps bootstrap-imported prompt text when no session message covers it", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        sessions: [makeSession({ sessionIndex: 0, message: null })],
+      }),
+      makeHistory([
+        makeAttempt({
+          sessionIndex: 0,
+          attemptNumber: 1,
+          prompt: "Existing backend prompt",
+          provenance: { kind: "backend_session", mode: "bootstrap" },
+        }),
+      ]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["session:0:system:1", "session:0:assistant:1"]);
+    expect(rows[0]).toMatchObject({
+      kind: "system",
+      source: "initial",
+      status: "sent",
+      text: "Existing backend prompt",
+    });
+  });
+
   it("renders automatic follow-up attempt prompts as system cards", () => {
     const rows = deriveRunChatRows(
       makeRun({
@@ -506,6 +563,7 @@ describe("deriveRunChatRows", () => {
           notices: "backend notice",
           prompt: "first prompt",
           live: false,
+          provenance: { kind: "task_runner" },
         }),
         makeAttempt({
           attemptNumber: 2,
@@ -513,6 +571,7 @@ describe("deriveRunChatRows", () => {
           notices: "live notice",
           prompt: "live prompt",
           live: true,
+          provenance: { kind: "task_runner" },
           endedAt: null,
           exitCode: null,
         }),
@@ -623,6 +682,7 @@ describe("deriveRunChatRows", () => {
           endedAt: null,
           exitCode: null,
           live: true,
+          provenance: { kind: "task_runner" },
         }),
       ]),
     );

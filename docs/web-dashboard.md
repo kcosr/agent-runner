@@ -217,9 +217,11 @@ history contains the first real attempt, Chat renders session 0 attempt 0
 from `attempt.prompt` as a normal System card, even when the run has an
 initial message, because before-attempt hooks may rewrite the prompt. If a
 hook clears `attempt.prompt`, Chat does not fall back to the original run
-message. Later
-resume sessions keep their stored session message as a user bubble, and
-automatic follow-up or retry prompts continue to render as System cards.
+message. Attempts imported from a bootstrapped backend session suppress
+that System prompt card because the message came from backend-owned
+history rather than a task-runner-authored handoff. Later resume sessions
+keep their stored session message as a user bubble, and automatic
+follow-up or retry prompts continue to render as System cards.
 Chat shows the existing loading skeleton until timeline history is available,
 so detail-only run/session messages do not appear as standalone user bubbles
 before the matching attempt/assistant row can be projected. Assistant output

@@ -875,6 +875,14 @@ export const piBackend: Backend = {
   validateSessionId: validatePiSession,
   resolveSessionHistorySource: resolvePiSessionHistorySource,
   readSessionHistory: readPiSessionHistory,
+  renameSession: ({ sessionId, cwd, env, resolvedBackendArgs, name }) =>
+    setPiSessionName({
+      sessionId,
+      cwd,
+      env,
+      resolvedBackendArgs,
+      name,
+    }),
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const processHandle = await createPiProcess(ctx);
 

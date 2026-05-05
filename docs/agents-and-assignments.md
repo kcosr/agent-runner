@@ -46,11 +46,11 @@ instructions.
 ---
 schemaVersion: 1            # required, must be 1
 name: implementer           # required, min 1 char; "ad-hoc" is reserved
-backend: codex              # required backend name; built-ins: claude | codex | cursor | pi | passive
+backend: codex              # required backend name; built-ins: claude | codex | cursor | opencode | pi | passive
 model: gpt-5.4              # optional backend-specific id
 effort: high                # optional: off | minimal | low | medium | high | xhigh | max
 timeoutSec: 3600            # optional positive integer (default 3600)
-unrestricted: true          # optional boolean (default false)
+unrestricted: true          # optional boolean (default true)
 backendConfig:              # optional backend-owned runtime config, keyed by backend name
   codex:
     transport:
@@ -670,5 +670,6 @@ Task-transition hooks return `{ accept: true }` or
   but the worker does not. The worker never sees it.
 - Use `lockedFields: [tasks]` on assignments whose task list must not be
   dropped or reordered at runtime.
-- `unrestricted: true` bypasses the backend's approval prompts — use only
-  for trusted agents.
+- `unrestricted: true` bypasses the backend's approval prompts and is the
+  default; set `unrestricted: false` only for backends that can surface
+  approval prompts to the user.

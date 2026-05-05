@@ -35,7 +35,7 @@ export const VAR_SOURCES = ["cli", "web", "env", "parent"] as const;
 export type VarSource = (typeof VAR_SOURCES)[number];
 export const EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export const DEFAULT_AGENT_TIMEOUT_SEC = 3600;
-export const DEFAULT_AGENT_UNRESTRICTED = false;
+export const DEFAULT_AGENT_UNRESTRICTED = true;
 export const DEFAULT_MAX_RETRIES = 3;
 
 function isValidVarDefault(value: unknown, def: { type: string; values?: string[] }): boolean {

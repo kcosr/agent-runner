@@ -738,6 +738,7 @@ export const cursorBackend: Backend = {
   validateSessionId: validateCursorSession,
   resolveSessionHistorySource: resolveCursorSessionHistorySource,
   readSessionHistory: readCursorSessionHistory,
+  taskRunnerAttemptTimingMatchesSyncedTurn: () => true,
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const state: StreamState = {
       sessionId: null,
