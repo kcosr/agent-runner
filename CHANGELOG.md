@@ -125,6 +125,7 @@
   json`, including resume ids, model/effort/name/unrestricted argument
   mapping, live JSON text capture, and SQLite-backed session validation
   plus history import/sync from OpenCode's `opencode.db`.
+  ([#137](https://github.com/kcosr/task-runner/pull/137))
 - Added run-group-aware runtime interpolation for fresh cwd values and
   launcher command/args, plus `TASK_RUNNER_RUN_ID`,
   `TASK_RUNNER_RUN_GROUP_ID`, and `TASK_RUNNER_CWD` backend wrapper env.
@@ -145,6 +146,7 @@
 - OpenCode backend session history sync now treats transient SQLite
   busy/locked reads as `source_busy` so pre-resume sync can skip and retry
   later instead of failing the resume.
+  ([#137](https://github.com/kcosr/task-runner/pull/137))
 - Added `TASK_RUNNER_BACKEND_SESSION_SYNC=false` to disable backend-owned
   session history import, pre-resume sync, and daemon subscribed-run
   polling for the current process.
@@ -367,6 +369,7 @@
 - Agents and ad-hoc runs now default `unrestricted` to `true`, so
   non-interactive backends do not block on approval prompts unless an
   agent explicitly sets `unrestricted: false`.
+  ([#137](https://github.com/kcosr/task-runner/pull/137))
 - Terminal non-passive runs now allow task status edits through the
   existing task mutation path while still rejecting task add and preserving
   historical lifecycle fields until normal resume execution changes them.
@@ -514,9 +517,11 @@
 - OpenCode backend session sync now matches already-recorded task-runner
   attempts when OpenCode stores the user prompt with a JSON-string quoting
   layer, preventing duplicate imported attempts after sync.
+  ([#137](https://github.com/kcosr/task-runner/pull/137))
 - Web Chat now suppresses the initial System prompt card for attempts
   imported from a bootstrapped backend session, using timeline attempt
   provenance while keeping the imported initial user message visible.
+  ([#137](https://github.com/kcosr/task-runner/pull/137))
 - Subscribed backend-session sync no longer holds the task-state lock while
   reading backend transcript files, preventing large histories from blocking
   run timeline and attachment requests.
