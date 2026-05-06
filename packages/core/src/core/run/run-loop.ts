@@ -821,14 +821,44 @@ function resolveFreshBackendArgs(
   return cloneResolvedBackendArgs(agentConfig.backendArgs?.[backendId]?.extraArgs ?? []);
 }
 
-async function validateBootstrapBackendSessionId(
-  sessionId: string,
-  backend: Backend,
-  cwd: string,
-  processCwd: string,
-  backendConfig: unknown,
-  resolvedBackendArgs: ResolvedBackendArgs,
-): Promise<void> {
+function assertExecutionEnvironmentCompatible(params: {
+  environment: RunManifest["executionEnvironment"];
+  launcher: ResolvedLauncherConfig;
+  backend: Backend;
+  backendConfig: unknown;
+}): void {
+  if (params.environment === null) {
+    return;
+  }
+  if (params.launcher.kind !== "direct") {
+    throw new ResumeError(
+      "execution environments cannot be combined with non-direct launchers; use one runtime wrapper mechanism per run",
+    );
+  }
+  if (!launcherAppliesToBackend(params.backend, params.backendConfig)) {
+    throw new ResumeError(
+      `execution environments only apply to subprocess-backed backend invocations; backend ${params.backend.id} is direct for this run`,
+    );
+  }
+}
+
+interface ValidateBootstrapBackendSessionIdParams {
+  sessionId: string;
+  backend: Backend;
+  cwd: string;
+  processCwd: string;
+  backendConfig: unknown;
+  resolvedBackendArgs: ResolvedBackendArgs;
+}
+
+async function validateBootstrapBackendSessionId({
+  sessionId,
+  backend,
+  cwd,
+  processCwd,
+  backendConfig,
+  resolvedBackendArgs,
+}: ValidateBootstrapBackendSessionIdParams): Promise<void> {
   if (backend.supportsBootstrapSessionImport === false) {
     throw new InvalidBackendSessionError(
       sessionId,
@@ -1627,16 +1657,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         runGroupId,
         backend: currentBackend.id,
       });
-  if (executionEnvironment !== null && launcher.kind !== "direct") {
-    throw new ResumeError(
-      "execution environments cannot be combined with non-direct launchers; use one runtime wrapper mechanism per run",
-    );
-  }
-  if (executionEnvironment !== null && !launcherAppliesToBackend(currentBackend, backendConfig)) {
-    throw new ResumeError(
-      `execution environments only apply to subprocess-backed backend invocations; backend ${currentBackend.id} is direct for this run`,
-    );
-  }
+  assertExecutionEnvironmentCompatible({
+    environment: executionEnvironment,
+    launcher,
+    backend: currentBackend,
+    backendConfig,
+  });
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   let timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   let unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
@@ -1896,16 +1922,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runGroupId,
       backend: currentBackend.id,
     });
-    if (executionEnvironment !== null && launcher.kind !== "direct") {
-      throw new ResumeError(
-        "execution environments cannot be combined with non-direct launchers; use one runtime wrapper mechanism per run",
-      );
-    }
-    if (executionEnvironment !== null && !launcherAppliesToBackend(currentBackend, backendConfig)) {
-      throw new ResumeError(
-        `execution environments only apply to subprocess-backed backend invocations; backend ${currentBackend.id} is direct for this run`,
-      );
-    }
+    assertExecutionEnvironmentCompatible({
+      environment: executionEnvironment,
+      launcher,
+      backend: currentBackend,
+      backendConfig,
+    });
     prepareState.manifest.launcher = cloneResolvedLauncherConfig(launcher);
     prepareState.manifest.executionEnvironment = executionEnvironment;
     hookState = { ...prepareState.manifest.hookState };
@@ -1925,14 +1947,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // after prepare hooks so the check sees the same backend, cwd,
   // backendConfig, and backendArgs that the first invocation will use.
   if (opts.bootstrapBackendSessionId !== undefined) {
-    await validateBootstrapBackendSessionId(
-      opts.bootstrapBackendSessionId,
-      currentBackend,
-      executionEnvironment?.cwd ?? cwd,
-      cwd,
+    await validateBootstrapBackendSessionId({
+      sessionId: opts.bootstrapBackendSessionId,
+      backend: currentBackend,
+      cwd: executionEnvironment?.cwd ?? cwd,
+      processCwd: cwd,
       backendConfig,
       resolvedBackendArgs,
-    );
+    });
   }
 
   const hasTasks = tasks.size > 0;
@@ -3138,31 +3160,43 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     // afterExit failures are warning-only; preserve the terminal result.
   }
 
+  const terminalEnvironment = manifest.executionEnvironment;
   if (
-    manifest.executionEnvironment?.mode === "managed" &&
-    !hasPendingGroupEnvironmentUsers(manifest, listRunManifests())
+    terminalEnvironment?.mode === "managed" &&
+    (terminalEnvironment.lifetime !== "group" ||
+      !hasPendingGroupEnvironmentUsers(manifest, listRunManifests()))
   ) {
-    const cleanedEnvironment = await cleanupExecutionEnvironment(manifest.executionEnvironment);
-    withTaskStateLock(workspaceDir, () => {
-      const latest = resolveResumeTarget(workspaceDir).manifest;
-      latest.executionEnvironment = cleanedEnvironment;
-      writeManifest(workspaceDir, latest);
-      manifest = latest;
-    });
+    const cleanedEnvironment = await cleanupExecutionEnvironment(terminalEnvironment);
+    const cleanupChanged =
+      cleanedEnvironment?.mode === "managed" &&
+      (cleanedEnvironment.containerId !== terminalEnvironment.containerId ||
+        cleanedEnvironment.cleanup.cleanedAt !== terminalEnvironment.cleanup.cleanedAt ||
+        cleanedEnvironment.cleanup.lastError !== terminalEnvironment.cleanup.lastError ||
+        cleanedEnvironment.lastError !== terminalEnvironment.lastError);
+    if (cleanupChanged) {
+      withTaskStateLock(workspaceDir, () => {
+        const latest = resolveResumeTarget(workspaceDir).manifest;
+        latest.executionEnvironment = cleanedEnvironment;
+        writeManifest(workspaceDir, latest);
+        manifest = latest;
+      });
+    }
     const cleanupError =
       cleanedEnvironment?.mode === "managed" ? cleanedEnvironment.cleanup.lastError : null;
-    emitAuditEnvelope(
-      cleanupError
-        ? appendRunContainerCleanupFailedEvent({
-            manifest,
-            context: lifecycleContext,
-            error: cleanupError,
-          })
-        : appendRunContainerRemovedEvent({
-            manifest,
-            context: lifecycleContext,
-          }),
-    );
+    if (cleanupChanged) {
+      emitAuditEnvelope(
+        cleanupError
+          ? appendRunContainerCleanupFailedEvent({
+              manifest,
+              context: lifecycleContext,
+              error: cleanupError,
+            })
+          : appendRunContainerRemovedEvent({
+              manifest,
+              context: lifecycleContext,
+            }),
+      );
+    }
   }
 
   const recurrenceResult = withTaskStateLock(workspaceDir, () => {

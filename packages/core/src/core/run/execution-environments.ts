@@ -1,12 +1,12 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { promisify } from "node:util";
 import { loadEnvironmentConfig } from "../../config/loader.js";
 import { resolveTaskRunnerStateDir } from "../../config/runtime-paths.js";
+import { runProcess } from "../../util/spawn.js";
+import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import type { BackendName } from "../backends/types.js";
 import type { EnvironmentReference, LoadedEnvironmentDefinition } from "../config/environments.js";
 import { interpolate } from "../config/interpolate.js";
@@ -22,7 +22,6 @@ import type {
   RunManifest,
 } from "./manifest.js";
 
-const execFileAsync = promisify(execFile);
 const INTERPOLATION_TOKEN_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/;
 
 export class ExecutionEnvironmentError extends Error {
@@ -417,22 +416,36 @@ async function runEngine(
   args: string[],
   options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<{ stdout: string; stderr: string }> {
+  let result: Awaited<ReturnType<typeof runProcess>>;
   try {
-    const result = await execFileAsync(environment.engine, args, {
-      encoding: "utf8",
-      maxBuffer: 8 * 1024 * 1024,
-      signal: options.signal,
-      timeout: options.timeoutMs ?? ENGINE_DEFAULT_TIMEOUT_MS,
+    result = await runProcess({
+      command: environment.engine,
+      args,
+      cwd: process.cwd(),
+      env: process.env as Record<string, string>,
+      timeoutMs: options.timeoutMs ?? ENGINE_DEFAULT_TIMEOUT_MS,
+      abortSignal: options.signal,
     });
-    return {
-      stdout: result.stdout,
-      stderr: result.stderr,
-    };
   } catch (error) {
-    const err = error as Error & { stderr?: string; stdout?: string };
-    const detail = err.stderr?.trim() || err.stdout?.trim() || err.message;
+    throw new ExecutionEnvironmentError(
+      `${environment.engine} ${args[0]} failed: ${(error as Error).message}`,
+    );
+  }
+  if (result.exitCode !== 0 || result.timedOut || result.aborted) {
+    const detail =
+      result.stderrText.trim() ||
+      result.stdoutText.trim() ||
+      (result.timedOut
+        ? "timed out"
+        : result.aborted
+          ? "aborted"
+          : `exited with code ${result.exitCode ?? "null"}`);
     throw new ExecutionEnvironmentError(`${environment.engine} ${args[0]} failed: ${detail}`);
   }
+  return {
+    stdout: result.stdoutText,
+    stderr: result.stderrText,
+  };
 }
 
 async function inspectContainer(
@@ -538,12 +551,18 @@ function workspaceLifecycleStateDir(workspace: RunEnvironmentWorkspace): string 
 
 function readWorkspaceLifecycleMarker(stateDir: string): string | null {
   const markerPath = join(stateDir, WORKSPACE_LIFECYCLE_MARKER);
-  if (!existsSync(markerPath)) {
-    return null;
+  let raw: string;
+  try {
+    raw = readFileSync(markerPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(markerPath, "utf8"));
+    parsed = JSON.parse(raw);
   } catch (error) {
     throw new ExecutionEnvironmentError(
       `workspace lifecycle marker ${markerPath} is invalid JSON: ${(error as Error).message}`,
@@ -564,7 +583,7 @@ function readWorkspaceLifecycleMarker(stateDir: string): string | null {
 
 function writeWorkspaceLifecycleMarker(stateDir: string, completedAt: string): void {
   mkdirSync(stateDir, { recursive: true });
-  writeFileSync(
+  writeTextFileAtomic(
     join(stateDir, WORKSPACE_LIFECYCLE_MARKER),
     `${JSON.stringify({ completedAt }, null, 2)}\n`,
   );
@@ -611,7 +630,7 @@ function writeWorkspaceLifecycleLockMetadata(lockPath: string): void {
     pid: process.pid,
     acquiredAt: new Date().toISOString(),
   };
-  writeFileSync(
+  writeTextFileAtomic(
     join(lockPath, WORKSPACE_LIFECYCLE_LOCK_METADATA),
     `${JSON.stringify(metadata, null, 2)}\n`,
   );
@@ -923,13 +942,13 @@ export async function prepareExecutionEnvironment(
 
   let next = environment;
   if (next.workspace?.create === true) {
-    const existed = existsSync(next.workspace.hostPath);
-    mkdirSync(next.workspace.hostPath, { recursive: true });
+    const createdPath = mkdirSync(next.workspace.hostPath, { recursive: true });
     next = {
       ...next,
       workspace: {
         ...next.workspace,
-        createdAt: next.workspace.createdAt ?? (existed ? null : new Date().toISOString()),
+        createdAt:
+          next.workspace.createdAt ?? (createdPath === undefined ? null : new Date().toISOString()),
       },
     };
   }

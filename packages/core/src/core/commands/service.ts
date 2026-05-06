@@ -229,15 +229,17 @@ async function cleanupManagedEnvironmentForMutation(
   auditOrigin: RunEventOrigin,
   emitAuditEnvelope: AuditEnvelopeEmitter | undefined,
 ): Promise<void> {
+  const environment = manifest.executionEnvironment;
   if (
-    manifest.executionEnvironment?.mode !== "managed" ||
-    hasPendingGroupEnvironmentUsers(manifest, listRunManifests())
+    environment?.mode !== "managed" ||
+    (environment.lifetime === "group" &&
+      hasPendingGroupEnvironmentUsers(manifest, listRunManifests()))
   ) {
     return;
   }
-  const previousCleanedAt = manifest.executionEnvironment.cleanup.cleanedAt;
+  const previousCleanedAt = environment.cleanup.cleanedAt;
   try {
-    const cleaned = await cleanupExecutionEnvironment(manifest.executionEnvironment, {
+    const cleaned = await cleanupExecutionEnvironment(environment, {
       includeManual: true,
       throwOnFailure: true,
     });
@@ -1104,7 +1106,10 @@ export async function cleanupRunEnvironment(target: string): Promise<RunEnvironm
   if (resolved.manifest.status === "running") {
     throw new CommandError("cannot cleanup the execution environment for a running run");
   }
-  if (hasPendingGroupEnvironmentUsers(resolved.manifest, listRunManifests())) {
+  if (
+    resolved.manifest.executionEnvironment.lifetime === "group" &&
+    hasPendingGroupEnvironmentUsers(resolved.manifest, listRunManifests())
+  ) {
     throw new CommandError(
       "cannot cleanup a group-scoped execution environment while another group run can still use it",
     );

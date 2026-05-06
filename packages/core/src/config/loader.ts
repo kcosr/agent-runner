@@ -1521,21 +1521,9 @@ export function loadEnvironmentConfig(
   arg: string,
   cwd: string = process.cwd(),
 ): LoadedEnvironmentDefinition {
-  const resolved = resolveStringRef(arg, cwd);
-  if (resolved.kind === "path") {
-    const sourcePath = resolveEnvironmentPath(arg, cwd);
-    return loadEnvironmentDefinitionFromPath(sourcePath, { strictIdentity: true });
-  }
-  const discovered = listEnvironments();
-  const entry = discovered.entries.find((candidate) => candidate.name === resolved.name);
-  if (!entry) {
-    const { searched } = resolveNamedEnvironmentPath(resolved.name);
-    throw new EnvironmentNotFoundError(arg, searched);
-  }
-  if (entry.path === null) {
-    throw new EnvironmentNotFoundError(arg, []);
-  }
-  return loadEnvironmentDefinitionFromPath(entry.path, { strictIdentity: true });
+  return loadEnvironmentDefinitionFromPath(resolveEnvironmentPath(arg, cwd), {
+    strictIdentity: true,
+  });
 }
 
 export function listEnvironments(): DefinitionListWarnings {

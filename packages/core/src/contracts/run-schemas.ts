@@ -62,9 +62,88 @@ export const runStatusSchema: z.ZodType<RunStatus> = z.enum(RUN_STATUSES);
 export const runScheduleStateSchema: z.ZodType<RunScheduleState> = z.enum(RUN_SCHEDULE_STATES);
 
 const runScheduleModeSchema = z.enum(["reuse", "reset", "clone"]);
+const runEnvironmentMountSchema = z.object({
+  hostPath: z.string(),
+  containerPath: z.string(),
+  mode: z.enum(["ro", "rw"]),
+});
+const runEnvironmentWorkspaceLifecycleStepSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("command"),
+    command: z.string(),
+    args: z.array(z.string()),
+    env: z.record(z.string(), z.string()),
+  }),
+  z.object({
+    kind: z.literal("git-clone"),
+    source: z.string(),
+    baseRef: z.string(),
+    branch: z.string(),
+  }),
+]);
+const runEnvironmentWorkspaceLifecycleSchema = z.object({
+  onCreate: z.array(runEnvironmentWorkspaceLifecycleStepSchema),
+  completedAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+});
+const runEnvironmentWorkspaceSchema = runEnvironmentMountSchema.extend({
+  scope: z.enum(["run", "group"]),
+  hostRoot: z.string().nullable(),
+  create: z.boolean(),
+  createdAt: z.string().nullable(),
+  lifecycle: runEnvironmentWorkspaceLifecycleSchema.nullable(),
+});
+const runExecutionEnvironmentBaseSchema = z.object({
+  kind: z.literal("container"),
+  name: z.string().nullable(),
+  sourcePath: z.string().nullable(),
+  engine: z.enum(["docker", "podman"]),
+  cwd: z.string(),
+  env: z.record(z.string(), z.string()),
+  extraExecArgs: z.array(z.string()),
+  lastValidatedAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+});
+const runExistingContainerEnvironmentSchema = runExecutionEnvironmentBaseSchema.extend({
+  mode: z.literal("existing"),
+  container: z.string(),
+  containerIdAtValidation: z.string().nullable(),
+  expectedMounts: z.array(runEnvironmentMountSchema),
+});
+const runManagedContainerEnvironmentSchema = runExecutionEnvironmentBaseSchema.extend({
+  mode: z.literal("managed"),
+  image: z.string(),
+  lifetime: z.enum(["run", "group"]),
+  containerName: z.string(),
+  containerId: z.string().nullable(),
+  workspace: runEnvironmentWorkspaceSchema.nullable(),
+  sessionMounts: z.array(
+    runEnvironmentMountSchema.extend({
+      preset: z.enum(["claude", "codex", "cursor", "opencode", "pi"]),
+    }),
+  ),
+  mounts: z.array(runEnvironmentMountSchema),
+  network: z.string(),
+  security: z.object({
+    userns: z.enum(["keep-id", "host"]).optional(),
+    selinuxLabel: z.enum(["disable", "shared", "private"]).optional(),
+    readOnlyRootFilesystem: z.boolean().optional(),
+    capDrop: z.array(z.string()),
+    capAdd: z.array(z.string()),
+  }),
+  extraRunArgs: z.array(z.string()),
+  cleanup: z.object({
+    policy: z.enum(["terminal", "manual"]),
+    cleanedAt: z.string().nullable(),
+    lastError: z.string().nullable(),
+  }),
+});
 const runExecutionEnvironmentSchema: z.ZodType<RunDetail["executionEnvironment"]> = z
-  .unknown()
-  .nullable() as z.ZodType<RunDetail["executionEnvironment"]>;
+  .discriminatedUnion("mode", [
+    runExistingContainerEnvironmentSchema,
+    runManagedContainerEnvironmentSchema,
+  ])
+  .nullable();
 
 export const runScheduleSchema: z.ZodType<RunSchedule> = z.object({
   enabled: z.boolean(),
