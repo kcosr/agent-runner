@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import { loadEnvironmentConfig } from "../../config/loader.js";
+import { resolveTaskRunnerStateDir } from "../../config/runtime-paths.js";
 import type { BackendName } from "../backends/types.js";
 import type { EnvironmentReference, LoadedEnvironmentDefinition } from "../config/environments.js";
 import { interpolate } from "../config/interpolate.js";
@@ -38,7 +40,7 @@ const WORKSPACE_LIFECYCLE_LOCK_STALE_BUFFER_MS = 60_000;
 const WORKSPACE_LIFECYCLE_MARKER = ".task-runner-workspace-lifecycle.json";
 const WORKSPACE_LIFECYCLE_LOCK = ".task-runner-workspace-lifecycle.lock";
 const WORKSPACE_LIFECYCLE_LOCK_METADATA = "metadata.json";
-const WORKSPACE_LIFECYCLE_STATE_SUFFIX = ".task-runner-lifecycle";
+const WORKSPACE_STATE_DIR = "workspace-state";
 
 interface ResolveEnvironmentOptions {
   reference: EnvironmentReference | undefined;
@@ -518,8 +520,20 @@ async function runContainerCommand(
   );
 }
 
-function workspaceLifecycleStateDir(hostPath: string): string {
-  return `${hostPath}${WORKSPACE_LIFECYCLE_STATE_SUFFIX}`;
+function explicitWorkspaceStateKey(hostPath: string): string {
+  return createHash("sha256").update(resolve(hostPath)).digest("hex");
+}
+
+function workspaceLifecycleStateDir(workspace: RunEnvironmentWorkspace): string {
+  const key =
+    workspace.hostRoot === null
+      ? explicitWorkspaceStateKey(workspace.hostPath)
+      : pathWithin(workspace.hostRoot, workspace.hostPath);
+  return join(
+    resolveTaskRunnerStateDir(),
+    WORKSPACE_STATE_DIR,
+    key && key.length > 0 ? key : explicitWorkspaceStateKey(workspace.hostPath),
+  );
 }
 
 function readWorkspaceLifecycleMarker(stateDir: string): string | null {
@@ -715,7 +729,7 @@ async function runWorkspaceLifecycle(
   if (workspace === null || workspace.lifecycle === null) {
     return environment;
   }
-  const lifecycleStateDir = workspaceLifecycleStateDir(workspace.hostPath);
+  const lifecycleStateDir = workspaceLifecycleStateDir(workspace);
   const completedAt = readWorkspaceLifecycleMarker(lifecycleStateDir);
   if (completedAt !== null) {
     return {

@@ -293,14 +293,18 @@ Workspaces may define `lifecycle.onCreate` steps that run inside the managed
 container before backend cwd validation. The `git-clone` step clones into the
 workspace root and checks out a branch from a base ref. The `command` step runs
 an arbitrary command in the workspace root with optional args and env.
-Host-side state next to the workspace records successful completion, so
+Host-side state outside the mounted workspace records successful completion, so
 group-scoped workspaces run setup once and later runs skip it without dirtying
-the mounted workspace.
-The state directory is `<workspace.hostPath>.task-runner-lifecycle`.
-Clearing that directory causes the lifecycle to run again on the next
-environment validation. When a lifecycle is configured, the managed container
-starts with `--workdir` set to the workspace mount root; task-runner validates
-the authored `cwd` only after lifecycle setup has had a chance to create it.
+the checked-out repository.
+Lifecycle state is stored outside the mounted workspace under
+`{{state_dir}}/workspace-state/<workspace-key>`. For workspaces derived from
+`hostRoot`, the key is the path under that root, such as the run id or run
+group id. Explicit `hostPath` workspaces use a stable hash of the resolved host
+path. Clearing that state directory causes the lifecycle to run again on the
+next environment validation. When a lifecycle is configured, the managed
+container starts with `--workdir` set to the workspace mount root; task-runner
+validates the authored `cwd` only after lifecycle setup has had a chance to
+create it.
 
 `sessionMounts` expands same-path read-write mounts for built-in backend
 session stores. `sessionMounts: backend` resolves to the selected backend's

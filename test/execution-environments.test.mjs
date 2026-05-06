@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import {
   buildEnvironmentLauncher,
@@ -14,6 +15,14 @@ function writeEnvironment(baseDir, name, body) {
   mkdirSync(join(baseDir, "environments"), { recursive: true });
   writeFileSync(path, body);
   return path;
+}
+
+function explicitWorkspaceLifecycleStatePath(stateDir, workspacePath) {
+  return join(
+    stateDir,
+    "workspace-state",
+    createHash("sha256").update(resolve(workspacePath)).digest("hex"),
+  );
 }
 
 test("resolveFreshExecutionEnvironment loads named config and interpolates run variables", () =>
@@ -397,10 +406,11 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment runs workspace lifecycle once before cwd validation", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
-    const workspacePath = join(rootDir, "workspace");
+    const workspaceRoot = join(rootDir, "workspaces");
+    const workspacePath = join(workspaceRoot, "run-123");
     mkdirSync(binDir, { recursive: true });
     writeFileSync(
       join(binDir, "docker"),
@@ -441,7 +451,7 @@ process.exit(0);
       containerId: null,
       workspace: {
         scope: "run",
-        hostRoot: null,
+        hostRoot: workspaceRoot,
         hostPath: workspacePath,
         containerPath: "/workspace",
         mode: "rw",
@@ -484,7 +494,7 @@ process.exit(0);
     assert.equal(typeof lifecycleCompletedAt, "string");
     assert.ok(
       existsSync(
-        join(`${workspacePath}.task-runner-lifecycle`, ".task-runner-workspace-lifecycle.json"),
+        join(stateDir, "workspace-state", "run-123", ".task-runner-workspace-lifecycle.json"),
       ),
     );
 
@@ -535,7 +545,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment removes a newly-started container when workspace lifecycle fails", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspacePath = join(rootDir, "workspace");
@@ -619,7 +629,10 @@ process.exit(0);
     );
     assert.equal(
       existsSync(
-        join(`${workspacePath}.task-runner-lifecycle`, ".task-runner-workspace-lifecycle.json"),
+        join(
+          explicitWorkspaceLifecycleStatePath(stateDir, workspacePath),
+          ".task-runner-workspace-lifecycle.json",
+        ),
       ),
       false,
     );
@@ -631,11 +644,11 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment waits for a contended workspace lifecycle lock", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspacePath = join(rootDir, "workspace");
-    const lifecycleStatePath = `${workspacePath}.task-runner-lifecycle`;
+    const lifecycleStatePath = explicitWorkspaceLifecycleStatePath(stateDir, workspacePath);
     const lockPath = join(lifecycleStatePath, ".task-runner-workspace-lifecycle.lock");
     mkdirSync(binDir, { recursive: true });
     mkdirSync(lockPath, { recursive: true });

@@ -419,6 +419,9 @@
 
 ### Changed
 
+- Workspace lifecycle markers now live under
+  `${TASK_RUNNER_STATE_DIR}/workspace-state/` instead of suffixed sibling
+  directories next to mounted workspaces.
 - Agents and ad-hoc runs now default `unrestricted` to `true`, so
   non-interactive backends do not block on approval prompts unless an
   agent explicitly sets `unrestricted: false`.
