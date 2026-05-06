@@ -6,18 +6,22 @@
 
 - Manifest schema version is now `23`. Managed container workspace state now
   persists resolved workspace lifecycle steps and lifecycle completion state.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Manifest schema version is now `22`. Managed container environments now
   persist resolved backend session mount presets so resume/reset reuse
   the frozen host paths used for backend session sync.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Manifest schema version is now `21`. Managed container environments now
   persist first-class workspace mount state and may be scoped to either a
   run or run group. Group-scoped execution resources freeze group
   membership, so `run set-group` rejects runs that already carry
   group-scoped environment state.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Manifest schema version is now `20`. Runs now persist frozen
   `executionEnvironment` state on the manifest and reset seed so
   container execution can be resumed, reset, validated, and cleaned up
   from the run record. Older manifests are not dual-read by current code.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Manifest schema version is now `19`. Runs now require
   backend-session sync state and explicit provenance on session and attempt
   records. Use `scripts/migrate-manifests-v19.mjs` before resuming schema
@@ -141,22 +145,28 @@
   override them with `--environment`, and task-runner can validate
   existing containers or create run-scoped managed containers before
   subprocess-backed backend invocation.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Added first-class managed-container workspaces with `workspace.scope:
   run|group`, automatic host directory creation, host-to-container cwd
   rewriting, and `lifetime: group` container reuse/cleanup semantics.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Added managed-container `workspace.lifecycle.onCreate` steps for
   container-side workspace setup, including `git-clone` and arbitrary
   `command` steps guarded by host-side completion state.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Added execution environment `vars`, merged with assignment vars for the
   selected run and frozen into normal runtime vars for environment,
   assignment, and lifecycle interpolation.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Added managed-container `sessionMounts` presets for built-in backend
   session stores (`backend`, `claude`, `codex`, `cursor`, `opencode`,
   and `pi`) so backend session sync can use same-path host mounts.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Added `task-runner list environments`,
   `task-runner show environment <name|path>`, and
   `task-runner run environment status|validate|cleanup <run-id>` across
   embedded and connected CLI paths.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Added first-class `opencode` backend support via `opencode run --format
   json`, including resume ids, model/effort/name/unrestricted argument
   mapping, live JSON text capture, and SQLite-backed session validation
@@ -181,33 +191,43 @@
 
 - Containerized Codex bootstrap-session validation and thread renaming now keep
   host-side Codex helper processes anchored in the run's original host cwd.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Containerized backend invocation now passes the container execution cwd to
   backend sessions and history sync while keeping host-side backend wrapper
   processes anchored in the run's original host cwd.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Containerized backend session history sync now depends on `sessionMounts`
   for backend-owned session stores that live inside the container execution
   cwd; configure `sessionMounts: backend` or a backend-specific preset when
   host-side sync/import is required.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Workspace lifecycle completion state moved to
   `${TASK_RUNNER_STATE_DIR}/workspace-state`; existing workspaces created by
   earlier unreleased branch builds may need their workspace/lifecycle state
   cleared or recreated.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Workspace lifecycle `git-clone` steps now create the run branch from the
   configured base ref instead of treating that ref as a pathspec.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Workspace lifecycle locks now wait for in-flight setup instead of timing
   out early, recover stale lock holders, and harden built-in git steps
   against flag-shaped ref/source values.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Managed container environments are now cleaned up before run reset and
   delete, and manual cleanup reports engine failures instead of returning
   success with a stale container.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Containerized backend invocation now forwards only task-runner runtime
   environment variables plus environment-authored values into `docker exec`
   or `podman exec`, avoiding accidental propagation of host secrets.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Reconfiguring initialized runs now preserves the frozen execution
   environment and reset seed.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Managed container preparation now times out engine operations, honors
   abort signals, rolls back a newly-started container when cwd validation
   fails, and attaches to a concurrently-created group container.
+  ([#138](https://github.com/kcosr/task-runner/pull/138))
 
 - OpenCode backend session history sync now treats transient SQLite
   busy/locked reads as `source_busy` so pre-resume sync can skip and retry
