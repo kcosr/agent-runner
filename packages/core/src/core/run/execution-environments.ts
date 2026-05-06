@@ -377,12 +377,14 @@ function resolveLifecycleSteps(
       };
     }
     const branch = interpolateLifecycleString(step.branch, vars);
+    const baseRef = interpolateLifecycleString(step.baseRef, vars);
     assertGitBranchName(branch);
+    assertGitBaseRefName(baseRef);
     return {
       kind: "git-clone",
       target: step.target,
       source: interpolateLifecycleString(step.source, vars),
-      baseRef: interpolateLifecycleString(step.baseRef, vars),
+      baseRef,
       branch,
       timeoutMs: step.timeoutMs ?? null,
     };
@@ -390,9 +392,19 @@ function resolveLifecycleSteps(
 }
 
 function assertGitBranchName(branch: string): void {
-  if (branch.trim().length === 0 || branch.startsWith("-")) {
+  const trimmed = branch.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("-")) {
     throw new ExecutionEnvironmentError(
       "lifecycle git-clone branch must be non-empty and must not start with '-'",
+    );
+  }
+}
+
+function assertGitBaseRefName(baseRef: string): void {
+  const trimmed = baseRef.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("-")) {
+    throw new ExecutionEnvironmentError(
+      "lifecycle git-clone baseRef must be non-empty and must not start with '-'",
     );
   }
 }
@@ -420,12 +432,14 @@ function resolveLateLifecycleStep(
     };
   }
   const branch = interpolateLateLifecycleString(step.branch, vars);
+  const baseRef = interpolateLateLifecycleString(step.baseRef, vars);
   assertGitBranchName(branch);
+  assertGitBaseRefName(baseRef);
   return {
     kind: "git-clone",
     target: step.target,
     source: interpolateLateLifecycleString(step.source, vars),
-    baseRef: interpolateLateLifecycleString(step.baseRef, vars),
+    baseRef,
     branch,
     timeoutMs: step.timeoutMs,
   };
@@ -640,15 +654,18 @@ async function inspectContainer(
   const record = parsed[0] as Record<string, unknown>;
   const state = record.State as Record<string, unknown> | undefined;
   const mounts = Array.isArray(record.Mounts) ? record.Mounts : [];
+  const running = state?.Running === true;
+  const pid = running
+    ? typeof state?.Pid === "number" && Number.isFinite(state.Pid) && state.Pid > 0
+      ? String(state.Pid)
+      : typeof state?.Pid === "string" && state.Pid !== "0"
+        ? state.Pid
+        : ""
+    : "";
   return {
     id: typeof record.Id === "string" ? record.Id : container,
-    pid:
-      typeof state?.Pid === "number" && Number.isFinite(state.Pid)
-        ? String(state.Pid)
-        : typeof state?.Pid === "string"
-          ? state.Pid
-          : "",
-    running: state?.Running === true,
+    pid,
+    running,
     mounts: mounts.flatMap((entry) => {
       if (!entry || typeof entry !== "object") {
         return [];
@@ -665,6 +682,29 @@ async function inspectContainer(
         : [];
     }),
   };
+}
+
+function assertStartedContainerRunning(
+  environment: RunManagedContainerEnvironment,
+  inspect: InspectSummary,
+): void {
+  if (!inspect.running) {
+    throw new ExecutionEnvironmentError(`container ${environment.containerName} failed to start`);
+  }
+}
+
+async function cleanupStartedManagedContainer(
+  environment: RunManagedContainerEnvironment,
+): Promise<string | null> {
+  if (environment.containerId === null) {
+    return null;
+  }
+  try {
+    await runEngine(environment, ["rm", "-f", environment.containerId]);
+    return null;
+  } catch (error) {
+    return `container cleanup failed: ${phaseErrorMessage(error)}`;
+  }
 }
 
 async function validateCwd(
@@ -1258,14 +1298,15 @@ export async function prepareExecutionEnvironment(
       }
       try {
         next = await startManagedContainer(next, { signal: options.signal });
+        startedContainer = true;
         inspectedManaged = await inspectContainer(next, next.containerId ?? next.containerName, {
           signal: options.signal,
         });
+        assertStartedContainerRunning(next, inspectedManaged);
         next = {
           ...next,
           containerId: inspectedManaged.id,
         };
-        startedContainer = true;
       } catch (startError) {
         if (next.lifetime === "group") {
           try {
@@ -1288,9 +1329,15 @@ export async function prepareExecutionEnvironment(
               throw startError;
             }
           } catch {
+            if (startedContainer) {
+              await cleanupStartedManagedContainer(next);
+            }
             throw startError;
           }
         } else {
+          if (startedContainer) {
+            await cleanupStartedManagedContainer(next);
+          }
           throw startError;
         }
       }
@@ -1298,21 +1345,29 @@ export async function prepareExecutionEnvironment(
   } else {
     const inspected = await inspectContainer(next, next.containerId, { signal: options.signal });
     if (!inspected.running) {
-      next = await startManagedContainer(
-        {
+      try {
+        next = await startManagedContainer(
+          {
+            ...next,
+            containerId: null,
+          },
+          { signal: options.signal },
+        );
+        startedContainer = true;
+        inspectedManaged = await inspectContainer(next, next.containerId ?? next.containerName, {
+          signal: options.signal,
+        });
+        assertStartedContainerRunning(next, inspectedManaged);
+        next = {
           ...next,
-          containerId: null,
-        },
-        { signal: options.signal },
-      );
-      inspectedManaged = await inspectContainer(next, next.containerId ?? next.containerName, {
-        signal: options.signal,
-      });
-      next = {
-        ...next,
-        containerId: inspectedManaged.id,
-      };
-      startedContainer = true;
+          containerId: inspectedManaged.id,
+        };
+      } catch (startError) {
+        if (startedContainer) {
+          await cleanupStartedManagedContainer(next);
+        }
+        throw startError;
+      }
     } else {
       inspectedManaged = inspected;
     }
@@ -1327,10 +1382,9 @@ export async function prepareExecutionEnvironment(
     next = await runWorkspaceLifecycle(next, inspectedManaged, { signal: options.signal });
     await validateCwd(next, next.containerId ?? next.containerName, { signal: options.signal });
   } catch (error) {
+    let cleanupLastError: string | null = null;
     if (startedContainer && next.containerId !== null) {
-      await runEngine(next, ["rm", "-f", next.containerId], {
-        signal: options.signal,
-      }).catch(() => undefined);
+      cleanupLastError = await cleanupStartedManagedContainer(next);
     }
     if (error instanceof ExecutionEnvironmentError && error.environment !== null) {
       const failedEnvironment =
@@ -1338,6 +1392,13 @@ export async function prepareExecutionEnvironment(
           ? {
               ...error.environment,
               containerId: null,
+              cleanup:
+                cleanupLastError === null
+                  ? error.environment.cleanup
+                  : {
+                      ...error.environment.cleanup,
+                      lastError: cleanupLastError,
+                    },
             }
           : error.environment;
       throw new ExecutionEnvironmentError(error.message, failedEnvironment);

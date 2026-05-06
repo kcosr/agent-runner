@@ -1009,6 +1009,166 @@ process.exit(0);
     assert.deepEqual(commands.at(-1), ["rm", "-f", "container-123"]);
   }));
 
+test("prepareExecutionEnvironment still removes a newly-started container after abort", async () =>
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+    const binDir = join(rootDir, "bin");
+    const logPath = join(rootDir, "docker.log");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(binDir, "docker"),
+      `#!/usr/bin/env node
+import fs from "node:fs";
+const logPath = process.env.FAKE_DOCKER_LOG;
+fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
+const args = process.argv.slice(2);
+const [cmd, target] = args;
+if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "container-123") {
+  process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true, Pid: 1234 }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "run") {
+  process.stdout.write("container-123\\n");
+  process.exit(0);
+}
+if (cmd === "exec" && args.includes("after-start")) {
+  setTimeout(() => {}, 10_000);
+} else {
+  process.exit(0);
+}
+`,
+      { mode: 0o755 },
+    );
+
+    const environment = {
+      kind: "container",
+      mode: "managed",
+      name: "workspace-dev",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/workspace",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: null,
+      lastError: null,
+      image: "node:22",
+      lifetime: "run",
+      containerName: "task-runner-run-123",
+      containerId: null,
+      workspace: null,
+      lifecycle: {
+        afterStart: {
+          steps: [
+            {
+              kind: "command",
+              target: "container",
+              command: "after-start",
+              args: [],
+              env: {},
+              cwd: null,
+              timeoutMs: null,
+              user: null,
+              detach: false,
+            },
+          ],
+          completedContainerId: null,
+          completedAt: null,
+          lastError: null,
+        },
+        onWorkspaceCreate: null,
+      },
+      sessionMounts: [],
+      mounts: [],
+      network: "default",
+      security: { capDrop: [], capAdd: [] },
+      extraRunArgs: [],
+      cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+    };
+
+    await assert.rejects(
+      withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
+        prepareExecutionEnvironment(environment, { signal: AbortSignal.timeout(500) }),
+      ),
+      /afterStart lifecycle failed/,
+    );
+
+    const commands = readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(commands.at(-1), ["rm", "-f", "container-123"]);
+  }));
+
+test("prepareExecutionEnvironment rejects and removes a newly-started stopped container", async () =>
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+    const binDir = join(rootDir, "bin");
+    const logPath = join(rootDir, "docker.log");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(binDir, "docker"),
+      `#!/usr/bin/env node
+import fs from "node:fs";
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
+const [cmd, target] = args;
+if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "container-123") {
+  process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: false, Pid: 0 }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "run") {
+  process.stdout.write("container-123\\n");
+  process.exit(0);
+}
+if (cmd === "rm") process.exit(0);
+process.exit(0);
+`,
+      { mode: 0o755 },
+    );
+
+    const environment = {
+      kind: "container",
+      mode: "managed",
+      name: "workspace-dev",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/workspace",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: null,
+      lastError: null,
+      image: "node:22",
+      lifetime: "run",
+      containerName: "task-runner-run-123",
+      containerId: null,
+      workspace: null,
+      lifecycle: null,
+      sessionMounts: [],
+      mounts: [],
+      network: "default",
+      security: { capDrop: [], capAdd: [] },
+      extraRunArgs: [],
+      cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+    };
+
+    await assert.rejects(
+      withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
+        prepareExecutionEnvironment(environment),
+      ),
+      /container task-runner-run-123 failed to start/,
+    );
+
+    const commands = readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(commands.at(-1), ["rm", "-f", "container-123"]);
+    assert.equal(
+      commands.some((command) => command.includes("test")),
+      false,
+    );
+  }));
+
 test("prepareExecutionEnvironment does not remove reused group containers on afterStart failure", async () =>
   withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");

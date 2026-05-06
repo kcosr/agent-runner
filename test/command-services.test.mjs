@@ -1554,6 +1554,108 @@ process.exit(0);
   assert.ok(commands.some((command) => command.includes("setup") && command.includes("7654")));
 });
 
+test("command services: validateRunEnvironment persists failed lifecycle state", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const binDir = join(dir, "bin");
+  const logPath = join(dir, "docker.log");
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(
+    join(binDir, "docker"),
+    `#!/usr/bin/env node
+import fs from "node:fs";
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
+const [cmd, target] = args;
+if (cmd === "inspect" && target === "task-runner-validate-fail") {
+  process.exit(1);
+}
+if (cmd === "inspect" && target === "container-validate-fail") {
+  process.stdout.write(JSON.stringify([{ Id: "container-validate-fail", State: { Running: true, Pid: 8765 }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "run") {
+  process.stdout.write("container-validate-fail\\n");
+  process.exit(0);
+}
+if (cmd === "exec" && args.includes("setup")) process.exit(1);
+if (cmd === "exec") process.exit(0);
+if (cmd === "rm") process.exit(0);
+process.exit(0);
+`,
+    { mode: 0o755 },
+  );
+
+  const environment = {
+    kind: "container",
+    mode: "managed",
+    name: "validate-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: "task-runner-validate-fail",
+    containerId: null,
+    workspace: null,
+    lifecycle: {
+      afterStart: {
+        steps: [
+          {
+            kind: "command",
+            target: "container",
+            command: "setup",
+            args: [],
+            env: {},
+            cwd: null,
+            timeoutMs: null,
+            user: null,
+            detach: false,
+          },
+        ],
+        completedContainerId: null,
+        completedAt: null,
+        lastError: null,
+      },
+      onWorkspaceCreate: null,
+    },
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.executionEnvironment = environment;
+    manifest.resetSeed.executionEnvironment = environment;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    await assert.rejects(
+      withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
+        validateRunEnvironment(outcome.runId),
+      ),
+      /afterStart lifecycle failed/,
+    );
+  });
+
+  const persisted = readManifest(outcome.workspaceDir).executionEnvironment;
+  assert.equal(persisted.containerId, null);
+  assert.match(persisted.lifecycle.afterStart.lastError, /afterStart lifecycle failed/);
+
+  const commands = readFileSync(logPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(commands.at(-1), ["rm", "-f", "container-validate-fail"]);
+});
+
 test("command services: reset and delete cleanup owned managed containers", async () => {
   const dir = tempDir();
   writeBundle(dir);

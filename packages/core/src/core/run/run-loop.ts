@@ -2418,11 +2418,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       });
     } catch (error) {
       if (error instanceof ExecutionEnvironmentError && error.environment !== null) {
-        manifest.executionEnvironment = error.environment;
+        const failedEnvironment = error.environment;
+        manifest.executionEnvironment = failedEnvironment;
         if (reusingWorkspace) {
           await withTaskStateLockAsync(workspaceDir, async () => {
             const latest = resolveResumeTarget(workspaceDir).manifest;
-            latest.executionEnvironment = error.environment;
+            latest.executionEnvironment = failedEnvironment;
             writeManifest(workspaceDir, latest);
           });
         } else {

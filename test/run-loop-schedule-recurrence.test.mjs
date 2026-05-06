@@ -19,6 +19,7 @@ import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
   completeAllTasksFromPrompt,
   setTaskStatusesForPrompt,
+  withEnv,
   withSharedRuntimeEnv,
 } from "./helpers/runtime-paths.mjs";
 
@@ -501,4 +502,107 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   assert.equal(cloneManifest.executionEnvironment.lifecycle.afterStart.lastError, null);
   assert.equal(cloneManifest.executionEnvironment.lifecycle.onWorkspaceCreate.completedAt, null);
   assert.equal(cloneManifest.executionEnvironment.lifecycle.onWorkspaceCreate.lastError, null);
+});
+
+test("run-loop schedules: runAgent persists failed lifecycle state", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const init = await initRun(dir);
+  const binDir = join(dir, "bin");
+  const logPath = join(dir, "docker.log");
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(
+    join(binDir, "docker"),
+    `#!/usr/bin/env node
+import fs from "node:fs";
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
+const [cmd, target] = args;
+if (cmd === "inspect" && target === "task-runner-run-loop-fail") {
+  process.exit(1);
+}
+if (cmd === "inspect" && target === "container-run-loop-fail") {
+  process.stdout.write(JSON.stringify([{ Id: "container-run-loop-fail", State: { Running: true, Pid: 9876 }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "run") {
+  process.stdout.write("container-run-loop-fail\\n");
+  process.exit(0);
+}
+if (cmd === "exec" && args.includes("setup")) process.exit(1);
+if (cmd === "exec") process.exit(0);
+if (cmd === "rm") process.exit(0);
+process.exit(0);
+`,
+    { mode: 0o755 },
+  );
+
+  const environment = {
+    kind: "container",
+    mode: "managed",
+    name: "run-loop-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: "task-runner-run-loop-fail",
+    containerId: null,
+    workspace: null,
+    lifecycle: {
+      afterStart: {
+        steps: [
+          {
+            kind: "command",
+            target: "container",
+            command: "setup",
+            args: [],
+            env: {},
+            cwd: null,
+            timeoutMs: null,
+            user: null,
+            detach: false,
+          },
+        ],
+        completedContainerId: null,
+        completedAt: null,
+        lastError: null,
+      },
+      onWorkspaceCreate: null,
+    },
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+  patchManifest(init.workspaceDir, (manifest) => {
+    manifest.executionEnvironment = environment;
+    manifest.resetSeed.executionEnvironment = environment;
+  });
+  readyInitializedRun(dir, init.runId);
+
+  await assert.rejects(
+    withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
+      runReady(dir, init.runId, () => {
+        throw new Error("backend should not run after environment prepare failure");
+      }),
+    ),
+    /afterStart lifecycle failed/,
+  );
+
+  const persisted = readManifest(init.workspaceDir).executionEnvironment;
+  assert.equal(persisted.containerId, null);
+  assert.match(persisted.lifecycle.afterStart.lastError, /afterStart lifecycle failed/);
+
+  const commands = readFileSync(logPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(commands.at(-1), ["rm", "-f", "container-run-loop-fail"]);
 });
