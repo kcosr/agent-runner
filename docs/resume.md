@@ -4,9 +4,9 @@ Resume continues an existing run from its frozen manifest state.
 task-runner does *not* re-read the source agent or assignment files on
 resume — everything the backend needs is in `run.json`, including the
 selected backend name, frozen backendConfig, resolved backend args, and
-backend session id. Current manifests use schema version 21, which also
-stores frozen execution environment/workspace state and backend-session
-sync provenance.
+backend session id. Current manifests use schema version 22, which also
+stores frozen execution environment workspace/session-mount state and
+backend-session sync provenance.
 
 ## Command
 

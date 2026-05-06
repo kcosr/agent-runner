@@ -4,6 +4,9 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `22`. Managed container environments now
+  persist resolved backend session mount presets so resume/reset reuse
+  the frozen host paths used for backend session sync.
 - Manifest schema version is now `21`. Managed container environments now
   persist first-class workspace mount state and may be scoped to either a
   run or run group. Group-scoped execution resources freeze group
@@ -139,6 +142,9 @@
 - Added first-class managed-container workspaces with `workspace.scope:
   run|group`, automatic host directory creation, host-to-container cwd
   rewriting, and `lifetime: group` container reuse/cleanup semantics.
+- Added managed-container `sessionMounts` presets for built-in backend
+  session stores (`backend`, `claude`, `codex`, `cursor`, `opencode`,
+  and `pi`) so backend session sync can use same-path host mounts.
 - Added `task-runner list environments`,
   `task-runner show environment <name|path>`, and
   `task-runner run environment status|validate|cleanup <run-id>` across

@@ -2358,6 +2358,7 @@ workspace:
   scope: group
   hostRoot: /home/user/task-runner-workspaces
   containerPath: /workspace
+sessionMounts: backend
 mounts:
   - hostPath: /home/user/repo
     containerPath: /workspace
@@ -2405,6 +2406,7 @@ cwd: workspace
       mode: "rw",
       create: true,
     });
+    assert.equal(managed.config.sessionMounts, "backend");
     assert.equal(managed.config.network, "none");
     assert.equal(managed.config.cleanup.policy, "manual");
   }));

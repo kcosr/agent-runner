@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `21`. Older manifest shapes are not
+The current manifest schema is version `22`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -88,8 +88,10 @@ Managed environments may define a first-class `workspace` mount. The
 workspace resolves a host path by run or run group, creates that host
 directory when requested, bind-mounts it at a container path, and rewrites
 environment cwd values inside the host workspace to the matching
-container path. Generic `mounts` remain for auth stores, caches, sockets,
-and other non-workspace paths.
+container path. Managed environments may also define `sessionMounts`
+presets for backend session stores used by host-side session sync.
+Generic `mounts` remain for auth stores, caches, sockets, and other
+non-workspace paths.
 
 Execution environments are resolved after final cwd/runtime vars are
 known, frozen into `manifest.executionEnvironment`, and copied into
@@ -185,6 +187,7 @@ the next session. Attempts are backend invocations within a session.
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
 
+Manifest schema version 22 adds resolved backend session mount presets.
 Manifest schema version 21 adds managed-container workspace mount state
 and group-scoped container lifetimes. Manifest schema version 20 adds
 frozen execution environment state for host or containerized execution.

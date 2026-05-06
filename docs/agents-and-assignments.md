@@ -255,6 +255,7 @@ workspace:
   containerPath: /workspace
   mode: rw
   create: true
+sessionMounts: backend
 cleanup:
   policy: terminal
 ```
@@ -269,6 +270,13 @@ container path before invoking the backend. With `create: true`,
 task-runner creates the host directory before starting the container.
 Managed environments can interpolate `workspace_host_path` and
 `workspace_container_path` after the workspace has been resolved.
+
+`sessionMounts` expands built-in backend session stores into same-path
+read-write mounts. `sessionMounts: backend` mounts the selected backend's
+known store. A list such as `sessionMounts: [codex, pi]` mounts explicit
+stores. Presets are `claude`, `codex`, `cursor`, `opencode`, and `pi`.
+These mounts are for backend session sync and are separate from the
+working `workspace` mount and generic `mounts`.
 
 `lifetime: group` gives managed containers a stable group-scoped
 container name and skips automatic terminal cleanup while another run in

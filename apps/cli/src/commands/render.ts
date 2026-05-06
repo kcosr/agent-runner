@@ -354,6 +354,11 @@ export function renderDefinitionDetails(result: DefinitionDetail): string {
         lines.push(`  workspace:    ${config.workspace.scope}`);
         lines.push(`  containerPath: ${config.workspace.containerPath}`);
       }
+      const sessionMounts =
+        config.sessionMounts === "backend" ? "backend" : config.sessionMounts.join(", ");
+      if (sessionMounts.length > 0) {
+        lines.push(`  sessionMounts: ${sessionMounts}`);
+      }
       lines.push(`  mounts:       ${config.mounts.length}`);
     }
     lines.push(`  source:       ${loaded.sourcePath}`);

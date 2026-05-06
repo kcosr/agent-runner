@@ -1,12 +1,16 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { loadEnvironmentConfig } from "../../config/loader.js";
+import type { BackendName } from "../backends/types.js";
 import type { EnvironmentReference, LoadedEnvironmentDefinition } from "../config/environments.js";
 import { interpolate } from "../config/interpolate.js";
 import type { ResolvedLauncherConfig } from "../config/launchers.js";
 import type {
+  RunEnvironmentSessionMount,
+  RunEnvironmentSessionMountPreset,
   RunEnvironmentWorkspace,
   RunExecutionEnvironment,
   RunExistingContainerEnvironment,
@@ -30,6 +34,7 @@ interface ResolveEnvironmentOptions {
   injectedVars: Record<string, unknown>;
   runId: string;
   runGroupId: string;
+  backend: BackendName;
 }
 
 function loadReferencedEnvironment(
@@ -88,6 +93,72 @@ function resolveMounts(
       hostPath,
       containerPath,
       mode: mount.mode,
+    };
+  });
+}
+
+function homeRoot(): string {
+  return process.env.HOME?.trim() || homedir();
+}
+
+function opencodeDataDir(): string {
+  const explicit =
+    process.env.TASK_RUNNER_OPENCODE_DATA_DIR?.trim() || process.env.OPENCODE_DATA_DIR?.trim();
+  if (explicit) {
+    return resolve(explicit);
+  }
+  const xdgData = process.env.XDG_DATA_HOME?.trim() || join(homeRoot(), ".local", "share");
+  return resolve(xdgData, "opencode");
+}
+
+function sessionMountHostPath(preset: RunEnvironmentSessionMountPreset): string {
+  switch (preset) {
+    case "claude":
+      return join(homeRoot(), ".claude", "projects");
+    case "codex":
+      return join(homeRoot(), ".codex", "sessions");
+    case "cursor":
+      return join(homeRoot(), ".cursor", "chats");
+    case "opencode":
+      return opencodeDataDir();
+    case "pi":
+      return process.env.PI_HOME?.trim() || join(homeRoot(), ".pi");
+  }
+}
+
+function isSessionMountPreset(value: string): value is RunEnvironmentSessionMountPreset {
+  return (
+    value === "claude" ||
+    value === "codex" ||
+    value === "cursor" ||
+    value === "opencode" ||
+    value === "pi"
+  );
+}
+
+function resolveSessionMounts(
+  sessionMounts: "backend" | RunEnvironmentSessionMountPreset[],
+  backend: BackendName,
+): RunEnvironmentSessionMount[] {
+  const presets =
+    sessionMounts === "backend"
+      ? isSessionMountPreset(backend)
+        ? [backend]
+        : null
+      : sessionMounts;
+  if (presets === null) {
+    throw new ExecutionEnvironmentError(
+      `execution environment sessionMounts: backend has no built-in preset for backend "${backend}"`,
+    );
+  }
+  const uniquePresets = [...new Set(presets)];
+  return uniquePresets.map((preset) => {
+    const hostPath = resolve(sessionMountHostPath(preset));
+    return {
+      preset,
+      hostPath,
+      containerPath: hostPath,
+      mode: "rw",
     };
   });
 }
@@ -163,6 +234,7 @@ function resolveEnvironmentConfig(
   vars: Record<string, unknown>,
   runId: string,
   runGroupId: string,
+  backend: BackendName,
 ): RunExecutionEnvironment {
   const config = loaded.config;
   const workspace =
@@ -210,6 +282,7 @@ function resolveEnvironmentConfig(
       : generatedContainerName(config.lifetime, runId, runGroupId),
     containerId: null,
     workspace,
+    sessionMounts: resolveSessionMounts(config.sessionMounts, backend),
     mounts: resolveMounts(config.mounts, environmentVars),
     network: config.network,
     security: {
@@ -243,6 +316,7 @@ export function resolveFreshExecutionEnvironment(
     options.injectedVars,
     options.runId,
     options.runGroupId,
+    options.backend,
   );
 }
 
@@ -377,6 +451,7 @@ async function startManagedContainer(
   }
   for (const mount of [
     ...(environment.workspace === null ? [] : [environment.workspace]),
+    ...environment.sessionMounts,
     ...environment.mounts,
   ]) {
     args.push("-v", `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
@@ -396,6 +471,12 @@ async function startManagedContainer(
   return {
     ...environment,
     containerId,
+    cleanup: {
+      ...environment.cleanup,
+      cleanedAt: null,
+      lastError: null,
+    },
+    lastError: null,
   };
 }
 
@@ -432,6 +513,9 @@ export async function prepareExecutionEnvironment(
       },
     };
   }
+  for (const sessionMount of next.sessionMounts) {
+    mkdirSync(sessionMount.hostPath, { recursive: true });
+  }
   if (next.containerId === null) {
     try {
       const inspected = await inspectContainer(next, next.containerName);
@@ -441,6 +525,11 @@ export async function prepareExecutionEnvironment(
       next = {
         ...next,
         containerId: inspected.id,
+        cleanup: {
+          ...next.cleanup,
+          cleanedAt: null,
+          lastError: null,
+        },
       };
     } catch (error) {
       if (!(error instanceof ExecutionEnvironmentError)) {

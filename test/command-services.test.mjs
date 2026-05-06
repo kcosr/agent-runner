@@ -1376,6 +1376,7 @@ test("command services: group-scoped execution environments pin group membership
       create: true,
       createdAt: null,
     },
+    sessionMounts: [],
     mounts: [],
     network: "default",
     security: { capDrop: [], capAdd: [] },

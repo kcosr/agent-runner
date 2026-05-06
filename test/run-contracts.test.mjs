@@ -32,7 +32,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 21,
+    schemaVersion: 22,
     runId: "run123",
     runGroupId: "run123",
     repo: "demo-repo",

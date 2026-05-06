@@ -900,6 +900,9 @@ function renderRunEnvironmentResult(result: ReturnType<typeof getRunEnvironment>
       lines.push(`  hostPath:      ${env.workspace.hostPath}`);
       lines.push(`  containerPath: ${env.workspace.containerPath}`);
     }
+    if (env.sessionMounts.length > 0) {
+      lines.push(`  sessionMounts: ${env.sessionMounts.map((mount) => mount.preset).join(", ")}`);
+    }
     lines.push(`  cleanup:       ${env.cleanup.policy}`);
     lines.push(`  cleanedAt:     ${env.cleanup.cleanedAt ?? "not-cleaned"}`);
     if (env.cleanup.lastError) {

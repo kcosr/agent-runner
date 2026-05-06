@@ -56,6 +56,7 @@ cleanup:
       },
       runId: "fallback-run",
       runGroupId: "group-123",
+      backend: "claude",
     });
 
     assert.deepEqual(environment, {
@@ -76,6 +77,7 @@ cleanup:
       containerName: "task-runner-run-123",
       containerId: null,
       workspace: null,
+      sessionMounts: [],
       mounts: [
         {
           hostPath: rootDir,
@@ -128,6 +130,7 @@ container: override-box
       injectedVars: {},
       runId: "run-123",
       runGroupId: "group-123",
+      backend: "claude",
     });
 
     assert.equal(environment.mode, "existing");
@@ -208,6 +211,7 @@ workspace:
       },
       runId: "run-123",
       runGroupId: "group-123",
+      backend: "claude",
     });
 
     assert.equal(environment.mode, "managed");
@@ -223,6 +227,45 @@ workspace:
       create: true,
       createdAt: null,
     });
+    assert.deepEqual(environment.sessionMounts, []);
+  }));
+
+test("resolveFreshExecutionEnvironment expands backend session mount presets", () =>
+  withRuntimeRoots("task-runner-environment-", ({ rootDir, configDir }) => {
+    const homeDir = join(rootDir, "home");
+    writeEnvironment(
+      configDir,
+      "codex-dev",
+      `schemaVersion: 1
+kind: container
+mode: managed
+engine: docker
+cwd: /workspace
+image: node:22
+sessionMounts: backend
+`,
+    );
+
+    withEnv({ HOME: homeDir }, () => {
+      const environment = resolveFreshExecutionEnvironment({
+        reference: { kind: "name", ref: "codex-dev", name: "codex-dev" },
+        cwd: rootDir,
+        injectedVars: {},
+        runId: "run-123",
+        runGroupId: "group-123",
+        backend: "codex",
+      });
+
+      assert.equal(environment.mode, "managed");
+      assert.deepEqual(environment.sessionMounts, [
+        {
+          preset: "codex",
+          hostPath: join(homeDir, ".codex", "sessions"),
+          containerPath: join(homeDir, ".codex", "sessions"),
+          mode: "rw",
+        },
+      ]);
+    });
   }));
 
 test("prepareExecutionEnvironment creates workspace host directory and mounts it", async () =>
@@ -230,6 +273,7 @@ test("prepareExecutionEnvironment creates workspace host directory and mounts it
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspacePath = join(rootDir, "workspace");
+    const codexSessionsPath = join(rootDir, "home", ".codex", "sessions");
     mkdirSync(binDir, { recursive: true });
     writeFileSync(
       join(binDir, "docker"),
@@ -277,6 +321,14 @@ process.exit(0);
         create: true,
         createdAt: null,
       },
+      sessionMounts: [
+        {
+          preset: "codex",
+          hostPath: codexSessionsPath,
+          containerPath: codexSessionsPath,
+          mode: "rw",
+        },
+      ],
       mounts: [],
       network: "default",
       security: { capDrop: [], capAdd: [] },
@@ -291,6 +343,7 @@ process.exit(0);
 
     assert.equal(prepared.containerId, "container-123");
     assert.ok(existsSync(workspacePath));
+    assert.ok(existsSync(codexSessionsPath));
     assert.equal(typeof prepared.workspace.createdAt, "string");
     const commands = readFileSync(logPath, "utf8")
       .trim()
@@ -309,5 +362,6 @@ process.exit(0);
       "/workspace",
     ]);
     assert.ok(commands[1].includes(`${workspacePath}:/workspace:rw`));
+    assert.ok(commands[1].includes(`${codexSessionsPath}:${codexSessionsPath}:rw`));
     assert.deepEqual(commands.at(-1), ["exec", "container-123", "test", "-d", "/workspace"]);
   }));

@@ -320,6 +320,12 @@ const environmentMountSchema = z
   })
   .strict();
 
+const environmentSessionMountPresetSchema = z.enum(["claude", "codex", "cursor", "opencode", "pi"]);
+
+const environmentSessionMountsSchema = z
+  .union([z.literal("backend"), z.array(environmentSessionMountPresetSchema)])
+  .default([]);
+
 const environmentWorkspaceSchema = z
   .object({
     scope: z.enum(["run", "group"]).default("run"),
@@ -383,6 +389,7 @@ const managedContainerEnvironmentSchema = baseContainerEnvironmentSchema
     lifetime: z.enum(["run", "group"]).default("run"),
     containerName: z.string().trim().min(1).optional(),
     workspace: environmentWorkspaceSchema.optional(),
+    sessionMounts: environmentSessionMountsSchema,
     mounts: z.array(environmentMountSchema).default([]),
     network: containerNetworkSchema.default("default"),
     security: containerSecuritySchema,

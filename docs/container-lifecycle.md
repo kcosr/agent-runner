@@ -236,9 +236,10 @@ workspace:
   containerPath: /workspace
   mode: rw
   create: true
+sessionMounts: backend
 mounts:
-  - hostPath: /home/kevin/.codex/sessions
-    containerPath: /home/kevin/.codex/sessions
+  - hostPath: /home/kevin/.cache/agent-tools
+    containerPath: /home/kevin/.cache/agent-tools
     mode: rw
 network: default
 security:
@@ -278,6 +279,13 @@ Generic `mounts` remain available for auth stores, caches, sockets, and other
 explicit bind mounts. After resolving the workspace, managed environments can
 interpolate `workspace_host_path` and `workspace_container_path` in cwd, env,
 image, container name, and generic mount paths.
+
+`sessionMounts` expands same-path read-write mounts for built-in backend
+session stores. `sessionMounts: backend` resolves to the selected backend's
+known store; explicit lists can mount multiple stores, for example
+`sessionMounts: [codex, pi]`. Presets are `claude`, `codex`, `cursor`,
+`opencode`, and `pi`. These resolved mounts are frozen into the manifest so
+resume/reset do not re-read current host environment paths.
 
 ## Manifest Shape
 
@@ -593,13 +601,15 @@ Implemented:
   override
 - frozen `manifest.executionEnvironment` and
   `manifest.resetSeed.executionEnvironment`
-- schemaVersion `21` manifest validation
+- schemaVersion `22` manifest validation
 - existing-container validation for running state, cwd, and expected
   mounts
 - managed run- and group-lifetime container creation, reuse, and
   terminal/manual cleanup state
 - first-class managed workspaces with run/group scope, host directory
   creation, bind mounting, and host-to-container cwd rewriting
+- backend session mount presets for same-path Claude, Codex, Cursor,
+  OpenCode, and Pi session stores
 - generated `docker exec` / `podman exec` subprocess launchers for
   supported backends
 - environment validation, container creation/removal, and cleanup failure
@@ -608,7 +618,7 @@ Implemented:
 
 Deferred:
 
-- backend session mount presets and same-path session-store validation
+- same-path session-store validation before backend session sync
 - daemon startup scavenging for labeled abandoned managed containers
 - `attempt` and `session` managed container lifetimes
 - richer web status/capability rendering

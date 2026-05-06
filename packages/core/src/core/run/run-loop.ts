@@ -543,7 +543,7 @@ function buildRecurringCloneManifest(params: {
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 21,
+    schemaVersion: 22,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -1592,6 +1592,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         injectedVars,
         runId,
         runGroupId,
+        backend: currentBackend.id,
       });
   if (executionEnvironment !== null && launcher.kind !== "direct") {
     throw new ResumeError(
@@ -1706,7 +1707,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 21,
+      schemaVersion: 22,
       runId,
       repo,
       agent: {
@@ -1859,6 +1860,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       injectedVars,
       runId,
       runGroupId,
+      backend: currentBackend.id,
     });
     if (executionEnvironment !== null && launcher.kind !== "direct") {
       throw new ResumeError(
@@ -2016,7 +2018,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 21,
+      schemaVersion: 22,
       runId,
       repo,
       agent: {

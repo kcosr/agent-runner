@@ -261,12 +261,15 @@ workspace:
   scope: group
   hostRoot: "{{state_dir}}/workspaces"
   containerPath: /workspace
+sessionMounts: backend
 ```
 
 Managed environments can create host workspace directories, mount them
 into the container, rewrite cwd to the container path, and keep a
 group-scoped container alive until no initialized, ready, or running run
-in the group still references it.
+in the group still references it. `sessionMounts: backend` adds a
+same-path mount for the selected backend's session store so host-side
+session sync can read the backend history.
 
 Agents may also author backend-owned argv tokens:
 
