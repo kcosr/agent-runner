@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -34,9 +34,10 @@ const ENGINE_DEFAULT_TIMEOUT_MS = 30_000;
 const ENGINE_START_TIMEOUT_MS = 60_000;
 const WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS = 30 * 60_000;
 const WORKSPACE_LIFECYCLE_LOCK_WAIT_MS = 100;
-const WORKSPACE_LIFECYCLE_LOCK_TIMEOUT_MS = 30_000;
+const WORKSPACE_LIFECYCLE_LOCK_STALE_BUFFER_MS = 60_000;
 const WORKSPACE_LIFECYCLE_MARKER = ".task-runner-workspace-lifecycle.json";
 const WORKSPACE_LIFECYCLE_LOCK = ".task-runner-workspace-lifecycle.lock";
+const WORKSPACE_LIFECYCLE_LOCK_METADATA = "metadata.json";
 const WORKSPACE_LIFECYCLE_STATE_SUFFIX = ".task-runner-lifecycle";
 
 interface ResolveEnvironmentOptions {
@@ -273,13 +274,23 @@ function resolveWorkspaceLifecycleSteps(
         env: interpolateStringRecord(step.env, vars),
       };
     }
+    const branch = interpolateString(step.branch, vars);
+    assertGitBranchName(branch);
     return {
       kind: "git-clone",
       source: interpolateString(step.source, vars),
       baseRef: interpolateString(step.baseRef, vars),
-      branch: interpolateString(step.branch, vars),
+      branch,
     };
   });
+}
+
+function assertGitBranchName(branch: string): void {
+  if (branch.trim().length === 0 || branch.startsWith("-")) {
+    throw new ExecutionEnvironmentError(
+      "workspace lifecycle git-clone branch must be non-empty and must not start with '-'",
+    );
+  }
 }
 
 function resolveEnvironmentConfig(
@@ -531,28 +542,105 @@ function writeWorkspaceLifecycleMarker(stateDir: string, completedAt: string): v
 
 async function acquireWorkspaceLifecycleLock(
   stateDir: string,
+  staleAfterMs: number,
   options: { signal?: AbortSignal } = {},
 ): Promise<string> {
   mkdirSync(stateDir, { recursive: true });
   const lockPath = join(stateDir, WORKSPACE_LIFECYCLE_LOCK);
-  const startedAt = Date.now();
   while (true) {
     try {
       mkdirSync(lockPath);
+      try {
+        writeWorkspaceLifecycleLockMetadata(lockPath);
+      } catch (error) {
+        rmSync(lockPath, { recursive: true, force: true });
+        throw error;
+      }
       return lockPath;
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code !== "EEXIST") {
         throw error;
       }
-      if (Date.now() - startedAt >= WORKSPACE_LIFECYCLE_LOCK_TIMEOUT_MS) {
-        throw new ExecutionEnvironmentError(
-          `timed out waiting for workspace lifecycle lock ${lockPath}`,
-        );
+      if (isStaleWorkspaceLifecycleLock(lockPath, staleAfterMs)) {
+        rmSync(lockPath, { recursive: true, force: true });
+        continue;
       }
       await sleep(WORKSPACE_LIFECYCLE_LOCK_WAIT_MS, undefined, { signal: options.signal });
     }
   }
+}
+
+interface WorkspaceLifecycleLockMetadata {
+  pid: number;
+  acquiredAt: string;
+}
+
+function writeWorkspaceLifecycleLockMetadata(lockPath: string): void {
+  const metadata: WorkspaceLifecycleLockMetadata = {
+    pid: process.pid,
+    acquiredAt: new Date().toISOString(),
+  };
+  writeFileSync(
+    join(lockPath, WORKSPACE_LIFECYCLE_LOCK_METADATA),
+    `${JSON.stringify(metadata, null, 2)}\n`,
+  );
+}
+
+function readWorkspaceLifecycleLockMetadata(
+  lockPath: string,
+): WorkspaceLifecycleLockMetadata | null {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(lockPath, WORKSPACE_LIFECYCLE_LOCK_METADATA), "utf8"),
+    );
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Number.isInteger((parsed as Record<string, unknown>).pid) &&
+      typeof (parsed as Record<string, unknown>).acquiredAt === "string"
+    ) {
+      return parsed as WorkspaceLifecycleLockMetadata;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function workspaceLifecycleLockAgeMs(lockPath: string): number {
+  try {
+    return Date.now() - statSync(lockPath).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+function isStaleWorkspaceLifecycleLock(lockPath: string, staleAfterMs: number): boolean {
+  const metadata = readWorkspaceLifecycleLockMetadata(lockPath);
+  if (metadata !== null) {
+    return (
+      !isProcessAlive(metadata.pid) || Date.now() - Date.parse(metadata.acquiredAt) > staleAfterMs
+    );
+  }
+  return workspaceLifecycleLockAgeMs(lockPath) > staleAfterMs;
+}
+
+function workspaceLifecycleLockStaleAfterMs(stepCount: number): number {
+  return (
+    Math.max(1, stepCount) * WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS +
+    WORKSPACE_LIFECYCLE_LOCK_STALE_BUFFER_MS
+  );
 }
 
 async function runWorkspaceLifecycleStep(
@@ -583,7 +671,7 @@ async function runWorkspaceLifecycleStep(
     workspace.containerPath,
     {},
     "git",
-    ["clone", step.source, "."],
+    ["-c", "protocol.ext.allow=never", "clone", "--", step.source, "."],
     {
       signal: options.signal,
       timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
@@ -595,7 +683,7 @@ async function runWorkspaceLifecycleStep(
     workspace.containerPath,
     {},
     "git",
-    ["checkout", "-B", step.branch, step.baseRef],
+    ["checkout", "-B", step.branch, "--", step.baseRef],
     {
       signal: options.signal,
       timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
@@ -627,7 +715,11 @@ async function runWorkspaceLifecycle(
     };
   }
 
-  const lockPath = await acquireWorkspaceLifecycleLock(lifecycleStateDir, options);
+  const lockPath = await acquireWorkspaceLifecycleLock(
+    lifecycleStateDir,
+    workspaceLifecycleLockStaleAfterMs(workspace.lifecycle.onCreate.length),
+    options,
+  );
   try {
     const lockedCompletedAt = readWorkspaceLifecycleMarker(lifecycleStateDir);
     if (lockedCompletedAt !== null) {
@@ -646,8 +738,15 @@ async function runWorkspaceLifecycle(
 
     const container = containerTarget(environment);
     try {
-      for (const step of workspace.lifecycle.onCreate) {
-        await runWorkspaceLifecycleStep(environment, workspace, container, step, options);
+      for (const [index, step] of workspace.lifecycle.onCreate.entries()) {
+        try {
+          await runWorkspaceLifecycleStep(environment, workspace, container, step, options);
+        } catch (error) {
+          const label = step.kind === "command" ? `${step.kind}: ${step.command}` : step.kind;
+          throw new ExecutionEnvironmentError(
+            `workspace lifecycle step ${index} (${label}) failed: ${(error as Error).message}`,
+          );
+        }
       }
       const lifecycleCompletedAt = new Date().toISOString();
       writeWorkspaceLifecycleMarker(lifecycleStateDir, lifecycleCompletedAt);
@@ -663,8 +762,9 @@ async function runWorkspaceLifecycle(
         },
       };
     } catch (error) {
-      const message = (error as Error).message;
-      throw new ExecutionEnvironmentError(`workspace lifecycle failed: ${message}`);
+      throw new ExecutionEnvironmentError(
+        `workspace lifecycle failed: ${(error as Error).message}`,
+      );
     }
   } finally {
     rmSync(lockPath, { recursive: true, force: true });

@@ -296,6 +296,11 @@ an arbitrary command in the workspace root with optional args and env.
 Host-side state next to the workspace records successful completion, so
 group-scoped workspaces run setup once and later runs skip it without dirtying
 the mounted workspace.
+The state directory is `<workspace.hostPath>.task-runner-lifecycle`.
+Clearing that directory causes the lifecycle to run again on the next
+environment validation. When a lifecycle is configured, the managed container
+starts with `--workdir` set to the workspace mount root; task-runner validates
+the authored `cwd` only after lifecycle setup has had a chance to create it.
 
 `sessionMounts` expands same-path read-write mounts for built-in backend
 session stores. `sessionMounts: backend` resolves to the selected backend's
@@ -329,7 +334,8 @@ Managed runtime example:
       "containerPath": "/workspace",
       "mode": "rw",
       "create": true,
-      "createdAt": "2026-05-06T00:00:00.000Z"
+      "createdAt": "2026-05-06T00:00:00.000Z",
+      "lifecycle": null
     },
     "mounts": [],
     "cleanup": {
@@ -613,13 +619,15 @@ Implemented:
   override
 - frozen `manifest.executionEnvironment` and
   `manifest.resetSeed.executionEnvironment`
-- schemaVersion `22` manifest validation
+- schemaVersion `23` manifest validation
 - existing-container validation for running state, cwd, and expected
   mounts
 - managed run- and group-lifetime container creation, reuse, and
   terminal/manual cleanup state
 - first-class managed workspaces with run/group scope, host directory
   creation, bind mounting, and host-to-container cwd rewriting
+- managed workspace lifecycle hooks with `command` and `git-clone`
+  `onCreate` steps plus host-side completion state
 - backend session mount presets for same-path Claude, Codex, Cursor,
   OpenCode, and Pi session stores
 - generated `docker exec` / `podman exec` subprocess launchers for

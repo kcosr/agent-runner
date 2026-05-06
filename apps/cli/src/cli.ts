@@ -899,6 +899,13 @@ function renderRunEnvironmentResult(result: ReturnType<typeof getRunEnvironment>
       lines.push(`  workspace:     ${env.workspace.scope}`);
       lines.push(`  hostPath:      ${env.workspace.hostPath}`);
       lines.push(`  containerPath: ${env.workspace.containerPath}`);
+      if (env.workspace.lifecycle !== null) {
+        lines.push(`  lifecycle:     ${env.workspace.lifecycle.onCreate.length} step(s)`);
+        lines.push(`  lifecycleAt:   ${env.workspace.lifecycle.completedAt ?? "not-completed"}`);
+        if (env.workspace.lifecycle.lastError) {
+          lines.push(`  lifecycleErr:  ${env.workspace.lifecycle.lastError}`);
+        }
+      }
     }
     if (env.sessionMounts.length > 0) {
       lines.push(`  sessionMounts: ${env.sessionMounts.map((mount) => mount.preset).join(", ")}`);

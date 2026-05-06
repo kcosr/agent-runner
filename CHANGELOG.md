@@ -176,6 +176,9 @@
 
 ### Fixed
 
+- Workspace lifecycle locks now wait for in-flight setup instead of timing
+  out early, recover stale lock holders, and harden built-in git steps
+  against flag-shaped ref/source values.
 - Managed container environments are now cleaned up before run reset and
   delete, and manual cleanup reports engine failures instead of returning
   success with a stale container.
