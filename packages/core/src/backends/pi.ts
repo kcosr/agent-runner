@@ -532,7 +532,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(launched.command, launched.args, {
-        cwd: ctx.cwd,
+        cwd: ctx.processCwd ?? ctx.cwd,
         env: ctx.env,
         stdio: ["pipe", "pipe", "pipe"],
       });

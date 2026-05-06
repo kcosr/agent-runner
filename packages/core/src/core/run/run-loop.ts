@@ -2847,6 +2847,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,
         cwd: runBackendCwd(manifest),
+        processCwd: manifest.cwd,
         env: backendInvokeEnv,
         model,
         effort,

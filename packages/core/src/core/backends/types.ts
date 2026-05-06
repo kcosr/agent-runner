@@ -134,6 +134,7 @@ export interface BackendConfigResolutionContext {
 export interface BackendInvokeContext {
   prompt: string;
   cwd: string;
+  processCwd?: string;
   env: Record<string, string>;
   model?: string;
   effort?: EffortLevel;

@@ -144,7 +144,7 @@ export function buildCodexAppServerArgs(
 }
 
 function openStdioTransport(
-  cwd: string,
+  processCwd: string,
   env: Record<string, string>,
   unrestricted: boolean,
   resolvedBackendArgs: string[],
@@ -158,7 +158,7 @@ function openStdioTransport(
     launcher,
   });
   const child: ChildProcess = spawn(launched.command, launched.args, {
-    cwd,
+    cwd: processCwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -990,7 +990,7 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
     return openUdsTransport(transport.path);
   }
   return openStdioTransport(
-    ctx.cwd,
+    ctx.processCwd ?? ctx.cwd,
     ctx.env,
     ctx.unrestricted ?? false,
     ctx.resolvedBackendArgs,

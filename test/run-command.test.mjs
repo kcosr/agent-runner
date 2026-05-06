@@ -186,6 +186,7 @@ export default {
   async invoke(ctx) {
     writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({
       cwd: ctx.cwd,
+      processCwd: ctx.processCwd,
       taskRunnerCwd: ctx.env.TASK_RUNNER_CWD,
       launcherCommand: ctx.launcher?.command,
       launcherWorkdir: ctx.launcher?.args?.[ctx.launcher.args.indexOf("-w") + 1],
@@ -234,6 +235,7 @@ cleanup:
     assert.equal(outcome.manifest.executionEnvironment.cwd, "/workspace");
     assert.deepEqual(JSON.parse(readFileSync(capturePath, "utf8")), {
       cwd: "/workspace",
+      processCwd: process.cwd(),
       taskRunnerCwd: "/workspace",
       launcherCommand: "docker",
       launcherWorkdir: "/workspace",

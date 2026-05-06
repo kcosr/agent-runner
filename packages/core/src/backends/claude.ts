@@ -463,7 +463,7 @@ export const claudeBackend: Backend = {
       command,
       args,
       launcher: ctx.launcher,
-      cwd: ctx.cwd,
+      cwd: ctx.processCwd ?? ctx.cwd,
       env: ctx.env,
       timeoutMs: ctx.timeoutSec * 1000,
       abortSignal: ctx.abortSignal,
