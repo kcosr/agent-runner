@@ -362,6 +362,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     "cwd",
     "backend",
     "launcher",
+    "executionEnvironment",
     "model",
     "effort",
     "message",
@@ -388,6 +389,10 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     cwd: optionalString(record.cwd, "overrides.cwd"),
     backend: optionalNonEmptyString(record.backend, "overrides.backend"),
     launcher,
+    executionEnvironment: optionalNonEmptyString(
+      record.executionEnvironment,
+      "overrides.executionEnvironment",
+    ),
     model: optionalString(record.model, "overrides.model"),
     effort: optionalEnum(record.effort, "overrides.effort", [
       "off",

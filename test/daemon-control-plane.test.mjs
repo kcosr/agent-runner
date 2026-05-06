@@ -6963,6 +6963,30 @@ test("daemon parses and forwards cursor backend overrides", async () => {
   }
 });
 
+test("daemon parses and forwards execution environment overrides", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  let seenEnvironment;
+  const server = await serveDaemon(listenUrl, {
+    async startRun(request) {
+      seenEnvironment = request.overrides.executionEnvironment;
+      return { runId: "daemon-environment-override" };
+    },
+  });
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    const started = await client.call("runs.start", {
+      cliVars: {},
+      overrides: { executionEnvironment: "feature-runtime" },
+    });
+    assert.equal(started.runId, "daemon-environment-override");
+    assert.equal(seenEnvironment, "feature-runtime");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("daemon runs.start keeps callerCwd separate from overrides.cwd", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
