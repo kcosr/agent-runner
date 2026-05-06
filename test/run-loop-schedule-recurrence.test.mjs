@@ -224,7 +224,7 @@ test("run-loop schedules: future clone recurrence moves schedule to clone", asyn
   assert.equal(sourceAfter.status, "success");
   assert.equal(sourceAfter.schedule, null);
   assert.ok(cloneManifest);
-  assert.equal(cloneManifest.schemaVersion, 23);
+  assert.equal(cloneManifest.schemaVersion, 24);
   assert.deepEqual(cloneManifest.queuedResumeMessages, []);
   assert.equal(typeof cloneManifest.updatedAt, "string");
   assert.deepEqual(cloneManifest.assignment, {
@@ -385,6 +385,77 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
       parentRunId: reuse.runId,
     },
   );
+  patchManifest(clone.workspaceDir, (manifest) => {
+    const environment = {
+      kind: "container",
+      mode: "managed",
+      name: "scheduled-dev",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/workspace/repo",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: "2026-05-06T21:00:00.000Z",
+      lastError: null,
+      image: "node:22",
+      lifetime: "run",
+      containerName: `task-runner-${clone.runId}`,
+      containerId: "old-container",
+      workspace: {
+        scope: "run",
+        hostRoot: join(dir, "workspaces"),
+        hostPath: join(dir, "workspaces", clone.runId),
+        containerPath: "/workspace",
+        mode: "rw",
+        create: true,
+        createdAt: "2026-05-06T21:00:00.000Z",
+      },
+      lifecycle: {
+        afterStart: {
+          steps: [
+            {
+              kind: "command",
+              target: "host",
+              command: "true",
+              args: [],
+              env: {},
+              cwd: null,
+              timeoutMs: null,
+              user: null,
+              detach: false,
+            },
+          ],
+          completedContainerId: "old-container",
+          completedAt: "2026-05-06T21:00:00.000Z",
+          lastError: "old afterStart error",
+        },
+        onWorkspaceCreate: {
+          steps: [
+            {
+              kind: "command",
+              target: "container",
+              command: "npm",
+              args: ["install"],
+              env: {},
+              cwd: null,
+              timeoutMs: null,
+              user: null,
+              detach: false,
+            },
+          ],
+          completedAt: "2026-05-06T21:01:00.000Z",
+          lastError: "old workspace error",
+        },
+      },
+      sessionMounts: [],
+      mounts: [],
+      network: "default",
+      security: { capDrop: [], capAdd: [] },
+      extraRunArgs: [],
+      cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+    };
+    manifest.resetSeed.executionEnvironment = environment;
+  });
   readyInitializedRun(dir, clone.runId);
   setDue(clone.workspaceDir);
   await runReady(dir, clone.runId, (ctx) => completeAllTasksFromPrompt(ctx.prompt, dir));
@@ -399,7 +470,7 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   assert.ok(cloneManifest);
   assert.equal(readManifest(clone.workspaceDir).status, "success");
   assert.equal(readManifest(clone.workspaceDir).schedule, null);
-  assert.equal(cloneManifest.schemaVersion, 23);
+  assert.equal(cloneManifest.schemaVersion, 24);
   assert.deepEqual(cloneManifest.queuedResumeMessages, []);
   assert.equal(typeof cloneManifest.updatedAt, "string");
   assert.deepEqual(cloneManifest.assignment, {
@@ -415,4 +486,19 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   assert.equal(cloneManifest.totalSessionCount, 0);
   assert.equal(cloneManifest.schedule.recurrence.mode, "clone");
   assert.equal(cloneManifest.resetSeed.parentRunId, reuse.runId);
+  assert.equal(
+    cloneManifest.executionEnvironment.containerName,
+    `task-runner-${cloneManifest.runId}`,
+  );
+  assert.equal(cloneManifest.executionEnvironment.containerId, null);
+  assert.equal(
+    cloneManifest.executionEnvironment.workspace.hostPath,
+    join(dir, "workspaces", cloneManifest.runId),
+  );
+  assert.equal(cloneManifest.executionEnvironment.workspace.createdAt, null);
+  assert.equal(cloneManifest.executionEnvironment.lifecycle.afterStart.completedContainerId, null);
+  assert.equal(cloneManifest.executionEnvironment.lifecycle.afterStart.completedAt, null);
+  assert.equal(cloneManifest.executionEnvironment.lifecycle.afterStart.lastError, null);
+  assert.equal(cloneManifest.executionEnvironment.lifecycle.onWorkspaceCreate.completedAt, null);
+  assert.equal(cloneManifest.executionEnvironment.lifecycle.onWorkspaceCreate.lastError, null);
 });

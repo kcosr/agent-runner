@@ -2302,6 +2302,152 @@ body
     });
   }));
 
+test("loadEnvironmentConfig accepts top-level managed lifecycle phases", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeEnvironment(
+      configDir,
+      "managed-lifecycle",
+      `schemaVersion: 1
+kind: container
+mode: managed
+cwd: /workspace/repo
+image: node:22
+workspace:
+  hostPath: /tmp/task-runner-workspace
+  containerPath: /workspace
+lifecycle:
+  afterStart:
+    - kind: command
+      target: container
+      command: acl-proxy
+      args: [--config, /etc/acl-proxy.toml]
+      env:
+        TOKEN: "{{aw_identity_token}}"
+      cwd: /workspace
+      timeoutMs: 120000
+      user: "0"
+      detach: true
+    - kind: command
+      target: host
+      command: sudo
+      args: [/opt/aw/bin/aw-iptables, add, "{{container_pid}}"]
+  onWorkspaceCreate:
+    - kind: git-clone
+      target: container
+      source: "{{repo_source}}"
+      baseRef: "{{base_ref}}"
+      branch: feature/env-lifecycle
+      timeoutMs: 120000
+    - kind: command
+      target: host
+      command: npm
+      args: [install]
+      env:
+        CI: "1"
+`,
+    );
+
+    const loaded = loadEnvironmentConfig("managed-lifecycle", rootDir);
+    assert.equal(loaded.config.mode, "managed");
+    assert.equal(loaded.config.lifecycle.afterStart.length, 2);
+    assert.equal(loaded.config.lifecycle.afterStart[0].target, "container");
+    assert.equal(loaded.config.lifecycle.afterStart[0].detach, true);
+    assert.equal(loaded.config.lifecycle.onWorkspaceCreate[0].kind, "git-clone");
+    assert.equal(loaded.config.lifecycle.onWorkspaceCreate[0].target, "container");
+  }));
+
+test("loadEnvironmentConfig rejects removed and invalid lifecycle shapes", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    const cases = [
+      [
+        "workspace-lifecycle",
+        `schemaVersion: 1
+kind: container
+mode: managed
+cwd: /workspace
+image: node:22
+workspace:
+  containerPath: /workspace
+  lifecycle:
+    onCreate: []
+`,
+      ],
+      [
+        "existing-lifecycle",
+        `schemaVersion: 1
+kind: container
+mode: existing
+cwd: /workspace
+container: devbox
+lifecycle:
+  afterStart: []
+`,
+      ],
+      [
+        "workspace-phase-without-workspace",
+        `schemaVersion: 1
+kind: container
+mode: managed
+cwd: /workspace
+image: node:22
+lifecycle:
+  onWorkspaceCreate:
+    - kind: command
+      target: container
+      command: npm
+`,
+      ],
+      [
+        "missing-target",
+        `schemaVersion: 1
+kind: container
+mode: managed
+cwd: /workspace
+image: node:22
+lifecycle:
+  afterStart:
+    - kind: command
+      command: npm
+`,
+      ],
+      [
+        "host-user",
+        `schemaVersion: 1
+kind: container
+mode: managed
+cwd: /workspace
+image: node:22
+lifecycle:
+  afterStart:
+    - kind: command
+      target: host
+      command: npm
+      user: "0"
+`,
+      ],
+      [
+        "host-detach",
+        `schemaVersion: 1
+kind: container
+mode: managed
+cwd: /workspace
+image: node:22
+lifecycle:
+  afterStart:
+    - kind: command
+      target: host
+      command: npm
+      detach: true
+`,
+      ],
+    ];
+
+    for (const [name, body] of cases) {
+      writeEnvironment(configDir, name, body);
+      assert.throws(() => loadEnvironmentConfig(name, rootDir), EnvironmentConfigError, name);
+    }
+  }));
+
 test("loadAgentConfig rejects empty launcher strings at schema validation time", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(

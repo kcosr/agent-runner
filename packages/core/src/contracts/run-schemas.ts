@@ -67,31 +67,47 @@ const runEnvironmentMountSchema = z.object({
   containerPath: z.string(),
   mode: z.enum(["ro", "rw"]),
 });
-const runEnvironmentWorkspaceLifecycleStepSchema = z.discriminatedUnion("kind", [
+const runEnvironmentLifecycleStepSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("command"),
+    target: z.enum(["host", "container"]),
     command: z.string(),
     args: z.array(z.string()),
     env: z.record(z.string(), z.string()),
+    cwd: z.string().nullable(),
+    timeoutMs: z.number().nullable(),
+    user: z.string().nullable(),
+    detach: z.boolean(),
   }),
   z.object({
     kind: z.literal("git-clone"),
+    target: z.enum(["host", "container"]),
     source: z.string(),
     baseRef: z.string(),
     branch: z.string(),
+    timeoutMs: z.number().nullable(),
   }),
 ]);
-const runEnvironmentWorkspaceLifecycleSchema = z.object({
-  onCreate: z.array(runEnvironmentWorkspaceLifecycleStepSchema),
+const runEnvironmentAfterStartLifecycleSchema = z.object({
+  steps: z.array(runEnvironmentLifecycleStepSchema),
+  completedContainerId: z.string().nullable(),
   completedAt: z.string().nullable(),
   lastError: z.string().nullable(),
+});
+const runEnvironmentOnWorkspaceCreateLifecycleSchema = z.object({
+  steps: z.array(runEnvironmentLifecycleStepSchema),
+  completedAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+});
+const runEnvironmentLifecycleSchema = z.object({
+  afterStart: runEnvironmentAfterStartLifecycleSchema.nullable(),
+  onWorkspaceCreate: runEnvironmentOnWorkspaceCreateLifecycleSchema.nullable(),
 });
 const runEnvironmentWorkspaceSchema = runEnvironmentMountSchema.extend({
   scope: z.enum(["run", "group"]),
   hostRoot: z.string().nullable(),
   create: z.boolean(),
   createdAt: z.string().nullable(),
-  lifecycle: runEnvironmentWorkspaceLifecycleSchema.nullable(),
 });
 const runExecutionEnvironmentBaseSchema = z.object({
   kind: z.literal("container"),
@@ -117,6 +133,7 @@ const runManagedContainerEnvironmentSchema = runExecutionEnvironmentBaseSchema.e
   containerName: z.string(),
   containerId: z.string().nullable(),
   workspace: runEnvironmentWorkspaceSchema.nullable(),
+  lifecycle: runEnvironmentLifecycleSchema.nullable(),
   sessionMounts: z.array(
     runEnvironmentMountSchema.extend({
       preset: z.enum(["claude", "codex", "cursor", "opencode", "pi"]),
@@ -143,7 +160,18 @@ const runExecutionEnvironmentSchema: z.ZodType<RunDetail["executionEnvironment"]
     runExistingContainerEnvironmentSchema,
     runManagedContainerEnvironmentSchema,
   ])
-  .nullable();
+  .nullable()
+  .refine(
+    (environment) =>
+      environment === null ||
+      environment.mode !== "managed" ||
+      environment.workspace !== null ||
+      environment.lifecycle?.onWorkspaceCreate == null,
+    {
+      path: ["lifecycle", "onWorkspaceCreate"],
+      message: "lifecycle.onWorkspaceCreate requires workspace",
+    },
+  );
 
 export const runScheduleSchema: z.ZodType<RunSchedule> = z.object({
   enabled: z.boolean(),

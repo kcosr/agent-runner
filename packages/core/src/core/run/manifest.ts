@@ -199,24 +199,45 @@ export interface RunEnvironmentMount {
   mode: "ro" | "rw";
 }
 
-export type RunEnvironmentWorkspaceLifecycleStep =
+export type RunEnvironmentLifecycleTarget = "host" | "container";
+
+export type RunEnvironmentLifecycleStep =
   | {
       kind: "command";
+      target: RunEnvironmentLifecycleTarget;
       command: string;
       args: string[];
       env: Record<string, string>;
+      cwd: string | null;
+      timeoutMs: number | null;
+      user: string | null;
+      detach: boolean;
     }
   | {
       kind: "git-clone";
+      target: RunEnvironmentLifecycleTarget;
       source: string;
       baseRef: string;
       branch: string;
+      timeoutMs: number | null;
     };
 
-export interface RunEnvironmentWorkspaceLifecycle {
-  onCreate: RunEnvironmentWorkspaceLifecycleStep[];
+export interface RunEnvironmentAfterStartLifecycle {
+  steps: RunEnvironmentLifecycleStep[];
+  completedContainerId: string | null;
   completedAt: string | null;
   lastError: string | null;
+}
+
+export interface RunEnvironmentOnWorkspaceCreateLifecycle {
+  steps: RunEnvironmentLifecycleStep[];
+  completedAt: string | null;
+  lastError: string | null;
+}
+
+export interface RunEnvironmentLifecycle {
+  afterStart: RunEnvironmentAfterStartLifecycle | null;
+  onWorkspaceCreate: RunEnvironmentOnWorkspaceCreateLifecycle | null;
 }
 
 export interface RunEnvironmentWorkspace extends RunEnvironmentMount {
@@ -224,7 +245,6 @@ export interface RunEnvironmentWorkspace extends RunEnvironmentMount {
   hostRoot: string | null;
   create: boolean;
   createdAt: string | null;
-  lifecycle: RunEnvironmentWorkspaceLifecycle | null;
 }
 
 export type RunEnvironmentSessionMountPreset = "claude" | "codex" | "cursor" | "opencode" | "pi";
@@ -262,6 +282,7 @@ export interface RunManagedContainerEnvironment extends RunExecutionEnvironmentB
   containerName: string;
   containerId: string | null;
   workspace: RunEnvironmentWorkspace | null;
+  lifecycle: RunEnvironmentLifecycle | null;
   sessionMounts: RunEnvironmentSessionMount[];
   mounts: RunEnvironmentMount[];
   network: string;
@@ -326,13 +347,13 @@ export interface QueuedResumeMessage {
   createdAt: string;
 }
 
-// schemaVersion: 23 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 24 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // reinitialize or run an explicit migration if one is added.
 export interface RunManifest {
-  schemaVersion: 23;
+  schemaVersion: 24;
   runId: string;
   repo: string;
   agent: {
@@ -496,6 +517,40 @@ export function cloneRunExecutionEnvironment(
   return environment === null ? null : structuredClone(environment);
 }
 
+function resetRunExecutionEnvironment(
+  environment: RunExecutionEnvironment | null,
+): RunExecutionEnvironment | null {
+  const cloned = cloneRunExecutionEnvironment(environment);
+  if (cloned?.mode !== "managed" || cloned.lifecycle === null) {
+    return cloned;
+  }
+  return {
+    ...cloned,
+    lifecycle: {
+      afterStart:
+        cloned.lifecycle.afterStart === null
+          ? null
+          : {
+              ...cloned.lifecycle.afterStart,
+              completedContainerId: null,
+              completedAt: null,
+              lastError: null,
+            },
+      onWorkspaceCreate:
+        cloned.lifecycle.onWorkspaceCreate === null
+          ? null
+          : {
+              ...cloned.lifecycle.onWorkspaceCreate,
+              completedAt:
+                cloned.workspace?.scope === "run"
+                  ? null
+                  : cloned.lifecycle.onWorkspaceCreate.completedAt,
+              lastError: null,
+            },
+    },
+  };
+}
+
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
@@ -528,7 +583,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   }
   manifest.resolvedBackendArgs = cloneResolvedBackendArgs(seed.resolvedBackendArgs);
   manifest.launcher = cloneResolvedLauncherConfig(seed.launcher);
-  manifest.executionEnvironment = cloneRunExecutionEnvironment(seed.executionEnvironment);
+  manifest.executionEnvironment = resetRunExecutionEnvironment(seed.executionEnvironment);
   manifest.cwd = seed.cwd;
   manifest.lockedFields = [...seed.lockedFields];
   manifest.message = seed.message;
@@ -795,11 +850,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 23
+    (parsed as { schemaVersion: number }).schemaVersion !== 24
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 23.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 24.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -951,7 +1006,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 23) return false;
+  if (obj.schemaVersion !== 24) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -1250,19 +1305,26 @@ function isValidEnvironmentMount(value: unknown): value is RunEnvironmentMount {
   );
 }
 
-function isValidEnvironmentWorkspaceLifecycleStep(
-  value: unknown,
-): value is RunEnvironmentWorkspaceLifecycleStep {
+function isValidEnvironmentLifecycleStep(value: unknown): value is RunEnvironmentLifecycleStep {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
   const record = value as unknown as Record<string, unknown>;
+  if (record.target !== "host" && record.target !== "container") {
+    return false;
+  }
+  if (record.timeoutMs !== null && typeof record.timeoutMs !== "number") {
+    return false;
+  }
   if (record.kind === "command") {
     return (
       typeof record.command === "string" &&
       Array.isArray(record.args) &&
       record.args.every((entry) => typeof entry === "string") &&
-      isStringRecord(record.env)
+      isStringRecord(record.env) &&
+      (record.cwd === null || typeof record.cwd === "string") &&
+      (record.user === null || typeof record.user === "string") &&
+      typeof record.detach === "boolean"
     );
   }
   return (
@@ -1273,18 +1335,49 @@ function isValidEnvironmentWorkspaceLifecycleStep(
   );
 }
 
-function isValidEnvironmentWorkspaceLifecycle(
+function isValidEnvironmentAfterStartLifecycle(
   value: unknown,
-): value is RunEnvironmentWorkspaceLifecycle {
+): value is RunEnvironmentAfterStartLifecycle {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
   const record = value as unknown as Record<string, unknown>;
   return (
-    Array.isArray(record.onCreate) &&
-    record.onCreate.every(isValidEnvironmentWorkspaceLifecycleStep) &&
+    Array.isArray(record.steps) &&
+    record.steps.every(isValidEnvironmentLifecycleStep) &&
+    (record.completedContainerId === null || typeof record.completedContainerId === "string") &&
     (record.completedAt === null || typeof record.completedAt === "string") &&
     (record.lastError === null || typeof record.lastError === "string")
+  );
+}
+
+function isValidEnvironmentOnWorkspaceCreateLifecycle(
+  value: unknown,
+): value is RunEnvironmentOnWorkspaceCreateLifecycle {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  return (
+    Array.isArray(record.steps) &&
+    record.steps.every(isValidEnvironmentLifecycleStep) &&
+    (record.completedAt === null || typeof record.completedAt === "string") &&
+    (record.lastError === null || typeof record.lastError === "string")
+  );
+}
+
+function isValidEnvironmentLifecycle(value: unknown): value is RunEnvironmentLifecycle | null {
+  if (value === null) {
+    return true;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  return (
+    (record.afterStart === null || isValidEnvironmentAfterStartLifecycle(record.afterStart)) &&
+    (record.onWorkspaceCreate === null ||
+      isValidEnvironmentOnWorkspaceCreateLifecycle(record.onWorkspaceCreate))
   );
 }
 
@@ -1301,7 +1394,7 @@ function isValidEnvironmentWorkspace(value: unknown): value is RunEnvironmentWor
     (record.hostRoot === null || typeof record.hostRoot === "string") &&
     typeof record.create === "boolean" &&
     (record.createdAt === null || typeof record.createdAt === "string") &&
-    (record.lifecycle === null || isValidEnvironmentWorkspaceLifecycle(record.lifecycle))
+    !("lifecycle" in record)
   );
 }
 
@@ -1354,6 +1447,15 @@ function isValidExecutionEnvironment(value: unknown): value is RunExecutionEnvir
   }
   const security = record.security;
   const cleanup = record.cleanup;
+  if (
+    record.workspace === null &&
+    record.lifecycle !== null &&
+    typeof record.lifecycle === "object" &&
+    !Array.isArray(record.lifecycle) &&
+    (record.lifecycle as Record<string, unknown>).onWorkspaceCreate !== null
+  ) {
+    return false;
+  }
   return (
     typeof record.image === "string" &&
     (record.lifetime === "run" || record.lifetime === "group") &&
@@ -1361,6 +1463,7 @@ function isValidExecutionEnvironment(value: unknown): value is RunExecutionEnvir
     record.containerName.trim().length > 0 &&
     (record.containerId === null || typeof record.containerId === "string") &&
     isValidEnvironmentWorkspace(record.workspace) &&
+    isValidEnvironmentLifecycle(record.lifecycle) &&
     Array.isArray(record.sessionMounts) &&
     record.sessionMounts.every(isValidEnvironmentSessionMount) &&
     Array.isArray(record.mounts) &&

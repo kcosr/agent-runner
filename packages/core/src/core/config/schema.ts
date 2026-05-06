@@ -334,39 +334,64 @@ const environmentWorkspaceSchema = z
     containerPath: environmentPathTemplateSchema,
     mode: z.enum(["ro", "rw"]).default("rw"),
     create: z.boolean().default(true),
-    lifecycle: z
-      .object({
-        onCreate: z
-          .array(
-            z.discriminatedUnion("kind", [
-              z
-                .object({
-                  kind: z.literal("command"),
-                  command: z.string().trim().min(1),
-                  args: z.array(z.string()).default([]),
-                  env: z.record(z.string().trim().min(1), z.string()).default({}),
-                })
-                .strict(),
-              z
-                .object({
-                  kind: z.literal("git-clone"),
-                  source: environmentPathTemplateSchema,
-                  baseRef: z.string().trim().min(1),
-                  branch: z.string().trim().min(1),
-                })
-                .strict(),
-            ]),
-          )
-          .default([]),
-      })
-      .strict()
-      .optional(),
   })
   .strict()
   .refine(
     (workspace) => workspace.hostRoot === undefined || workspace.hostPath === undefined,
     "workspace cannot define both hostRoot and hostPath",
   );
+
+const lifecycleTargetSchema = z.enum(["host", "container"]);
+
+const lifecycleCommandStepSchema = z
+  .object({
+    kind: z.literal("command"),
+    target: lifecycleTargetSchema,
+    command: z.string().trim().min(1),
+    args: z.array(z.string()).default([]),
+    env: z.record(z.string().trim().min(1), z.string()).default({}),
+    cwd: z.string().trim().min(1).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+    user: z.string().trim().min(1).optional(),
+    detach: z.boolean().default(false),
+  })
+  .strict()
+  .superRefine((step, ctx) => {
+    if (step.target === "host" && step.user !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["user"],
+        message: "lifecycle command step `user` is valid only for target: container",
+      });
+    }
+    if (step.target === "host" && step.detach === true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["detach"],
+        message: "lifecycle command step `detach` is valid only for target: container",
+      });
+    }
+  });
+
+const lifecycleGitCloneStepSchema = z
+  .object({
+    kind: z.literal("git-clone"),
+    target: lifecycleTargetSchema,
+    source: environmentPathTemplateSchema,
+    baseRef: z.string().trim().min(1),
+    branch: z.string().trim().min(1),
+    timeoutMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+const lifecycleStepSchema = z.union([lifecycleCommandStepSchema, lifecycleGitCloneStepSchema]);
+
+const environmentLifecycleSchema = z
+  .object({
+    afterStart: z.array(lifecycleStepSchema).default([]),
+    onWorkspaceCreate: z.array(lifecycleStepSchema).default([]),
+  })
+  .strict();
 
 const containerEngineSchema = z.enum(["docker", "podman"]);
 
@@ -417,6 +442,7 @@ const managedContainerEnvironmentSchema = baseContainerEnvironmentSchema
     lifetime: z.enum(["run", "group"]).default("run"),
     containerName: z.string().trim().min(1).optional(),
     workspace: environmentWorkspaceSchema.optional(),
+    lifecycle: environmentLifecycleSchema.optional(),
     sessionMounts: environmentSessionMountsSchema,
     mounts: z.array(environmentMountSchema).default([]),
     network: containerNetworkSchema.default("default"),
@@ -431,10 +457,25 @@ const managedContainerEnvironmentSchema = baseContainerEnvironmentSchema
   })
   .strict();
 
-export const environmentDefinitionSchema = z.discriminatedUnion("mode", [
-  existingContainerEnvironmentSchema,
-  managedContainerEnvironmentSchema,
-]);
+export const environmentDefinitionSchema = z
+  .discriminatedUnion("mode", [
+    existingContainerEnvironmentSchema,
+    managedContainerEnvironmentSchema,
+  ])
+  .superRefine((environment, ctx) => {
+    if (
+      environment.mode === "managed" &&
+      environment.workspace === undefined &&
+      environment.lifecycle?.onWorkspaceCreate !== undefined &&
+      environment.lifecycle.onWorkspaceCreate.length > 0
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lifecycle", "onWorkspaceCreate"],
+        message: "lifecycle.onWorkspaceCreate requires workspace",
+      });
+    }
+  });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent schema — identity, backend config, role instructions, locks.

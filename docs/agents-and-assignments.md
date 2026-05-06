@@ -262,15 +262,17 @@ workspace:
   containerPath: /workspace
   mode: rw
   create: true
-  lifecycle:
-    onCreate:
-      - kind: git-clone
-        source: "{{repo_source}}"
-        baseRef: "{{base_ref}}"
-        branch: "task-runner/{{run_id}}"
-      - kind: command
-        command: npm
-        args: [install]
+lifecycle:
+  onWorkspaceCreate:
+    - kind: git-clone
+      target: container
+      source: "{{repo_source}}"
+      baseRef: "{{base_ref}}"
+      branch: "task-runner/{{run_id}}"
+    - kind: command
+      target: container
+      command: npm
+      args: [install]
 sessionMounts: backend
 cleanup:
   policy: terminal
@@ -291,13 +293,16 @@ assignment vars. The selected environment's vars are merged with the
 assignment vars for the run and then frozen into `runtimeVars`; duplicate
 names must have identical definitions.
 
-`workspace.lifecycle.onCreate` runs once per host workspace inside the
-managed container before backend `cwd` validation. A `git-clone` step
-clones `source` into the workspace root and checks out `branch` from
-`baseRef`; a `command` step runs an arbitrary command in the workspace
-root with optional `args` and `env`. Completion is guarded by host-side
-state next to the workspace, so later runs reusing the same group
-workspace skip the lifecycle without dirtying the mounted workspace.
+`lifecycle.afterStart` runs after a managed container is started or
+reused and inspected, before workspace setup and backend `cwd`
+validation. `lifecycle.onWorkspaceCreate` runs once per host workspace;
+a `git-clone` step clones `source` into the workspace root and checks
+out `branch` from `baseRef`, while a `command` step runs an arbitrary
+host or container command with optional `args` and `env`. Completion is
+guarded by host-side state next to the workspace, so later runs reusing
+the same group workspace skip the workspace lifecycle without dirtying
+the mounted workspace. Readiness is expressed as ordinary command steps.
+`mode: existing` environments reject lifecycle phases.
 
 `sessionMounts` expands built-in backend session stores into same-path
 read-write mounts. `sessionMounts: backend` mounts the selected backend's

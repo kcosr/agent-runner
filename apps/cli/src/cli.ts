@@ -899,11 +899,25 @@ function renderRunEnvironmentResult(result: ReturnType<typeof getRunEnvironment>
       lines.push(`  workspace:     ${env.workspace.scope}`);
       lines.push(`  hostPath:      ${env.workspace.hostPath}`);
       lines.push(`  containerPath: ${env.workspace.containerPath}`);
-      if (env.workspace.lifecycle !== null) {
-        lines.push(`  lifecycle:     ${env.workspace.lifecycle.onCreate.length} step(s)`);
-        lines.push(`  lifecycleAt:   ${env.workspace.lifecycle.completedAt ?? "not-completed"}`);
-        if (env.workspace.lifecycle.lastError) {
-          lines.push(`  lifecycleErr:  ${env.workspace.lifecycle.lastError}`);
+    }
+    if (env.lifecycle !== null) {
+      if (env.lifecycle.afterStart !== null) {
+        lines.push(`  afterStart:    ${env.lifecycle.afterStart.steps.length} step(s)`);
+        lines.push(`  afterStartAt:  ${env.lifecycle.afterStart.completedAt ?? "not-completed"}`);
+        lines.push(
+          `  afterStartId:  ${env.lifecycle.afterStart.completedContainerId ?? "not-completed"}`,
+        );
+        if (env.lifecycle.afterStart.lastError) {
+          lines.push(`  afterStartErr: ${env.lifecycle.afterStart.lastError}`);
+        }
+      }
+      if (env.lifecycle.onWorkspaceCreate !== null) {
+        lines.push(`  workspaceLife: ${env.lifecycle.onWorkspaceCreate.steps.length} step(s)`);
+        lines.push(
+          `  workspaceAt:   ${env.lifecycle.onWorkspaceCreate.completedAt ?? "not-completed"}`,
+        );
+        if (env.lifecycle.onWorkspaceCreate.lastError) {
+          lines.push(`  workspaceErr:  ${env.lifecycle.onWorkspaceCreate.lastError}`);
         }
       }
     }

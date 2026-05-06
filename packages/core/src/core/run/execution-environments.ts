@@ -12,22 +12,26 @@ import type { EnvironmentReference, LoadedEnvironmentDefinition } from "../confi
 import { interpolate } from "../config/interpolate.js";
 import type { ResolvedLauncherConfig } from "../config/launchers.js";
 import type {
+  RunEnvironmentLifecycleStep,
   RunEnvironmentSessionMount,
   RunEnvironmentSessionMountPreset,
   RunEnvironmentWorkspace,
-  RunEnvironmentWorkspaceLifecycleStep,
   RunExecutionEnvironment,
   RunExistingContainerEnvironment,
   RunManagedContainerEnvironment,
   RunManifest,
 } from "./manifest.js";
 
-const INTERPOLATION_TOKEN_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/;
+const INTERPOLATION_TOKEN_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
+const LATE_LIFECYCLE_TOKENS = new Set(["container_name", "container_id", "container_pid"]);
 
 export class ExecutionEnvironmentError extends Error {
-  constructor(message: string) {
+  environment: RunExecutionEnvironment | null;
+
+  constructor(message: string, environment: RunExecutionEnvironment | null = null) {
     super(message);
     this.name = "ExecutionEnvironmentError";
+    this.environment = environment;
   }
 }
 
@@ -76,13 +80,38 @@ export function resolveFreshExecutionEnvironmentDefinition(options: {
 
 function interpolateString(value: string, vars: Record<string, unknown>): string {
   const interpolated = interpolate(value, vars);
-  const unresolved = interpolated.match(INTERPOLATION_TOKEN_PATTERN)?.[0];
-  if (unresolved) {
+  const unresolved = unresolvedTokens(interpolated);
+  if (unresolved.length > 0) {
+    const first = unresolved[0] as { token: string; name: string };
     throw new ExecutionEnvironmentError(
-      `execution environment interpolation could not resolve token ${unresolved}`,
+      `execution environment interpolation could not resolve token ${first.token}`,
     );
   }
   return interpolated;
+}
+
+function unresolvedTokens(value: string): { token: string; name: string }[] {
+  return [...value.matchAll(INTERPOLATION_TOKEN_PATTERN)].map((match) => ({
+    token: match[0],
+    name: match[1] ?? "",
+  }));
+}
+
+function interpolateLifecycleString(value: string, vars: Record<string, unknown>): string {
+  const interpolated = interpolate(value, vars);
+  const unresolved = unresolvedTokens(interpolated).find(
+    (token) => !LATE_LIFECYCLE_TOKENS.has(token.name),
+  );
+  if (unresolved) {
+    throw new ExecutionEnvironmentError(
+      `execution environment lifecycle interpolation could not resolve token ${unresolved.token}`,
+    );
+  }
+  return interpolated;
+}
+
+function interpolateLateLifecycleString(value: string, vars: Record<string, string>): string {
+  return interpolateString(value, vars);
 }
 
 function interpolateStringRecord(
@@ -91,6 +120,15 @@ function interpolateStringRecord(
 ): Record<string, string> {
   return Object.fromEntries(
     Object.entries(record).map(([key, value]) => [key, interpolateString(value, vars)]),
+  );
+}
+
+function interpolateLifecycleStringRecord(
+  record: Record<string, string>,
+  vars: Record<string, unknown>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [key, interpolateLifecycleString(value, vars)]),
   );
 }
 
@@ -254,48 +292,99 @@ function resolveWorkspace(
     mode: workspace.mode,
     create: workspace.create,
     createdAt: null,
-    lifecycle: null,
   };
 }
 
-function applyWorkspaceLifecycle(
-  workspace: RunEnvironmentWorkspace | null,
-  lifecycle: { onCreate: RunEnvironmentWorkspaceLifecycleStep[] } | undefined,
+type AuthoredLifecycleStep =
+  | {
+      kind: "command";
+      target: "host" | "container";
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+      cwd?: string;
+      timeoutMs?: number;
+      user?: string;
+      detach: boolean;
+    }
+  | {
+      kind: "git-clone";
+      target: "host" | "container";
+      source: string;
+      baseRef: string;
+      branch: string;
+      timeoutMs?: number;
+    };
+
+function resolveLifecycle(
+  lifecycle:
+    | {
+        afterStart: AuthoredLifecycleStep[];
+        onWorkspaceCreate: AuthoredLifecycleStep[];
+      }
+    | undefined,
   vars: Record<string, unknown>,
-): RunEnvironmentWorkspace | null {
-  if (workspace === null || lifecycle === undefined) {
-    return workspace;
+): RunManagedContainerEnvironment["lifecycle"] {
+  if (lifecycle === undefined) {
+    return null;
+  }
+  const afterStartSteps = resolveLifecycleSteps(lifecycle.afterStart, vars);
+  const onWorkspaceCreateSteps = resolveLifecycleSteps(lifecycle.onWorkspaceCreate, vars);
+  if (afterStartSteps.length === 0 && onWorkspaceCreateSteps.length === 0) {
+    return null;
   }
   return {
-    ...workspace,
-    lifecycle: {
-      onCreate: resolveWorkspaceLifecycleSteps(lifecycle.onCreate, vars),
-      completedAt: null,
-      lastError: null,
-    },
+    afterStart:
+      afterStartSteps.length === 0
+        ? null
+        : {
+            steps: afterStartSteps,
+            completedContainerId: null,
+            completedAt: null,
+            lastError: null,
+          },
+    onWorkspaceCreate:
+      onWorkspaceCreateSteps.length === 0
+        ? null
+        : {
+            steps: onWorkspaceCreateSteps,
+            completedAt: null,
+            lastError: null,
+          },
   };
 }
 
-function resolveWorkspaceLifecycleSteps(
-  steps: RunEnvironmentWorkspaceLifecycleStep[],
+function resolveLifecycleSteps(
+  steps: AuthoredLifecycleStep[],
   vars: Record<string, unknown>,
-): RunEnvironmentWorkspaceLifecycleStep[] {
+): RunEnvironmentLifecycleStep[] {
   return steps.map((step) => {
     if (step.kind === "command") {
+      const cwd = step.cwd === undefined ? null : interpolateLifecycleString(step.cwd, vars);
+      if (cwd !== null) {
+        assertAbsolutePath(cwd, "lifecycle command cwd");
+      }
       return {
         kind: "command",
-        command: interpolateString(step.command, vars),
-        args: step.args.map((arg) => interpolateString(arg, vars)),
-        env: interpolateStringRecord(step.env, vars),
+        target: step.target,
+        command: interpolateLifecycleString(step.command, vars),
+        args: step.args.map((arg) => interpolateLifecycleString(arg, vars)),
+        env: interpolateLifecycleStringRecord(step.env, vars),
+        cwd,
+        timeoutMs: step.timeoutMs ?? null,
+        user: step.user ?? null,
+        detach: step.detach,
       };
     }
-    const branch = interpolateString(step.branch, vars);
+    const branch = interpolateLifecycleString(step.branch, vars);
     assertGitBranchName(branch);
     return {
       kind: "git-clone",
-      source: interpolateString(step.source, vars),
-      baseRef: interpolateString(step.baseRef, vars),
+      target: step.target,
+      source: interpolateLifecycleString(step.source, vars),
+      baseRef: interpolateLifecycleString(step.baseRef, vars),
       branch,
+      timeoutMs: step.timeoutMs ?? null,
     };
   });
 }
@@ -303,9 +392,79 @@ function resolveWorkspaceLifecycleSteps(
 function assertGitBranchName(branch: string): void {
   if (branch.trim().length === 0 || branch.startsWith("-")) {
     throw new ExecutionEnvironmentError(
-      "workspace lifecycle git-clone branch must be non-empty and must not start with '-'",
+      "lifecycle git-clone branch must be non-empty and must not start with '-'",
     );
   }
+}
+
+function resolveLateLifecycleStep(
+  step: RunEnvironmentLifecycleStep,
+  vars: Record<string, string>,
+): RunEnvironmentLifecycleStep {
+  if (step.kind === "command") {
+    return {
+      kind: "command",
+      target: step.target,
+      command: interpolateLateLifecycleString(step.command, vars),
+      args: step.args.map((arg) => interpolateLateLifecycleString(arg, vars)),
+      env: Object.fromEntries(
+        Object.entries(step.env).map(([key, value]) => [
+          key,
+          interpolateLateLifecycleString(value, vars),
+        ]),
+      ),
+      cwd: step.cwd === null ? null : interpolateLateLifecycleString(step.cwd, vars),
+      timeoutMs: step.timeoutMs,
+      user: step.user,
+      detach: step.detach,
+    };
+  }
+  const branch = interpolateLateLifecycleString(step.branch, vars);
+  assertGitBranchName(branch);
+  return {
+    kind: "git-clone",
+    target: step.target,
+    source: interpolateLateLifecycleString(step.source, vars),
+    baseRef: interpolateLateLifecycleString(step.baseRef, vars),
+    branch,
+    timeoutMs: step.timeoutMs,
+  };
+}
+
+function resolvePhaseSteps(
+  steps: RunEnvironmentLifecycleStep[],
+  vars: Record<string, string>,
+  defaults: { hostCwd: string; containerCwd: string },
+): RunEnvironmentLifecycleStep[] {
+  return steps.map((step) => {
+    const resolved = resolveLateLifecycleStep(step, vars);
+    if (resolved.kind !== "command") {
+      return resolved;
+    }
+    const cwd =
+      resolved.cwd ?? (resolved.target === "container" ? defaults.containerCwd : defaults.hostCwd);
+    assertAbsolutePath(cwd, "lifecycle command cwd");
+    return {
+      ...resolved,
+      cwd,
+    };
+  });
+}
+
+function lifecycleMetadataVars(
+  environment: RunManagedContainerEnvironment,
+  inspect: InspectSummary,
+): Record<string, string> {
+  return {
+    container_name: environment.containerName,
+    container_id: inspect.id,
+    container_pid: inspect.pid,
+  };
+}
+
+function phaseErrorMessage(error: unknown): string {
+  const message = (error as Error).message;
+  return message.length > 800 ? `${message.slice(0, 800)}...` : message;
 }
 
 function resolveEnvironmentConfig(
@@ -326,11 +485,10 @@ function resolveEnvironmentConfig(
           workspace_host_path: resolvedWorkspace.hostPath,
           workspace_container_path: resolvedWorkspace.containerPath,
         };
-  const workspace =
-    config.mode === "managed"
-      ? applyWorkspaceLifecycle(resolvedWorkspace, config.workspace?.lifecycle, environmentVars)
-      : null;
-  const cwd = rewriteWorkspacePath(workspace, interpolateString(config.cwd, environmentVars));
+  const cwd = rewriteWorkspacePath(
+    resolvedWorkspace,
+    interpolateString(config.cwd, environmentVars),
+  );
   assertAbsolutePath(cwd, "executionEnvironment.cwd");
   const env = interpolateStringRecord(config.env, environmentVars);
   const common = {
@@ -364,7 +522,8 @@ function resolveEnvironmentConfig(
       ? interpolateString(config.containerName, environmentVars)
       : generatedContainerName(config.lifetime, runId, runGroupId),
     containerId: null,
-    workspace,
+    workspace: resolvedWorkspace,
+    lifecycle: resolveLifecycle(config.lifecycle, environmentVars),
     sessionMounts: resolveSessionMounts(config.sessionMounts, backend),
     mounts: resolveMounts(config.mounts, environmentVars),
     network: config.network,
@@ -407,6 +566,7 @@ export function resolveFreshExecutionEnvironment(
 
 interface InspectSummary {
   id: string;
+  pid: string;
   running: boolean;
   mounts: { source: string; destination: string; rw: boolean }[];
 }
@@ -432,20 +592,30 @@ async function runEngine(
     );
   }
   if (result.exitCode !== 0 || result.timedOut || result.aborted) {
-    const detail =
-      result.stderrText.trim() ||
-      result.stdoutText.trim() ||
-      (result.timedOut
-        ? "timed out"
-        : result.aborted
-          ? "aborted"
-          : `exited with code ${result.exitCode ?? "null"}`);
+    const detail = processFailureDetail(result);
     throw new ExecutionEnvironmentError(`${environment.engine} ${args[0]} failed: ${detail}`);
   }
   return {
     stdout: result.stdoutText,
     stderr: result.stderrText,
   };
+}
+
+function boundedExcerpt(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.length > 500 ? `${trimmed.slice(0, 500)}...` : trimmed;
+}
+
+function processFailureDetail(result: Awaited<ReturnType<typeof runProcess>>): string {
+  return (
+    boundedExcerpt(result.stderrText) ||
+    boundedExcerpt(result.stdoutText) ||
+    (result.timedOut
+      ? "timed out"
+      : result.aborted
+        ? "aborted"
+        : `exited with code ${result.exitCode ?? "null"}`)
+  );
 }
 
 async function inspectContainer(
@@ -472,6 +642,12 @@ async function inspectContainer(
   const mounts = Array.isArray(record.Mounts) ? record.Mounts : [];
   return {
     id: typeof record.Id === "string" ? record.Id : container,
+    pid:
+      typeof state?.Pid === "number" && Number.isFinite(state.Pid)
+        ? String(state.Pid)
+        : typeof state?.Pid === "string"
+          ? state.Pid
+          : "",
     running: state?.Running === true,
     mounts: mounts.flatMap((entry) => {
       if (!entry || typeof entry !== "object") {
@@ -508,14 +684,20 @@ async function runContainerCommand(
   env: Record<string, string>,
   command: string,
   args: string[],
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    user?: string | null;
+    detach?: boolean;
+  } = {},
 ): Promise<void> {
   await runEngine(
     environment,
     [
       "exec",
-      "-i",
+      options.detach === true ? "-d" : "-i",
       ...environment.extraExecArgs,
+      ...(options.user === null || options.user === undefined ? [] : ["--user", options.user]),
       "-w",
       cwd,
       ...Object.entries({ ...environment.env, ...env }).flatMap(([key, value]) => [
@@ -531,6 +713,31 @@ async function runContainerCommand(
       timeoutMs: options.timeoutMs,
     },
   );
+}
+
+async function runHostCommand(
+  cwd: string,
+  env: Record<string, string>,
+  command: string,
+  args: string[],
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<void> {
+  let result: Awaited<ReturnType<typeof runProcess>>;
+  try {
+    result = await runProcess({
+      command,
+      args,
+      cwd,
+      env: { ...(process.env as Record<string, string>), ...env },
+      timeoutMs: options.timeoutMs ?? WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+      abortSignal: options.signal,
+    });
+  } catch (error) {
+    throw new ExecutionEnvironmentError(`${command} failed: ${(error as Error).message}`);
+  }
+  if (result.exitCode !== 0 || result.timedOut || result.aborted) {
+    throw new ExecutionEnvironmentError(`${command} failed: ${processFailureDetail(result)}`);
+  }
 }
 
 function explicitWorkspaceStateKey(hostPath: string): string {
@@ -692,104 +899,177 @@ function workspaceLifecycleLockStaleAfterMs(stepCount: number): number {
   );
 }
 
-async function runWorkspaceLifecycleStep(
+async function runLifecycleStep(
   environment: RunManagedContainerEnvironment,
-  workspace: RunEnvironmentWorkspace,
   container: string,
-  step: RunEnvironmentWorkspaceLifecycleStep,
+  step: RunEnvironmentLifecycleStep,
   options: { signal?: AbortSignal } = {},
 ): Promise<void> {
   if (step.kind === "command") {
-    await runContainerCommand(
-      environment,
-      container,
-      workspace.containerPath,
-      step.env,
-      step.command,
-      step.args,
-      {
+    if (step.cwd === null) {
+      throw new ExecutionEnvironmentError("lifecycle command cwd was not resolved");
+    }
+    if (step.target === "host") {
+      await runHostCommand(step.cwd, step.env, step.command, step.args, {
         signal: options.signal,
-        timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
-      },
-    );
+        timeoutMs: step.timeoutMs ?? WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+      });
+      return;
+    }
+    await runContainerCommand(environment, container, step.cwd, step.env, step.command, step.args, {
+      signal: options.signal,
+      timeoutMs: step.timeoutMs ?? WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+      user: step.user,
+      detach: step.detach,
+    });
     return;
   }
-  await runContainerCommand(
-    environment,
-    container,
-    workspace.containerPath,
-    {},
-    "git",
-    ["-c", "protocol.ext.allow=never", "clone", "--", step.source, "."],
-    {
-      signal: options.signal,
-      timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+  const workspace = environment.workspace;
+  if (workspace === null) {
+    throw new ExecutionEnvironmentError("lifecycle git-clone requires workspace");
+  }
+  const cwd = step.target === "container" ? workspace.containerPath : workspace.hostPath;
+  const runGit =
+    step.target === "container"
+      ? (args: string[]) =>
+          runContainerCommand(environment, container, cwd, {}, "git", args, {
+            signal: options.signal,
+            timeoutMs: step.timeoutMs ?? WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+          })
+      : (args: string[]) =>
+          runHostCommand(cwd, {}, "git", args, {
+            signal: options.signal,
+            timeoutMs: step.timeoutMs ?? WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+          });
+  await runGit(["-c", "protocol.ext.allow=never", "clone", "--", step.source, "."]);
+  await runGit(["checkout", "-B", step.branch, step.baseRef]);
+}
+
+function updateAfterStartLifecycle(
+  environment: RunManagedContainerEnvironment,
+  updates: Partial<
+    NonNullable<NonNullable<RunManagedContainerEnvironment["lifecycle"]>["afterStart"]>
+  >,
+): RunManagedContainerEnvironment {
+  if (environment.lifecycle === null || environment.lifecycle.afterStart === null) {
+    return environment;
+  }
+  return {
+    ...environment,
+    lifecycle: {
+      ...environment.lifecycle,
+      afterStart: {
+        ...environment.lifecycle.afterStart,
+        ...updates,
+      },
     },
-  );
-  await runContainerCommand(
-    environment,
-    container,
-    workspace.containerPath,
-    {},
-    "git",
-    ["checkout", "-B", step.branch, step.baseRef],
-    {
-      signal: options.signal,
-      timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+  };
+}
+
+function updateOnWorkspaceCreateLifecycle(
+  environment: RunManagedContainerEnvironment,
+  updates: Partial<
+    NonNullable<NonNullable<RunManagedContainerEnvironment["lifecycle"]>["onWorkspaceCreate"]>
+  >,
+): RunManagedContainerEnvironment {
+  if (environment.lifecycle === null || environment.lifecycle.onWorkspaceCreate === null) {
+    return environment;
+  }
+  return {
+    ...environment,
+    lifecycle: {
+      ...environment.lifecycle,
+      onWorkspaceCreate: {
+        ...environment.lifecycle.onWorkspaceCreate,
+        ...updates,
+      },
     },
-  );
+  };
+}
+
+async function runAfterStartLifecycle(
+  environment: RunManagedContainerEnvironment,
+  inspect: InspectSummary,
+  options: { signal?: AbortSignal } = {},
+): Promise<RunManagedContainerEnvironment> {
+  const phase = environment.lifecycle?.afterStart ?? null;
+  if (phase === null || phase.completedContainerId === inspect.id) {
+    return environment;
+  }
+  const container = containerTarget(environment);
+  const steps = resolvePhaseSteps(phase.steps, lifecycleMetadataVars(environment, inspect), {
+    hostCwd: process.cwd(),
+    containerCwd: environment.cwd,
+  });
+  try {
+    for (const [index, step] of steps.entries()) {
+      try {
+        await runLifecycleStep(environment, container, step, options);
+      } catch (error) {
+        const label = step.kind === "command" ? `${step.kind}: ${step.command}` : step.kind;
+        throw new ExecutionEnvironmentError(
+          `afterStart lifecycle step ${index} (${label}) failed: ${(error as Error).message}`,
+        );
+      }
+    }
+    return updateAfterStartLifecycle(environment, {
+      completedContainerId: inspect.id,
+      completedAt: new Date().toISOString(),
+      lastError: null,
+    });
+  } catch (error) {
+    const message = `afterStart lifecycle failed: ${phaseErrorMessage(error)}`;
+    throw new ExecutionEnvironmentError(
+      message,
+      updateAfterStartLifecycle(environment, {
+        lastError: message,
+      }),
+    );
+  }
 }
 
 async function runWorkspaceLifecycle(
   environment: RunManagedContainerEnvironment,
+  inspect: InspectSummary,
   options: { signal?: AbortSignal } = {},
 ): Promise<RunManagedContainerEnvironment> {
   const workspace = environment.workspace;
-  if (workspace === null || workspace.lifecycle === null) {
+  const phase = environment.lifecycle?.onWorkspaceCreate ?? null;
+  if (workspace === null || phase === null) {
     return environment;
   }
   const lifecycleStateDir = workspaceLifecycleStateDir(workspace);
   const completedAt = readWorkspaceLifecycleMarker(lifecycleStateDir);
   if (completedAt !== null) {
-    return {
-      ...environment,
-      workspace: {
-        ...workspace,
-        lifecycle: {
-          ...workspace.lifecycle,
-          completedAt,
-          lastError: null,
-        },
-      },
-    };
+    return updateOnWorkspaceCreateLifecycle(environment, {
+      completedAt,
+      lastError: null,
+    });
   }
 
   const lockPath = await acquireWorkspaceLifecycleLock(
     lifecycleStateDir,
-    workspaceLifecycleLockStaleAfterMs(workspace.lifecycle.onCreate.length),
+    workspaceLifecycleLockStaleAfterMs(phase.steps.length),
     options,
   );
   try {
     const lockedCompletedAt = readWorkspaceLifecycleMarker(lifecycleStateDir);
     if (lockedCompletedAt !== null) {
-      return {
-        ...environment,
-        workspace: {
-          ...workspace,
-          lifecycle: {
-            ...workspace.lifecycle,
-            completedAt: lockedCompletedAt,
-            lastError: null,
-          },
-        },
-      };
+      return updateOnWorkspaceCreateLifecycle(environment, {
+        completedAt: lockedCompletedAt,
+        lastError: null,
+      });
     }
 
     const container = containerTarget(environment);
+    const steps = resolvePhaseSteps(phase.steps, lifecycleMetadataVars(environment, inspect), {
+      hostCwd: workspace.hostPath,
+      containerCwd: workspace.containerPath,
+    });
     try {
-      for (const [index, step] of workspace.lifecycle.onCreate.entries()) {
+      for (const [index, step] of steps.entries()) {
         try {
-          await runWorkspaceLifecycleStep(environment, workspace, container, step, options);
+          await runLifecycleStep(environment, container, step, options);
         } catch (error) {
           const label = step.kind === "command" ? `${step.kind}: ${step.command}` : step.kind;
           throw new ExecutionEnvironmentError(
@@ -799,20 +1079,17 @@ async function runWorkspaceLifecycle(
       }
       const lifecycleCompletedAt = new Date().toISOString();
       writeWorkspaceLifecycleMarker(lifecycleStateDir, lifecycleCompletedAt);
-      return {
-        ...environment,
-        workspace: {
-          ...workspace,
-          lifecycle: {
-            ...workspace.lifecycle,
-            completedAt: lifecycleCompletedAt,
-            lastError: null,
-          },
-        },
-      };
+      return updateOnWorkspaceCreateLifecycle(environment, {
+        completedAt: lifecycleCompletedAt,
+        lastError: null,
+      });
     } catch (error) {
+      const message = `workspace lifecycle failed: ${phaseErrorMessage(error)}`;
       throw new ExecutionEnvironmentError(
-        `workspace lifecycle failed: ${(error as Error).message}`,
+        message,
+        updateOnWorkspaceCreateLifecycle(environment, {
+          lastError: message,
+        }),
       );
     }
   } finally {
@@ -855,9 +1132,9 @@ async function startManagedContainer(
     "--label",
     `task-runner-environment=${environment.name ?? "inline"}`,
     "--workdir",
-    environment.workspace?.lifecycle === null || environment.workspace === null
-      ? environment.cwd
-      : environment.workspace.containerPath,
+    environment.workspace !== null && environment.lifecycle?.onWorkspaceCreate !== null
+      ? environment.workspace.containerPath
+      : environment.cwd,
   ];
 
   if (environment.network !== "default") {
@@ -956,6 +1233,7 @@ export async function prepareExecutionEnvironment(
     mkdirSync(sessionMount.hostPath, { recursive: true });
   }
   let startedContainer = false;
+  let inspectedManaged: InspectSummary | null = null;
   if (next.containerId === null) {
     try {
       const inspected = await inspectContainer(next, next.containerName, {
@@ -973,12 +1251,20 @@ export async function prepareExecutionEnvironment(
           lastError: null,
         },
       };
+      inspectedManaged = inspected;
     } catch (error) {
       if (!(error instanceof ExecutionEnvironmentError)) {
         throw error;
       }
       try {
         next = await startManagedContainer(next, { signal: options.signal });
+        inspectedManaged = await inspectContainer(next, next.containerId ?? next.containerName, {
+          signal: options.signal,
+        });
+        next = {
+          ...next,
+          containerId: inspectedManaged.id,
+        };
         startedContainer = true;
       } catch (startError) {
         if (next.lifetime === "group") {
@@ -997,6 +1283,7 @@ export async function prepareExecutionEnvironment(
                 },
                 lastError: null,
               };
+              inspectedManaged = inspected;
             } else {
               throw startError;
             }
@@ -1018,17 +1305,42 @@ export async function prepareExecutionEnvironment(
         },
         { signal: options.signal },
       );
+      inspectedManaged = await inspectContainer(next, next.containerId ?? next.containerName, {
+        signal: options.signal,
+      });
+      next = {
+        ...next,
+        containerId: inspectedManaged.id,
+      };
       startedContainer = true;
+    } else {
+      inspectedManaged = inspected;
     }
   }
   try {
-    next = await runWorkspaceLifecycle(next, { signal: options.signal });
+    if (inspectedManaged === null) {
+      inspectedManaged = await inspectContainer(next, next.containerId ?? next.containerName, {
+        signal: options.signal,
+      });
+    }
+    next = await runAfterStartLifecycle(next, inspectedManaged, { signal: options.signal });
+    next = await runWorkspaceLifecycle(next, inspectedManaged, { signal: options.signal });
     await validateCwd(next, next.containerId ?? next.containerName, { signal: options.signal });
   } catch (error) {
     if (startedContainer && next.containerId !== null) {
       await runEngine(next, ["rm", "-f", next.containerId], {
         signal: options.signal,
       }).catch(() => undefined);
+    }
+    if (error instanceof ExecutionEnvironmentError && error.environment !== null) {
+      const failedEnvironment =
+        startedContainer && error.environment.mode === "managed"
+          ? {
+              ...error.environment,
+              containerId: null,
+            }
+          : error.environment;
+      throw new ExecutionEnvironmentError(error.message, failedEnvironment);
     }
     throw error;
   }

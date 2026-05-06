@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `23`. Older manifest shapes are not
+The current manifest schema is version `24`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -92,6 +92,14 @@ container path. Managed environments may also define `sessionMounts`
 presets for backend session stores used by host-side session sync.
 Generic `mounts` remain for auth stores, caches, sockets, and other
 non-workspace paths.
+
+Managed environments may define top-level lifecycle phases.
+`lifecycle.afterStart` runs after container start/reuse and inspect,
+before workspace setup and backend invocation. `lifecycle.onWorkspaceCreate`
+runs once per host workspace and keeps the host-side workspace marker/lock
+skip behavior. Lifecycle steps require explicit `target: host` or
+`target: container`; readiness is an ordinary command step, not a built-in
+primitive. `mode: existing` environments reject lifecycle phases.
 
 Execution environments are resolved after final cwd/runtime vars are
 known, frozen into `manifest.executionEnvironment`, and copied into
@@ -187,6 +195,8 @@ the next session. Attempts are backend invocations within a session.
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
 
+Manifest schema version 24 moves managed-container lifecycle state to
+top-level `executionEnvironment.lifecycle` phases.
 Manifest schema version 23 adds resolved managed-container workspace
 lifecycle state.
 Manifest schema version 22 adds resolved backend session mount presets.
