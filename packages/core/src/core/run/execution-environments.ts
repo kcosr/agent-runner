@@ -699,7 +699,7 @@ async function runWorkspaceLifecycleStep(
     workspace.containerPath,
     {},
     "git",
-    ["checkout", "-B", step.branch, "--", step.baseRef],
+    ["checkout", "-B", step.branch, step.baseRef],
     {
       signal: options.signal,
       timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,

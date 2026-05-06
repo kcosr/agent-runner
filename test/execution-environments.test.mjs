@@ -527,7 +527,6 @@ process.exit(0);
         "checkout",
         "-B",
         "feature/test",
-        "--",
         "origin/main",
       ],
       ["exec", "-i", "-w", "/workspace", "-e", "CI=1", "container-123", "npm", "install"],
