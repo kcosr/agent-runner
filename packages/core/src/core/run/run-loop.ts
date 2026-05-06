@@ -2294,11 +2294,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       throw error;
     }
     manifest.executionEnvironment = preparedEnvironment;
-    await withTaskStateLockAsync(workspaceDir, async () => {
-      const latest = resolveResumeTarget(workspaceDir).manifest;
-      latest.executionEnvironment = preparedEnvironment;
-      writeManifest(workspaceDir, latest);
-    });
+    if (reusingWorkspace) {
+      await withTaskStateLockAsync(workspaceDir, async () => {
+        const latest = resolveResumeTarget(workspaceDir).manifest;
+        latest.executionEnvironment = preparedEnvironment;
+        writeManifest(workspaceDir, latest);
+      });
+    } else {
+      writeManifest(workspaceDir, manifest);
+    }
     emitAuditEnvelope(
       appendRunEnvironmentValidatedEvent({
         manifest,
