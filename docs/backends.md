@@ -34,6 +34,7 @@ All non-passive backends accept per-agent:
 - `timeoutSec` — per-attempt wall-clock budget
 - `unrestricted` — pass a safety bypass flag to the underlying CLI
 - `launcher` — optional subprocess prefix selection
+- `executionEnvironment` — optional container execution environment
 - `backendArgs.<backend>.extraArgs` — optional backend-owned argv tokens
 
 Every backend receives a `cwd`, a resume session id (when present), and a
@@ -58,6 +59,14 @@ Launchers are subprocess-only. They wrap the spawned backend command for
 `claude`, `cursor`, `opencode`, `pi`, and Codex stdio. They do not apply
 to the `passive` backend, Codex websocket transport, or Codex UDS
 transport.
+
+Execution environments are also subprocess-only. When a run has a frozen
+container environment, task-runner validates or starts the container and
+passes subprocess-backed backend invocations through a generated
+`docker exec` / `podman exec` prefix with the container cwd and merged
+env. Container environments are mutually exclusive with non-direct
+launchers, and do not apply to passive runs or Codex websocket/UDS
+transports.
 
 Backend args are also resolved once for the selected backend and frozen
 into the local run manifest. They are appended after task-runner's

@@ -3,6 +3,7 @@ import type {
   addRunAttachmentFromStream,
   appendNotes,
   archive,
+  cleanupRunEnvironment,
   clearBackendSession,
   clearDependencies,
   clearGroup,
@@ -17,6 +18,7 @@ import type {
   getRun,
   getRunAuditHistory,
   getRunBrief,
+  getRunEnvironment,
   getRunInputSurface,
   getRunList,
   getRunSummary,
@@ -42,6 +44,7 @@ import type {
   updateRunNote,
   updateRunPinned,
   updateTask,
+  validateRunEnvironment,
 } from "@task-runner/core/app/service.js";
 import type {
   CliRunsStartParams,
@@ -64,6 +67,7 @@ type InternalStartRunRequest = Parameters<DaemonHandlers["startRun"]>[0];
 export interface DaemonHandlers {
   getRun: typeof getRun;
   getRunBrief: typeof getRunBrief;
+  getRunEnvironment: typeof getRunEnvironment;
   getRunList: typeof getRunList;
   getRunSummary: typeof getRunSummary;
   getRunAuditHistory: typeof getRunAuditHistory;
@@ -90,6 +94,8 @@ export interface DaemonHandlers {
   clearDependencies: typeof clearDependencies;
   setRunSchedule: typeof setRunSchedule;
   clearRunSchedule: typeof clearRunSchedule;
+  validateRunEnvironment: typeof validateRunEnvironment;
+  cleanupRunEnvironment: typeof cleanupRunEnvironment;
   setRunScheduleEnabled: typeof setRunScheduleEnabled;
   addRunAttachmentFromStream: typeof addRunAttachmentFromStream;
   removeRunAttachment: typeof removeRunAttachment;
@@ -135,6 +141,15 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     getRunBrief(target: string) {
       return { brief: ctx.getRunBrief(target) };
+    },
+    getRunEnvironment(target: string) {
+      return ctx.getRunEnvironment(target);
+    },
+    validateRunEnvironment(target: string) {
+      return ctx.validateRunEnvironment(target);
+    },
+    cleanupRunEnvironment(target: string) {
+      return ctx.cleanupRunEnvironment(target);
     },
     initCliRun(request: CliRunsStartParams) {
       return ctx
@@ -293,6 +308,14 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     getLauncher(params: DefinitionGetParams) {
       return {
         launcher: ctx.getDefinition("launcher", params.target, params.cwd),
+      };
+    },
+    listEnvironments() {
+      return { environments: ctx.getDefinitionList("environment") };
+    },
+    getEnvironment(params: DefinitionGetParams) {
+      return {
+        environment: ctx.getDefinition("environment", params.target, params.cwd),
       };
     },
     listTaskDefinitions() {

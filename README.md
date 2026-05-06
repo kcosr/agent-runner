@@ -5,6 +5,7 @@ state in a manifest-canonical workspace. It supports embedded CLI
 execution, active backend invocation, passive sidecar operation, a local
 daemon, a browser dashboard, resumable runs, attachments, dependencies,
 scheduled runs, launcher prefixes for subprocess backends, a first-class
+container execution environment layer, a first-class
 `run brief` surface for handing a run to a worker, and `task-runner run
 audit` for reading durable run audit history. Live runs can also hold
 queued resume messages as daemon-owned pending user intent for the next
@@ -464,10 +465,11 @@ use `task-runner run set-group` or `clear-group` to mutate membership.
 | `serve` | Start the local daemon (WS JSON-RPC + HTTP/SSE + web UI) |
 | `status` | Print system/environment status |
 | `run status\|brief\|audit` | Print run state, the composed worker handoff, or persisted audit history |
+| `run environment status\|validate\|cleanup` | Inspect, validate, or clean up a run execution environment |
 | `task list\|show\|set\|append-notes\|add` | Run task-state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
-| `list agents\|assignments\|launchers\|tasks\|runs` | Enumerate definitions and runs |
-| `show agent\|assignment\|launcher\|task` | Render a single definition |
+| `list agents\|assignments\|launchers\|environments\|tasks\|runs` | Enumerate definitions and runs |
+| `show agent\|assignment\|launcher\|environment\|task` | Render a single definition |
 | `run reconfigure` | Patch vars/message on an unarchived initialized run |
 | `run queue-message\|queued-messages\|remove-queued-message` | Manage queued resume messages for live runs |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
@@ -519,6 +521,7 @@ The rest are focused topic pages:
 | [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
 | [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
 | [docs/backends.md](docs/backends.md) | Built-in and custom backends |
+| [docs/container-lifecycle.md](docs/container-lifecycle.md) | Container execution environment and lifecycle design |
 | [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
 | [docs/daemon.md](docs/daemon.md) | Control plane, HTTP/SSE, JSON-RPC |

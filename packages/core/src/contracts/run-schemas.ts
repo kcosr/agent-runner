@@ -62,6 +62,9 @@ export const runStatusSchema: z.ZodType<RunStatus> = z.enum(RUN_STATUSES);
 export const runScheduleStateSchema: z.ZodType<RunScheduleState> = z.enum(RUN_SCHEDULE_STATES);
 
 const runScheduleModeSchema = z.enum(["reuse", "reset", "clone"]);
+const runExecutionEnvironmentSchema: z.ZodType<RunDetail["executionEnvironment"]> = z
+  .unknown()
+  .nullable() as z.ZodType<RunDetail["executionEnvironment"]>;
 
 export const runScheduleSchema: z.ZodType<RunSchedule> = z.object({
   enabled: z.boolean(),
@@ -361,6 +364,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)),
   runtimeVars: z.record(z.string(), z.unknown()),
   execution: runExecutionSchema,
+  executionEnvironment: runExecutionEnvironmentSchema,
   capabilities: runCapabilitiesSchema,
 });
 

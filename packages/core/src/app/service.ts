@@ -42,6 +42,7 @@ import {
   addTask,
   appendTaskNotes,
   archiveRun,
+  cleanupRunEnvironment as cleanupRunEnvironmentCommand,
   clearRunBackendSession,
   clearRunDependencies,
   clearRunGroup,
@@ -57,6 +58,7 @@ import {
   queueResumeMessage as queueResumeMessageCommand,
   readAttachment,
   readBrief,
+  readRunEnvironment,
   readRunSummary,
   readStatus,
   removeAttachment,
@@ -74,9 +76,16 @@ import {
   showDefinition,
   showTask,
   unarchiveRun,
+  validateRunEnvironment as validateRunEnvironmentCommand,
 } from "../core/commands/service.js";
+import type { LoadedEnvironmentDefinition } from "../core/config/environments.js";
 import type { LoadedLauncherDefinition } from "../core/config/launchers.js";
-import type { AgentConfig, AssignmentConfig, TaskDef } from "../core/config/schema.js";
+import type {
+  AgentConfig,
+  AssignmentConfig,
+  EnvironmentDefinitionConfig,
+  TaskDef,
+} from "../core/config/schema.js";
 import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
 import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
 import { reconfigureInitializedRun } from "../core/run/reconfigure.js";
@@ -107,6 +116,11 @@ export type DefinitionDetail =
       definition: LoadedLauncherDefinition;
     }
   | {
+      kind: "environment";
+      definition: LoadedEnvironmentDefinition;
+      config: EnvironmentDefinitionConfig;
+    }
+  | {
       kind: "task";
       task: TaskDef;
       sourcePath: string;
@@ -116,6 +130,7 @@ export interface RunCommandOverrides {
   cwd?: string;
   backend?: BackendName;
   launcher?: string;
+  executionEnvironment?: string;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   backendConfig?: Partial<Record<BackendName, unknown>>;
@@ -174,6 +189,13 @@ function toDefinitionDetail(result: ReturnType<typeof showDefinition>): Definiti
     return {
       kind: "launcher",
       definition: result.loaded,
+    };
+  }
+  if (result.kind === "environment") {
+    return {
+      kind: "environment",
+      definition: result.loaded,
+      config: result.loaded.config,
     };
   }
   if (result.kind === "agent") {
@@ -330,6 +352,22 @@ export function getRunBrief(target: string): string {
   return readBrief(target);
 }
 
+export function getRunEnvironment(target: string): ReturnType<typeof readRunEnvironment> {
+  return readRunEnvironment(target);
+}
+
+export function validateRunEnvironment(
+  target: string,
+): Promise<Awaited<ReturnType<typeof validateRunEnvironmentCommand>>> {
+  return validateRunEnvironmentCommand(target);
+}
+
+export function cleanupRunEnvironment(
+  target: string,
+): Promise<Awaited<ReturnType<typeof cleanupRunEnvironmentCommand>>> {
+  return cleanupRunEnvironmentCommand(target);
+}
+
 export function getRunList(filter: RunListFilter = {}): RunSummary[] {
   return listRuns(filter);
 }
@@ -404,13 +442,13 @@ export function getAttachment(
 }
 
 export function getDefinitionList(
-  kind: "agent" | "assignment" | "launcher" | "task",
+  kind: "agent" | "assignment" | "launcher" | "task" | "environment",
 ): ReturnType<typeof listDefinitions> {
   return listDefinitions(kind);
 }
 
 export function getDefinition(
-  kind: "agent" | "assignment" | "launcher" | "task",
+  kind: "agent" | "assignment" | "launcher" | "task" | "environment",
   target: string,
   cwd?: string,
 ): DefinitionDetail {

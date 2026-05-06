@@ -31,8 +31,18 @@ import type { LockableField, VarDef } from "../config/schema.js";
 import { resolveAssignmentHooks } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
 import type { ResolvedHookDescriptor } from "../hooks/types.js";
+import {
+  buildEnvironmentLauncher,
+  cleanupExecutionEnvironment,
+  prepareExecutionEnvironment,
+  resolveFreshExecutionEnvironment,
+} from "./execution-environments.js";
 import { validateRunGroupId } from "./groups.js";
-import { interpolateResolvedLauncher, resolveFreshLauncherConfig } from "./launchers.js";
+import {
+  interpolateResolvedLauncher,
+  launcherAppliesToBackend,
+  resolveFreshLauncherConfig,
+} from "./launchers.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -78,7 +88,12 @@ import {
   appendRunBackendSessionHistorySyncFailedEvent,
   appendRunBackendSessionHistorySyncedEvent,
   appendRunBackendSessionUpdatedEvent,
+  appendRunContainerCleanupFailedEvent,
+  appendRunContainerCreatedEvent,
+  appendRunContainerRemovedEvent,
   appendRunCreatedEvent,
+  appendRunEnvironmentValidatedEvent,
+  appendRunEnvironmentValidationFailedEvent,
   appendRunFinishedEvent,
   appendRunResumeRejectedEvent,
   appendRunRetryingEvent,
@@ -129,6 +144,7 @@ export interface RunOverrides {
   maxRetries?: number;
   addedTasks?: string[];
   schedule?: ScheduleInput;
+  executionEnvironment?: string;
 }
 
 export interface RunOptions {
@@ -526,7 +542,7 @@ function buildRecurringCloneManifest(params: {
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 19,
+    schemaVersion: 20,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -576,6 +592,21 @@ function buildRecurringCloneManifest(params: {
     runtimeVars: { ...seed.runtimeVars },
     runtimeVarSources: cloneRuntimeVarSources(seed.runtimeVarSources),
     execution: sourceManifest.execution,
+    executionEnvironment:
+      seed.executionEnvironment?.mode === "managed"
+        ? {
+            ...seed.executionEnvironment,
+            containerName: `task-runner-${runId}`,
+            containerId: null,
+            cleanup: {
+              ...seed.executionEnvironment.cleanup,
+              cleanedAt: null,
+              lastError: null,
+            },
+            lastValidatedAt: null,
+            lastError: null,
+          }
+        : seed.executionEnvironment,
     brief: seed.brief,
     resolvedHooks: sourceManifest.resolvedHooks.map((descriptor) => ({
       ...descriptor,
@@ -590,6 +621,21 @@ function buildRecurringCloneManifest(params: {
       backendConfig: cloneBackendConfig(seed.backendConfig),
       resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(seed.launcher),
+      executionEnvironment:
+        seed.executionEnvironment?.mode === "managed"
+          ? {
+              ...seed.executionEnvironment,
+              containerName: `task-runner-${runId}`,
+              containerId: null,
+              cleanup: {
+                ...seed.executionEnvironment.cleanup,
+                cleanedAt: null,
+                lastError: null,
+              },
+              lastValidatedAt: null,
+              lastError: null,
+            }
+          : seed.executionEnvironment,
       lockedFields: [...seed.lockedFields],
       runGroupId: seed.runGroupId,
       dependencies: cloneRunDependencyRefs(seed.dependencies),
@@ -1363,6 +1409,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       if (overrides?.message && overrides.message.trim().length > 0) forbidden.push("message");
       if ((overrides?.addedTasks?.length ?? 0) > 0) forbidden.push("--add-task");
       if (overrides?.launcher !== undefined) forbidden.push("--launcher");
+      if (overrides?.executionEnvironment !== undefined) forbidden.push("--environment");
       if (overrides?.model !== undefined) forbidden.push("--model");
       if (overrides?.effort !== undefined) forbidden.push("--effort");
       if (overrides?.timeoutSec !== undefined) forbidden.push("--timeout-sec");
@@ -1486,6 +1533,25 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         }),
         injectedVars,
       );
+  let executionEnvironment = reusesFrozenSetup
+    ? resume.manifest.executionEnvironment
+    : resolveFreshExecutionEnvironment({
+        reference: loaded.executionEnvironment,
+        overrideEnvironment: overrides?.executionEnvironment,
+        cwd,
+        injectedVars,
+        runId,
+      });
+  if (executionEnvironment !== null && launcher.kind !== "direct") {
+    throw new ResumeError(
+      "execution environments cannot be combined with non-direct launchers; use one runtime wrapper mechanism per run",
+    );
+  }
+  if (executionEnvironment !== null && !launcherAppliesToBackend(currentBackend, backendConfig)) {
+    throw new ResumeError(
+      `execution environments only apply to subprocess-backed backend invocations; backend ${currentBackend.id} is direct for this run`,
+    );
+  }
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   let timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   let unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
@@ -1589,7 +1655,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 19,
+      schemaVersion: 20,
       runId,
       repo,
       agent: {
@@ -1639,6 +1705,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runtimeVars: { ...runtimeVars },
       runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
       execution,
+      executionEnvironment,
       brief: "",
       resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
         ...descriptor,
@@ -1655,6 +1722,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs,
         launcher: cloneResolvedLauncherConfig(launcher),
+        executionEnvironment,
         cwd,
         lockedFields: initialLockedFields,
         message,
@@ -1733,7 +1801,25 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }),
       injectedVars,
     );
+    executionEnvironment = resolveFreshExecutionEnvironment({
+      reference: loaded.executionEnvironment,
+      overrideEnvironment: overrides?.executionEnvironment,
+      cwd,
+      injectedVars,
+      runId,
+    });
+    if (executionEnvironment !== null && launcher.kind !== "direct") {
+      throw new ResumeError(
+        "execution environments cannot be combined with non-direct launchers; use one runtime wrapper mechanism per run",
+      );
+    }
+    if (executionEnvironment !== null && !launcherAppliesToBackend(currentBackend, backendConfig)) {
+      throw new ResumeError(
+        `execution environments only apply to subprocess-backed backend invocations; backend ${currentBackend.id} is direct for this run`,
+      );
+    }
     prepareState.manifest.launcher = cloneResolvedLauncherConfig(launcher);
+    prepareState.manifest.executionEnvironment = executionEnvironment;
     hookState = { ...prepareState.manifest.hookState };
     hookAttachments = prepareState.manifest.attachments.map((attachment) => ({ ...attachment }));
     hookNote = prepareState.manifest.note;
@@ -1878,7 +1964,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 19,
+      schemaVersion: 20,
       runId,
       repo,
       agent: {
@@ -1936,6 +2022,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runtimeVars: { ...runtimeVars },
       runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
       execution,
+      executionEnvironment,
       brief: initialPrompt,
       resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
         ...descriptor,
@@ -1952,6 +2039,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs,
         launcher: cloneResolvedLauncherConfig(launcher),
+        executionEnvironment,
         cwd,
         lockedFields: [...(hookLockedFields ?? frozenLockedFields)],
         message,
@@ -2167,6 +2255,50 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       workspaceDir,
       manifest,
     };
+  }
+
+  if (manifest.executionEnvironment !== null) {
+    let preparedEnvironment: RunManifest["executionEnvironment"];
+    const previousEnvironment = manifest.executionEnvironment;
+    try {
+      preparedEnvironment = await prepareExecutionEnvironment(manifest.executionEnvironment);
+    } catch (error) {
+      emitAuditEnvelope(
+        appendRunEnvironmentValidationFailedEvent({
+          manifest,
+          context: lifecycleContext,
+          error,
+        }),
+      );
+      throw error;
+    }
+    manifest.executionEnvironment = preparedEnvironment;
+    if (reusingWorkspace) {
+      await withTaskStateLockAsync(workspaceDir, async () => {
+        const latest = resolveResumeTarget(workspaceDir).manifest;
+        latest.executionEnvironment = preparedEnvironment;
+        writeManifest(workspaceDir, latest);
+      });
+    }
+    emitAuditEnvelope(
+      appendRunEnvironmentValidatedEvent({
+        manifest,
+        context: lifecycleContext,
+      }),
+    );
+    if (
+      previousEnvironment.mode === "managed" &&
+      previousEnvironment.containerId === null &&
+      preparedEnvironment?.mode === "managed" &&
+      preparedEnvironment.containerId !== null
+    ) {
+      emitAuditEnvelope(
+        appendRunContainerCreatedEvent({
+          manifest,
+          context: lifecycleContext,
+        }),
+      );
+    }
   }
 
   const addedTasks =
@@ -2603,20 +2735,25 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         emit: emitEvent,
       });
 
+      const backendInvokeEnv = buildBackendInvokeEnv({
+        recursionState,
+        runId: manifest.runId,
+        runGroupId: manifest.runGroupId,
+        cwd,
+      });
+      const environmentLauncher = buildEnvironmentLauncher(
+        manifest.executionEnvironment,
+        backendInvokeEnv,
+      );
       const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,
         cwd,
-        env: buildBackendInvokeEnv({
-          recursionState,
-          runId: manifest.runId,
-          runGroupId: manifest.runGroupId,
-          cwd,
-        }),
+        env: backendInvokeEnv,
         model,
         effort,
         backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),
-        launcher,
+        launcher: environmentLauncher ?? launcher,
         unrestricted,
         timeoutSec,
         resumeSessionId: sessionId ?? undefined,
@@ -2896,6 +3033,30 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     });
   } catch {
     // afterExit failures are warning-only; preserve the terminal result.
+  }
+
+  if (manifest.executionEnvironment?.mode === "managed") {
+    const cleanedEnvironment = await cleanupExecutionEnvironment(manifest.executionEnvironment);
+    withTaskStateLock(workspaceDir, () => {
+      const latest = resolveResumeTarget(workspaceDir).manifest;
+      latest.executionEnvironment = cleanedEnvironment;
+      writeManifest(workspaceDir, latest);
+      manifest = latest;
+    });
+    const cleanupError =
+      cleanedEnvironment?.mode === "managed" ? cleanedEnvironment.cleanup.lastError : null;
+    emitAuditEnvelope(
+      cleanupError
+        ? appendRunContainerCleanupFailedEvent({
+            manifest,
+            context: lifecycleContext,
+            error: cleanupError,
+          })
+        : appendRunContainerRemovedEvent({
+            manifest,
+            context: lifecycleContext,
+          }),
+    );
   }
 
   const recurrenceResult = withTaskStateLock(workspaceDir, () => {

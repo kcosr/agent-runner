@@ -8,6 +8,7 @@ import {
   addRunAttachmentFromStream,
   appendNotes,
   archive,
+  cleanupRunEnvironment,
   clearBackendSession,
   clearDependencies,
   clearGroup,
@@ -22,6 +23,7 @@ import {
   getRun,
   getRunAuditHistory,
   getRunBrief,
+  getRunEnvironment,
   getRunInputSurface,
   getRunList,
   getRunSummary,
@@ -47,6 +49,7 @@ import {
   updateRunNote,
   updateRunPinned,
   updateTask,
+  validateRunEnvironment,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import { loadCustomBackends, resolveBackend } from "@task-runner/core/backends/registry.js";
@@ -759,6 +762,7 @@ export async function serveDaemon(
   const app: DaemonHandlers = {
     getRun,
     getRunBrief,
+    getRunEnvironment,
     getRunList,
     getRunSummary,
     getRunAuditHistory,
@@ -786,6 +790,8 @@ export async function serveDaemon(
     setRunSchedule,
     clearRunSchedule,
     setRunScheduleEnabled,
+    validateRunEnvironment,
+    cleanupRunEnvironment,
     addRunAttachmentFromStream,
     removeRunAttachment,
     reset,
@@ -2943,6 +2949,48 @@ export async function serveDaemon(
             ),
           );
           return;
+        case "runs.environment.status":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.getRunEnvironment(
+                requiredRunIdString(
+                  asRecord(params, "runs.environment.status params").target,
+                  "target",
+                ),
+              ),
+            ),
+          );
+          return;
+        case "runs.environment.validate":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              await operations.validateRunEnvironment(
+                requiredRunIdString(
+                  asRecord(params, "runs.environment.validate params").target,
+                  "target",
+                ),
+              ),
+            ),
+          );
+          return;
+        case "runs.environment.cleanup":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              await operations.cleanupRunEnvironment(
+                requiredRunIdString(
+                  asRecord(params, "runs.environment.cleanup params").target,
+                  "target",
+                ),
+              ),
+            ),
+          );
+          return;
         case "tasks.list":
           sendJson(
             ws,
@@ -3137,6 +3185,23 @@ export async function serveDaemon(
             resultResponse(
               request.id,
               operations.getLauncher({
+                target: requiredString(parsed.target, "target"),
+                cwd: optionalString(parsed.cwd, "cwd"),
+              }),
+            ),
+          );
+          return;
+        }
+        case "environments.list":
+          sendJson(ws, resultResponse(request.id, operations.listEnvironments()));
+          return;
+        case "environments.get": {
+          const parsed = asRecord(params, "environments.get params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.getEnvironment({
                 target: requiredString(parsed.target, "target"),
                 cwd: optionalString(parsed.cwd, "cwd"),
               }),

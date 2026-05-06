@@ -402,6 +402,7 @@ function makeDetail(
         kind: "embedded",
       },
     },
+    executionEnvironment: null,
   } satisfies Omit<RunDetail, "capabilities" | "execution"> & {
     capabilities: RunDetail["capabilities"];
     execution: RunDetail["execution"];

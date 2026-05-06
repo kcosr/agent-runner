@@ -48,6 +48,13 @@ function writeLauncher(baseDir, name, body) {
   return path;
 }
 
+function writeEnvironment(baseDir, name, body) {
+  const path = join(baseDir, "environments", `${name}.yaml`);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, body.replaceAll("__NAME__", name));
+  return path;
+}
+
 test("CLI list tasks renders text and json task definition lists", () =>
   withRuntimeRoots("task-runner-task-def-cli-", ({ rootDir, configDir }) => {
     const orientPath = writeTask(
@@ -190,7 +197,7 @@ test("CLI show task reports usage and missing task failures", () =>
     assert.equal(missingTarget.status, 3);
     assert.equal(missingTarget.stdout, "");
     assert.match(missingTarget.stderr, /show task requires a name or path/);
-    assert.match(missingTarget.stderr, /show <agent\|assignment\|launcher\|task>/);
+    assert.match(missingTarget.stderr, /show <agent\|assignment\|launcher\|environment\|task>/);
 
     const missingTask = runCli(["show", "task", "missing/task"], { cwd: rootDir });
     assert.equal(missingTask.status, 3);
@@ -214,7 +221,7 @@ test("CLI show task reports usage and missing task failures", () =>
     );
   }));
 
-test("CLI definition renderer handles existing agent, assignment, and launcher details", () =>
+test("CLI definition renderer handles existing agent, assignment, launcher, and environment details", () =>
   withRuntimeRoots("task-runner-task-def-cli-", ({ rootDir, configDir }) => {
     const agentPath = writeAgent(
       configDir,
@@ -224,6 +231,7 @@ schemaVersion: 1
 name: __NAME__
 backend: codex
 model: gpt-5.5
+executionEnvironment: renderer-environment
 ---
 Review implementation details.
 `,
@@ -250,6 +258,18 @@ command: ssh
 args: [worker, run]
 `,
     );
+    const environmentPath = writeEnvironment(
+      configDir,
+      "renderer-environment",
+      `schemaVersion: 1
+name: __NAME__
+kind: container
+mode: existing
+engine: podman
+cwd: /workspace
+container: renderer-worker
+`,
+    );
 
     const agent = runCli(["show", "agent", "renderer-agent"], { cwd: rootDir });
     assertCliOk(agent);
@@ -257,6 +277,7 @@ args: [worker, run]
     assert.match(agent.stdout, /Agent: renderer-agent/);
     assert.match(agent.stdout, /backend:\s+codex/);
     assert.match(agent.stdout, /model:\s+gpt-5\.5/);
+    assert.match(agent.stdout, /environment:\s+renderer-environment/);
     assert.ok(agent.stdout.includes(`source:       ${agentPath}`));
     assert.match(agent.stdout, /Review implementation details\./);
 
@@ -278,4 +299,21 @@ args: [worker, run]
     assert.match(launcher.stdout, /command:\s+ssh/);
     assert.match(launcher.stdout, /args:\s+worker run/);
     assert.ok(launcher.stdout.includes(`source:       ${launcherPath}`));
+
+    const environments = runCli(["list", "environments"], { cwd: rootDir });
+    assertCliOk(environments);
+    assert.equal(environments.stderr, "");
+    assert.equal(environments.stdout, "  renderer-environment\n");
+
+    const environment = runCli(["show", "environment", "renderer-environment"], {
+      cwd: rootDir,
+    });
+    assertCliOk(environment);
+    assert.equal(environment.stderr, "");
+    assert.match(environment.stdout, /Environment: renderer-environment/);
+    assert.match(environment.stdout, /kind:\s+container/);
+    assert.match(environment.stdout, /mode:\s+existing/);
+    assert.match(environment.stdout, /engine:\s+podman/);
+    assert.match(environment.stdout, /container:\s+renderer-worker/);
+    assert.ok(environment.stdout.includes(`source:       ${environmentPath}`));
   }));

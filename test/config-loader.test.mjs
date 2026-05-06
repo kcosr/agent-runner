@@ -9,6 +9,8 @@ import {
   AssignmentConfigError,
   AssignmentNotFoundError,
   DefinitionListError,
+  EnvironmentConfigError,
+  EnvironmentNotFoundError,
   LauncherConfigError,
   LauncherNotFoundError,
   TaskConfigError,
@@ -17,10 +19,12 @@ import {
   listAgents,
   listAssignmentDefinitions,
   listAssignments,
+  listEnvironments,
   listLaunchers,
   listTaskDefinitions,
   loadAgentConfig,
   loadAssignmentConfig,
+  loadEnvironmentConfig,
   loadLauncherConfig,
   loadTaskConfig,
   resolveAgentPath,
@@ -77,6 +81,14 @@ function writeTask(baseDir, name, body) {
 
 function writeLauncher(baseDir, name, body, ext = ".yaml") {
   const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${name}${ext}`);
+  writeFileSync(path, body);
+  return path;
+}
+
+function writeEnvironment(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "environments");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${name}${ext}`);
   writeFileSync(path, body);
@@ -2241,6 +2253,55 @@ body
     });
   }));
 
+test("loadAgentConfig normalizes named and path execution environment authoring", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    const environmentPath = join(rootDir, "one-off-env.yaml");
+    writeFileSync(
+      environmentPath,
+      `schemaVersion: 1
+kind: container
+mode: existing
+cwd: /workspace
+container: worker
+`,
+    );
+    writeAgent(
+      configDir,
+      "named-environment",
+      `---
+schemaVersion: 1
+name: named-environment
+backend: claude
+executionEnvironment: dev-container
+---
+body
+`,
+    );
+    writeAgent(
+      configDir,
+      "path-environment",
+      `---
+schemaVersion: 1
+name: path-environment
+backend: claude
+executionEnvironment: ../../../one-off-env.yaml
+---
+body
+`,
+    );
+
+    assert.deepEqual(loadAgentConfig("named-environment", rootDir).executionEnvironment, {
+      kind: "name",
+      ref: "dev-container",
+      name: "dev-container",
+    });
+    assert.deepEqual(loadAgentConfig("path-environment", rootDir).executionEnvironment, {
+      kind: "path",
+      ref: "../../../one-off-env.yaml",
+      path: environmentPath,
+    });
+  }));
+
 test("loadAgentConfig rejects empty launcher strings at schema validation time", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
@@ -2261,6 +2322,109 @@ body
       (error) => {
         assert.ok(error instanceof AgentConfigError);
         assert.match(error.message, /launcher/i);
+        return true;
+      },
+    );
+  }));
+
+test("listEnvironments loads valid container definitions and skips invalid files with warnings", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    const existingPath = writeEnvironment(
+      configDir,
+      "existing-dev",
+      `schemaVersion: 1
+name: existing-dev
+kind: container
+mode: existing
+engine: podman
+cwd: /workspace
+container: devbox
+expectedMounts:
+  - hostPath: /home/user/repo
+    containerPath: /workspace
+    mode: rw
+`,
+    );
+    const managedPath = writeEnvironment(
+      configDir,
+      "managed-dev",
+      `schemaVersion: 1
+kind: container
+mode: managed
+cwd: /workspace
+image: node:22
+mounts:
+  - hostPath: /home/user/repo
+    containerPath: /workspace
+    mode: rw
+network: none
+cleanup:
+  policy: manual
+`,
+    );
+    const badPath = writeEnvironment(
+      configDir,
+      "bad",
+      `schemaVersion: 1
+kind: container
+mode: managed
+cwd: workspace
+`,
+    );
+
+    const result = listEnvironments();
+    assert.deepEqual(result.entries, [
+      { name: "existing-dev", path: existingPath, root: "config" },
+      { name: "managed-dev", path: managedPath, root: "config" },
+    ]);
+    assert.equal(result.warnings.length, 1);
+    assert.match(result.warnings[0], /Invalid environment config/);
+    assert.ok(result.warnings[0].includes(badPath));
+    assert.match(result.warnings[0], /image/);
+
+    const existing = loadEnvironmentConfig("existing-dev");
+    assert.equal(existing.config.mode, "existing");
+    assert.equal(existing.config.engine, "podman");
+    assert.equal(existing.config.container, "devbox");
+    assert.equal(existing.config.expectedMounts[0].mode, "rw");
+
+    const managed = loadEnvironmentConfig("managed-dev");
+    assert.equal(managed.sourcePath, managedPath);
+    assert.equal(managed.config.mode, "managed");
+    assert.equal(managed.config.engine, "docker");
+    assert.equal(managed.config.lifetime, "run");
+    assert.equal(managed.config.network, "none");
+    assert.equal(managed.config.cleanup.policy, "manual");
+  }));
+
+test("loadEnvironmentConfig rejects missing and targeted invalid environment definitions", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    const brokenPath = writeEnvironment(
+      configDir,
+      "broken",
+      `schemaVersion: 1
+kind: container
+mode: existing
+cwd: /workspace
+`,
+    );
+
+    assert.throws(
+      () => loadEnvironmentConfig("missing", rootDir),
+      (error) => {
+        assert.ok(error instanceof EnvironmentNotFoundError);
+        assert.deepEqual(error.searched, [
+          join(configDir, "environments", "missing.yaml"),
+          join(configDir, "environments", "missing.yml"),
+        ]);
+        return true;
+      },
+    );
+    assert.throws(
+      () => loadEnvironmentConfig(brokenPath, rootDir),
+      (error) => {
+        assert.ok(error instanceof EnvironmentConfigError);
+        assert.match(error.message, /container/);
         return true;
       },
     );

@@ -7,6 +7,7 @@ import {
   addRunAttachmentFromFile,
   appendNotes,
   archive,
+  cleanupRunEnvironment,
   clearBackendSession,
   clearDependencies,
   clearGroup,
@@ -20,6 +21,7 @@ import {
   getRun,
   getRunAuditHistory,
   getRunBrief,
+  getRunEnvironment,
   getRunList,
   getTask,
   getTaskList,
@@ -42,6 +44,7 @@ import {
   updateRunNote,
   updateRunPinned,
   updateTask,
+  validateRunEnvironment,
 } from "@task-runner/core/app/service.js";
 import {
   AgentConfigError,
@@ -49,6 +52,8 @@ import {
   AssignmentConfigError,
   AssignmentNotFoundError,
   DefinitionListError,
+  EnvironmentConfigError,
+  EnvironmentNotFoundError,
   LauncherConfigError,
   LauncherNotFoundError,
   TaskConfigError,
@@ -68,6 +73,7 @@ import {
 } from "@task-runner/core/core/commands/service.js";
 import { HookRuntimeError } from "@task-runner/core/core/hooks/runtime.js";
 import { AttachmentError } from "@task-runner/core/core/run/attachments.js";
+import { ExecutionEnvironmentError } from "@task-runner/core/core/run/execution-environments.js";
 import { RunGroupValidationError, validateRunGroupId } from "@task-runner/core/core/run/groups.js";
 import { RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
 import { ReconfigureLockedFieldError } from "@task-runner/core/core/run/reconfigure.js";
@@ -153,6 +159,12 @@ Commands:
   run status <id>         Read a run and print its current status.
   run audit <id>          Read the persisted audit history for a run.
   run brief <id>          Print the canonical worker handoff for a run.
+  run environment status <id>
+                          Print run execution environment state.
+  run environment validate <id>
+                          Validate or prepare the run execution environment.
+  run environment cleanup <id>
+                          Cleanup a task-runner-managed environment.
   run reconfigure <id>    Patch vars/message for an initialized run.
   run queue-message <id> <text>
                           Queue a follow-up message for a live run.
@@ -212,9 +224,9 @@ Commands:
                           Remove one attachment from a run.
   attachment download <id> <attachment-id> <output-path>
                           Download one attachment from a run.
-  list <agents|assignments|launchers|tasks|runs>
+  list <agents|assignments|launchers|environments|tasks|runs>
                           Enumerate definitions or runs.
-  show <agent|assignment|launcher|task> <name|path>
+  show <agent|assignment|launcher|environment|task> <name|path>
                           Print details of a specific definition.
 
 Arguments:
@@ -261,6 +273,7 @@ Execution options:
   --cwd <path>            Override the run cwd, or scope list runs to a cwd.
   --backend <id>          Override the agent's backend.
   --launcher <name>       Override the run launcher by named launcher id.
+  --environment <name>    Override the run execution environment.
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level.
   --timeout-sec <n>       Override the per-attempt timeout.
@@ -348,6 +361,8 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof AgentConfigError ||
     err instanceof AssignmentNotFoundError ||
     err instanceof AssignmentConfigError ||
+    err instanceof EnvironmentNotFoundError ||
+    err instanceof EnvironmentConfigError ||
     err instanceof LauncherNotFoundError ||
     err instanceof LauncherConfigError ||
     err instanceof TaskNotFoundError ||
@@ -359,6 +374,7 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof LockedFieldError ||
     err instanceof ReconfigureLockedFieldError ||
     err instanceof ResumeError ||
+    err instanceof ExecutionEnvironmentError ||
     err instanceof HookRuntimeError ||
     err instanceof RunGroupValidationError
   ) {
@@ -435,6 +451,11 @@ const DEFINITION_LIST_DESCRIPTORS = {
     responseKey: "assignments",
   },
   launchers: { kind: "launcher", rpcMethod: "launchers.list", responseKey: "launchers" },
+  environments: {
+    kind: "environment",
+    rpcMethod: "environments.list",
+    responseKey: "environments",
+  },
   tasks: { kind: "task", rpcMethod: "taskDefinitions.list", responseKey: "taskDefinitions" },
 } as const;
 
@@ -453,6 +474,11 @@ const DEFINITION_SHOW_DESCRIPTORS = {
   agent: { kind: "agent", rpcMethod: "agents.get", responseKey: "agent" },
   assignment: { kind: "assignment", rpcMethod: "assignments.get", responseKey: "assignment" },
   launcher: { kind: "launcher", rpcMethod: "launchers.get", responseKey: "launcher" },
+  environment: {
+    kind: "environment",
+    rpcMethod: "environments.get",
+    responseKey: "environment",
+  },
   task: { kind: "task", rpcMethod: "taskDefinitions.get", responseKey: "taskDefinition" },
 } as const;
 
@@ -843,6 +869,95 @@ async function runRunBrief(parsed: ParsedArgs, connect?: DaemonConnectContext): 
   }
 }
 
+function renderRunEnvironmentResult(result: ReturnType<typeof getRunEnvironment>): string {
+  const env = result.environment;
+  if (env === null) {
+    return `Run ${result.manifest.runId} has no execution environment.\n`;
+  }
+  const lines = [
+    `Run: ${result.manifest.runId}`,
+    `Environment: ${env.name ?? "(inline)"}`,
+    `  kind:          ${env.kind}`,
+    `  mode:          ${env.mode}`,
+    `  engine:        ${env.engine}`,
+    `  cwd:           ${env.cwd}`,
+    `  validatedAt:   ${env.lastValidatedAt ?? "never"}`,
+  ];
+  if (env.lastError) {
+    lines.push(`  lastError:     ${env.lastError}`);
+  }
+  if (env.mode === "existing") {
+    lines.push(`  container:     ${env.container}`);
+    lines.push(`  containerId:   ${env.containerIdAtValidation ?? "unknown"}`);
+    lines.push(`  mounts:        ${env.expectedMounts.length}`);
+  } else {
+    lines.push(`  image:         ${env.image}`);
+    lines.push(`  containerName: ${env.containerName}`);
+    lines.push(`  containerId:   ${env.containerId ?? "not-created"}`);
+    lines.push(`  cleanup:       ${env.cleanup.policy}`);
+    lines.push(`  cleanedAt:     ${env.cleanup.cleanedAt ?? "not-cleaned"}`);
+    if (env.cleanup.lastError) {
+      lines.push(`  cleanupError:  ${env.cleanup.lastError}`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function runEnvironmentCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
+  try {
+    const action = parsed.positionals[0];
+    const target = normalizeRunIdTarget(parsed.positionals[1], "run environment");
+    if (action !== "status" && action !== "validate" && action !== "cleanup") {
+      process.stderr.write("task-runner: run environment requires status, validate, or cleanup\n");
+      process.stderr.write("Usage: task-runner run environment <status|validate|cleanup> <id>\n");
+      process.exit(3);
+    }
+    if (!target) {
+      process.stderr.write(`task-runner: run environment ${action} requires a run id\n`);
+      process.stderr.write("Usage: task-runner run environment <status|validate|cleanup> <id>\n");
+      process.exit(3);
+    }
+    if (parsed.positionals.length > 2) {
+      process.stderr.write(
+        `task-runner: run environment ${action} takes exactly one run id; got "${parsed.positionals[2]}"\n`,
+      );
+      process.exit(3);
+    }
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run environment ${action} only supports <run-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const result =
+      connect === undefined
+        ? action === "status"
+          ? getRunEnvironment(target)
+          : action === "validate"
+            ? await validateRunEnvironment(target)
+            : await cleanupRunEnvironment(target)
+        : await withDaemonClient(connect, (client) =>
+            client
+              .call<ReturnType<typeof getRunEnvironment>>(`runs.environment.${action}`, {
+                target,
+              })
+              .then((r) => r),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(renderRunEnvironmentResult(result));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
 function queuedMessageText(parsed: ParsedArgs): string | undefined {
   if (parsed.positionals.length < 2) {
     return undefined;
@@ -1079,10 +1194,10 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
   const definitionDescriptor = getDefinitionListDescriptor(kindArg);
   if (definitionDescriptor === undefined && kindArg !== "runs") {
     process.stderr.write(
-      `task-runner: list requires a kind: agents, assignments, launchers, tasks, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `task-runner: list requires a kind: agents, assignments, launchers, environments, tasks, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner list <agents|assignments|launchers|tasks|runs> [--cwd <path> | --repo <name> | --global | --group-id <group-id>] [--include-archived] [--output-format json]\n",
+      "Usage: task-runner list <agents|assignments|launchers|environments|tasks|runs> [--cwd <path> | --repo <name> | --global | --group-id <group-id>] [--include-archived] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -1176,10 +1291,10 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
   const definitionDescriptor = getDefinitionShowDescriptor(kindArg);
   if (definitionDescriptor === undefined) {
     process.stderr.write(
-      `task-runner: show requires a kind: agent, assignment, launcher, or task${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `task-runner: show requires a kind: agent, assignment, launcher, environment, or task${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment|launcher|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
+      "Usage: task-runner show <agent|assignment|launcher|environment|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -1188,7 +1303,7 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
   if (!target) {
     process.stderr.write(`task-runner: show ${kindArg} requires a name or path\n`);
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment|launcher|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
+      "Usage: task-runner show <agent|assignment|launcher|environment|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -1275,6 +1390,7 @@ function unsupportedFlagsForGroupedCommand(
   if (!opts.allowRunListScope && parsed.repo !== undefined) unsupported.push("--repo");
   if (!opts.allowRunListScope && parsed.global) unsupported.push("--global");
   if (parsed.backend !== undefined) unsupported.push("--backend");
+  if (parsed.environment !== undefined) unsupported.push("--environment");
   if (parsed.model !== undefined) unsupported.push("--model");
   if (parsed.effort !== undefined) unsupported.push("--effort");
   if (parsed.timeoutSec !== undefined) unsupported.push("--timeout-sec");
@@ -2888,6 +3004,9 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "brief") {
       await runRunBrief(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "environment") {
+      await runEnvironmentCommand(parsed, daemonConnect);
     }
     if (parsed.subcommand === "reconfigure") {
       await runReconfigureCommand(parsed, daemonConnect);

@@ -197,6 +197,7 @@ export interface RunDetail {
   lockedFields: LockableField[];
   runtimeVars: Record<string, unknown>;
   execution: RunExecution;
+  executionEnvironment: RunManifest["executionEnvironment"];
   capabilities: RunCapabilities;
 }
 
@@ -622,6 +623,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     lockedFields: [...manifest.lockedFields],
     runtimeVars: redactRuntimeVarsForDisplay(manifest),
     execution: manifest.execution,
+    executionEnvironment: manifest.executionEnvironment,
     capabilities: deriveRunCapabilities(manifest, dependencyState),
   };
 }

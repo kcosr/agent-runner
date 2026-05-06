@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `19`. Older manifest shapes are not
+The current manifest schema is version `20`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -43,6 +43,7 @@ instructions:
 - `timeoutSec`
 - `unrestricted`
 - optional `launcher`
+- optional `executionEnvironment`
 - optional `backendConfig` runtime config keyed by backend name
 - optional `backendArgs` entries keyed by backend name
 - `lockedFields`
@@ -66,6 +67,28 @@ A launcher definition is a named subprocess prefix stored under
 - fresh-run/init callers may override with named-only `--launcher`
 - launchers are resolved once at fresh-run/init time and frozen into the
   manifest and reset seed
+
+### Execution Environment
+
+An execution environment is a named container definition stored under
+`${TASK_RUNNER_CONFIG_DIR}/environments/*.yaml|*.yml`. Agents may select
+one with `executionEnvironment`, and fresh `run` / `init` callers may
+override that selection with `--environment <name|path>`.
+
+The current environment implementation supports `kind: container` with
+two modes:
+
+- `existing` validates and executes inside an already-running Docker or
+  Podman container without stopping or removing it.
+- `managed` creates a run-scoped idle container, executes backend
+  subprocesses through `docker exec` / `podman exec`, and records cleanup
+  state on terminal cleanup.
+
+Execution environments are resolved after final cwd/runtime vars are
+known, frozen into `manifest.executionEnvironment`, and copied into
+`manifest.resetSeed.executionEnvironment`. They are separate from
+`manifest.execution`, which records embedded vs daemon controller
+provenance.
 
 ### Assignment
 
@@ -98,6 +121,7 @@ Canonical definition identity comes from the on-disk key:
 - assignments: slash-relative directory under `assignments/`
 - tasks: slash-relative file under `tasks/`
 - launchers: slash-relative file under `launchers/`
+- environments: slash-relative file under `environments/`
 
 Discovery warns and skips definitions whose authored internal id does
 not match that canonical key, while direct named/path loads of the same
@@ -119,6 +143,7 @@ The canonical record is `run.json`. Important persisted fields:
 - `backend`, `model`, `effort`, `backendConfig`,
   `resolvedBackendArgs`, `timeoutSec`, `unrestricted`,
   `maxAttemptsPerSession`, `launcher`
+- `executionEnvironment` (`null` for host execution)
 - `lockedFields` (union of agent and assignment locks)
 - `status`, `exitCode`
 - `startedAt`, `updatedAt`, `endedAt`, `archivedAt`
@@ -153,7 +178,9 @@ the next session. Attempts are backend invocations within a session.
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
 
-Manifest schema version 19 adds backend-session history provenance and
+Manifest schema version 20 adds frozen execution environment state for
+host or containerized execution. Manifest schema version 19 adds
+backend-session history provenance and
 sync state. Task-runner-owned records carry
 `provenance.kind: "task_runner"`. Backend-imported records carry
 `provenance.kind: "backend_session"` plus backend name, backend session

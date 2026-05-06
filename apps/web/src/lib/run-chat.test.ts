@@ -117,6 +117,7 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
       hostMode: "embedded",
       controller: { kind: "embedded" },
     },
+    executionEnvironment: null,
     capabilities: {
       canArchive: true,
       canUnarchive: false,

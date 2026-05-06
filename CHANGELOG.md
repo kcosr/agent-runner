@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `20`. Runs now persist frozen
+  `executionEnvironment` state on the manifest and reset seed so
+  container execution can be resumed, reset, validated, and cleaned up
+  from the run record. Older manifests are not dual-read by current code.
 - Manifest schema version is now `19`. Runs now require
   backend-session sync state and explicit provenance on session and attempt
   records. Use `scripts/migrate-manifests-v19.mjs` before resuming schema
@@ -121,6 +125,16 @@
 
 ### Added
 
+- Added first-class container execution environments. Agents can select
+  named environment definitions from
+  `${TASK_RUNNER_CONFIG_DIR}/environments/*.yaml|*.yml`, fresh runs can
+  override them with `--environment`, and task-runner can validate
+  existing containers or create run-scoped managed containers before
+  subprocess-backed backend invocation.
+- Added `task-runner list environments`,
+  `task-runner show environment <name|path>`, and
+  `task-runner run environment status|validate|cleanup <run-id>` across
+  embedded and connected CLI paths.
 - Added first-class `opencode` backend support via `opencode run --format
   json`, including resume ids, model/effort/name/unrestricted argument
   mapping, live JSON text capture, and SQLite-backed session validation

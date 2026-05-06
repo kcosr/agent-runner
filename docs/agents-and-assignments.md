@@ -19,6 +19,8 @@ ${TASK_RUNNER_CONFIG_DIR}/
 │   └── <task-id>.md
 ├── launchers/
 │   └── <launcher-name>.yaml
+├── environments/
+│   └── <environment-name>.yaml
 ├── hooks/
 │   └── <hook-name>/
 │       └── hook.ts
@@ -63,6 +65,7 @@ backendArgs:                # optional per-backend extra argv tokens
     extraArgs: ["--model", "gpt-5.4"]
 lockedFields: []            # optional list of lockable fields
 launcher: ssh-docker        # optional named launcher or inline object
+executionEnvironment: dev-container  # optional named/path container environment
 ---
 ```
 
@@ -232,6 +235,53 @@ launcher:
 The built-in `direct` launcher has no command or args to interpolate.
 Unknown launcher tokens follow the normal `{{key}}` interpolation rule:
 they remain literal.
+
+## Execution environment definitions
+
+An environment file is YAML only, not markdown:
+
+```yaml
+schemaVersion: 1
+name: dev-container
+kind: container
+mode: managed
+engine: podman
+image: node:22
+cwd: "{{cwd}}"
+mounts:
+  - hostPath: "{{cwd}}"
+    containerPath: "{{cwd}}"
+    mode: rw
+cleanup:
+  policy: terminal
+```
+
+Existing-container definitions attach to an externally managed
+container:
+
+```yaml
+schemaVersion: 1
+name: external-dev
+kind: container
+mode: existing
+engine: docker
+container: devbox
+cwd: "{{cwd}}"
+expectedMounts:
+  - hostPath: "{{cwd}}"
+    containerPath: "{{cwd}}"
+    mode: rw
+```
+
+Agents reference environments with `executionEnvironment:
+dev-container`. Fresh `run` and `init` calls may override the agent
+selection with `--environment <name|path>`. The resolved environment is
+frozen on the run manifest and reset seed; resume and reset do not
+re-read current environment files.
+
+Container execution is limited to subprocess-backed backends and the
+built-in `direct` launcher. Passive runs, Codex websocket/UDS
+transports, and non-direct launchers reject container environments.
 
 ## Assignment definition
 

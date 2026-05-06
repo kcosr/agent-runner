@@ -2,6 +2,11 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, extname, relative, resolve } from "node:path";
 import matter from "gray-matter";
 import {
+  ENVIRONMENT_FILE_EXTENSIONS,
+  type EnvironmentReference,
+  type LoadedEnvironmentDefinition,
+} from "../core/config/environments.js";
+import {
   type AgentLauncherReference,
   DIRECT_LAUNCHER_NAME,
   LAUNCHER_FILE_EXTENSIONS,
@@ -11,17 +16,20 @@ import { AD_HOC_AGENT_NAME } from "../core/config/loaded.js";
 import type { LoadedAgent, LoadedAssignment, LoadedTaskDefinition } from "../core/config/loaded.js";
 import {
   type AuthoredAssignmentConfig,
+  type EnvironmentDefinitionConfig,
   type LauncherDefinitionConfig,
   type TaskDef,
   agentConfigSchema,
   assignmentConfigSchema,
   authoredAssignmentConfigSchema,
+  environmentDefinitionSchema,
   launcherDefinitionSchema,
   taskDefinitionConfigSchema,
 } from "../core/config/schema.js";
 import {
   definitionLayout,
   resolveDefinitionRoot,
+  resolveEnvironmentsRoot,
   resolveLaunchersRoot,
   resolveStringRef,
   resolveTasksRoot,
@@ -30,8 +38,8 @@ import {
 type PathSegment = string | number;
 type AuthoredDefinitionKind = "agent" | "assignment" | "task";
 type NamedDefinitionKind = "agent" | "assignment";
-type CanonicalDefinitionKind = AuthoredDefinitionKind | "launcher";
-export type DefinitionKind = NamedDefinitionKind | "launcher" | "task";
+type CanonicalDefinitionKind = AuthoredDefinitionKind | "launcher" | "environment";
+export type DefinitionKind = NamedDefinitionKind | "launcher" | "task" | "environment";
 type ExactScalarKind = "string" | "number" | "boolean";
 type InterpolationSurface =
   | { mode: "exact"; scalarKind: ExactScalarKind; allowLiteral: boolean }
@@ -145,6 +153,28 @@ export class LauncherConfigError extends Error {
   }
 }
 
+export class EnvironmentNotFoundError extends Error {
+  constructor(
+    public readonly arg: string,
+    public readonly searched: string[],
+  ) {
+    super(
+      `Environment not found: ${arg}\n  searched:\n${searched.map((s) => `    - ${s}`).join("\n")}`,
+    );
+    this.name = "EnvironmentNotFoundError";
+  }
+}
+
+export class EnvironmentConfigError extends Error {
+  constructor(
+    public readonly sourcePath: string,
+    public readonly issues: string,
+  ) {
+    super(`Invalid environment config at ${sourcePath}:\n${issues}`);
+    this.name = "EnvironmentConfigError";
+  }
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -169,6 +199,7 @@ function classifyAgentSurface(path: PathSegment[]): InterpolationSurface {
       case "model":
       case "effort":
       case "launcher":
+      case "executionEnvironment":
         return { mode: "exact", scalarKind: "string", allowLiteral: false };
       case "timeoutSec":
         return { mode: "exact", scalarKind: "number", allowLiteral: false };
@@ -776,7 +807,12 @@ function canonicalDefinitionIdFromPath(kind: CanonicalDefinitionKind, sourcePath
     return fromRoot ?? basename(dirname(sourcePath));
   }
 
-  const root = kind === "task" ? resolveTasksRoot() : resolveLaunchersRoot();
+  const root =
+    kind === "task"
+      ? resolveTasksRoot()
+      : kind === "launcher"
+        ? resolveLaunchersRoot()
+        : resolveEnvironmentsRoot();
   const fromRoot = relativePathWithinRoot(sourcePath, root);
   const relativeFilePath = fromRoot ?? basename(sourcePath);
   return normalizePathKey(
@@ -794,7 +830,12 @@ function isWithinCanonicalDefinitionRoot(
   if (kind === "agent" || kind === "assignment") {
     return relativePathWithinRoot(dirname(sourcePath), resolveDefinitionRoot(kind)) !== null;
   }
-  const root = kind === "task" ? resolveTasksRoot() : resolveLaunchersRoot();
+  const root =
+    kind === "task"
+      ? resolveTasksRoot()
+      : kind === "launcher"
+        ? resolveLaunchersRoot()
+        : resolveEnvironmentsRoot();
   return relativePathWithinRoot(sourcePath, root) !== null;
 }
 
@@ -817,8 +858,18 @@ function isLauncherFileName(name: string): boolean {
   );
 }
 
+function isEnvironmentFileName(name: string): boolean {
+  return ENVIRONMENT_FILE_EXTENSIONS.includes(
+    extname(name) as (typeof ENVIRONMENT_FILE_EXTENSIONS)[number],
+  );
+}
+
 function launcherCanonicalNameFromPath(sourcePath: string): string {
   return canonicalDefinitionIdFromPath("launcher", sourcePath);
+}
+
+function environmentCanonicalNameFromPath(sourcePath: string): string {
+  return canonicalDefinitionIdFromPath("environment", sourcePath);
 }
 
 function toLauncherIssues(issues: { path: PathSegment[]; message: string }[]): string {
@@ -839,6 +890,26 @@ function loadLauncherYaml(sourcePath: string): unknown {
     return matter(`---\n${raw}\n---\n`).data;
   } catch (error) {
     throw new LauncherConfigError(
+      sourcePath,
+      error instanceof Error ? `  - ${error.message}` : `  - ${String(error)}`,
+    );
+  }
+}
+
+function loadEnvironmentYaml(sourcePath: string): unknown {
+  const ext = extname(sourcePath);
+  if (!ENVIRONMENT_FILE_EXTENSIONS.includes(ext as (typeof ENVIRONMENT_FILE_EXTENSIONS)[number])) {
+    throw new EnvironmentConfigError(
+      sourcePath,
+      `  - extension "${ext || "(none)"}" is not supported; use .yaml or .yml`,
+    );
+  }
+
+  try {
+    const raw = readFileSync(sourcePath, "utf8");
+    return matter(`---\n${raw}\n---\n`).data;
+  } catch (error) {
+    throw new EnvironmentConfigError(
       sourcePath,
       error instanceof Error ? `  - ${error.message}` : `  - ${String(error)}`,
     );
@@ -894,6 +965,42 @@ function loadLauncherDefinitionFromPath(
   };
 }
 
+function cloneEnvironmentConfig(config: EnvironmentDefinitionConfig): EnvironmentDefinitionConfig {
+  return structuredClone(config);
+}
+
+function loadEnvironmentDefinitionFromPath(
+  sourcePath: string,
+  options: { strictIdentity: boolean },
+): LoadedEnvironmentDefinition {
+  const configData = loadEnvironmentYaml(sourcePath);
+  const parsed = environmentDefinitionSchema.safeParse(configData);
+  if (!parsed.success) {
+    throw new EnvironmentConfigError(sourcePath, formatConfigIssues(parsed.error.issues));
+  }
+
+  const config = parsed.data;
+  const canonicalName = environmentCanonicalNameFromPath(sourcePath);
+  const withinRoot = isWithinCanonicalDefinitionRoot("environment", sourcePath);
+  if (config.name !== undefined && config.name !== canonicalName && withinRoot) {
+    throw new EnvironmentConfigError(
+      sourcePath,
+      formatIdentityMismatch("name", config.name, canonicalName, options.strictIdentity),
+    );
+  }
+  const resolvedName = !withinRoot && config.name !== undefined ? config.name : canonicalName;
+
+  return {
+    name: resolvedName,
+    sourcePath,
+    root: "config",
+    config: cloneEnvironmentConfig({
+      ...config,
+      name: config.name,
+    }),
+  };
+}
+
 function normalizeAgentLauncherReference(
   launcher: LoadedAgent["config"]["launcher"],
   sourcePath: string,
@@ -922,6 +1029,28 @@ function normalizeAgentLauncherReference(
       command: launcher.command,
       args: [...(launcher.args ?? [])],
     },
+  };
+}
+
+function normalizeAgentEnvironmentReference(
+  environment: LoadedAgent["config"]["executionEnvironment"],
+  sourcePath: string,
+): EnvironmentReference | undefined {
+  if (environment === undefined) {
+    return undefined;
+  }
+  const resolved = resolveStringRef(environment, dirname(sourcePath));
+  if (resolved.kind === "path") {
+    return {
+      kind: "path",
+      ref: resolved.ref,
+      path: resolved.path,
+    };
+  }
+  return {
+    kind: "name",
+    ref: resolved.ref,
+    name: resolved.name,
   };
 }
 
@@ -1070,6 +1199,10 @@ function loadAgentDefinitionFromPath(
     config: loaded.config,
     instructions: loaded.instructions,
     launcher: normalizeAgentLauncherReference(loaded.config.launcher, sourcePath),
+    executionEnvironment: normalizeAgentEnvironmentReference(
+      loaded.config.executionEnvironment,
+      sourcePath,
+    ),
     sourcePath,
   };
 }
@@ -1289,6 +1422,10 @@ function resolveNamedLauncherPath(name: string): { path: string; searched: strin
   return resolveNamedFilePath(resolveLaunchersRoot(), name, LAUNCHER_FILE_EXTENSIONS);
 }
 
+function resolveNamedEnvironmentPath(name: string): { path: string; searched: string[] } {
+  return resolveNamedFilePath(resolveEnvironmentsRoot(), name, ENVIRONMENT_FILE_EXTENSIONS);
+}
+
 export function resolveLauncherPath(arg: string, cwd: string = process.cwd()): string {
   if (arg === DIRECT_LAUNCHER_NAME) {
     return DIRECT_LAUNCHER_NAME;
@@ -1355,6 +1492,66 @@ export function listLaunchers(): DefinitionListWarnings {
       entries.push({ name: loaded.name, path: loaded.sourcePath, root: "config" });
     } catch (error) {
       if (error instanceof LauncherConfigError) {
+        warnings.push(error.message);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return { entries, warnings };
+}
+
+export function resolveEnvironmentPath(arg: string, cwd: string = process.cwd()): string {
+  const resolved = resolveStringRef(arg, cwd);
+  if (resolved.kind === "path") {
+    if (!existsSync(resolved.path)) {
+      throw new EnvironmentNotFoundError(arg, [resolved.path]);
+    }
+    return resolved.path;
+  }
+  const { path, searched } = resolveNamedEnvironmentPath(resolved.name);
+  if (!path) {
+    throw new EnvironmentNotFoundError(arg, searched);
+  }
+  return path;
+}
+
+export function loadEnvironmentConfig(
+  arg: string,
+  cwd: string = process.cwd(),
+): LoadedEnvironmentDefinition {
+  const resolved = resolveStringRef(arg, cwd);
+  if (resolved.kind === "path") {
+    const sourcePath = resolveEnvironmentPath(arg, cwd);
+    return loadEnvironmentDefinitionFromPath(sourcePath, { strictIdentity: true });
+  }
+  const discovered = listEnvironments();
+  const entry = discovered.entries.find((candidate) => candidate.name === resolved.name);
+  if (!entry) {
+    const { searched } = resolveNamedEnvironmentPath(resolved.name);
+    throw new EnvironmentNotFoundError(arg, searched);
+  }
+  if (entry.path === null) {
+    throw new EnvironmentNotFoundError(arg, []);
+  }
+  return loadEnvironmentDefinitionFromPath(entry.path, { strictIdentity: true });
+}
+
+export function listEnvironments(): DefinitionListWarnings {
+  const entries: DefinitionEntry[] = [];
+  const warnings: string[] = [];
+  const sourcePaths = discoverDefinitionSourcePaths(
+    resolveEnvironmentsRoot(),
+    isEnvironmentFileName,
+  );
+
+  for (const sourcePath of sourcePaths) {
+    try {
+      const loaded = loadEnvironmentDefinitionFromPath(sourcePath, { strictIdentity: false });
+      entries.push({ name: loaded.name, path: loaded.sourcePath, root: "config" });
+    } catch (error) {
+      if (error instanceof EnvironmentConfigError) {
         warnings.push(error.message);
         continue;
       }

@@ -12,10 +12,12 @@ import {
   type DefinitionKind,
   listAgentDefinitions,
   listAssignmentDefinitions,
+  listEnvironments,
   listLaunchers,
   listTaskDefinitions,
   loadAgentConfig,
   loadAssignmentConfig,
+  loadEnvironmentConfig,
   loadLauncherConfig,
   loadTaskConfig,
 } from "../../config/loader.js";
@@ -60,6 +62,7 @@ import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { startDebugPerfTimer } from "../../util/debug-perf.js";
 import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
+import type { LoadedEnvironmentDefinition } from "../config/environments.js";
 import type { LoadedLauncherDefinition } from "../config/launchers.js";
 import type { LoadedAgent, LoadedAssignment, LoadedTaskDefinition } from "../config/loaded.js";
 import { createHookExecutionState, runTaskTransitionHooks } from "../hooks/runtime.js";
@@ -82,6 +85,10 @@ import {
   resolveDependents,
   wouldCreateDependencyCycle,
 } from "../run/dependencies.js";
+import {
+  cleanupExecutionEnvironment,
+  prepareExecutionEnvironment,
+} from "../run/execution-environments.js";
 import { RunGroupValidationError, listRunGroupMembers, validateRunGroupId } from "../run/groups.js";
 import {
   ResumeError,
@@ -161,12 +168,21 @@ export type DefinitionDetailsResult =
       loaded: LoadedLauncherDefinition;
     }
   | {
+      kind: "environment";
+      loaded: LoadedEnvironmentDefinition;
+    }
+  | {
       kind: "task";
       loaded: LoadedTaskDefinition;
     };
 
 export interface RunResetResult {
   manifest: RunManifest;
+}
+
+export interface RunEnvironmentResult {
+  manifest: RunManifest;
+  environment: RunManifest["executionEnvironment"];
 }
 
 export type RunListEntry = RunSummary;
@@ -957,6 +973,14 @@ export function readBrief(target: string): BriefCommandResult {
 }
 
 export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
+  if (kind === "environment") {
+    const result = listEnvironments();
+    return {
+      kind,
+      entries: result.entries,
+      warnings: result.warnings,
+    };
+  }
   if (kind === "launcher") {
     const result = listLaunchers();
     return {
@@ -987,6 +1011,60 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
     entries: result.entries,
     warnings: result.warnings,
   };
+}
+
+export function readRunEnvironment(target: string): RunEnvironmentResult {
+  const resolved = resolveRun(target);
+  return {
+    manifest: resolved.manifest,
+    environment: resolved.manifest.executionEnvironment,
+  };
+}
+
+export async function validateRunEnvironment(target: string): Promise<RunEnvironmentResult> {
+  const resolved = resolveRun(target);
+  if (resolved.manifest.executionEnvironment === null) {
+    return {
+      manifest: resolved.manifest,
+      environment: null,
+    };
+  }
+  const prepared = await prepareExecutionEnvironment(resolved.manifest.executionEnvironment);
+  return withTaskStateLock(resolved.workspaceDir, () => {
+    const latest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    latest.executionEnvironment = prepared;
+    writeManifest(resolved.workspaceDir, latest);
+    return {
+      manifest: latest,
+      environment: latest.executionEnvironment,
+    };
+  });
+}
+
+export async function cleanupRunEnvironment(target: string): Promise<RunEnvironmentResult> {
+  const resolved = resolveRun(target);
+  if (resolved.manifest.executionEnvironment === null) {
+    return {
+      manifest: resolved.manifest,
+      environment: null,
+    };
+  }
+  if (resolved.manifest.executionEnvironment.mode === "existing") {
+    throw new CommandError("cannot cleanup an externally managed execution environment");
+  }
+  if (resolved.manifest.status === "running") {
+    throw new CommandError("cannot cleanup the execution environment for a running run");
+  }
+  const cleaned = await cleanupExecutionEnvironment(resolved.manifest.executionEnvironment);
+  return withTaskStateLock(resolved.workspaceDir, () => {
+    const latest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    latest.executionEnvironment = cleaned;
+    writeManifest(resolved.workspaceDir, latest);
+    return {
+      manifest: latest,
+      environment: latest.executionEnvironment,
+    };
+  });
 }
 
 function matchesNonGroupRunListScope(
@@ -1059,6 +1137,12 @@ export function showDefinition(
   target: string,
   cwd?: string,
 ): DefinitionDetailsResult {
+  if (kind === "environment") {
+    return {
+      kind,
+      loaded: loadEnvironmentConfig(target, cwd),
+    };
+  }
   if (kind === "launcher") {
     return {
       kind,

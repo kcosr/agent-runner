@@ -222,18 +222,18 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v19 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v20 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 19);
+  assert.equal(resolved.manifest.schemaVersion, 20);
   assert.equal(resolved.manifest.updatedAt, "2026-04-11T16:05:00Z");
 });
 
-test("resolveResumeTarget rejects a v19 manifest carrying legacy assignment.workspacePath", () => {
+test("resolveResumeTarget rejects a v20 manifest carrying legacy assignment.workspacePath", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "legacy-workspace-path");
   const manifest = baseManifest("legacy-workspace-path", workspaceDir);
@@ -264,7 +264,7 @@ test("resolveResumeTarget rejects a v19 manifest carrying legacy assignment.work
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 19,
+    schemaVersion: 20,
     runId,
     repo: "unknown",
     agent: {
@@ -318,6 +318,7 @@ function baseManifest(runId, workspaceDir) {
         kind: "embedded",
       },
     },
+    executionEnvironment: null,
     brief: "resume brief",
     callerInstructions: null,
     attachments: [],
@@ -330,6 +331,7 @@ function baseManifest(runId, workspaceDir) {
         kind: "direct",
         name: "direct",
       },
+      executionEnvironment: null,
       cwd: process.cwd(),
       lockedFields: [],
       message: null,

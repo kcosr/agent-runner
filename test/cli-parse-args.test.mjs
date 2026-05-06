@@ -108,6 +108,12 @@ test("parseArgs: --launcher captures the launcher override and forwards it into 
   assert.equal(overridesFromParsedArgs(parsed).launcher, "./launchers/ssh.yaml");
 });
 
+test("parseArgs: --environment captures the execution environment override", () => {
+  const parsed = parseArgs(argv("run", "--agent", "x", "--environment", "dev-container"));
+  assert.equal(parsed.environment, "dev-container");
+  assert.equal(overridesFromParsedArgs(parsed).executionEnvironment, "dev-container");
+});
+
 // ── list/show command parsing ────────────────────────────────────────
 
 test("parseArgs: list agents is parsed as command=list subcommand=agents", () => {
