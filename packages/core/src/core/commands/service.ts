@@ -1021,6 +1021,31 @@ export function readRunEnvironment(target: string): RunEnvironmentResult {
   };
 }
 
+function groupEnvironmentHasPendingUsers(manifest: RunManifest): boolean {
+  const environment = manifest.executionEnvironment;
+  if (environment?.mode !== "managed" || environment.lifetime !== "group") {
+    return false;
+  }
+  return listRunManifests().some(({ manifest: candidate }) => {
+    if (candidate.runId === manifest.runId) {
+      return false;
+    }
+    if (
+      candidate.runGroupId !== manifest.runGroupId ||
+      candidate.executionEnvironment?.mode !== "managed" ||
+      candidate.executionEnvironment.lifetime !== "group" ||
+      candidate.executionEnvironment.containerName !== environment.containerName
+    ) {
+      return false;
+    }
+    return (
+      candidate.status === "initialized" ||
+      candidate.status === "ready" ||
+      candidate.status === "running"
+    );
+  });
+}
+
 export async function validateRunEnvironment(target: string): Promise<RunEnvironmentResult> {
   const resolved = resolveRun(target);
   if (resolved.manifest.executionEnvironment === null) {
@@ -1055,7 +1080,14 @@ export async function cleanupRunEnvironment(target: string): Promise<RunEnvironm
   if (resolved.manifest.status === "running") {
     throw new CommandError("cannot cleanup the execution environment for a running run");
   }
-  const cleaned = await cleanupExecutionEnvironment(resolved.manifest.executionEnvironment);
+  if (groupEnvironmentHasPendingUsers(resolved.manifest)) {
+    throw new CommandError(
+      "cannot cleanup a group-scoped execution environment while another group run can still use it",
+    );
+  }
+  const cleaned = await cleanupExecutionEnvironment(resolved.manifest.executionEnvironment, {
+    includeManual: true,
+  });
   return withTaskStateLock(resolved.workspaceDir, () => {
     const latest = resolveResumeTarget(resolved.workspaceDir).manifest;
     latest.executionEnvironment = cleaned;
@@ -1664,6 +1696,15 @@ export function setRunGroup(
       previousRunGroupId = resolved.manifest.runGroupId;
       if (previousRunGroupId === nextRunGroupId) {
         return;
+      }
+      if (
+        resolved.manifest.executionEnvironment?.mode === "managed" &&
+        (resolved.manifest.executionEnvironment.lifetime === "group" ||
+          resolved.manifest.executionEnvironment.workspace?.scope === "group")
+      ) {
+        throw new CommandError(
+          "run set-group is not supported after a run freezes group-scoped execution environment resources",
+        );
       }
 
       resolved.manifest.runGroupId = nextRunGroupId;

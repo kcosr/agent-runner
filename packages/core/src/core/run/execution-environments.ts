@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
-import { isAbsolute } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { loadEnvironmentConfig } from "../../config/loader.js";
 import type { EnvironmentReference, LoadedEnvironmentDefinition } from "../config/environments.js";
 import { interpolate } from "../config/interpolate.js";
 import type { ResolvedLauncherConfig } from "../config/launchers.js";
 import type {
+  RunEnvironmentWorkspace,
   RunExecutionEnvironment,
   RunExistingContainerEnvironment,
   RunManagedContainerEnvironment,
@@ -27,6 +29,7 @@ interface ResolveEnvironmentOptions {
   cwd: string;
   injectedVars: Record<string, unknown>;
   runId: string;
+  runGroupId: string;
 }
 
 function loadReferencedEnvironment(
@@ -64,8 +67,12 @@ function assertAbsolutePath(path: string, field: string): void {
   }
 }
 
-function generatedContainerName(runId: string): string {
-  return `task-runner-${runId}`;
+function generatedContainerName(
+  lifetime: "run" | "group",
+  runId: string,
+  runGroupId: string,
+): string {
+  return `task-runner-${lifetime === "group" ? runGroupId : runId}`;
 }
 
 function resolveMounts(
@@ -85,15 +92,92 @@ function resolveMounts(
   });
 }
 
+function pathWithin(hostPath: string, candidate: string): string | null {
+  const root = resolve(hostPath);
+  const target = resolve(candidate);
+  const suffix = relative(root, target);
+  if (suffix === "") {
+    return "";
+  }
+  return suffix.startsWith("..") || isAbsolute(suffix) ? null : suffix.split(sep).join("/");
+}
+
+function rewriteWorkspacePath(workspace: RunEnvironmentWorkspace | null, path: string): string {
+  if (workspace === null) {
+    return path;
+  }
+  const suffix = pathWithin(workspace.hostPath, path);
+  if (suffix === null) {
+    return path;
+  }
+  return suffix.length === 0 ? workspace.containerPath : `${workspace.containerPath}/${suffix}`;
+}
+
+function resolveWorkspace(
+  workspace:
+    | {
+        scope: "run" | "group";
+        hostRoot?: string;
+        hostPath?: string;
+        containerPath: string;
+        mode: "ro" | "rw";
+        create: boolean;
+      }
+    | undefined,
+  vars: Record<string, unknown>,
+  runId: string,
+  runGroupId: string,
+): RunEnvironmentWorkspace | null {
+  if (workspace === undefined) {
+    return null;
+  }
+  const containerPath = interpolateString(workspace.containerPath, vars);
+  assertAbsolutePath(containerPath, "workspace.containerPath");
+  const hostRoot =
+    workspace.hostPath === undefined
+      ? workspace.hostRoot !== undefined
+        ? interpolateString(workspace.hostRoot, vars)
+        : interpolateString("{{state_dir}}/workspaces", vars)
+      : null;
+  const hostPath =
+    workspace.hostPath !== undefined
+      ? interpolateString(workspace.hostPath, vars)
+      : join(hostRoot as string, workspace.scope === "group" ? runGroupId : runId);
+  if (hostRoot !== null) {
+    assertAbsolutePath(hostRoot, "workspace.hostRoot");
+  }
+  assertAbsolutePath(hostPath, "workspace.hostPath");
+  return {
+    scope: workspace.scope,
+    hostRoot: hostRoot === null ? null : resolve(hostRoot),
+    hostPath: resolve(hostPath),
+    containerPath,
+    mode: workspace.mode,
+    create: workspace.create,
+    createdAt: null,
+  };
+}
+
 function resolveEnvironmentConfig(
   loaded: LoadedEnvironmentDefinition,
   vars: Record<string, unknown>,
   runId: string,
+  runGroupId: string,
 ): RunExecutionEnvironment {
   const config = loaded.config;
-  const cwd = interpolateString(config.cwd, vars);
+  const workspace =
+    config.mode === "managed" ? resolveWorkspace(config.workspace, vars, runId, runGroupId) : null;
+  const environmentVars =
+    workspace === null
+      ? vars
+      : {
+          ...vars,
+          workspace_host_path: workspace.hostPath,
+          workspace_container_path: workspace.containerPath,
+        };
+  const cwd = rewriteWorkspacePath(workspace, interpolateString(config.cwd, environmentVars));
   assertAbsolutePath(cwd, "executionEnvironment.cwd");
-  const env = interpolateStringRecord(config.env, vars);
+  const env = interpolateStringRecord(config.env, environmentVars);
   const common = {
     kind: "container" as const,
     name: loaded.name,
@@ -119,13 +203,14 @@ function resolveEnvironmentConfig(
   return {
     ...common,
     mode: "managed",
-    image: interpolateString(config.image, vars),
+    image: interpolateString(config.image, environmentVars),
     lifetime: config.lifetime,
     containerName: config.containerName
-      ? interpolateString(config.containerName, vars)
-      : generatedContainerName(runId),
+      ? interpolateString(config.containerName, environmentVars)
+      : generatedContainerName(config.lifetime, runId, runGroupId),
     containerId: null,
-    mounts: resolveMounts(config.mounts, vars),
+    workspace,
+    mounts: resolveMounts(config.mounts, environmentVars),
     network: config.network,
     security: {
       ...config.security,
@@ -153,7 +238,12 @@ export function resolveFreshExecutionEnvironment(
   if (selected === null) {
     return null;
   }
-  return resolveEnvironmentConfig(selected, options.injectedVars, options.runId);
+  return resolveEnvironmentConfig(
+    selected,
+    options.injectedVars,
+    options.runId,
+    options.runGroupId,
+  );
 }
 
 interface InspectSummary {
@@ -285,7 +375,10 @@ async function startManagedContainer(
   for (const cap of environment.security.capAdd) {
     args.push("--cap-add", cap);
   }
-  for (const mount of environment.mounts) {
+  for (const mount of [
+    ...(environment.workspace === null ? [] : [environment.workspace]),
+    ...environment.mounts,
+  ]) {
     args.push("-v", `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
   }
   for (const [key, value] of Object.entries(environment.env)) {
@@ -328,8 +421,33 @@ export async function prepareExecutionEnvironment(
   }
 
   let next = environment;
+  if (next.workspace?.create === true) {
+    const existed = existsSync(next.workspace.hostPath);
+    mkdirSync(next.workspace.hostPath, { recursive: true });
+    next = {
+      ...next,
+      workspace: {
+        ...next.workspace,
+        createdAt: next.workspace.createdAt ?? (existed ? null : new Date().toISOString()),
+      },
+    };
+  }
   if (next.containerId === null) {
-    next = await startManagedContainer(next);
+    try {
+      const inspected = await inspectContainer(next, next.containerName);
+      if (!inspected.running) {
+        throw new ExecutionEnvironmentError(`container ${next.containerName} is not running`);
+      }
+      next = {
+        ...next,
+        containerId: inspected.id,
+      };
+    } catch (error) {
+      if (!(error instanceof ExecutionEnvironmentError)) {
+        throw error;
+      }
+      next = await startManagedContainer(next);
+    }
   } else {
     const inspected = await inspectContainer(next, next.containerId);
     if (!inspected.running) {
@@ -383,11 +501,15 @@ export function buildEnvironmentLauncher(
 
 export async function cleanupExecutionEnvironment(
   environment: RunExecutionEnvironment | null,
+  options: { includeManual?: boolean } = {},
 ): Promise<RunExecutionEnvironment | null> {
   if (environment === null || environment.mode === "existing") {
     return environment;
   }
-  if (environment.cleanup.policy !== "terminal" || environment.cleanup.cleanedAt !== null) {
+  if (
+    environment.cleanup.cleanedAt !== null ||
+    (environment.cleanup.policy !== "terminal" && options.includeManual !== true)
+  ) {
     return environment;
   }
   const target = environment.containerId ?? environment.containerName;

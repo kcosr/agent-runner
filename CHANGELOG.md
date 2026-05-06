@@ -4,6 +4,11 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `21`. Managed container environments now
+  persist first-class workspace mount state and may be scoped to either a
+  run or run group. Group-scoped execution resources freeze group
+  membership, so `run set-group` rejects runs that already carry
+  group-scoped environment state.
 - Manifest schema version is now `20`. Runs now persist frozen
   `executionEnvironment` state on the manifest and reset seed so
   container execution can be resumed, reset, validated, and cleaned up
@@ -131,6 +136,9 @@
   override them with `--environment`, and task-runner can validate
   existing containers or create run-scoped managed containers before
   subprocess-backed backend invocation.
+- Added first-class managed-container workspaces with `workspace.scope:
+  run|group`, automatic host directory creation, host-to-container cwd
+  rewriting, and `lifetime: group` container reuse/cleanup semantics.
 - Added `task-runner list environments`,
   `task-runner show environment <name|path>`, and
   `task-runner run environment status|validate|cleanup <run-id>` across

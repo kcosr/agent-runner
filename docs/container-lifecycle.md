@@ -11,10 +11,10 @@ Container support is a task-runner execution-environment layer below
 backend invocation. It does not replace backends, and it is not hidden
 inside launcher wrappers.
 
-The initial implementation supports two modes:
+The implementation supports two modes:
 
 - `managed`: task-runner creates, starts, validates, uses, audits, and cleans up
-  a run-scoped container.
+  a run- or run-group-scoped container.
 - `existing`: task-runner attaches to an already-running external container,
   validates it, executes backend subprocesses inside it, audits use, and never
   stops or removes it.
@@ -228,12 +228,15 @@ kind: container
 mode: managed
 engine: podman
 image: agent-dev:latest
-lifetime: run
-cwd: "{{cwd}}"
+lifetime: group
+cwd: "{{workspace_host_path}}"
+workspace:
+  scope: group
+  hostRoot: "{{state_dir}}/workspaces"
+  containerPath: /workspace
+  mode: rw
+  create: true
 mounts:
-  - hostPath: "{{cwd}}"
-    containerPath: "{{cwd}}"
-    mode: rw
   - hostPath: /home/kevin/.codex/sessions
     containerPath: /home/kevin/.codex/sessions
     mode: rw
@@ -265,6 +268,17 @@ Interpolation should use the same injected variables as launchers after final
 tokens should fail for environment paths and container names because unresolved
 mounts or container identities are unsafe.
 
+Managed environments may use a first-class `workspace` block for the primary
+working directory. If `hostPath` is omitted, task-runner derives the host path
+from `hostRoot` plus the run id for `scope: run` or the run group id for
+`scope: group`. With `create: true`, task-runner creates that host directory
+before the container starts. If the resolved environment cwd is inside the host
+workspace path, task-runner rewrites it to the corresponding container path.
+Generic `mounts` remain available for auth stores, caches, sockets, and other
+explicit bind mounts. After resolving the workspace, managed environments can
+interpolate `workspace_host_path` and `workspace_container_path` in cwd, env,
+image, container name, and generic mount paths.
+
 ## Manifest Shape
 
 Add a frozen `executionEnvironment` field to `RunManifest` and `RunResetSeed`.
@@ -279,17 +293,20 @@ Managed runtime example:
     "mode": "managed",
     "engine": "podman",
     "image": "agent-dev:latest",
-    "lifetime": "run",
-    "containerName": "task-runner-abc123",
+    "lifetime": "group",
+    "containerName": "task-runner-group-abc123",
     "containerId": "9d2f...",
-    "cwd": "/home/kevin/worktrees/task-runner",
-    "mounts": [
-      {
-        "hostPath": "/home/kevin/worktrees/task-runner",
-        "containerPath": "/home/kevin/worktrees/task-runner",
-        "mode": "rw"
-      }
-    ],
+    "cwd": "/workspace",
+    "workspace": {
+      "scope": "group",
+      "hostRoot": "/home/kevin/.task-runner/workspaces",
+      "hostPath": "/home/kevin/.task-runner/workspaces/abc123",
+      "containerPath": "/workspace",
+      "mode": "rw",
+      "create": true,
+      "createdAt": "2026-05-06T00:00:00.000Z"
+    },
+    "mounts": [],
     "cleanup": {
       "policy": "terminal",
       "cleanedAt": null,
@@ -360,8 +377,8 @@ Resume should reuse the frozen environment config and runtime state from the
 manifest:
 
 - Managed mode validates that the container still exists and is running. If the
-  run lifetime is `run` and the container is missing, task-runner may recreate it
-  from the frozen config and audit the recreation.
+  managed lifetime is `run` or `group` and the container is missing,
+  task-runner may recreate it from the frozen config and audit the recreation.
 - Existing mode validates that the named/id container exists, is running, and
   still matches required cwd/mount expectations. If validation fails, resume
   fails clearly and never recreates the container.
@@ -379,9 +396,11 @@ does today. Environment behavior depends on mode:
 
 ### Terminal State
 
-Managed `lifetime: run` containers should be cleaned up when a run reaches a
-terminal status unless cleanup policy says otherwise. Cleanup failure should be
-audited and surfaced in status, but it should not rewrite task outcome or run
+Managed `lifetime: run` containers are cleaned up when a run reaches a terminal
+status unless cleanup policy says otherwise. Managed `lifetime: group`
+containers are cleaned up only after no initialized, ready, or running run in
+the group still references the same container identity. Cleanup failure should
+be audited and surfaced in status, but it should not rewrite task outcome or run
 exit code by default.
 
 ### Archive And Delete
@@ -400,11 +419,10 @@ Recurring schedule `reuse` and one-time schedules should use the run's frozen
 environment config.
 
 For recurring `clone`, each clone gets a new managed container identity derived
-from the cloned run id. It must not reuse the source run's container id/name.
-
-Initial managed support should only implement `lifetime: run`. `attempt`,
-`session`, and `group` lifetimes can be added later once the simpler lifecycle is
-stable.
+from the cloned run id when `lifetime: run`, or the run group id when
+`lifetime: group`. Run-scoped workspace host paths derived from `hostRoot` are
+also rewritten to the cloned run id. Group-scoped workspace paths remain tied to
+the group id.
 
 ## Backend Compatibility
 
@@ -443,6 +461,11 @@ Same-path mounts preserve backend cwd semantics and allow existing host-side
 backend session history readers to keep working. Mapped paths should be allowed
 only when there is an explicit backend-specific reason because they may require
 env overrides and path translation.
+
+The managed `workspace` block is the preferred mapped-path mechanism for the
+primary working directory because it records scope, can create the host
+directory, participates in run/group lifecycle decisions, and performs cwd
+rewriting explicitly. Generic `mounts` do not rewrite cwd.
 
 Existing-container mode cannot add mounts to an already-running container.
 `expectedMounts` are validation-only.
@@ -570,11 +593,13 @@ Implemented:
   override
 - frozen `manifest.executionEnvironment` and
   `manifest.resetSeed.executionEnvironment`
-- schemaVersion `20` manifest validation
+- schemaVersion `21` manifest validation
 - existing-container validation for running state, cwd, and expected
   mounts
-- managed run-lifetime container creation, reuse, and terminal/manual
-  cleanup state
+- managed run- and group-lifetime container creation, reuse, and
+  terminal/manual cleanup state
+- first-class managed workspaces with run/group scope, host directory
+  creation, bind mounting, and host-to-container cwd rewriting
 - generated `docker exec` / `podman exec` subprocess launchers for
   supported backends
 - environment validation, container creation/removal, and cleanup failure
@@ -585,7 +610,7 @@ Deferred:
 
 - backend session mount presets and same-path session-store validation
 - daemon startup scavenging for labeled abandoned managed containers
-- lifetimes other than `run`
+- `attempt` and `session` managed container lifetimes
 - richer web status/capability rendering
 - optional native `openai-agents` backend integration
 

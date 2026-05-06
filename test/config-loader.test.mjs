@@ -2353,6 +2353,11 @@ kind: container
 mode: managed
 cwd: /workspace
 image: node:22
+lifetime: group
+workspace:
+  scope: group
+  hostRoot: /home/user/task-runner-workspaces
+  containerPath: /workspace
 mounts:
   - hostPath: /home/user/repo
     containerPath: /workspace
@@ -2392,7 +2397,14 @@ cwd: workspace
     assert.equal(managed.sourcePath, managedPath);
     assert.equal(managed.config.mode, "managed");
     assert.equal(managed.config.engine, "docker");
-    assert.equal(managed.config.lifetime, "run");
+    assert.equal(managed.config.lifetime, "group");
+    assert.deepEqual(managed.config.workspace, {
+      scope: "group",
+      hostRoot: "/home/user/task-runner-workspaces",
+      containerPath: "/workspace",
+      mode: "rw",
+      create: true,
+    });
     assert.equal(managed.config.network, "none");
     assert.equal(managed.config.cleanup.policy, "manual");
   }));

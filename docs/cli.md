@@ -403,8 +403,9 @@ task-runner run environment cleanup <id|path>
 `status` prints the frozen execution environment state from the run
 manifest. `validate` checks an existing container or starts/validates a
 managed container and persists the updated state. `cleanup` removes a
-task-runner-managed environment when its cleanup policy permits it;
-externally managed containers are never removed.
+task-runner-managed environment when the run is not running and no
+same-group initialized, ready, or running run still references the shared
+environment. Externally managed containers are never removed.
 
 Exit codes are `0` for success, `2` when the run id is not found, `3`
 for invalid input/lifecycle/var/lock/prepare failures, and `4` for

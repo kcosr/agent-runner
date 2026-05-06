@@ -27,6 +27,7 @@ import {
   addTask,
   appendTaskNotes,
   archiveRun,
+  cleanupRunEnvironment,
   clearRunBackendSession,
   clearRunDependencies,
   clearRunGroup,
@@ -1343,6 +1344,69 @@ test("command services: set/clear run group mutations persist manifest and reset
   const manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.runGroupId, outcome.runId);
   assert.equal(manifest.resetSeed.runGroupId, outcome.runId);
+});
+
+test("command services: group-scoped execution environments pin group membership and cleanup", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const owner = await initRun(dir);
+  const runningPeer = await initRun(dir);
+
+  const environment = {
+    kind: "container",
+    mode: "managed",
+    name: "group-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "group",
+    containerName: "task-runner-shared-group",
+    containerId: "container-123",
+    workspace: {
+      scope: "group",
+      hostRoot: join(dir, "workspaces"),
+      hostPath: join(dir, "workspaces", "shared-group"),
+      containerPath: "/workspace",
+      mode: "rw",
+      create: true,
+      createdAt: null,
+    },
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+
+  patchManifest(owner.workspaceDir, (manifest) => {
+    manifest.runGroupId = "shared-group";
+    manifest.resetSeed.runGroupId = "shared-group";
+    manifest.executionEnvironment = environment;
+    manifest.resetSeed.executionEnvironment = environment;
+  });
+  patchManifest(runningPeer.workspaceDir, (manifest) => {
+    manifest.runGroupId = "shared-group";
+    manifest.resetSeed.runGroupId = "shared-group";
+    manifest.status = "running";
+    manifest.executionEnvironment = environment;
+    manifest.resetSeed.executionEnvironment = environment;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => setRunGroup(owner.runId, { runGroupId: "other-group" }),
+      /group-scoped execution environment resources/,
+    );
+    await assert.rejects(
+      () => cleanupRunEnvironment(owner.runId),
+      /another group run can still use it/,
+    );
+  });
 });
 
 test("command services: group dependencies project aggregate readiness and reverse edges", async () => {

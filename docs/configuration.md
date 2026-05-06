@@ -35,7 +35,10 @@ See [agents-and-assignments.md](agents-and-assignments.md).
 Environment definitions under `environments/*.yaml|*.yml` describe
 Docker/Podman execution environments for subprocess-backed runs. Agents
 select them with `executionEnvironment`, and fresh callers may override
-with `--environment`.
+with `--environment`. Managed environments can define a first-class
+workspace mount with run or group scope; after that workspace resolves,
+`workspace_host_path` and `workspace_container_path` are available to
+environment interpolation.
 
 Assignment `tasks:` entries may mix inline objects, named task refs such
 as `review/reuse`, and explicit path refs. Bare strings resolve only
@@ -192,7 +195,7 @@ values using `runtimeVarSources`.
 
 ## Manifest upgrades
 
-The current manifest schema is version `20`. Older manifests are not
+The current manifest schema is version `21`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 

@@ -243,27 +243,30 @@ Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
 the built-in `direct` launcher.
 
 Launcher command and args are runtime-interpolated before they are frozen
-into the manifest. A short-term persistent-container workflow can combine
-a run-group workspace path with a launcher wrapper:
+into the manifest. For containers, prefer first-class execution
+environments over launcher wrappers so task-runner can validate, audit,
+reuse, and clean up the container:
 
 ```yaml
-# assignment.md
-cwd: "/home/kevin/agent-workspaces/{{run_group_id}}/repo"
+# ~/.config/task-runner/environments/agent-dev.yaml
+schemaVersion: 1
+name: agent-dev
+kind: container
+mode: managed
+engine: podman
+image: agent-dev:latest
+lifetime: group
+cwd: "{{workspace_host_path}}"
+workspace:
+  scope: group
+  hostRoot: "{{state_dir}}/workspaces"
+  containerPath: /workspace
 ```
 
-```yaml
-# agent.md
-launcher:
-  command: aw-tr-launch
-  args:
-    - agent-dev
-    - "{{cwd}}"
-    - "{{run_group_id}}"
-```
-
-Task-runner does not manage the container lifecycle or cleanup. The
-wrapper receives the frozen cwd and run group id so it can enter a
-workspace that another process prepared.
+Managed environments can create host workspace directories, mount them
+into the container, rewrite cwd to the container path, and keep a
+group-scoped container alive until no initialized, ready, or running run
+in the group still references it.
 
 Agents may also author backend-owned argv tokens:
 

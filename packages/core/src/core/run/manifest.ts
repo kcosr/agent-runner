@@ -199,6 +199,13 @@ export interface RunEnvironmentMount {
   mode: "ro" | "rw";
 }
 
+export interface RunEnvironmentWorkspace extends RunEnvironmentMount {
+  scope: "run" | "group";
+  hostRoot: string | null;
+  create: boolean;
+  createdAt: string | null;
+}
+
 export type RunContainerEngine = "docker" | "podman";
 
 interface RunExecutionEnvironmentBase {
@@ -224,9 +231,10 @@ export interface RunExistingContainerEnvironment extends RunExecutionEnvironment
 export interface RunManagedContainerEnvironment extends RunExecutionEnvironmentBase {
   mode: "managed";
   image: string;
-  lifetime: "run";
+  lifetime: "run" | "group";
   containerName: string;
   containerId: string | null;
+  workspace: RunEnvironmentWorkspace | null;
   mounts: RunEnvironmentMount[];
   network: string;
   security: {
@@ -286,13 +294,13 @@ export interface QueuedResumeMessage {
   createdAt: string;
 }
 
-// schemaVersion: 20 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 21 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // reinitialize or run an explicit migration if one is added.
 export interface RunManifest {
-  schemaVersion: 20;
+  schemaVersion: 21;
   runId: string;
   repo: string;
   agent: {
@@ -751,11 +759,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 20
+    (parsed as { schemaVersion: number }).schemaVersion !== 21
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 20.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 21.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -907,7 +915,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 20) return false;
+  if (obj.schemaVersion !== 21) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -1169,7 +1177,7 @@ function isValidResolvedLauncherConfig(value: unknown): value is ResolvedLaunche
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
+  const record = value as unknown as Record<string, unknown>;
   if (record.kind === "direct") {
     return record.name === "direct";
   }
@@ -1198,11 +1206,27 @@ function isValidEnvironmentMount(value: unknown): value is RunEnvironmentMount {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
+  const record = value as unknown as Record<string, unknown>;
   return (
     typeof record.hostPath === "string" &&
     typeof record.containerPath === "string" &&
     (record.mode === "ro" || record.mode === "rw")
+  );
+}
+
+function isValidEnvironmentWorkspace(value: unknown): value is RunEnvironmentWorkspace | null {
+  if (value === null) {
+    return true;
+  }
+  if (!isValidEnvironmentMount(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  return (
+    (record.scope === "run" || record.scope === "group") &&
+    (record.hostRoot === null || typeof record.hostRoot === "string") &&
+    typeof record.create === "boolean" &&
+    (record.createdAt === null || typeof record.createdAt === "string")
   );
 }
 
@@ -1213,7 +1237,7 @@ function isValidExecutionEnvironment(value: unknown): value is RunExecutionEnvir
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
+  const record = value as unknown as Record<string, unknown>;
   const commonValid =
     record.kind === "container" &&
     (record.mode === "existing" || record.mode === "managed") &&
@@ -1242,9 +1266,10 @@ function isValidExecutionEnvironment(value: unknown): value is RunExecutionEnvir
   const cleanup = record.cleanup;
   return (
     typeof record.image === "string" &&
-    record.lifetime === "run" &&
+    (record.lifetime === "run" || record.lifetime === "group") &&
     typeof record.containerName === "string" &&
     (record.containerId === null || typeof record.containerId === "string") &&
+    isValidEnvironmentWorkspace(record.workspace) &&
     Array.isArray(record.mounts) &&
     record.mounts.every(isValidEnvironmentMount) &&
     typeof record.network === "string" &&

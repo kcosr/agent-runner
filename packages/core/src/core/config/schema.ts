@@ -320,6 +320,21 @@ const environmentMountSchema = z
   })
   .strict();
 
+const environmentWorkspaceSchema = z
+  .object({
+    scope: z.enum(["run", "group"]).default("run"),
+    hostRoot: environmentPathTemplateSchema.optional(),
+    hostPath: environmentPathTemplateSchema.optional(),
+    containerPath: environmentPathTemplateSchema,
+    mode: z.enum(["ro", "rw"]).default("rw"),
+    create: z.boolean().default(true),
+  })
+  .strict()
+  .refine(
+    (workspace) => workspace.hostRoot === undefined || workspace.hostPath === undefined,
+    "workspace cannot define both hostRoot and hostPath",
+  );
+
 const containerEngineSchema = z.enum(["docker", "podman"]);
 
 const containerNetworkSchema = z.union([
@@ -365,8 +380,9 @@ const managedContainerEnvironmentSchema = baseContainerEnvironmentSchema
   .extend({
     mode: z.literal("managed"),
     image: z.string().trim().min(1),
-    lifetime: z.literal("run").default("run"),
+    lifetime: z.enum(["run", "group"]).default("run"),
     containerName: z.string().trim().min(1).optional(),
+    workspace: environmentWorkspaceSchema.optional(),
     mounts: z.array(environmentMountSchema).default([]),
     network: containerNetworkSchema.default("default"),
     security: containerSecuritySchema,

@@ -1,12 +1,13 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
   buildEnvironmentLauncher,
+  prepareExecutionEnvironment,
   resolveFreshExecutionEnvironment,
 } from "../packages/core/dist/core/run/execution-environments.js";
-import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
+import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 function writeEnvironment(baseDir, name, body) {
   const path = join(baseDir, "environments", `${name}.yaml`);
@@ -54,6 +55,7 @@ cleanup:
         run_id: "run-123",
       },
       runId: "fallback-run",
+      runGroupId: "group-123",
     });
 
     assert.deepEqual(environment, {
@@ -73,6 +75,7 @@ cleanup:
       lifetime: "run",
       containerName: "task-runner-run-123",
       containerId: null,
+      workspace: null,
       mounts: [
         {
           hostPath: rootDir,
@@ -124,6 +127,7 @@ container: override-box
       cwd: rootDir,
       injectedVars: {},
       runId: "run-123",
+      runGroupId: "group-123",
     });
 
     assert.equal(environment.mode, "existing");
@@ -174,3 +178,136 @@ test("buildEnvironmentLauncher wraps backend commands in a container exec launch
     source: "inline",
   });
 });
+
+test("resolveFreshExecutionEnvironment resolves group-scoped workspace mounts and rewrites cwd", () =>
+  withRuntimeRoots("task-runner-environment-", ({ rootDir, configDir, stateDir }) => {
+    writeEnvironment(
+      configDir,
+      "workspace-dev",
+      `schemaVersion: 1
+kind: container
+mode: managed
+engine: docker
+cwd: "{{workspace_host_path}}/repo"
+image: node:22
+lifetime: group
+workspace:
+  scope: group
+  hostRoot: "{{state_dir}}/group-workspaces"
+  containerPath: /workspace
+  mode: rw
+`,
+    );
+
+    const environment = resolveFreshExecutionEnvironment({
+      reference: { kind: "name", ref: "workspace-dev", name: "workspace-dev" },
+      cwd: rootDir,
+      injectedVars: {
+        cwd: join(stateDir, "group-workspaces", "group-123"),
+        state_dir: stateDir,
+      },
+      runId: "run-123",
+      runGroupId: "group-123",
+    });
+
+    assert.equal(environment.mode, "managed");
+    assert.equal(environment.lifetime, "group");
+    assert.equal(environment.containerName, "task-runner-group-123");
+    assert.equal(environment.cwd, "/workspace/repo");
+    assert.deepEqual(environment.workspace, {
+      scope: "group",
+      hostRoot: join(stateDir, "group-workspaces"),
+      hostPath: join(stateDir, "group-workspaces", "group-123"),
+      containerPath: "/workspace",
+      mode: "rw",
+      create: true,
+      createdAt: null,
+    });
+  }));
+
+test("prepareExecutionEnvironment creates workspace host directory and mounts it", async () =>
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+    const binDir = join(rootDir, "bin");
+    const logPath = join(rootDir, "docker.log");
+    const workspacePath = join(rootDir, "workspace");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(binDir, "docker"),
+      `#!/usr/bin/env node
+import fs from "node:fs";
+const logPath = process.env.FAKE_DOCKER_LOG;
+fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
+const [cmd, target] = process.argv.slice(2);
+if (cmd === "inspect") {
+  if (target === "task-runner-group-123") process.exit(1);
+  process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "run") {
+  process.stdout.write("container-123\\n");
+  process.exit(0);
+}
+if (cmd === "exec") process.exit(0);
+process.exit(0);
+`,
+      { mode: 0o755 },
+    );
+
+    const environment = {
+      kind: "container",
+      mode: "managed",
+      name: "workspace-dev",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/workspace",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: null,
+      lastError: null,
+      image: "node:22",
+      lifetime: "group",
+      containerName: "task-runner-group-123",
+      containerId: null,
+      workspace: {
+        scope: "group",
+        hostRoot: null,
+        hostPath: workspacePath,
+        containerPath: "/workspace",
+        mode: "rw",
+        create: true,
+        createdAt: null,
+      },
+      mounts: [],
+      network: "default",
+      security: { capDrop: [], capAdd: [] },
+      extraRunArgs: [],
+      cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+    };
+
+    const prepared = await withEnv(
+      { PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath },
+      () => prepareExecutionEnvironment(environment),
+    );
+
+    assert.equal(prepared.containerId, "container-123");
+    assert.ok(existsSync(workspacePath));
+    assert.equal(typeof prepared.workspace.createdAt, "string");
+    const commands = readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(commands[1].slice(0, 10), [
+      "run",
+      "-d",
+      "--name",
+      "task-runner-group-123",
+      "--label",
+      "task-runner=true",
+      "--label",
+      "task-runner-environment=workspace-dev",
+      "--workdir",
+      "/workspace",
+    ]);
+    assert.ok(commands[1].includes(`${workspacePath}:/workspace:rw`));
+    assert.deepEqual(commands.at(-1), ["exec", "container-123", "test", "-d", "/workspace"]);
+  }));

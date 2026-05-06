@@ -892,8 +892,14 @@ function renderRunEnvironmentResult(result: ReturnType<typeof getRunEnvironment>
     lines.push(`  mounts:        ${env.expectedMounts.length}`);
   } else {
     lines.push(`  image:         ${env.image}`);
+    lines.push(`  lifetime:      ${env.lifetime}`);
     lines.push(`  containerName: ${env.containerName}`);
     lines.push(`  containerId:   ${env.containerId ?? "not-created"}`);
+    if (env.workspace !== null) {
+      lines.push(`  workspace:     ${env.workspace.scope}`);
+      lines.push(`  hostPath:      ${env.workspace.hostPath}`);
+      lines.push(`  containerPath: ${env.workspace.containerPath}`);
+    }
     lines.push(`  cleanup:       ${env.cleanup.policy}`);
     lines.push(`  cleanedAt:     ${env.cleanup.cleanedAt ?? "not-cleaned"}`);
     if (env.cleanup.lastError) {

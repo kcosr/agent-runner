@@ -350,6 +350,10 @@ export function renderDefinitionDetails(result: DefinitionDetail): string {
     } else {
       lines.push(`  image:        ${config.image}`);
       lines.push(`  lifetime:     ${config.lifetime}`);
+      if (config.workspace !== undefined) {
+        lines.push(`  workspace:    ${config.workspace.scope}`);
+        lines.push(`  containerPath: ${config.workspace.containerPath}`);
+      }
       lines.push(`  mounts:       ${config.mounts.length}`);
     }
     lines.push(`  source:       ${loaded.sourcePath}`);

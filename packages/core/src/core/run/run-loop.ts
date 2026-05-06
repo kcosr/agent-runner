@@ -59,6 +59,7 @@ import {
   cloneRunDependencyRefs,
   cloneRuntimeVarSources,
   findRunManifestsById,
+  listRunManifests,
   resolveResumeTarget,
   snapshotTasks,
   workspaceAgentPath,
@@ -542,7 +543,7 @@ function buildRecurringCloneManifest(params: {
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 20,
+    schemaVersion: 21,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -596,8 +597,20 @@ function buildRecurringCloneManifest(params: {
       seed.executionEnvironment?.mode === "managed"
         ? {
             ...seed.executionEnvironment,
-            containerName: `task-runner-${runId}`,
+            containerName:
+              seed.executionEnvironment.lifetime === "group"
+                ? seed.executionEnvironment.containerName
+                : `task-runner-${runId}`,
             containerId: null,
+            workspace:
+              seed.executionEnvironment.workspace?.scope === "run" &&
+              seed.executionEnvironment.workspace.hostRoot !== null
+                ? {
+                    ...seed.executionEnvironment.workspace,
+                    hostPath: join(seed.executionEnvironment.workspace.hostRoot, runId),
+                    createdAt: null,
+                  }
+                : seed.executionEnvironment.workspace,
             cleanup: {
               ...seed.executionEnvironment.cleanup,
               cleanedAt: null,
@@ -625,8 +638,20 @@ function buildRecurringCloneManifest(params: {
         seed.executionEnvironment?.mode === "managed"
           ? {
               ...seed.executionEnvironment,
-              containerName: `task-runner-${runId}`,
+              containerName:
+                seed.executionEnvironment.lifetime === "group"
+                  ? seed.executionEnvironment.containerName
+                  : `task-runner-${runId}`,
               containerId: null,
+              workspace:
+                seed.executionEnvironment.workspace?.scope === "run" &&
+                seed.executionEnvironment.workspace.hostRoot !== null
+                  ? {
+                      ...seed.executionEnvironment.workspace,
+                      hostPath: join(seed.executionEnvironment.workspace.hostRoot, runId),
+                      createdAt: null,
+                    }
+                  : seed.executionEnvironment.workspace,
               cleanup: {
                 ...seed.executionEnvironment.cleanup,
                 cleanedAt: null,
@@ -652,6 +677,31 @@ function buildRecurringCloneManifest(params: {
     sessions: [],
     attemptRecords: [],
   };
+}
+
+function groupEnvironmentHasPendingUsers(manifest: RunManifest): boolean {
+  const environment = manifest.executionEnvironment;
+  if (environment?.mode !== "managed" || environment.lifetime !== "group") {
+    return false;
+  }
+  return listRunManifests().some(({ manifest: candidate }) => {
+    if (candidate.runId === manifest.runId) {
+      return false;
+    }
+    if (
+      candidate.runGroupId !== manifest.runGroupId ||
+      candidate.executionEnvironment?.mode !== "managed" ||
+      candidate.executionEnvironment.lifetime !== "group" ||
+      candidate.executionEnvironment.containerName !== environment.containerName
+    ) {
+      return false;
+    }
+    return (
+      candidate.status === "initialized" ||
+      candidate.status === "ready" ||
+      candidate.status === "running"
+    );
+  });
 }
 
 function resolveFreshRunCwd(
@@ -1541,6 +1591,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         cwd,
         injectedVars,
         runId,
+        runGroupId,
       });
   if (executionEnvironment !== null && launcher.kind !== "direct") {
     throw new ResumeError(
@@ -1655,7 +1706,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 20,
+      schemaVersion: 21,
       runId,
       repo,
       agent: {
@@ -1807,6 +1858,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       cwd,
       injectedVars,
       runId,
+      runGroupId,
     });
     if (executionEnvironment !== null && launcher.kind !== "direct") {
       throw new ResumeError(
@@ -1964,7 +2016,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 20,
+      schemaVersion: 21,
       runId,
       repo,
       agent: {
@@ -3035,7 +3087,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     // afterExit failures are warning-only; preserve the terminal result.
   }
 
-  if (manifest.executionEnvironment?.mode === "managed") {
+  if (
+    manifest.executionEnvironment?.mode === "managed" &&
+    !groupEnvironmentHasPendingUsers(manifest)
+  ) {
     const cleanedEnvironment = await cleanupExecutionEnvironment(manifest.executionEnvironment);
     withTaskStateLock(workspaceDir, () => {
       const latest = resolveResumeTarget(workspaceDir).manifest;

@@ -247,14 +247,34 @@ kind: container
 mode: managed
 engine: podman
 image: node:22
-cwd: "{{cwd}}"
-mounts:
-  - hostPath: "{{cwd}}"
-    containerPath: "{{cwd}}"
-    mode: rw
+lifetime: group
+cwd: "{{workspace_host_path}}"
+workspace:
+  scope: group
+  hostRoot: "{{state_dir}}/workspaces"
+  containerPath: /workspace
+  mode: rw
+  create: true
 cleanup:
   policy: terminal
 ```
+
+The `workspace` block is the preferred way to mount a run working
+directory into a managed container. `scope: run` creates/reuses a host
+path for one run; `scope: group` creates/reuses one host path for all
+runs in the run group. When `hostPath` is omitted, task-runner derives it
+from `hostRoot` plus the run id or run group id. If `cwd` resolves inside
+the workspace host path, task-runner rewrites it to the matching
+container path before invoking the backend. With `create: true`,
+task-runner creates the host directory before starting the container.
+Managed environments can interpolate `workspace_host_path` and
+`workspace_container_path` after the workspace has been resolved.
+
+`lifetime: group` gives managed containers a stable group-scoped
+container name and skips automatic terminal cleanup while another run in
+the group can still use the same environment. Group-scoped runs cannot be
+moved to another group after creation because the workspace and container
+identity are already frozen.
 
 Existing-container definitions attach to an externally managed
 container:
