@@ -72,6 +72,7 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
       hostMode: "embedded",
       controller: { kind: "embedded" },
     },
+    executionEnvironment: null,
     capabilities: {
       canArchive: true,
       canUnarchive: false,
@@ -522,6 +523,7 @@ describe("api client", () => {
                 hostMode: "embedded",
                 controller: { kind: "embedded" },
               },
+              executionEnvironment: null,
               capabilities: {
                 canArchive: false,
                 canUnarchive: false,
@@ -619,6 +621,7 @@ describe("api client", () => {
                   hostMode: "embedded",
                   controller: { kind: "embedded" },
                 },
+                executionEnvironment: null,
                 capabilities: {
                   canArchive: true,
                   canUnarchive: false,
@@ -763,6 +766,7 @@ describe("api client", () => {
                   hostMode: "embedded",
                   controller: { kind: "embedded" },
                 },
+                executionEnvironment: null,
                 capabilities: {
                   canArchive: true,
                   canUnarchive: false,
@@ -954,6 +958,7 @@ describe("api client", () => {
                 hostMode: "embedded",
                 controller: { kind: "embedded" },
               },
+              executionEnvironment: null,
               capabilities: {
                 canArchive: true,
                 canUnarchive: false,
@@ -2172,6 +2177,7 @@ describe("api client", () => {
                 hostMode: "embedded",
                 controller: { kind: "embedded" },
               },
+              executionEnvironment: null,
               capabilities: {
                 canArchive: true,
                 canUnarchive: false,

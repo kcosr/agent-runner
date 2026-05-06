@@ -1,5 +1,6 @@
 import { cloneBackendArgsConfig, cloneBackendConfig } from "../backends/types.js";
 import type { RunManifest } from "../run/manifest.js";
+import type { EnvironmentReference } from "./environments.js";
 import type { AgentLauncherReference } from "./launchers.js";
 import {
   type AgentConfig,
@@ -19,6 +20,7 @@ export interface LoadedAgent {
   config: AgentConfig;
   instructions: string;
   launcher?: AgentLauncherReference;
+  executionEnvironment?: EnvironmentReference;
   // null for ad-hoc agents synthesized from CLI overrides and for
   // agents reconstructed from a resumed manifest (since resume never
   // re-reads the source file under the manifest-canonical design).
@@ -67,6 +69,7 @@ export function loadedAgentFromManifest(manifest: RunManifest): LoadedAgent {
     config,
     instructions: manifest.agent.instructions,
     launcher: undefined,
+    executionEnvironment: undefined,
     sourcePath: manifest.agent.sourcePath,
   };
 }
@@ -98,6 +101,7 @@ export function synthesizeAdHocAgent(inputs: AdHocAgentInputs): LoadedAgent {
     config,
     instructions: "",
     launcher: undefined,
+    executionEnvironment: undefined,
     sourcePath: null,
   };
 }

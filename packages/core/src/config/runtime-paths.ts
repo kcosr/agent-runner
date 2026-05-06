@@ -93,6 +93,10 @@ export function resolveLaunchersRoot(env: NodeJS.ProcessEnv = process.env): stri
   return join(resolveTaskRunnerConfigDir(env), "launchers");
 }
 
+export function resolveEnvironmentsRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveTaskRunnerConfigDir(env), "environments");
+}
+
 export function hookFilenameCandidates(): readonly string[] {
   return HOOK_FILENAME_CANDIDATES;
 }

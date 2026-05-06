@@ -27,10 +27,12 @@ import {
   addTask,
   appendTaskNotes,
   archiveRun,
+  cleanupRunEnvironment,
   clearRunBackendSession,
   clearRunDependencies,
   clearRunGroup,
   clearRunSchedule,
+  deleteRun,
   downloadAttachment,
   drainQueuedResumeMessages,
   isCommandError,
@@ -44,6 +46,7 @@ import {
   removeAttachment,
   removeQueuedResumeMessage,
   removeRunDependency,
+  resetRun,
   setRunBackendSession,
   setRunGroup,
   setRunName,
@@ -586,6 +589,44 @@ async function startCodexRenameServer(options = {}) {
       });
     },
   };
+}
+
+function writeFakeCodexStdioServer(baseDir, capturePath) {
+  const path = join(baseDir, "fake-codex-stdio.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+
+const capturePath = ${JSON.stringify(capturePath)};
+
+function respond(id, result) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+}
+
+const rl = createInterface({ input: process.stdin });
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize" && message.id !== undefined) {
+    respond(message.id, {});
+    return;
+  }
+  if (message.method === "initialized") {
+    return;
+  }
+  if (message.method === "thread/name/set" && message.id !== undefined) {
+    writeFileSync(capturePath, JSON.stringify({
+      cwd: process.cwd(),
+      params: message.params,
+    }, null, 2));
+    respond(message.id, {});
+  }
+});
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
 }
 
 test("command services: getRunTimelineHistory reads schema v3 attempt logs", async () => {
@@ -1343,6 +1384,152 @@ test("command services: set/clear run group mutations persist manifest and reset
   const manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.runGroupId, outcome.runId);
   assert.equal(manifest.resetSeed.runGroupId, outcome.runId);
+});
+
+test("command services: group-scoped execution environments pin group membership and cleanup", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const owner = await initRun(dir);
+  const runningPeer = await initRun(dir);
+
+  const environment = {
+    kind: "container",
+    mode: "managed",
+    name: "group-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "group",
+    containerName: "task-runner-shared-group",
+    containerId: "container-123",
+    workspace: {
+      scope: "group",
+      hostRoot: join(dir, "workspaces"),
+      hostPath: join(dir, "workspaces", "shared-group"),
+      containerPath: "/workspace",
+      mode: "rw",
+      create: true,
+      createdAt: null,
+      lifecycle: null,
+    },
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+
+  patchManifest(owner.workspaceDir, (manifest) => {
+    manifest.runGroupId = "shared-group";
+    manifest.resetSeed.runGroupId = "shared-group";
+    manifest.executionEnvironment = environment;
+    manifest.resetSeed.executionEnvironment = environment;
+  });
+  patchManifest(runningPeer.workspaceDir, (manifest) => {
+    manifest.runGroupId = "shared-group";
+    manifest.resetSeed.runGroupId = "shared-group";
+    manifest.status = "running";
+    manifest.executionEnvironment = environment;
+    manifest.resetSeed.executionEnvironment = environment;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => setRunGroup(owner.runId, { runGroupId: "other-group" }),
+      /group-scoped execution environment resources/,
+    );
+    await assert.rejects(
+      () => cleanupRunEnvironment(owner.runId),
+      /another group run can still use it/,
+    );
+  });
+});
+
+test("command services: reset and delete cleanup owned managed containers", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const resetTarget = await initRun(dir);
+  const deleteTarget = await initRun(dir);
+  const binDir = join(dir, "bin");
+  const logPath = join(dir, "docker.log");
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(
+    join(binDir, "docker"),
+    `#!/usr/bin/env node
+import fs from "node:fs";
+fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");
+process.exit(0);
+`,
+    { mode: 0o755 },
+  );
+
+  const environment = (containerId) => ({
+    kind: "container",
+    mode: "managed",
+    name: "run-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: "2026-05-06T01:00:00.000Z",
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: `task-runner-${containerId}`,
+    containerId,
+    workspace: null,
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  });
+
+  patchManifest(resetTarget.workspaceDir, (manifest) => {
+    manifest.executionEnvironment = environment("reset-container");
+    manifest.resetSeed.executionEnvironment = {
+      ...environment(null),
+      containerName: "task-runner-reset-container",
+      containerId: null,
+      lastValidatedAt: null,
+    };
+  });
+  patchManifest(deleteTarget.workspaceDir, (manifest) => {
+    manifest.executionEnvironment = environment("delete-container");
+    manifest.resetSeed.executionEnvironment = {
+      ...environment(null),
+      containerName: "task-runner-delete-container",
+      containerId: null,
+      lastValidatedAt: null,
+    };
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    await withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, async () => {
+      const reset = await resetRun(resetTarget.runId);
+      assert.equal(reset.manifest.executionEnvironment.containerId, null);
+      archiveRun(deleteTarget.runId);
+      await deleteRun(deleteTarget.runId);
+    });
+  });
+
+  const commands = readFileSync(logPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(commands, [
+    ["rm", "-f", "reset-container"],
+    ["rm", "-f", "delete-container"],
+  ]);
+  assert.equal(existsSync(deleteTarget.workspaceDir), false);
 });
 
 test("command services: group dependencies project aggregate readiness and reverse edges", async () => {
@@ -2198,6 +2385,55 @@ test("command services: setRunName propagates codex thread rename and clear valu
   } finally {
     await codexServer.close();
   }
+});
+
+test("command services: containerized codex stdio rename starts from host process cwd", async () => {
+  const dir = tempDir();
+  const capturePath = join(dir, "codex-rename-capture.json");
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const fakeCodex = writeFakeCodexStdioServer(dir, capturePath);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.backend = "codex";
+    manifest.backendSessionId = "thr_rename";
+    manifest.backendConfig = {
+      transport: {
+        type: "stdio",
+      },
+    };
+    manifest.cwd = dir;
+    manifest.executionEnvironment = {
+      kind: "container",
+      mode: "existing",
+      name: "runtime",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/workspace",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: null,
+      lastError: null,
+      container: "devbox",
+      containerIdAtValidation: null,
+      expectedMounts: [],
+    };
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    await withEnv({ TASK_RUNNER_CODEX_BIN: fakeCodex }, async () => {
+      const renamed = await setRunName(outcome.runId, { name: "Container rename" });
+      assert.equal(renamed.name, "Container rename");
+    });
+  });
+
+  assert.deepEqual(JSON.parse(readFileSync(capturePath, "utf8")), {
+    cwd: dir,
+    params: {
+      threadId: "thr_rename",
+      name: "Container rename",
+    },
+  });
 });
 
 test("command services: setRunNote and setRunPinned are idempotent and preserve reset seed metadata", async () => {

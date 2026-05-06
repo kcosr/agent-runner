@@ -87,6 +87,9 @@ function validateResumeOverrides(
   if (opts.overrides.launcher !== undefined) {
     return "--launcher cannot be combined with --resume-run (launcher is frozen into the run manifest)";
   }
+  if (opts.overrides.executionEnvironment !== undefined) {
+    return "--environment cannot be combined with --resume-run (execution environment is frozen into the run manifest)";
+  }
   if (opts.backendSessionId !== undefined) {
     return "--backend-session-id cannot be combined with --resume-run (the resume target already carries a backend session id)";
   }

@@ -20,6 +20,7 @@ import type {
 import {
   cloneBackendSessionHistorySource,
   cloneBackendSessionSyncState,
+  runBackendCwd,
   writeAttemptLog,
 } from "./manifest.js";
 
@@ -539,9 +540,10 @@ export async function prepareBackendSessionHistorySync(
   }
 
   const previousState = cloneBackendSessionSyncState(manifest.backendSessionSync);
+  const backendCwd = runBackendCwd(manifest);
   const sourceResult = await backend.resolveSessionHistorySource({
     sessionId: backendSessionId,
-    cwd: manifest.cwd,
+    cwd: backendCwd,
     env,
     backendConfig: cloneBackendConfig(manifest.backendConfig),
     resolvedBackendArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),
@@ -577,7 +579,7 @@ export async function prepareBackendSessionHistorySync(
   try {
     historyResult = await backend.readSessionHistory({
       sessionId: backendSessionId,
-      cwd: manifest.cwd,
+      cwd: backendCwd,
       env,
       backendConfig: cloneBackendConfig(manifest.backendConfig),
       resolvedBackendArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),

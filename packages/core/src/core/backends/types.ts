@@ -134,6 +134,7 @@ export interface BackendConfigResolutionContext {
 export interface BackendInvokeContext {
   prompt: string;
   cwd: string;
+  processCwd?: string;
   env: Record<string, string>;
   model?: string;
   effort?: EffortLevel;
@@ -163,6 +164,7 @@ export interface BackendInvokeResult {
 export interface ValidateSessionContext {
   sessionId: string;
   cwd: string;
+  processCwd?: string;
   env?: Record<string, string>;
   backendConfig?: unknown;
   resolvedBackendArgs: ResolvedBackendArgs;
@@ -246,6 +248,7 @@ export interface BackendLauncherContext {
 export interface BackendRenameSessionContext {
   sessionId: string;
   cwd: string;
+  processCwd?: string;
   env: Record<string, string>;
   backendConfig?: unknown;
   resolvedBackendArgs: ResolvedBackendArgs;

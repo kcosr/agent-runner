@@ -335,6 +335,40 @@ export function renderDefinitionDetails(result: DefinitionDetail): string {
     return `${lines.join("\n")}\n`;
   }
 
+  if (result.kind === "environment") {
+    const loaded = result.definition;
+    const config = loaded.config;
+    const lines: string[] = [];
+    lines.push(`Environment: ${loaded.name}`);
+    lines.push(`  kind:         ${config.kind}`);
+    lines.push(`  mode:         ${config.mode}`);
+    lines.push(`  engine:       ${config.engine}`);
+    lines.push(`  cwd:          ${config.cwd}`);
+    const varNames = Object.keys(config.vars);
+    if (varNames.length > 0) {
+      lines.push(`  vars:         ${varNames.join(", ")}`);
+    }
+    if (config.mode === "existing") {
+      lines.push(`  container:    ${config.container}`);
+      lines.push(`  mounts:       ${config.expectedMounts.length}`);
+    } else {
+      lines.push(`  image:        ${config.image}`);
+      lines.push(`  lifetime:     ${config.lifetime}`);
+      if (config.workspace !== undefined) {
+        lines.push(`  workspace:    ${config.workspace.scope}`);
+        lines.push(`  containerPath: ${config.workspace.containerPath}`);
+      }
+      const sessionMounts =
+        config.sessionMounts === "backend" ? "backend" : config.sessionMounts.join(", ");
+      if (sessionMounts.length > 0) {
+        lines.push(`  sessionMounts: ${sessionMounts}`);
+      }
+      lines.push(`  mounts:       ${config.mounts.length}`);
+    }
+    lines.push(`  source:       ${loaded.sourcePath}`);
+    return `${lines.join("\n")}\n`;
+  }
+
   if (result.kind === "agent") {
     const lines: string[] = [];
     lines.push(`Agent: ${result.config.name}`);
@@ -345,6 +379,9 @@ export function renderDefinitionDetails(result: DefinitionDetail): string {
       lines.push(
         `  launcher:     ${typeof result.config.launcher === "string" ? result.config.launcher : result.config.launcher.command}`,
       );
+    }
+    if (result.config.executionEnvironment !== undefined) {
+      lines.push(`  environment:  ${result.config.executionEnvironment}`);
     }
     lines.push(`  timeoutSec:   ${result.config.timeoutSec}`);
     lines.push(`  unrestricted: ${result.config.unrestricted}`);

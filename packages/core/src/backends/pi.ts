@@ -532,7 +532,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(launched.command, launched.args, {
-        cwd: ctx.cwd,
+        cwd: ctx.processCwd ?? ctx.cwd,
         env: ctx.env,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -832,6 +832,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
 export async function setPiSessionName(ctx: {
   sessionId: string;
   cwd: string;
+  processCwd?: string;
   env?: Record<string, string>;
   resolvedBackendArgs: string[];
   name: string | null;
@@ -847,6 +848,7 @@ export async function setPiSessionName(ctx: {
   const processHandle = await createPiProcess({
     prompt: "",
     cwd: ctx.cwd,
+    processCwd: ctx.processCwd,
     env: ctx.env ?? (process.env as Record<string, string>),
     resolvedBackendArgs: ctx.resolvedBackendArgs,
     timeoutSec: 60,
@@ -875,10 +877,11 @@ export const piBackend: Backend = {
   validateSessionId: validatePiSession,
   resolveSessionHistorySource: resolvePiSessionHistorySource,
   readSessionHistory: readPiSessionHistory,
-  renameSession: ({ sessionId, cwd, env, resolvedBackendArgs, name }) =>
+  renameSession: ({ sessionId, cwd, processCwd, env, resolvedBackendArgs, name }) =>
     setPiSessionName({
       sessionId,
       cwd,
+      processCwd,
       env,
       resolvedBackendArgs,
       name,

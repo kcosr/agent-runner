@@ -14,10 +14,11 @@ All commands accept `--help` / `-h`.
 | `serve` | Start the local daemon / control plane |
 | `status` | Print system/environment status |
 | `run status\|brief\|audit` | Print run state, the composed worker handoff, or persisted audit history |
+| `run environment status\|validate\|cleanup` | Inspect, validate, or clean up a run execution environment |
 | `task list\|show\|set\|append-notes\|add` | Run task-state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
-| `list agents\|assignments\|launchers\|tasks\|runs` | Enumerate definitions and runs |
-| `show agent\|assignment\|launcher\|task` | Render a single definition |
+| `list agents\|assignments\|launchers\|environments\|tasks\|runs` | Enumerate definitions and runs |
+| `show agent\|assignment\|launcher\|environment\|task` | Render a single definition |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
 | `run set-name\|set-backend-session\|clear-backend-session` | Metadata mutations |
@@ -60,6 +61,7 @@ task-runner run \
   [--cwd <path>] \
   [--backend <id>] \
   [--launcher <name>] \
+  [--environment <name|path>] \
   [--model <id>] \
   [--effort <level>] \
   [--timeout-sec <n>] \
@@ -90,6 +92,9 @@ Flags:
 - `--launcher <name>` — override the agent's launcher by named launcher
   id. Fresh-run/init only; forbidden on resume and ready-start.
   The built-in `direct` launcher is always available.
+- `--environment <name|path>` — override the agent's execution
+  environment for a fresh run/init. The selected environment is frozen
+  into the manifest and reset seed. Forbidden on resume.
 - `--model <id>` — override the agent's model.
 - `--effort <level>` — one of `off`, `minimal`, `low`, `medium`, `high`,
   `xhigh`, `max`.
@@ -169,6 +174,16 @@ In connected mode the daemon resolves named launchers against its own
 config root, then freezes the result into the manifest and reset seed.
 Launchers apply to subprocess-backed execution only; passive runs and
 Codex websocket/UDS transports keep the built-in `direct` launcher.
+
+Execution environment precedence on fresh run/init is:
+
+1. `--environment <name|path>`
+2. agent-authored `executionEnvironment`
+3. host execution
+
+Container environments are currently subprocess-only and require the
+built-in `direct` launcher. They do not apply to passive runs or Codex
+websocket/UDS transports.
 
 Schedule flags are accepted on `init` and `run ready`. Exactly one of
 `--schedule-at`, `--schedule-delay`, or `--schedule-cron` is required
@@ -310,6 +325,7 @@ See [attachments.md](attachments.md).
 task-runner list agents
 task-runner list assignments
 task-runner list launchers
+task-runner list environments
 task-runner list tasks
 task-runner list runs \
   [--cwd <path> | --repo <name> | --global] \
@@ -317,8 +333,9 @@ task-runner list runs \
   [--include-archived]
 ```
 
-- `list agents`, `list assignments`, `list launchers`, and `list tasks`
-  enumerate reusable definitions from `${TASK_RUNNER_CONFIG_DIR}`.
+- `list agents`, `list assignments`, `list launchers`,
+  `list environments`, and `list tasks` enumerate reusable definitions
+  from `${TASK_RUNNER_CONFIG_DIR}`.
 - `list tasks` lists markdown task definition files under
   `${TASK_RUNNER_CONFIG_DIR}/tasks`; invalid task definitions are warned
   to stderr in text mode and included in the JSON payload's `warnings`
@@ -337,11 +354,13 @@ task-runner list runs \
 task-runner show agent <name|path>
 task-runner show assignment <name|path>
 task-runner show launcher <name|path>
+task-runner show environment <name|path>
 task-runner show task <name|path>
 ```
 
 Renders the parsed frontmatter, declared vars (for assignments), task
-lists, launcher definitions, or reusable task definition title/body/hooks.
+lists, launcher definitions, environment definitions, or reusable task
+definition title/body/hooks.
 For `show task`, bare strings are named ids under
 `${TASK_RUNNER_CONFIG_DIR}/tasks`; absolute paths and strings beginning
 with `./` or `../` are direct markdown file paths.
@@ -372,6 +391,21 @@ is left unchanged. Reconfigure does not support identity/runtime
 changes: agent, assignment, backend, cwd, tasks, schedule, launcher,
 hooks, selected backendConfig, and selected backend args remain the frozen
 values from the initialized run.
+
+### Execution environment
+
+```bash
+task-runner run environment status <id|path>
+task-runner run environment validate <id|path>
+task-runner run environment cleanup <id|path>
+```
+
+`status` prints the frozen execution environment state from the run
+manifest. `validate` checks an existing container or starts/validates a
+managed container and persists the updated state. `cleanup` removes a
+task-runner-managed environment when the run is not running and no
+same-group initialized, ready, or running run still references the shared
+environment. Externally managed containers are never removed.
 
 Exit codes are `0` for success, `2` when the run id is not found, `3`
 for invalid input/lifecycle/var/lock/prepare failures, and `4` for

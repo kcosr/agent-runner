@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { encodePiSessionDir } from "../packages/core/dist/backends/pi.js";
+import { reconfigureInitializedRun } from "../packages/core/dist/core/run/reconfigure.js";
 import {
   ResumeError,
   RunCommandError,
@@ -15,6 +16,30 @@ function writeLauncher(baseDir, name, body, ext = ".yaml") {
   const dir = join(baseDir, "launchers");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${name}${ext}`), body);
+}
+
+function writeEnvironment(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "environments");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}${ext}`), body);
+}
+
+function writeBackend(baseDir, name, body) {
+  const dir = join(baseDir, "backends", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "backend.mjs"), body);
+}
+
+function writeAgent(baseDir, name, body) {
+  const dir = join(baseDir, "agents", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "agent.md"), body);
+}
+
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "assignment.md"), body);
 }
 
 function patchManifest(workspaceDir, mutator) {
@@ -63,6 +88,343 @@ test("executeRunCommand can initialize an ad-hoc passive run without an agent fi
     assert.equal(outcome.manifest.agent.name, "ad-hoc");
     assert.equal(outcome.manifest.agent.sourcePath, null);
     assert.equal(outcome.manifest.backend, "passive");
+  }));
+
+test("executeRunCommand resolves selected environment vars as run vars", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ configDir, stateDir }) => {
+    writeEnvironment(
+      configDir,
+      "clone-runtime",
+      `schemaVersion: 1
+kind: container
+mode: existing
+engine: podman
+cwd: /workspace/{{repo_name}}
+vars:
+  repo_name:
+    sources: [cli]
+    required: true
+  base_ref:
+    sources: [cli]
+    default: main
+container: runtime-box
+`,
+    );
+    writeAgent(
+      configDir,
+      "worker",
+      `---
+schemaVersion: 1
+name: worker
+backend: codex
+---
+Inspect the repository.
+`,
+    );
+    writeAssignment(
+      configDir,
+      "inspect",
+      `---
+schemaVersion: 1
+name: inspect
+cwd: "{{state_dir}}/assigned/{{repo_name}}"
+tasks: []
+---
+Explain {{repo_name}}.
+`,
+    );
+
+    const outcome = await executeRunCommand({
+      initialize: true,
+      agent: "worker",
+      assignment: "inspect",
+      cliVars: { repo_name: "demo" },
+      overrides: {
+        executionEnvironment: "clone-runtime",
+        message: "Explain this app.",
+      },
+    });
+
+    assert.equal(outcome.manifest.cwd, join(stateDir, "assigned", "demo"));
+    assert.deepEqual(outcome.manifest.runtimeVars, {
+      repo_name: "demo",
+      base_ref: "main",
+    });
+    assert.deepEqual(outcome.manifest.resetSeed.runtimeVars, outcome.manifest.runtimeVars);
+    assert.equal(outcome.manifest.executionEnvironment.cwd, "/workspace/demo");
+  }));
+
+test("executeRunCommand invokes containerized backends with the execution cwd", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ rootDir, configDir }) => {
+    const binDir = join(rootDir, "bin");
+    const capturePath = join(rootDir, "backend-capture.json");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(binDir, "docker"),
+      `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const [cmd, target] = args;
+if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect") {
+  process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "run") {
+  process.stdout.write("container-123\\n");
+  process.exit(0);
+}
+process.exit(0);
+`,
+      { mode: 0o755 },
+    );
+    writeBackend(
+      configDir,
+      "capture",
+      `import { writeFileSync } from "node:fs";
+export default {
+  id: "capture",
+  async invoke(ctx) {
+    writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({
+      cwd: ctx.cwd,
+      processCwd: ctx.processCwd,
+      taskRunnerCwd: ctx.env.TASK_RUNNER_CWD,
+      launcherCommand: ctx.launcher?.command,
+      launcherWorkdir: ctx.launcher?.args?.[ctx.launcher.args.indexOf("-w") + 1],
+    }, null, 2));
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+      sessionId: "capture-session",
+      transcript: "ok",
+      rawStdout: "",
+      rawStderr: ""
+    };
+  }
+};`,
+    );
+    writeEnvironment(
+      configDir,
+      "runtime",
+      `schemaVersion: 1
+kind: container
+mode: managed
+engine: docker
+image: alpine:latest
+cwd: /workspace
+containerName: task-runner-run-123
+cleanup:
+  policy: terminal
+`,
+    );
+
+    const outcome = await withEnv({ PATH: `${binDir}:${process.env.PATH}` }, () =>
+      executeRunCommand({
+        initialize: false,
+        cliVars: {},
+        overrides: {
+          backend: "capture",
+          executionEnvironment: "runtime",
+          message: "Inspect the repository.",
+        },
+      }),
+    );
+
+    assert.equal(outcome.manifest.cwd, process.cwd());
+    assert.equal(outcome.manifest.executionEnvironment.cwd, "/workspace");
+    assert.deepEqual(JSON.parse(readFileSync(capturePath, "utf8")), {
+      cwd: "/workspace",
+      processCwd: process.cwd(),
+      taskRunnerCwd: "/workspace",
+      launcherCommand: "docker",
+      launcherWorkdir: "/workspace",
+    });
+  }));
+
+test("executeRunCommand rejects conflicting assignment and environment var definitions", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+    writeEnvironment(
+      configDir,
+      "clone-runtime",
+      `schemaVersion: 1
+kind: container
+mode: existing
+cwd: /workspace/{{repo_name}}
+vars:
+  repo_name:
+    type: string
+    sources: [cli]
+container: runtime-box
+`,
+    );
+    writeAgent(
+      configDir,
+      "worker",
+      `---
+schemaVersion: 1
+name: worker
+backend: codex
+---
+Inspect the repository.
+`,
+    );
+    writeAssignment(
+      configDir,
+      "inspect",
+      `---
+schemaVersion: 1
+name: inspect
+vars:
+  repo_name:
+    type: number
+    sources: [cli]
+tasks: []
+---
+Explain the repository.
+`,
+    );
+
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: true,
+          agent: "worker",
+          assignment: "inspect",
+          cliVars: { repo_name: "demo" },
+          overrides: {
+            executionEnvironment: "clone-runtime",
+            message: "Explain this app.",
+          },
+        }),
+      /var "repo_name" is declared by both assignment\.vars and environment\.vars with different definitions/,
+    );
+  }));
+
+test("reconfigureInitializedRun can edit vars introduced by the selected environment", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+    writeEnvironment(
+      configDir,
+      "clone-runtime",
+      `schemaVersion: 1
+kind: container
+mode: existing
+engine: podman
+cwd: /workspace/{{repo_name}}
+vars:
+  repo_name:
+    sources: [cli]
+    required: true
+container: runtime-box
+`,
+    );
+
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: { repo_name: "demo" },
+      overrides: {
+        backend: "codex",
+        executionEnvironment: "clone-runtime",
+        message: "Explain this app.",
+      },
+    });
+
+    const detail = await reconfigureInitializedRun(outcome.runId, {
+      vars: { repo_name: "beta" },
+    });
+    assert.equal(detail.runtimeVars.repo_name, "beta");
+
+    const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+    assert.equal(manifest.runtimeVars.repo_name, "beta");
+    assert.equal(manifest.resetSeed.runtimeVars.repo_name, "beta");
+    assert.equal(manifest.executionEnvironment.cwd, "/workspace/beta");
+    assert.equal(manifest.resetSeed.executionEnvironment.cwd, "/workspace/beta");
+  }));
+
+test("reconfigureInitializedRun preserves environment var constraints", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+    writeEnvironment(
+      configDir,
+      "clone-runtime",
+      `schemaVersion: 1
+kind: container
+mode: existing
+cwd: /workspace/{{repo_kind}}
+vars:
+  repo_kind:
+    type: enum
+    values: [app, library]
+    sources: [cli]
+    required: true
+container: runtime-box
+`,
+    );
+
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: { repo_kind: "app" },
+      overrides: {
+        backend: "codex",
+        executionEnvironment: "clone-runtime",
+        message: "Explain this app.",
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        reconfigureInitializedRun(outcome.runId, {
+          vars: { repo_kind: "service" },
+        }),
+      /var "repo_kind": expected one of app, library, got "service"/,
+    );
+
+    const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+    assert.equal(manifest.runtimeVars.repo_kind, "app");
+    assert.equal(manifest.executionEnvironment.cwd, "/workspace/app");
+  }));
+
+test("reconfigureInitializedRun preserves group container identity", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+    writeEnvironment(
+      configDir,
+      "group-runtime",
+      `schemaVersion: 1
+kind: container
+mode: managed
+engine: podman
+image: node:22
+lifetime: group
+containerName: "{{repo_name}}-box"
+cwd: /workspace/{{repo_name}}
+vars:
+  repo_name:
+    sources: [cli]
+    required: true
+`,
+    );
+
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: { repo_name: "demo" },
+      overrides: {
+        backend: "codex",
+        executionEnvironment: "group-runtime",
+        message: "Explain this app.",
+      },
+    });
+
+    const before = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+    assert.equal(before.executionEnvironment.containerName, "demo-box");
+
+    await reconfigureInitializedRun(outcome.runId, {
+      vars: { repo_name: "beta" },
+    });
+
+    const after = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+    assert.equal(after.runtimeVars.repo_name, "beta");
+    assert.equal(after.executionEnvironment.cwd, "/workspace/beta");
+    assert.equal(after.executionEnvironment.containerName, "demo-box");
+    assert.equal(after.resetSeed.executionEnvironment.containerName, "demo-box");
   }));
 
 test("executeRunCommand rejects resume-time cli vars before attempting backend execution", async () =>

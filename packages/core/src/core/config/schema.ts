@@ -310,6 +310,132 @@ export const launcherDefinitionSchema = z
 
 export const agentLauncherSchema = z.union([z.string().trim().min(1), launcherInlineConfigSchema]);
 
+const environmentPathTemplateSchema = z.string().trim().min(1);
+
+const environmentMountSchema = z
+  .object({
+    hostPath: environmentPathTemplateSchema,
+    containerPath: environmentPathTemplateSchema,
+    mode: z.enum(["ro", "rw"]),
+  })
+  .strict();
+
+const environmentSessionMountPresetSchema = z.enum(["claude", "codex", "cursor", "opencode", "pi"]);
+
+const environmentSessionMountsSchema = z
+  .union([z.literal("backend"), z.array(environmentSessionMountPresetSchema)])
+  .default([]);
+
+const environmentWorkspaceSchema = z
+  .object({
+    scope: z.enum(["run", "group"]).default("run"),
+    hostRoot: environmentPathTemplateSchema.optional(),
+    hostPath: environmentPathTemplateSchema.optional(),
+    containerPath: environmentPathTemplateSchema,
+    mode: z.enum(["ro", "rw"]).default("rw"),
+    create: z.boolean().default(true),
+    lifecycle: z
+      .object({
+        onCreate: z
+          .array(
+            z.discriminatedUnion("kind", [
+              z
+                .object({
+                  kind: z.literal("command"),
+                  command: z.string().trim().min(1),
+                  args: z.array(z.string()).default([]),
+                  env: z.record(z.string().trim().min(1), z.string()).default({}),
+                })
+                .strict(),
+              z
+                .object({
+                  kind: z.literal("git-clone"),
+                  source: environmentPathTemplateSchema,
+                  baseRef: z.string().trim().min(1),
+                  branch: z.string().trim().min(1),
+                })
+                .strict(),
+            ]),
+          )
+          .default([]),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .refine(
+    (workspace) => workspace.hostRoot === undefined || workspace.hostPath === undefined,
+    "workspace cannot define both hostRoot and hostPath",
+  );
+
+const containerEngineSchema = z.enum(["docker", "podman"]);
+
+const containerNetworkSchema = z.union([
+  z.enum(["default", "none", "host", "bridge"]),
+  z.string().trim().min(1),
+]);
+
+const containerSecuritySchema = z
+  .object({
+    userns: z.enum(["keep-id", "host"]).optional(),
+    selinuxLabel: z.enum(["disable", "shared", "private"]).optional(),
+    readOnlyRootFilesystem: z.boolean().optional(),
+    capDrop: z.array(z.string().trim().min(1)).default([]),
+    capAdd: z.array(z.string().trim().min(1)).default([]),
+  })
+  .strict()
+  .default({
+    capDrop: [],
+    capAdd: [],
+  });
+
+const containerEnvSchema = z.record(z.string().trim().min(1), z.string());
+
+const baseContainerEnvironmentSchema = z.object({
+  schemaVersion: z.literal(1),
+  name: z.string().min(1).optional(),
+  kind: z.literal("container"),
+  engine: containerEngineSchema.default("docker"),
+  cwd: environmentPathTemplateSchema,
+  vars: z.record(z.string(), varDefSchema).default({}),
+  env: containerEnvSchema.default({}),
+  extraExecArgs: z.array(z.string().trim().min(1)).default([]),
+});
+
+const existingContainerEnvironmentSchema = baseContainerEnvironmentSchema
+  .extend({
+    mode: z.literal("existing"),
+    container: z.string().trim().min(1),
+    expectedMounts: z.array(environmentMountSchema).default([]),
+  })
+  .strict();
+
+const managedContainerEnvironmentSchema = baseContainerEnvironmentSchema
+  .extend({
+    mode: z.literal("managed"),
+    image: z.string().trim().min(1),
+    lifetime: z.enum(["run", "group"]).default("run"),
+    containerName: z.string().trim().min(1).optional(),
+    workspace: environmentWorkspaceSchema.optional(),
+    sessionMounts: environmentSessionMountsSchema,
+    mounts: z.array(environmentMountSchema).default([]),
+    network: containerNetworkSchema.default("default"),
+    security: containerSecuritySchema,
+    extraRunArgs: z.array(z.string().trim().min(1)).default([]),
+    cleanup: z
+      .object({
+        policy: z.enum(["terminal", "manual"]).default("terminal"),
+      })
+      .strict()
+      .default({ policy: "terminal" }),
+  })
+  .strict();
+
+export const environmentDefinitionSchema = z.discriminatedUnion("mode", [
+  existingContainerEnvironmentSchema,
+  managedContainerEnvironmentSchema,
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent schema — identity, backend config, role instructions, locks.
 // No vars, no tasks, no message. Those live on assignments.
@@ -323,6 +449,7 @@ export const agentConfigSchema = z
     model: z.string().optional(),
     effort: z.enum(EFFORT_LEVELS).optional(),
     launcher: agentLauncherSchema.optional(),
+    executionEnvironment: z.string().trim().min(1).optional(),
     backendConfig: backendConfigSchema.optional(),
     backendArgs: backendArgsConfigSchema.optional(),
     timeoutSec: z.number().int().positive().default(DEFAULT_AGENT_TIMEOUT_SEC),
@@ -333,6 +460,7 @@ export const agentConfigSchema = z
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 export type AgentLauncherConfig = z.infer<typeof agentLauncherSchema>;
+export type EnvironmentDefinitionConfig = z.infer<typeof environmentDefinitionSchema>;
 export type LauncherDefinitionConfig = z.infer<typeof launcherDefinitionSchema>;
 export type LauncherInlineConfig = z.infer<typeof launcherInlineConfigSchema>;
 

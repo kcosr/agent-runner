@@ -3,6 +3,7 @@ import type {
   addRunAttachmentFromStream,
   appendNotes,
   archive,
+  cleanupRunEnvironment,
   clearBackendSession,
   clearDependencies,
   clearGroup,
@@ -17,6 +18,7 @@ import type {
   getRun,
   getRunAuditHistory,
   getRunBrief,
+  getRunEnvironment,
   getRunInputSurface,
   getRunList,
   getRunSummary,
@@ -42,6 +44,7 @@ import type {
   updateRunNote,
   updateRunPinned,
   updateTask,
+  validateRunEnvironment,
 } from "@task-runner/core/app/service.js";
 import type {
   CliRunsStartParams,
@@ -64,6 +67,7 @@ type InternalStartRunRequest = Parameters<DaemonHandlers["startRun"]>[0];
 export interface DaemonHandlers {
   getRun: typeof getRun;
   getRunBrief: typeof getRunBrief;
+  getRunEnvironment: typeof getRunEnvironment;
   getRunList: typeof getRunList;
   getRunSummary: typeof getRunSummary;
   getRunAuditHistory: typeof getRunAuditHistory;
@@ -90,6 +94,8 @@ export interface DaemonHandlers {
   clearDependencies: typeof clearDependencies;
   setRunSchedule: typeof setRunSchedule;
   clearRunSchedule: typeof clearRunSchedule;
+  validateRunEnvironment: typeof validateRunEnvironment;
+  cleanupRunEnvironment: typeof cleanupRunEnvironment;
   setRunScheduleEnabled: typeof setRunScheduleEnabled;
   addRunAttachmentFromStream: typeof addRunAttachmentFromStream;
   removeRunAttachment: typeof removeRunAttachment;
@@ -135,6 +141,15 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     getRunBrief(target: string) {
       return { brief: ctx.getRunBrief(target) };
+    },
+    getRunEnvironment(target: string) {
+      return ctx.getRunEnvironment(target);
+    },
+    validateRunEnvironment(target: string) {
+      return ctx.validateRunEnvironment(target);
+    },
+    cleanupRunEnvironment(target: string) {
+      return ctx.cleanupRunEnvironment(target);
     },
     initCliRun(request: CliRunsStartParams) {
       return ctx
@@ -188,8 +203,8 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     unarchiveRun(target: string) {
       return { result: ctx.unarchive(target) };
     },
-    deleteRun(target: string) {
-      return { result: ctx.deleteArchivedRun(target) };
+    async deleteRun(target: string) {
+      return { result: await ctx.deleteArchivedRun(target) };
     },
     async setRunName(target: string, input: Parameters<typeof renameRun>[1]) {
       return { result: await ctx.renameRun(target, input) };
@@ -245,8 +260,8 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     abortRun(target: string) {
       return ctx.abortRun(target);
     },
-    resetRun(target: string) {
-      return { run: ctx.reset(target) };
+    async resetRun(target: string) {
+      return { run: await ctx.reset(target) };
     },
     async reconfigureRun(params: RunsReconfigureParams) {
       return {
@@ -293,6 +308,14 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     getLauncher(params: DefinitionGetParams) {
       return {
         launcher: ctx.getDefinition("launcher", params.target, params.cwd),
+      };
+    },
+    listEnvironments() {
+      return { environments: ctx.getDefinitionList("environment") };
+    },
+    getEnvironment(params: DefinitionGetParams) {
+      return {
+        environment: ctx.getDefinition("environment", params.target, params.cwd),
       };
     },
     listTaskDefinitions() {

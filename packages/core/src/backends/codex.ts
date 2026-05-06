@@ -144,7 +144,7 @@ export function buildCodexAppServerArgs(
 }
 
 function openStdioTransport(
-  cwd: string,
+  processCwd: string,
   env: Record<string, string>,
   unrestricted: boolean,
   resolvedBackendArgs: string[],
@@ -158,7 +158,7 @@ function openStdioTransport(
     launcher,
   });
   const child: ChildProcess = spawn(launched.command, launched.args, {
-    cwd,
+    cwd: processCwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -990,7 +990,7 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
     return openUdsTransport(transport.path);
   }
   return openStdioTransport(
-    ctx.cwd,
+    ctx.processCwd ?? ctx.cwd,
     ctx.env,
     ctx.unrestricted ?? false,
     ctx.resolvedBackendArgs,
@@ -1254,10 +1254,11 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
   let client: CodexClient | undefined;
   try {
     transport = await openTransport({
-      // Only cwd/env are read by openTransport. The rest of
+      // Only cwd/processCwd/env are read by openTransport. The rest of
       // BackendInvokeContext is unused for the validation handshake.
       prompt: "",
       cwd: ctx.cwd,
+      processCwd: ctx.processCwd,
       env: ctx.env ?? (process.env as Record<string, string>),
       backendConfig: ctx.backendConfig,
       resolvedBackendArgs: ctx.resolvedBackendArgs,
@@ -1306,6 +1307,7 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
 export async function setCodexThreadName(ctx: {
   threadId: string;
   cwd: string;
+  processCwd?: string;
   env?: Record<string, string>;
   backendConfig?: unknown;
   resolvedBackendArgs: string[];
@@ -1317,6 +1319,7 @@ export async function setCodexThreadName(ctx: {
     transport = await openTransport({
       prompt: "",
       cwd: ctx.cwd,
+      processCwd: ctx.processCwd,
       env: ctx.env ?? (process.env as Record<string, string>),
       backendConfig: ctx.backendConfig,
       resolvedBackendArgs: ctx.resolvedBackendArgs,
@@ -1353,10 +1356,11 @@ export const codexBackend: Backend = {
   validateSessionId: validateCodexSession,
   resolveSessionHistorySource: resolveCodexSessionHistorySource,
   readSessionHistory: readCodexSessionHistory,
-  renameSession: ({ sessionId, cwd, env, backendConfig, resolvedBackendArgs, name }) =>
+  renameSession: ({ sessionId, cwd, processCwd, env, backendConfig, resolvedBackendArgs, name }) =>
     setCodexThreadName({
       threadId: sessionId,
       cwd,
+      processCwd,
       env,
       backendConfig,
       resolvedBackendArgs,

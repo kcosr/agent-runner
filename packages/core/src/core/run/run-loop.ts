@@ -1,5 +1,6 @@
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { BackendConfigError, resolveBackend } from "../../backends/registry.js";
 import {
@@ -31,8 +32,20 @@ import type { LockableField, VarDef } from "../config/schema.js";
 import { resolveAssignmentHooks } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
 import type { ResolvedHookDescriptor } from "../hooks/types.js";
+import {
+  buildEnvironmentLauncher,
+  cleanupExecutionEnvironment,
+  groupEnvironmentHasPendingUsers as hasPendingGroupEnvironmentUsers,
+  prepareExecutionEnvironment,
+  resolveFreshExecutionEnvironment,
+  resolveFreshExecutionEnvironmentDefinition,
+} from "./execution-environments.js";
 import { validateRunGroupId } from "./groups.js";
-import { interpolateResolvedLauncher, resolveFreshLauncherConfig } from "./launchers.js";
+import {
+  interpolateResolvedLauncher,
+  launcherAppliesToBackend,
+  resolveFreshLauncherConfig,
+} from "./launchers.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -47,12 +60,16 @@ import {
   attemptStdoutLogRelativePath,
   buildRunResetSeed,
   cloneRunDependencyRefs,
+  cloneRunExecutionEnvironment,
   cloneRuntimeVarSources,
   findRunManifestsById,
+  listRunManifests,
   resolveResumeTarget,
+  runBackendCwd,
   snapshotTasks,
   workspaceAgentPath,
   workspaceAssignmentPath,
+  workspaceEnvironmentPath,
   writeAttemptLog,
   writeManifest,
 } from "./manifest.js";
@@ -78,7 +95,12 @@ import {
   appendRunBackendSessionHistorySyncFailedEvent,
   appendRunBackendSessionHistorySyncedEvent,
   appendRunBackendSessionUpdatedEvent,
+  appendRunContainerCleanupFailedEvent,
+  appendRunContainerCreatedEvent,
+  appendRunContainerRemovedEvent,
   appendRunCreatedEvent,
+  appendRunEnvironmentValidatedEvent,
+  appendRunEnvironmentValidationFailedEvent,
   appendRunFinishedEvent,
   appendRunResumeRejectedEvent,
   appendRunRetryingEvent,
@@ -129,6 +151,7 @@ export interface RunOverrides {
   maxRetries?: number;
   addedTasks?: string[];
   schedule?: ScheduleInput;
+  executionEnvironment?: string;
 }
 
 export interface RunOptions {
@@ -161,6 +184,7 @@ export interface RunOptions {
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
   stageInitialize?: boolean;
   resolvedHooksOverride?: ResolvedHookDescriptor[];
+  varsSchemaOverride?: Record<string, VarDef>;
 }
 
 export interface RunOutcome {
@@ -515,6 +539,67 @@ function copyFrozenAgentSeed(sourceManifest: RunManifest, targetWorkspaceDir: st
   copyFileSync(workspaceAgentPath(sourceManifest.workspaceDir), targetAgentPath);
 }
 
+function copyFrozenEnvironmentSeed(sourceManifest: RunManifest, targetWorkspaceDir: string): void {
+  if (sourceManifest.executionEnvironment === null) {
+    return;
+  }
+  const sourceEnvironmentPath = workspaceEnvironmentPath(sourceManifest.workspaceDir);
+  if (!existsSync(sourceEnvironmentPath)) {
+    return;
+  }
+  const targetEnvironmentPath = workspaceEnvironmentPath(targetWorkspaceDir);
+  mkdirSync(dirname(targetEnvironmentPath), { recursive: true });
+  copyFileSync(sourceEnvironmentPath, targetEnvironmentPath);
+}
+
+function cloneExecutionEnvironmentForRecurringRun(
+  environment: RunManifest["executionEnvironment"],
+  sourceWorkspaceDir: string,
+  targetWorkspaceDir: string,
+  sourceRunId: string,
+  runId: string,
+): RunManifest["executionEnvironment"] {
+  const cloned = cloneRunExecutionEnvironment(environment);
+  if (cloned !== null && existsSync(workspaceEnvironmentPath(sourceWorkspaceDir))) {
+    cloned.sourcePath = workspaceEnvironmentPath(targetWorkspaceDir);
+  }
+  if (cloned?.mode !== "managed") {
+    return cloned;
+  }
+  const sourceDefaultName = `task-runner-${sourceRunId}`;
+  return {
+    ...cloned,
+    containerName:
+      cloned.lifetime === "group" || cloned.containerName !== sourceDefaultName
+        ? cloned.containerName
+        : `task-runner-${runId}`,
+    containerId: null,
+    workspace:
+      cloned.workspace?.scope === "run" && cloned.workspace.hostRoot !== null
+        ? {
+            ...cloned.workspace,
+            hostPath: join(cloned.workspace.hostRoot, runId),
+            createdAt: null,
+            lifecycle:
+              cloned.workspace.lifecycle === null
+                ? null
+                : {
+                    ...cloned.workspace.lifecycle,
+                    completedAt: null,
+                    lastError: null,
+                  },
+          }
+        : cloned.workspace,
+    cleanup: {
+      ...cloned.cleanup,
+      cleanedAt: null,
+      lastError: null,
+    },
+    lastValidatedAt: null,
+    lastError: null,
+  };
+}
+
 function buildRecurringCloneManifest(params: {
   sourceManifest: RunManifest;
   schedule: RunSchedule;
@@ -525,8 +610,15 @@ function buildRecurringCloneManifest(params: {
   const runId = shortId();
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
+  const executionEnvironment = cloneExecutionEnvironmentForRecurringRun(
+    seed.executionEnvironment,
+    sourceManifest.workspaceDir,
+    workspaceDir,
+    sourceManifest.runId,
+    runId,
+  );
   return {
-    schemaVersion: 19,
+    schemaVersion: 23,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -576,6 +668,7 @@ function buildRecurringCloneManifest(params: {
     runtimeVars: { ...seed.runtimeVars },
     runtimeVarSources: cloneRuntimeVarSources(seed.runtimeVarSources),
     execution: sourceManifest.execution,
+    executionEnvironment,
     brief: seed.brief,
     resolvedHooks: sourceManifest.resolvedHooks.map((descriptor) => ({
       ...descriptor,
@@ -590,6 +683,7 @@ function buildRecurringCloneManifest(params: {
       backendConfig: cloneBackendConfig(seed.backendConfig),
       resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(seed.launcher),
+      executionEnvironment,
       lockedFields: [...seed.lockedFields],
       runGroupId: seed.runGroupId,
       dependencies: cloneRunDependencyRefs(seed.dependencies),
@@ -727,13 +821,44 @@ function resolveFreshBackendArgs(
   return cloneResolvedBackendArgs(agentConfig.backendArgs?.[backendId]?.extraArgs ?? []);
 }
 
-async function validateBootstrapBackendSessionId(
-  sessionId: string,
-  backend: Backend,
-  cwd: string,
-  backendConfig: unknown,
-  resolvedBackendArgs: ResolvedBackendArgs,
-): Promise<void> {
+function assertExecutionEnvironmentCompatible(params: {
+  environment: RunManifest["executionEnvironment"];
+  launcher: ResolvedLauncherConfig;
+  backend: Backend;
+  backendConfig: unknown;
+}): void {
+  if (params.environment === null) {
+    return;
+  }
+  if (params.launcher.kind !== "direct") {
+    throw new ResumeError(
+      "execution environments cannot be combined with non-direct launchers; use one runtime wrapper mechanism per run",
+    );
+  }
+  if (!launcherAppliesToBackend(params.backend, params.backendConfig)) {
+    throw new ResumeError(
+      `execution environments only apply to subprocess-backed backend invocations; backend ${params.backend.id} is direct for this run`,
+    );
+  }
+}
+
+interface ValidateBootstrapBackendSessionIdParams {
+  sessionId: string;
+  backend: Backend;
+  cwd: string;
+  processCwd: string;
+  backendConfig: unknown;
+  resolvedBackendArgs: ResolvedBackendArgs;
+}
+
+async function validateBootstrapBackendSessionId({
+  sessionId,
+  backend,
+  cwd,
+  processCwd,
+  backendConfig,
+  resolvedBackendArgs,
+}: ValidateBootstrapBackendSessionIdParams): Promise<void> {
   if (backend.supportsBootstrapSessionImport === false) {
     throw new InvalidBackendSessionError(
       sessionId,
@@ -748,6 +873,7 @@ async function validateBootstrapBackendSessionId(
   const result = await backend.validateSessionId({
     sessionId,
     cwd,
+    processCwd,
     env: process.env as Record<string, string>,
     backendConfig: cloneBackendConfig(backendConfig),
     resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
@@ -837,7 +963,7 @@ function assertKnownCliVars(
   const unknown = Object.keys(cliVars).filter((key) => !declared.has(key));
   if (unknown.length === 0) return;
   throw new VarResolutionError(
-    `unknown --var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or remove the extra --var flag(s).`,
+    `unknown --var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or environment.vars, or remove the extra --var flag(s).`,
   );
 }
 
@@ -849,8 +975,25 @@ function assertKnownWebVars(
   const unknown = Object.keys(webVars).filter((key) => !declared.has(key));
   if (unknown.length === 0) return;
   throw new VarResolutionError(
-    `unknown web var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or remove the extra web field(s).`,
+    `unknown web var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or environment.vars, or remove the extra web field(s).`,
   );
+}
+
+export function mergeRunVarSchemas(
+  assignmentVars: Record<string, VarDef>,
+  environmentVars: Record<string, VarDef>,
+): Record<string, VarDef> {
+  const merged = { ...environmentVars };
+  for (const [key, assignmentDef] of Object.entries(assignmentVars)) {
+    const environmentDef = environmentVars[key];
+    if (environmentDef !== undefined && !isDeepStrictEqual(environmentDef, assignmentDef)) {
+      throw new VarResolutionError(
+        `var "${key}" is declared by both assignment.vars and environment.vars with different definitions`,
+      );
+    }
+    merged[key] = assignmentDef;
+  }
+  return merged;
 }
 
 export class LineageResolutionError extends VarResolutionError {
@@ -1363,6 +1506,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       if (overrides?.message && overrides.message.trim().length > 0) forbidden.push("message");
       if ((overrides?.addedTasks?.length ?? 0) > 0) forbidden.push("--add-task");
       if (overrides?.launcher !== undefined) forbidden.push("--launcher");
+      if (overrides?.executionEnvironment !== undefined) forbidden.push("--environment");
       if (overrides?.model !== undefined) forbidden.push("--model");
       if (overrides?.effort !== undefined) forbidden.push("--effort");
       if (overrides?.timeoutSec !== undefined) forbidden.push("--timeout-sec");
@@ -1421,10 +1565,25 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const backendOverridden = overrides?.backend !== undefined;
   let model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   let effort = overrides?.effort ?? agentConfig.effort;
-  // Vars live on the assignment. Chat mode (no assignment) has no var
-  // schema, so there is nothing to validate against or resolve from.
-  const varsSchema = assignmentConfig?.vars ?? {};
-  if (assignmentConfig) {
+  const initialCwd = reusesFrozenSetup ? resume.manifest.cwd : (opts.callerCwd ?? process.cwd());
+  const selectedExecutionEnvironment = reusesFrozenSetup
+    ? null
+    : resolveFreshExecutionEnvironmentDefinition({
+        reference: loaded.executionEnvironment,
+        overrideEnvironment: overrides?.executionEnvironment,
+        cwd: initialCwd,
+      });
+  const varsSchema =
+    opts.varsSchemaOverride ??
+    mergeRunVarSchemas(
+      assignmentConfig?.vars ?? {},
+      selectedExecutionEnvironment?.config.vars ?? {},
+    );
+  if (
+    opts.varsSchemaOverride !== undefined ||
+    assignmentConfig ||
+    selectedExecutionEnvironment !== null
+  ) {
     assertKnownCliVars(varsSchema, cliVars);
     assertKnownWebVars(varsSchema, webVars);
   }
@@ -1449,7 +1608,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         lineageChain[0]?.manifest.runGroupId ??
         runId);
   const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
-  let cwd = reusesFrozenSetup ? resume.manifest.cwd : (opts.callerCwd ?? process.cwd());
+  let cwd = initialCwd;
   let injectedVars = buildInjectedVars({
     runtimeVars,
     runId,
@@ -1486,6 +1645,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         }),
         injectedVars,
       );
+  let executionEnvironment = reusesFrozenSetup
+    ? resume.manifest.executionEnvironment
+    : resolveFreshExecutionEnvironment({
+        reference: loaded.executionEnvironment,
+        overrideEnvironment: overrides?.executionEnvironment,
+        selectedEnvironment: selectedExecutionEnvironment,
+        cwd,
+        injectedVars,
+        runId,
+        runGroupId,
+        backend: currentBackend.id,
+      });
+  assertExecutionEnvironmentCompatible({
+    environment: executionEnvironment,
+    launcher,
+    backend: currentBackend,
+    backendConfig,
+  });
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   let timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   let unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
@@ -1589,7 +1766,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 19,
+      schemaVersion: 23,
       runId,
       repo,
       agent: {
@@ -1639,6 +1816,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runtimeVars: { ...runtimeVars },
       runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
       execution,
+      executionEnvironment,
       brief: "",
       resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
         ...descriptor,
@@ -1655,6 +1833,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs,
         launcher: cloneResolvedLauncherConfig(launcher),
+        executionEnvironment,
         cwd,
         lockedFields: initialLockedFields,
         message,
@@ -1733,7 +1912,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }),
       injectedVars,
     );
+    executionEnvironment = resolveFreshExecutionEnvironment({
+      reference: loaded.executionEnvironment,
+      overrideEnvironment: overrides?.executionEnvironment,
+      selectedEnvironment: selectedExecutionEnvironment,
+      cwd,
+      injectedVars,
+      runId,
+      runGroupId,
+      backend: currentBackend.id,
+    });
+    assertExecutionEnvironmentCompatible({
+      environment: executionEnvironment,
+      launcher,
+      backend: currentBackend,
+      backendConfig,
+    });
     prepareState.manifest.launcher = cloneResolvedLauncherConfig(launcher);
+    prepareState.manifest.executionEnvironment = executionEnvironment;
     hookState = { ...prepareState.manifest.hookState };
     hookAttachments = prepareState.manifest.attachments.map((attachment) => ({ ...attachment }));
     hookNote = prepareState.manifest.note;
@@ -1751,13 +1947,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // after prepare hooks so the check sees the same backend, cwd,
   // backendConfig, and backendArgs that the first invocation will use.
   if (opts.bootstrapBackendSessionId !== undefined) {
-    await validateBootstrapBackendSessionId(
-      opts.bootstrapBackendSessionId,
-      currentBackend,
-      cwd,
+    await validateBootstrapBackendSessionId({
+      sessionId: opts.bootstrapBackendSessionId,
+      backend: currentBackend,
+      cwd: executionEnvironment?.cwd ?? cwd,
+      processCwd: cwd,
       backendConfig,
       resolvedBackendArgs,
-    );
+    });
   }
 
   const hasTasks = tasks.size > 0;
@@ -1878,7 +2075,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 19,
+      schemaVersion: 23,
       runId,
       repo,
       agent: {
@@ -1936,6 +2133,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runtimeVars: { ...runtimeVars },
       runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
       execution,
+      executionEnvironment,
       brief: initialPrompt,
       resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
         ...descriptor,
@@ -1952,6 +2150,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs,
         launcher: cloneResolvedLauncherConfig(launcher),
+        executionEnvironment,
         cwd,
         lockedFields: [...(hookLockedFields ?? frozenLockedFields)],
         message,
@@ -2020,6 +2219,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
   } else if (isReinitialize) {
     rmSync(workspaceAgentPath(workspaceDir), { force: true });
+  }
+
+  const environmentSeedPath = workspaceEnvironmentPath(workspaceDir);
+  if ((resume === undefined || isReinitialize) && selectedExecutionEnvironment !== null) {
+    if (selectedExecutionEnvironment.sourcePath !== environmentSeedPath) {
+      copyFileSync(selectedExecutionEnvironment.sourcePath, environmentSeedPath);
+    }
+  } else if (isReinitialize) {
+    rmSync(environmentSeedPath, { force: true });
   }
 
   const lifecycleContext = lifecycleRunEventContext(execution);
@@ -2167,6 +2375,54 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       workspaceDir,
       manifest,
     };
+  }
+
+  if (manifest.executionEnvironment !== null) {
+    let preparedEnvironment: RunManifest["executionEnvironment"];
+    const previousEnvironment = manifest.executionEnvironment;
+    try {
+      preparedEnvironment = await prepareExecutionEnvironment(manifest.executionEnvironment, {
+        signal: opts.abortSignal,
+      });
+    } catch (error) {
+      emitAuditEnvelope(
+        appendRunEnvironmentValidationFailedEvent({
+          manifest,
+          context: lifecycleContext,
+          error,
+        }),
+      );
+      throw error;
+    }
+    manifest.executionEnvironment = preparedEnvironment;
+    if (reusingWorkspace) {
+      await withTaskStateLockAsync(workspaceDir, async () => {
+        const latest = resolveResumeTarget(workspaceDir).manifest;
+        latest.executionEnvironment = preparedEnvironment;
+        writeManifest(workspaceDir, latest);
+      });
+    } else {
+      writeManifest(workspaceDir, manifest);
+    }
+    emitAuditEnvelope(
+      appendRunEnvironmentValidatedEvent({
+        manifest,
+        context: lifecycleContext,
+      }),
+    );
+    if (
+      previousEnvironment.mode === "managed" &&
+      previousEnvironment.containerId === null &&
+      preparedEnvironment?.mode === "managed" &&
+      preparedEnvironment.containerId !== null
+    ) {
+      emitAuditEnvelope(
+        appendRunContainerCreatedEvent({
+          manifest,
+          context: lifecycleContext,
+        }),
+      );
+    }
   }
 
   const addedTasks =
@@ -2603,20 +2859,26 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         emit: emitEvent,
       });
 
+      const backendInvokeEnv = buildBackendInvokeEnv({
+        recursionState,
+        runId: manifest.runId,
+        runGroupId: manifest.runGroupId,
+        cwd: runBackendCwd(manifest),
+      });
+      const environmentLauncher = buildEnvironmentLauncher(
+        manifest.executionEnvironment,
+        backendInvokeEnv,
+      );
       const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,
-        cwd,
-        env: buildBackendInvokeEnv({
-          recursionState,
-          runId: manifest.runId,
-          runGroupId: manifest.runGroupId,
-          cwd,
-        }),
+        cwd: runBackendCwd(manifest),
+        processCwd: manifest.cwd,
+        env: backendInvokeEnv,
         model,
         effort,
         backendConfig: cloneBackendConfig(backendConfig),
         resolvedBackendArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),
-        launcher,
+        launcher: environmentLauncher ?? launcher,
         unrestricted,
         timeoutSec,
         resumeSessionId: sessionId ?? undefined,
@@ -2898,6 +3160,45 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     // afterExit failures are warning-only; preserve the terminal result.
   }
 
+  const terminalEnvironment = manifest.executionEnvironment;
+  if (
+    terminalEnvironment?.mode === "managed" &&
+    (terminalEnvironment.lifetime !== "group" ||
+      !hasPendingGroupEnvironmentUsers(manifest, listRunManifests()))
+  ) {
+    const cleanedEnvironment = await cleanupExecutionEnvironment(terminalEnvironment);
+    const cleanupChanged =
+      cleanedEnvironment?.mode === "managed" &&
+      (cleanedEnvironment.containerId !== terminalEnvironment.containerId ||
+        cleanedEnvironment.cleanup.cleanedAt !== terminalEnvironment.cleanup.cleanedAt ||
+        cleanedEnvironment.cleanup.lastError !== terminalEnvironment.cleanup.lastError ||
+        cleanedEnvironment.lastError !== terminalEnvironment.lastError);
+    if (cleanupChanged) {
+      withTaskStateLock(workspaceDir, () => {
+        const latest = resolveResumeTarget(workspaceDir).manifest;
+        latest.executionEnvironment = cleanedEnvironment;
+        writeManifest(workspaceDir, latest);
+        manifest = latest;
+      });
+    }
+    const cleanupError =
+      cleanedEnvironment?.mode === "managed" ? cleanedEnvironment.cleanup.lastError : null;
+    if (cleanupChanged) {
+      emitAuditEnvelope(
+        cleanupError
+          ? appendRunContainerCleanupFailedEvent({
+              manifest,
+              context: lifecycleContext,
+              error: cleanupError,
+            })
+          : appendRunContainerRemovedEvent({
+              manifest,
+              context: lifecycleContext,
+            }),
+      );
+    }
+  }
+
   const recurrenceResult = withTaskStateLock(workspaceDir, () => {
     const latest = resolveResumeTarget(workspaceDir).manifest;
     const schedule = latest.schedule;
@@ -2953,6 +3254,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       mkdirSync(cloneManifest.workspaceDir, { recursive: true });
       copyFrozenAgentSeed(latest, cloneManifest.workspaceDir);
       copyFrozenAssignmentSeed(latest, cloneManifest.workspaceDir);
+      copyFrozenEnvironmentSeed(latest, cloneManifest.workspaceDir);
       copySeedAttachments(latest, cloneManifest);
       writeManifest(cloneManifest.workspaceDir, cloneManifest);
       latest.schedule = null;

@@ -48,6 +48,11 @@ const RUN_EVENT_TYPES = [
   "run.queued_resume_message_added",
   "run.queued_resume_message_removed",
   "run.queued_resume_messages_drained",
+  "run.environment.validated",
+  "run.environment.validation_failed",
+  "run.container.created",
+  "run.container.removed",
+  "run.container.cleanup_failed",
   "task.added",
   "task.updated",
 ] as const;
@@ -395,6 +400,109 @@ export function appendRunCreatedEvent(params: {
       passive: params.passive,
       initialStatus: params.manifest.status,
       name: params.manifest.name,
+    },
+  });
+}
+
+export function appendRunEnvironmentValidatedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "executionEnvironment">;
+  context: RunEventWriteContext;
+}): RunAuditEnvelope {
+  const environment = params.manifest.executionEnvironment;
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.environment.validated",
+    context: params.context,
+    fields:
+      environment === null
+        ? { kind: null }
+        : {
+            kind: environment.kind,
+            mode: environment.mode,
+            engine: environment.engine,
+            cwd: environment.cwd,
+            name: environment.name,
+          },
+  });
+}
+
+export function appendRunEnvironmentValidationFailedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "executionEnvironment">;
+  context: RunEventWriteContext;
+  error: unknown;
+}): RunAuditEnvelope {
+  const environment = params.manifest.executionEnvironment;
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.environment.validation_failed",
+    context: params.context,
+    fields: {
+      kind: environment?.kind ?? null,
+      mode: environment?.mode ?? null,
+      engine: environment?.engine ?? null,
+      error: params.error instanceof Error ? params.error.message : String(params.error),
+    },
+  });
+}
+
+export function appendRunContainerCreatedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "executionEnvironment">;
+  context: RunEventWriteContext;
+}): RunAuditEnvelope {
+  const environment = params.manifest.executionEnvironment;
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.container.created",
+    context: params.context,
+    fields: {
+      mode: environment?.mode ?? null,
+      engine: environment?.engine ?? null,
+      name: environment?.name ?? null,
+      container:
+        environment?.mode === "managed"
+          ? (environment.containerId ?? environment.containerName)
+          : null,
+    },
+  });
+}
+
+export function appendRunContainerRemovedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "executionEnvironment">;
+  context: RunEventWriteContext;
+}): RunAuditEnvelope {
+  const environment = params.manifest.executionEnvironment;
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.container.removed",
+    context: params.context,
+    fields: {
+      mode: environment?.mode ?? null,
+      engine: environment?.engine ?? null,
+      name: environment?.name ?? null,
+    },
+  });
+}
+
+export function appendRunContainerCleanupFailedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "executionEnvironment">;
+  context: RunEventWriteContext;
+  error: string;
+}): RunAuditEnvelope {
+  const environment = params.manifest.executionEnvironment;
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.container.cleanup_failed",
+    context: params.context,
+    fields: {
+      mode: environment?.mode ?? null,
+      engine: environment?.engine ?? null,
+      name: environment?.name ?? null,
+      error: params.error,
     },
   });
 }

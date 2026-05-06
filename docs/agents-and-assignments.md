@@ -19,6 +19,8 @@ ${TASK_RUNNER_CONFIG_DIR}/
 │   └── <task-id>.md
 ├── launchers/
 │   └── <launcher-name>.yaml
+├── environments/
+│   └── <environment-name>.yaml
 ├── hooks/
 │   └── <hook-name>/
 │       └── hook.ts
@@ -63,6 +65,7 @@ backendArgs:                # optional per-backend extra argv tokens
     extraArgs: ["--model", "gpt-5.4"]
 lockedFields: []            # optional list of lockable fields
 launcher: ssh-docker        # optional named launcher or inline object
+executionEnvironment: dev-container  # optional named/path container environment
 ---
 ```
 
@@ -232,6 +235,109 @@ launcher:
 The built-in `direct` launcher has no command or args to interpolate.
 Unknown launcher tokens follow the normal `{{key}}` interpolation rule:
 they remain literal.
+
+## Execution environment definitions
+
+An environment file is YAML only, not markdown:
+
+```yaml
+schemaVersion: 1
+name: dev-container
+kind: container
+mode: managed
+engine: podman
+image: node:22
+lifetime: group
+cwd: "{{workspace_host_path}}"
+vars:
+  repo_source:
+    sources: [cli, web]
+    required: true
+  base_ref:
+    sources: [cli, web]
+    default: main
+workspace:
+  scope: group
+  hostRoot: "{{state_dir}}/workspaces"
+  containerPath: /workspace
+  mode: rw
+  create: true
+  lifecycle:
+    onCreate:
+      - kind: git-clone
+        source: "{{repo_source}}"
+        baseRef: "{{base_ref}}"
+        branch: "task-runner/{{run_id}}"
+      - kind: command
+        command: npm
+        args: [install]
+sessionMounts: backend
+cleanup:
+  policy: terminal
+```
+
+The `workspace` block is the preferred way to mount a run working
+directory into a managed container. `scope: run` creates/reuses a host
+path for one run; `scope: group` creates/reuses one host path for all
+runs in the run group. When `hostPath` is omitted, task-runner derives it
+from `hostRoot` plus the run id or run group id. If `cwd` resolves inside
+the workspace host path, task-runner rewrites it to the matching
+container path before invoking the backend. With `create: true`,
+task-runner creates the host directory before starting the container.
+Managed environments can interpolate `workspace_host_path` and
+`workspace_container_path` after the workspace has been resolved.
+Environment `vars` use the same schema and approved sources as
+assignment vars. The selected environment's vars are merged with the
+assignment vars for the run and then frozen into `runtimeVars`; duplicate
+names must have identical definitions.
+
+`workspace.lifecycle.onCreate` runs once per host workspace inside the
+managed container before backend `cwd` validation. A `git-clone` step
+clones `source` into the workspace root and checks out `branch` from
+`baseRef`; a `command` step runs an arbitrary command in the workspace
+root with optional `args` and `env`. Completion is guarded by host-side
+state next to the workspace, so later runs reusing the same group
+workspace skip the lifecycle without dirtying the mounted workspace.
+
+`sessionMounts` expands built-in backend session stores into same-path
+read-write mounts. `sessionMounts: backend` mounts the selected backend's
+known store. A list such as `sessionMounts: [codex, pi]` mounts explicit
+stores. Presets are `claude`, `codex`, `cursor`, `opencode`, and `pi`.
+These mounts are for backend session sync and are separate from the
+working `workspace` mount and generic `mounts`.
+
+`lifetime: group` gives managed containers a stable group-scoped
+container name and skips automatic terminal cleanup while another run in
+the group can still use the same environment. Group-scoped runs cannot be
+moved to another group after creation because the workspace and container
+identity are already frozen.
+
+Existing-container definitions attach to an externally managed
+container:
+
+```yaml
+schemaVersion: 1
+name: external-dev
+kind: container
+mode: existing
+engine: docker
+container: devbox
+cwd: "{{cwd}}"
+expectedMounts:
+  - hostPath: "{{cwd}}"
+    containerPath: "{{cwd}}"
+    mode: rw
+```
+
+Agents reference environments with `executionEnvironment:
+dev-container`. Fresh `run` and `init` calls may override the agent
+selection with `--environment <name|path>`. The resolved environment is
+frozen on the run manifest and reset seed; resume and reset do not
+re-read current environment files.
+
+Container execution is limited to subprocess-backed backends and the
+built-in `direct` launcher. Passive runs, Codex websocket/UDS
+transports, and non-direct launchers reject container environments.
 
 ## Assignment definition
 

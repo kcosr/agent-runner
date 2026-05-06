@@ -5,6 +5,7 @@ state in a manifest-canonical workspace. It supports embedded CLI
 execution, active backend invocation, passive sidecar operation, a local
 daemon, a browser dashboard, resumable runs, attachments, dependencies,
 scheduled runs, launcher prefixes for subprocess backends, a first-class
+container execution environment layer, a first-class
 `run brief` surface for handing a run to a worker, and `task-runner run
 audit` for reading durable run audit history. Live runs can also hold
 queued resume messages as daemon-owned pending user intent for the next
@@ -242,27 +243,45 @@ Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
 the built-in `direct` launcher.
 
 Launcher command and args are runtime-interpolated before they are frozen
-into the manifest. A short-term persistent-container workflow can combine
-a run-group workspace path with a launcher wrapper:
+into the manifest. For containers, prefer first-class execution
+environments over launcher wrappers so task-runner can validate, audit,
+reuse, and clean up the container:
 
 ```yaml
-# assignment.md
-cwd: "/home/kevin/agent-workspaces/{{run_group_id}}/repo"
+# ~/.config/task-runner/environments/agent-dev.yaml
+schemaVersion: 1
+name: agent-dev
+kind: container
+mode: managed
+engine: podman
+image: agent-dev:latest
+lifetime: group
+cwd: "{{workspace_host_path}}"
+vars:
+  repo_source:
+    sources: [cli, web]
+    required: true
+workspace:
+  scope: group
+  hostRoot: "{{state_dir}}/workspaces"
+  containerPath: /workspace
+  lifecycle:
+    onCreate:
+      - kind: command
+        command: npm
+        args: [install]
+sessionMounts: backend
 ```
 
-```yaml
-# agent.md
-launcher:
-  command: aw-tr-launch
-  args:
-    - agent-dev
-    - "{{cwd}}"
-    - "{{run_group_id}}"
-```
-
-Task-runner does not manage the container lifecycle or cleanup. The
-wrapper receives the frozen cwd and run group id so it can enter a
-workspace that another process prepared.
+Managed environments can create host workspace directories, mount them
+into the container, rewrite cwd to the container path, and keep a
+group-scoped container alive until no initialized, ready, or running run
+in the group still references it. `sessionMounts: backend` adds a
+same-path mount for the selected backend's session store so host-side
+session sync can read the backend history. `workspace.lifecycle.onCreate`
+runs container-side setup once per host workspace before backend cwd
+validation. Environment `vars` are merged with assignment vars for the
+selected run and frozen into the normal runtime var map.
 
 Agents may also author backend-owned argv tokens:
 
@@ -464,10 +483,11 @@ use `task-runner run set-group` or `clear-group` to mutate membership.
 | `serve` | Start the local daemon (WS JSON-RPC + HTTP/SSE + web UI) |
 | `status` | Print system/environment status |
 | `run status\|brief\|audit` | Print run state, the composed worker handoff, or persisted audit history |
+| `run environment status\|validate\|cleanup` | Inspect, validate, or clean up a run execution environment |
 | `task list\|show\|set\|append-notes\|add` | Run task-state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
-| `list agents\|assignments\|launchers\|tasks\|runs` | Enumerate definitions and runs |
-| `show agent\|assignment\|launcher\|task` | Render a single definition |
+| `list agents\|assignments\|launchers\|environments\|tasks\|runs` | Enumerate definitions and runs |
+| `show agent\|assignment\|launcher\|environment\|task` | Render a single definition |
 | `run reconfigure` | Patch vars/message on an unarchived initialized run |
 | `run queue-message\|queued-messages\|remove-queued-message` | Manage queued resume messages for live runs |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
@@ -519,6 +539,7 @@ The rest are focused topic pages:
 | [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
 | [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
 | [docs/backends.md](docs/backends.md) | Built-in and custom backends |
+| [docs/container-lifecycle.md](docs/container-lifecycle.md) | Container execution environment and lifecycle design |
 | [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
 | [docs/daemon.md](docs/daemon.md) | Control plane, HTTP/SSE, JSON-RPC |

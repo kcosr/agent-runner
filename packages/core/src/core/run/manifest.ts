@@ -88,6 +88,7 @@ export interface RunResetSeed {
   backendConfig?: unknown;
   resolvedBackendArgs: string[];
   launcher: ResolvedLauncherConfig;
+  executionEnvironment: RunExecutionEnvironment | null;
   cwd: string;
   lockedFields: LockableField[];
   message: string | null;
@@ -192,6 +193,101 @@ export interface RunExecution {
   controller: RunExecutionController;
 }
 
+export interface RunEnvironmentMount {
+  hostPath: string;
+  containerPath: string;
+  mode: "ro" | "rw";
+}
+
+export type RunEnvironmentWorkspaceLifecycleStep =
+  | {
+      kind: "command";
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+    }
+  | {
+      kind: "git-clone";
+      source: string;
+      baseRef: string;
+      branch: string;
+    };
+
+export interface RunEnvironmentWorkspaceLifecycle {
+  onCreate: RunEnvironmentWorkspaceLifecycleStep[];
+  completedAt: string | null;
+  lastError: string | null;
+}
+
+export interface RunEnvironmentWorkspace extends RunEnvironmentMount {
+  scope: "run" | "group";
+  hostRoot: string | null;
+  create: boolean;
+  createdAt: string | null;
+  lifecycle: RunEnvironmentWorkspaceLifecycle | null;
+}
+
+export type RunEnvironmentSessionMountPreset = "claude" | "codex" | "cursor" | "opencode" | "pi";
+
+export interface RunEnvironmentSessionMount extends RunEnvironmentMount {
+  preset: RunEnvironmentSessionMountPreset;
+}
+
+export type RunContainerEngine = "docker" | "podman";
+
+interface RunExecutionEnvironmentBase {
+  kind: "container";
+  mode: "existing" | "managed";
+  name: string | null;
+  sourcePath: string | null;
+  engine: RunContainerEngine;
+  cwd: string;
+  env: Record<string, string>;
+  extraExecArgs: string[];
+  lastValidatedAt: string | null;
+  lastError: string | null;
+}
+
+export interface RunExistingContainerEnvironment extends RunExecutionEnvironmentBase {
+  mode: "existing";
+  container: string;
+  containerIdAtValidation: string | null;
+  expectedMounts: RunEnvironmentMount[];
+}
+
+export interface RunManagedContainerEnvironment extends RunExecutionEnvironmentBase {
+  mode: "managed";
+  image: string;
+  lifetime: "run" | "group";
+  containerName: string;
+  containerId: string | null;
+  workspace: RunEnvironmentWorkspace | null;
+  sessionMounts: RunEnvironmentSessionMount[];
+  mounts: RunEnvironmentMount[];
+  network: string;
+  security: {
+    userns?: "keep-id" | "host";
+    selinuxLabel?: "disable" | "shared" | "private";
+    readOnlyRootFilesystem?: boolean;
+    capDrop: string[];
+    capAdd: string[];
+  };
+  extraRunArgs: string[];
+  cleanup: {
+    policy: "terminal" | "manual";
+    cleanedAt: string | null;
+    lastError: string | null;
+  };
+}
+
+export type RunExecutionEnvironment =
+  | RunExistingContainerEnvironment
+  | RunManagedContainerEnvironment;
+
+export function runBackendCwd(manifest: Pick<RunManifest, "cwd" | "executionEnvironment">): string {
+  return manifest.executionEnvironment?.cwd ?? manifest.cwd;
+}
+
 export interface AssignmentInfo {
   name: string;
   sourcePath: string;
@@ -230,13 +326,13 @@ export interface QueuedResumeMessage {
   createdAt: string;
 }
 
-// schemaVersion: 19 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 23 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // reinitialize or run an explicit migration if one is added.
 export interface RunManifest {
-  schemaVersion: 19;
+  schemaVersion: 23;
   runId: string;
   repo: string;
   agent: {
@@ -291,6 +387,7 @@ export interface RunManifest {
   runtimeVars: Record<string, unknown>;
   runtimeVarSources: Record<string, RuntimeVarSourceRecord>;
   execution: RunExecution;
+  executionEnvironment: RunExecutionEnvironment | null;
   brief: string;
   resolvedHooks: ResolvedHookDescriptor[];
   hookState: Record<string, unknown>;
@@ -393,12 +490,19 @@ export function cloneBackendSessionSyncState(
   };
 }
 
+export function cloneRunExecutionEnvironment(
+  environment: RunExecutionEnvironment | null,
+): RunExecutionEnvironment | null {
+  return environment === null ? null : structuredClone(environment);
+}
+
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
     backendConfig: cloneBackendConfig(seed.backendConfig),
     resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(seed.launcher),
+    executionEnvironment: cloneRunExecutionEnvironment(seed.executionEnvironment),
     lockedFields: [...seed.lockedFields],
     runGroupId: seed.runGroupId,
     dependencies: cloneRunDependencyRefs(seed.dependencies),
@@ -424,6 +528,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   }
   manifest.resolvedBackendArgs = cloneResolvedBackendArgs(seed.resolvedBackendArgs);
   manifest.launcher = cloneResolvedLauncherConfig(seed.launcher);
+  manifest.executionEnvironment = cloneRunExecutionEnvironment(seed.executionEnvironment);
   manifest.cwd = seed.cwd;
   manifest.lockedFields = [...seed.lockedFields];
   manifest.message = seed.message;
@@ -613,6 +718,10 @@ export function workspaceAgentPath(workspaceDir: string): string {
   return join(workspaceDir, "agent-seed.md");
 }
 
+export function workspaceEnvironmentPath(workspaceDir: string): string {
+  return join(workspaceDir, "environment-seed.yaml");
+}
+
 export class ResumeError extends Error {
   constructor(message: string) {
     super(message);
@@ -644,6 +753,7 @@ function normalizeRunManifest(parsed: RunManifest): RunManifest {
     ...parsed,
     backendConfig: cloneBackendConfig(parsed.backendConfig),
     launcher: cloneResolvedLauncherConfig(parsed.launcher),
+    executionEnvironment: cloneRunExecutionEnvironment(parsed.executionEnvironment),
     dependencies: cloneRunDependencyRefs(parsed.dependencies),
     queuedResumeMessages: parsed.queuedResumeMessages.map((message) => ({ ...message })),
     backendSessionSync: cloneBackendSessionSyncState(parsed.backendSessionSync),
@@ -660,6 +770,7 @@ function normalizeRunManifest(parsed: RunManifest): RunManifest {
       ...parsed.resetSeed,
       backendConfig: cloneBackendConfig(parsed.resetSeed.backendConfig),
       launcher: cloneResolvedLauncherConfig(parsed.resetSeed.launcher),
+      executionEnvironment: cloneRunExecutionEnvironment(parsed.resetSeed.executionEnvironment),
       resolvedBackendArgs: cloneResolvedBackendArgs(parsed.resetSeed.resolvedBackendArgs),
       dependencies: cloneRunDependencyRefs(parsed.resetSeed.dependencies),
       runtimeVarSources: cloneRuntimeVarSources(parsed.resetSeed.runtimeVarSources),
@@ -684,11 +795,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 19
+    (parsed as { schemaVersion: number }).schemaVersion !== 23
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 19.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 23.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -840,7 +951,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 19) return false;
+  if (obj.schemaVersion !== 23) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -1002,6 +1113,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!obj.hookState || typeof obj.hookState !== "object") return false;
   if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
   if (!obj.execution || typeof obj.execution !== "object") return false;
+  if (!isValidExecutionEnvironment(obj.executionEnvironment)) return false;
   if ("backendConfig" in obj && !isJsonishPersistable(obj.backendConfig)) return false;
   if (!isValidResolvedBackendArgs(obj.resolvedBackendArgs)) return false;
   if (!isValidResolvedLauncherConfig(obj.launcher)) return false;
@@ -1018,6 +1130,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if ("backendConfig" in resetSeed && !isJsonishPersistable(resetSeed.backendConfig)) return false;
   if (!isValidResolvedBackendArgs(resetSeed.resolvedBackendArgs)) return false;
   if (!isValidResolvedLauncherConfig(resetSeed.launcher)) return false;
+  if (!isValidExecutionEnvironment(resetSeed.executionEnvironment)) return false;
   if (typeof resetSeed.cwd !== "string") return false;
   if (!Array.isArray(resetSeed.lockedFields)) return false;
   if (resetSeed.message !== null && typeof resetSeed.message !== "string") return false;
@@ -1100,7 +1213,7 @@ function isValidResolvedLauncherConfig(value: unknown): value is ResolvedLaunche
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  const record = value as Record<string, unknown>;
+  const record = value as unknown as Record<string, unknown>;
   if (record.kind === "direct") {
     return record.name === "direct";
   }
@@ -1113,5 +1226,176 @@ function isValidResolvedLauncherConfig(value: unknown): value is ResolvedLaunche
     record.args.every((entry) => typeof entry === "string") &&
     (record.name === null || typeof record.name === "string") &&
     (record.source === "builtin" || record.source === "named" || record.source === "inline")
+  );
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every((entry) => typeof entry === "string")
+  );
+}
+
+function isValidEnvironmentMount(value: unknown): value is RunEnvironmentMount {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  return (
+    typeof record.hostPath === "string" &&
+    typeof record.containerPath === "string" &&
+    (record.mode === "ro" || record.mode === "rw")
+  );
+}
+
+function isValidEnvironmentWorkspaceLifecycleStep(
+  value: unknown,
+): value is RunEnvironmentWorkspaceLifecycleStep {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  if (record.kind === "command") {
+    return (
+      typeof record.command === "string" &&
+      Array.isArray(record.args) &&
+      record.args.every((entry) => typeof entry === "string") &&
+      isStringRecord(record.env)
+    );
+  }
+  return (
+    record.kind === "git-clone" &&
+    typeof record.source === "string" &&
+    typeof record.baseRef === "string" &&
+    typeof record.branch === "string"
+  );
+}
+
+function isValidEnvironmentWorkspaceLifecycle(
+  value: unknown,
+): value is RunEnvironmentWorkspaceLifecycle {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  return (
+    Array.isArray(record.onCreate) &&
+    record.onCreate.every(isValidEnvironmentWorkspaceLifecycleStep) &&
+    (record.completedAt === null || typeof record.completedAt === "string") &&
+    (record.lastError === null || typeof record.lastError === "string")
+  );
+}
+
+function isValidEnvironmentWorkspace(value: unknown): value is RunEnvironmentWorkspace | null {
+  if (value === null) {
+    return true;
+  }
+  if (!isValidEnvironmentMount(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  return (
+    (record.scope === "run" || record.scope === "group") &&
+    (record.hostRoot === null || typeof record.hostRoot === "string") &&
+    typeof record.create === "boolean" &&
+    (record.createdAt === null || typeof record.createdAt === "string") &&
+    (record.lifecycle === null || isValidEnvironmentWorkspaceLifecycle(record.lifecycle))
+  );
+}
+
+function isValidEnvironmentSessionMount(value: unknown): value is RunEnvironmentSessionMount {
+  if (!isValidEnvironmentMount(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  return (
+    record.preset === "claude" ||
+    record.preset === "codex" ||
+    record.preset === "cursor" ||
+    record.preset === "opencode" ||
+    record.preset === "pi"
+  );
+}
+
+function isValidExecutionEnvironment(value: unknown): value is RunExecutionEnvironment | null {
+  if (value === null) {
+    return true;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as unknown as Record<string, unknown>;
+  const commonValid =
+    record.kind === "container" &&
+    (record.mode === "existing" || record.mode === "managed") &&
+    (record.name === null || typeof record.name === "string") &&
+    (record.sourcePath === null || typeof record.sourcePath === "string") &&
+    (record.engine === "docker" || record.engine === "podman") &&
+    typeof record.cwd === "string" &&
+    isStringRecord(record.env) &&
+    Array.isArray(record.extraExecArgs) &&
+    record.extraExecArgs.every((entry) => typeof entry === "string") &&
+    (record.lastValidatedAt === null || typeof record.lastValidatedAt === "string") &&
+    (record.lastError === null || typeof record.lastError === "string");
+  if (!commonValid) {
+    return false;
+  }
+  if (record.mode === "existing") {
+    return (
+      typeof record.container === "string" &&
+      record.container.trim().length > 0 &&
+      (record.containerIdAtValidation === null ||
+        typeof record.containerIdAtValidation === "string") &&
+      Array.isArray(record.expectedMounts) &&
+      record.expectedMounts.every(isValidEnvironmentMount)
+    );
+  }
+  const security = record.security;
+  const cleanup = record.cleanup;
+  return (
+    typeof record.image === "string" &&
+    (record.lifetime === "run" || record.lifetime === "group") &&
+    typeof record.containerName === "string" &&
+    record.containerName.trim().length > 0 &&
+    (record.containerId === null || typeof record.containerId === "string") &&
+    isValidEnvironmentWorkspace(record.workspace) &&
+    Array.isArray(record.sessionMounts) &&
+    record.sessionMounts.every(isValidEnvironmentSessionMount) &&
+    Array.isArray(record.mounts) &&
+    record.mounts.every(isValidEnvironmentMount) &&
+    typeof record.network === "string" &&
+    Boolean(security) &&
+    typeof security === "object" &&
+    !Array.isArray(security) &&
+    ((security as Record<string, unknown>).userns === undefined ||
+      (security as Record<string, unknown>).userns === "keep-id" ||
+      (security as Record<string, unknown>).userns === "host") &&
+    ((security as Record<string, unknown>).selinuxLabel === undefined ||
+      (security as Record<string, unknown>).selinuxLabel === "disable" ||
+      (security as Record<string, unknown>).selinuxLabel === "shared" ||
+      (security as Record<string, unknown>).selinuxLabel === "private") &&
+    ((security as Record<string, unknown>).readOnlyRootFilesystem === undefined ||
+      typeof (security as Record<string, unknown>).readOnlyRootFilesystem === "boolean") &&
+    Array.isArray((security as Record<string, unknown>).capDrop) &&
+    ((security as Record<string, unknown>).capDrop as unknown[]).every(
+      (entry) => typeof entry === "string",
+    ) &&
+    Array.isArray((security as Record<string, unknown>).capAdd) &&
+    ((security as Record<string, unknown>).capAdd as unknown[]).every(
+      (entry) => typeof entry === "string",
+    ) &&
+    Array.isArray(record.extraRunArgs) &&
+    record.extraRunArgs.every((entry) => typeof entry === "string") &&
+    Boolean(cleanup) &&
+    typeof cleanup === "object" &&
+    !Array.isArray(cleanup) &&
+    ((cleanup as Record<string, unknown>).policy === "terminal" ||
+      (cleanup as Record<string, unknown>).policy === "manual") &&
+    ((cleanup as Record<string, unknown>).cleanedAt === null ||
+      typeof (cleanup as Record<string, unknown>).cleanedAt === "string") &&
+    ((cleanup as Record<string, unknown>).lastError === null ||
+      typeof (cleanup as Record<string, unknown>).lastError === "string")
   );
 }

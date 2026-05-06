@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `19`. Older manifest shapes are not
+The current manifest schema is version `23`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -43,6 +43,7 @@ instructions:
 - `timeoutSec`
 - `unrestricted`
 - optional `launcher`
+- optional `executionEnvironment`
 - optional `backendConfig` runtime config keyed by backend name
 - optional `backendArgs` entries keyed by backend name
 - `lockedFields`
@@ -66,6 +67,37 @@ A launcher definition is a named subprocess prefix stored under
 - fresh-run/init callers may override with named-only `--launcher`
 - launchers are resolved once at fresh-run/init time and frozen into the
   manifest and reset seed
+
+### Execution Environment
+
+An execution environment is a named container definition stored under
+`${TASK_RUNNER_CONFIG_DIR}/environments/*.yaml|*.yml`. Agents may select
+one with `executionEnvironment`, and fresh `run` / `init` callers may
+override that selection with `--environment <name|path>`.
+
+The current environment implementation supports `kind: container` with
+two modes:
+
+- `existing` validates and executes inside an already-running Docker or
+  Podman container without stopping or removing it.
+- `managed` creates an idle run- or group-scoped container, executes
+  backend subprocesses through `docker exec` / `podman exec`, and records
+  cleanup state on terminal cleanup.
+
+Managed environments may define a first-class `workspace` mount. The
+workspace resolves a host path by run or run group, creates that host
+directory when requested, bind-mounts it at a container path, and rewrites
+environment cwd values inside the host workspace to the matching
+container path. Managed environments may also define `sessionMounts`
+presets for backend session stores used by host-side session sync.
+Generic `mounts` remain for auth stores, caches, sockets, and other
+non-workspace paths.
+
+Execution environments are resolved after final cwd/runtime vars are
+known, frozen into `manifest.executionEnvironment`, and copied into
+`manifest.resetSeed.executionEnvironment`. They are separate from
+`manifest.execution`, which records embedded vs daemon controller
+provenance.
 
 ### Assignment
 
@@ -98,6 +130,7 @@ Canonical definition identity comes from the on-disk key:
 - assignments: slash-relative directory under `assignments/`
 - tasks: slash-relative file under `tasks/`
 - launchers: slash-relative file under `launchers/`
+- environments: slash-relative file under `environments/`
 
 Discovery warns and skips definitions whose authored internal id does
 not match that canonical key, while direct named/path loads of the same
@@ -119,6 +152,7 @@ The canonical record is `run.json`. Important persisted fields:
 - `backend`, `model`, `effort`, `backendConfig`,
   `resolvedBackendArgs`, `timeoutSec`, `unrestricted`,
   `maxAttemptsPerSession`, `launcher`
+- `executionEnvironment` (`null` for host execution)
 - `lockedFields` (union of agent and assignment locks)
 - `status`, `exitCode`
 - `startedAt`, `updatedAt`, `endedAt`, `archivedAt`
@@ -153,7 +187,14 @@ the next session. Attempts are backend invocations within a session.
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
 
-Manifest schema version 19 adds backend-session history provenance and
+Manifest schema version 23 adds resolved managed-container workspace
+lifecycle state.
+Manifest schema version 22 adds resolved backend session mount presets.
+Manifest schema version 21 adds managed-container workspace mount state
+and group-scoped container lifetimes. Manifest schema version 20 adds
+frozen execution environment state for host or containerized execution.
+Manifest schema version 19 adds
+backend-session history provenance and
 sync state. Task-runner-owned records carry
 `provenance.kind: "task_runner"`. Backend-imported records carry
 `provenance.kind: "backend_session"` plus backend name, backend session
@@ -323,8 +364,10 @@ blocked with the rest completed or blocked → `blocked`; otherwise
    Named and explicit-path task refs are resolved here, before runtime
    interpolation.
 2. enforces locked fields
-3. resolves vars in authored `sources` order (`cli`, `env`, `parent`)
-   and applies `default` / `required` only after every source fails
+3. loads the selected execution environment, merges any environment
+   `vars` with assignment `vars`, resolves the merged vars in authored
+   `sources` order (`cli`, `web`, `env`, `parent`), and applies
+   `default` / `required` only after every source fails
 4. allocates or reuses the run id and resolves `runGroupId`. Fresh
    workspaces use explicit request, `TASK_RUNNER_RUN_GROUP_ID`, nearest
    parent lineage, or the singleton run id; reinitializing an existing

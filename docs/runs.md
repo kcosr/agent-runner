@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 19)
+├── run.json               # canonical manifest (schema version 23)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── agent-seed.md          # only when the run started from an agent file
@@ -43,7 +43,7 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `19`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `23`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath }` or `null` |
@@ -402,6 +402,11 @@ launcher/cwd values keep the concrete strings resolved when the run was
 created. Initialized-run reconfigure can replace frozen launcher values
 from the rebuilt seed, but group mutation still does not re-interpolate
 them.
+
+Runs with group-scoped execution environment resources are stricter:
+`run set-group` and `run clear-group` reject them because their frozen
+container name and workspace mount paths are already tied to the original
+group id.
 
 ### Dependencies
 

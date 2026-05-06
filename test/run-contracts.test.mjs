@@ -32,7 +32,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 19,
+    schemaVersion: 23,
     runId: "run123",
     runGroupId: "run123",
     repo: "demo-repo",
@@ -105,6 +105,7 @@ function buildManifest(overrides = {}) {
         kind: "embedded",
       },
     },
+    executionEnvironment: null,
     brief: "Prepared handoff prompt.",
     callerInstructions: "Caller docs",
     attachments: [],
@@ -117,6 +118,7 @@ function buildManifest(overrides = {}) {
         kind: "direct",
         name: "direct",
       },
+      executionEnvironment: null,
       cwd: "/repo",
       lockedFields: ["backend"],
       message: "Finish the task list.",
@@ -351,6 +353,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
         kind: "embedded",
       },
     },
+    executionEnvironment: null,
     capabilities: detail.capabilities,
   });
 });
