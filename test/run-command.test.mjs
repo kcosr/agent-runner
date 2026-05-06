@@ -24,6 +24,12 @@ function writeEnvironment(baseDir, name, body, ext = ".yaml") {
   writeFileSync(join(dir, `${name}${ext}`), body);
 }
 
+function writeBackend(baseDir, name, body) {
+  const dir = join(baseDir, "backends", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "backend.mjs"), body);
+}
+
 function writeAgent(baseDir, name, body) {
   const dir = join(baseDir, "agents", name);
   mkdirSync(dir, { recursive: true });
@@ -146,6 +152,92 @@ Explain {{repo_name}}.
     });
     assert.deepEqual(outcome.manifest.resetSeed.runtimeVars, outcome.manifest.runtimeVars);
     assert.equal(outcome.manifest.executionEnvironment.cwd, "/workspace/demo");
+  }));
+
+test("executeRunCommand invokes containerized backends with the execution cwd", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ rootDir, configDir }) => {
+    const binDir = join(rootDir, "bin");
+    const capturePath = join(rootDir, "backend-capture.json");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(binDir, "docker"),
+      `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const [cmd, target] = args;
+if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect") {
+  process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "run") {
+  process.stdout.write("container-123\\n");
+  process.exit(0);
+}
+process.exit(0);
+`,
+      { mode: 0o755 },
+    );
+    writeBackend(
+      configDir,
+      "capture",
+      `import { writeFileSync } from "node:fs";
+export default {
+  id: "capture",
+  async invoke(ctx) {
+    writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({
+      cwd: ctx.cwd,
+      taskRunnerCwd: ctx.env.TASK_RUNNER_CWD,
+      launcherCommand: ctx.launcher?.command,
+      launcherWorkdir: ctx.launcher?.args?.[ctx.launcher.args.indexOf("-w") + 1],
+    }, null, 2));
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+      sessionId: "capture-session",
+      transcript: "ok",
+      rawStdout: "",
+      rawStderr: ""
+    };
+  }
+};`,
+    );
+    writeEnvironment(
+      configDir,
+      "runtime",
+      `schemaVersion: 1
+kind: container
+mode: managed
+engine: docker
+image: alpine:latest
+cwd: /workspace
+containerName: task-runner-run-123
+cleanup:
+  policy: terminal
+`,
+    );
+
+    const outcome = await withEnv({ PATH: `${binDir}:${process.env.PATH}` }, () =>
+      executeRunCommand({
+        initialize: false,
+        cliVars: {},
+        overrides: {
+          backend: "capture",
+          executionEnvironment: "runtime",
+          message: "Inspect the repository.",
+        },
+      }),
+    );
+
+    assert.equal(outcome.manifest.cwd, process.cwd());
+    assert.equal(outcome.manifest.executionEnvironment.cwd, "/workspace");
+    assert.deepEqual(JSON.parse(readFileSync(capturePath, "utf8")), {
+      cwd: "/workspace",
+      taskRunnerCwd: "/workspace",
+      launcherCommand: "docker",
+      launcherWorkdir: "/workspace",
+    });
   }));
 
 test("executeRunCommand rejects conflicting assignment and environment var definitions", async () =>

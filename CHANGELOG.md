@@ -179,6 +179,8 @@
 
 ### Fixed
 
+- Containerized backend invocation now passes the container execution cwd to
+  backend sessions, history sync, and backend process context.
 - Workspace lifecycle `git-clone` steps now create the run branch from the
   configured base ref instead of treating that ref as a pathspec.
 - Workspace lifecycle locks now wait for in-flight setup instead of timing

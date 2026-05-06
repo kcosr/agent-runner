@@ -65,6 +65,7 @@ import {
   findRunManifestsById,
   listRunManifests,
   resolveResumeTarget,
+  runBackendCwd,
   snapshotTasks,
   workspaceAgentPath,
   workspaceAssignmentPath,
@@ -1925,7 +1926,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     await validateBootstrapBackendSessionId(
       opts.bootstrapBackendSessionId,
       currentBackend,
-      cwd,
+      executionEnvironment?.cwd ?? cwd,
       backendConfig,
       resolvedBackendArgs,
     );
@@ -2837,7 +2838,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         recursionState,
         runId: manifest.runId,
         runGroupId: manifest.runGroupId,
-        cwd,
+        cwd: runBackendCwd(manifest),
       });
       const environmentLauncher = buildEnvironmentLauncher(
         manifest.executionEnvironment,
@@ -2845,7 +2846,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       );
       const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,
-        cwd,
+        cwd: runBackendCwd(manifest),
         env: backendInvokeEnv,
         model,
         effort,

@@ -101,6 +101,7 @@ import {
   findRunManifestsById,
   listRunManifests,
   resolveResumeTarget,
+  runBackendCwd,
   writeManifest,
 } from "../run/manifest.js";
 import {
@@ -831,7 +832,7 @@ async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
   if (backend.renameSession && manifest.backendSessionId !== null) {
     await backend.renameSession({
       sessionId: manifest.backendSessionId,
-      cwd: manifest.cwd,
+      cwd: runBackendCwd(manifest),
       env: process.env as Record<string, string>,
       backendConfig: manifest.backendConfig,
       resolvedBackendArgs: manifest.resolvedBackendArgs,

@@ -284,6 +284,10 @@ export type RunExecutionEnvironment =
   | RunExistingContainerEnvironment
   | RunManagedContainerEnvironment;
 
+export function runBackendCwd(manifest: Pick<RunManifest, "cwd" | "executionEnvironment">): string {
+  return manifest.executionEnvironment?.cwd ?? manifest.cwd;
+}
+
 export interface AssignmentInfo {
   name: string;
   sourcePath: string;
