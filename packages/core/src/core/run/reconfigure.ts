@@ -37,7 +37,13 @@ import {
   appendRunReconfiguredEvent,
   commandRunEventContext,
 } from "./run-events.js";
-import { LockedFieldError, type RunOverrides, VarResolutionError, runAgent } from "./run-loop.js";
+import {
+  LockedFieldError,
+  type RunOverrides,
+  VarResolutionError,
+  mergeRunVarSchemas,
+  runAgent,
+} from "./run-loop.js";
 import { withTaskStateLockAsync } from "./workspace-state.js";
 
 type AuditEnvelopeEmitter = (envelope: RunAuditEnvelope) => void;
@@ -93,16 +99,12 @@ function inferCliEditableVarDef(value: unknown): VarDef | null {
 function buildReconfigureVarsSchema(
   manifest: RunManifest,
   loadedAssignment: LoadedAssignment | undefined,
+  environmentVars: Record<string, VarDef>,
 ): Record<string, VarDef> {
-  const schema =
-    loadedAssignment === undefined
-      ? {}
-      : Object.fromEntries(
-          Object.entries(loadedAssignment.config.vars).map(([key, def]) => [
-            key,
-            withCliSource(def),
-          ]),
-        );
+  const mergedSchema = mergeRunVarSchemas(loadedAssignment?.config.vars ?? {}, environmentVars);
+  const schema = Object.fromEntries(
+    Object.entries(mergedSchema).map(([key, def]) => [key, withCliSource(def)]),
+  );
   for (const [key, value] of Object.entries(manifest.runtimeVars)) {
     if (schema[key] !== undefined || manifest.runtimeVarSources[key]?.source === "hook") {
       continue;
@@ -115,15 +117,15 @@ function buildReconfigureVarsSchema(
   return schema;
 }
 
-function environmentVarKeys(manifest: RunManifest): Set<string> {
+function loadFrozenEnvironmentVars(manifest: RunManifest): Record<string, VarDef> {
   if (manifest.executionEnvironment === null) {
-    return new Set();
+    return {};
   }
   const environmentSeedPath = workspaceEnvironmentPath(manifest.workspaceDir);
   if (!existsSync(environmentSeedPath)) {
-    return new Set();
+    return {};
   }
-  return new Set(Object.keys(loadEnvironmentConfig(environmentSeedPath).config.vars));
+  return loadEnvironmentConfig(environmentSeedPath).config.vars;
 }
 
 function buildReconfigureCliVars(
@@ -303,6 +305,13 @@ function restoreFrozenManifestFields(
   ) {
     executionEnvironment.name = previous.executionEnvironment.name;
     executionEnvironment.sourcePath = previous.executionEnvironment.sourcePath;
+    if (
+      executionEnvironment.mode === "managed" &&
+      previous.executionEnvironment.mode === "managed" &&
+      previous.executionEnvironment.lifetime === "group"
+    ) {
+      executionEnvironment.containerName = previous.executionEnvironment.containerName;
+    }
   }
   const restored: RunManifest = {
     ...next,
@@ -427,8 +436,9 @@ async function reconfigureResolvedRun(
   const nextMessage = patch.message ?? previous.message;
   const loaded = buildLoadedAgent(previous);
   const loadedAssignment = buildLoadedAssignment(previous, nextMessage);
-  const varsSchema = buildReconfigureVarsSchema(previous, loadedAssignment);
-  const declaredEnvironmentVars = environmentVarKeys(previous);
+  const environmentVars = loadFrozenEnvironmentVars(previous);
+  const varsSchema = buildReconfigureVarsSchema(previous, loadedAssignment, environmentVars);
+  const declaredEnvironmentVars = new Set(Object.keys(environmentVars));
   const environmentVarsChanged = Object.keys(patchVars).some((key) =>
     declaredEnvironmentVars.has(key),
   );

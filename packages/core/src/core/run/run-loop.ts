@@ -553,10 +553,15 @@ function copyFrozenEnvironmentSeed(sourceManifest: RunManifest, targetWorkspaceD
 
 function cloneExecutionEnvironmentForRecurringRun(
   environment: RunManifest["executionEnvironment"],
+  sourceWorkspaceDir: string,
+  targetWorkspaceDir: string,
   sourceRunId: string,
   runId: string,
 ): RunManifest["executionEnvironment"] {
   const cloned = cloneRunExecutionEnvironment(environment);
+  if (cloned !== null && existsSync(workspaceEnvironmentPath(sourceWorkspaceDir))) {
+    cloned.sourcePath = workspaceEnvironmentPath(targetWorkspaceDir);
+  }
   if (cloned?.mode !== "managed") {
     return cloned;
   }
@@ -606,6 +611,8 @@ function buildRecurringCloneManifest(params: {
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   const executionEnvironment = cloneExecutionEnvironmentForRecurringRun(
     seed.executionEnvironment,
+    sourceManifest.workspaceDir,
+    workspaceDir,
     sourceManifest.runId,
     runId,
   );
@@ -939,7 +946,7 @@ function assertKnownWebVars(
   );
 }
 
-function mergeRunVarSchemas(
+export function mergeRunVarSchemas(
   assignmentVars: Record<string, VarDef>,
   environmentVars: Record<string, VarDef>,
 ): Record<string, VarDef> {

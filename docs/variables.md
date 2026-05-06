@@ -87,8 +87,9 @@ For each variable declared by the assignment or the selected environment,
 task-runner walks the authored `sources` array from left to right:
 
 1. `cli` reads `--var key=value`.
-2. `env` reads `envName` (or the var key when `envName` is omitted).
-3. `parent` walks the declared `parentRunId` chain and picks the nearest
+2. `web` reads API/UI-authored vars.
+3. `env` reads `envName` (or the var key when `envName` is omitted).
+4. `parent` walks the declared `parentRunId` chain and picks the nearest
    ancestor run that already froze that variable.
 
 If every authored source fails, task-runner then applies `default`, then
@@ -210,6 +211,8 @@ Runtime interpolation is applied to:
 - Caller instructions
 - Assignment hook `with`, `when`, and `path` values
 - Fresh resolved launcher `command` and `args[]` values
+- Fresh resolved execution environment cwd, env, image, container names,
+  mounts, workspace paths, and workspace lifecycle step values
 
 Values are stringified with `String(value)` before substitution.
 
@@ -246,6 +249,10 @@ inherited-env-derived values for humans.
 Variables are resolved once at run creation and frozen. Resume rejects
 `--var` flags — use dependencies, new tasks, or follow-up messages to pass
 new information. See [resume.md](resume.md).
+
+Initialized runs can still be edited with `run reconfigure`; that path
+uses the frozen assignment and environment variable schemas and rerenders
+the initialized run before it has executed.
 
 ## CLI usage
 

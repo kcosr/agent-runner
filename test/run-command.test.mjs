@@ -247,6 +247,92 @@ container: runtime-box
     assert.equal(manifest.resetSeed.executionEnvironment.cwd, "/workspace/beta");
   }));
 
+test("reconfigureInitializedRun preserves environment var constraints", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+    writeEnvironment(
+      configDir,
+      "clone-runtime",
+      `schemaVersion: 1
+kind: container
+mode: existing
+cwd: /workspace/{{repo_kind}}
+vars:
+  repo_kind:
+    type: enum
+    values: [app, library]
+    sources: [cli]
+    required: true
+container: runtime-box
+`,
+    );
+
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: { repo_kind: "app" },
+      overrides: {
+        backend: "codex",
+        executionEnvironment: "clone-runtime",
+        message: "Explain this app.",
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        reconfigureInitializedRun(outcome.runId, {
+          vars: { repo_kind: "service" },
+        }),
+      /var "repo_kind": expected one of app, library, got "service"/,
+    );
+
+    const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+    assert.equal(manifest.runtimeVars.repo_kind, "app");
+    assert.equal(manifest.executionEnvironment.cwd, "/workspace/app");
+  }));
+
+test("reconfigureInitializedRun preserves group container identity", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+    writeEnvironment(
+      configDir,
+      "group-runtime",
+      `schemaVersion: 1
+kind: container
+mode: managed
+engine: podman
+image: node:22
+lifetime: group
+containerName: "{{repo_name}}-box"
+cwd: /workspace/{{repo_name}}
+vars:
+  repo_name:
+    sources: [cli]
+    required: true
+`,
+    );
+
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: { repo_name: "demo" },
+      overrides: {
+        backend: "codex",
+        executionEnvironment: "group-runtime",
+        message: "Explain this app.",
+      },
+    });
+
+    const before = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+    assert.equal(before.executionEnvironment.containerName, "demo-box");
+
+    await reconfigureInitializedRun(outcome.runId, {
+      vars: { repo_name: "beta" },
+    });
+
+    const after = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+    assert.equal(after.runtimeVars.repo_name, "beta");
+    assert.equal(after.executionEnvironment.cwd, "/workspace/beta");
+    assert.equal(after.executionEnvironment.containerName, "demo-box");
+    assert.equal(after.resetSeed.executionEnvironment.containerName, "demo-box");
+  }));
+
 test("executeRunCommand rejects resume-time cli vars before attempting backend execution", async () =>
   withRuntimeRoots("task-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
