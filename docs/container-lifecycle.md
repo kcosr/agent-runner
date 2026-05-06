@@ -312,6 +312,11 @@ known store; explicit lists can mount multiple stores, for example
 `sessionMounts: [codex, pi]`. Presets are `claude`, `codex`, `cursor`,
 `opencode`, and `pi`. These resolved mounts are frozen into the manifest so
 resume/reset do not re-read current host environment paths.
+For containerized backends with host-readable session history, these mounts are
+also the bridge that lets task-runner sync or import backend-owned history
+using the container execution cwd. Without the selected backend's session mount,
+the run can still execute, but host-side session history sync may report no
+durable history for that backend session.
 
 ## Manifest Shape
 

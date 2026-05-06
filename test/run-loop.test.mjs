@@ -180,6 +180,14 @@ function writeLauncher(baseDir, name, body, ext = ".yaml") {
   return path;
 }
 
+function writeEnvironment(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "environments");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${name}${ext}`);
+  writeFileSync(path, body);
+  return path;
+}
+
 function writeNamedHook(baseDir, name, body) {
   const dir = join(baseDir, "hooks", name);
   mkdirSync(dir, { recursive: true });
@@ -881,6 +889,71 @@ export default {
   assert.equal(evidence.cwd, join(dir, "prepared"));
   assert.deepEqual(evidence.backendConfig, { mode: "authored", resolved: true });
   assert.deepEqual(evidence.resolvedBackendArgs, ["--validating-swap"]);
+});
+
+test("container bootstrap session validation keeps host process cwd separate from execution cwd", async () => {
+  const dir = tempDir();
+  const evidencePath = join(dir, "validate-evidence.json");
+  writeAgent(
+    dir,
+    "validating-container-agent",
+    `---
+schemaVersion: 1
+name: validating-container-agent
+backend: validating-container
+executionEnvironment: runtime
+---
+Validate container agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "validating-container-work",
+    `---
+schemaVersion: 1
+name: validating-container-work
+tasks: []
+---
+Validate container work.
+`,
+  );
+  writeEnvironment(
+    dir,
+    "runtime",
+    `schemaVersion: 1
+name: runtime
+kind: container
+mode: existing
+engine: docker
+container: devbox
+cwd: /workspace
+`,
+  );
+
+  await runWithMock(
+    dir,
+    async () => {
+      throw new Error("validation-only initialized run should not invoke");
+    },
+    {},
+    {
+      agentName: "validating-container-agent",
+      assignmentName: "validating-container-work",
+      backendId: "validating-container",
+      bootstrapBackendSessionId: "imported-session",
+      validateSessionId: async (ctx) => {
+        writeFileSync(evidencePath, JSON.stringify(ctx, null, 2));
+        return { valid: true };
+      },
+      initialize: true,
+      callerCwd: dir,
+    },
+  );
+  const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+
+  assert.equal(evidence.sessionId, "imported-session");
+  assert.equal(evidence.cwd, "/workspace");
+  assert.equal(evidence.processCwd, dir);
 });
 
 test("post-prepare resolveConfig failure removes the fresh workspace", async () => {

@@ -591,6 +591,44 @@ async function startCodexRenameServer(options = {}) {
   };
 }
 
+function writeFakeCodexStdioServer(baseDir, capturePath) {
+  const path = join(baseDir, "fake-codex-stdio.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+
+const capturePath = ${JSON.stringify(capturePath)};
+
+function respond(id, result) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+}
+
+const rl = createInterface({ input: process.stdin });
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize" && message.id !== undefined) {
+    respond(message.id, {});
+    return;
+  }
+  if (message.method === "initialized") {
+    return;
+  }
+  if (message.method === "thread/name/set" && message.id !== undefined) {
+    writeFileSync(capturePath, JSON.stringify({
+      cwd: process.cwd(),
+      params: message.params,
+    }, null, 2));
+    respond(message.id, {});
+  }
+});
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
 test("command services: getRunTimelineHistory reads schema v3 attempt logs", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -2347,6 +2385,55 @@ test("command services: setRunName propagates codex thread rename and clear valu
   } finally {
     await codexServer.close();
   }
+});
+
+test("command services: containerized codex stdio rename starts from host process cwd", async () => {
+  const dir = tempDir();
+  const capturePath = join(dir, "codex-rename-capture.json");
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const fakeCodex = writeFakeCodexStdioServer(dir, capturePath);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.backend = "codex";
+    manifest.backendSessionId = "thr_rename";
+    manifest.backendConfig = {
+      transport: {
+        type: "stdio",
+      },
+    };
+    manifest.cwd = dir;
+    manifest.executionEnvironment = {
+      kind: "container",
+      mode: "existing",
+      name: "runtime",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/workspace",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: null,
+      lastError: null,
+      container: "devbox",
+      containerIdAtValidation: null,
+      expectedMounts: [],
+    };
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    await withEnv({ TASK_RUNNER_CODEX_BIN: fakeCodex }, async () => {
+      const renamed = await setRunName(outcome.runId, { name: "Container rename" });
+      assert.equal(renamed.name, "Container rename");
+    });
+  });
+
+  assert.deepEqual(JSON.parse(readFileSync(capturePath, "utf8")), {
+    cwd: dir,
+    params: {
+      threadId: "thr_rename",
+      name: "Container rename",
+    },
+  });
 });
 
 test("command services: setRunNote and setRunPinned are idempotent and preserve reset seed metadata", async () => {

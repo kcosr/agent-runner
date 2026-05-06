@@ -179,9 +179,19 @@
 
 ### Fixed
 
+- Containerized Codex bootstrap-session validation and thread renaming now keep
+  host-side Codex helper processes anchored in the run's original host cwd.
 - Containerized backend invocation now passes the container execution cwd to
   backend sessions and history sync while keeping host-side backend wrapper
   processes anchored in the run's original host cwd.
+- Containerized backend session history sync now depends on `sessionMounts`
+  for backend-owned session stores that live inside the container execution
+  cwd; configure `sessionMounts: backend` or a backend-specific preset when
+  host-side sync/import is required.
+- Workspace lifecycle completion state moved to
+  `${TASK_RUNNER_STATE_DIR}/workspace-state`; existing workspaces created by
+  earlier unreleased branch builds may need their workspace/lifecycle state
+  cleared or recreated.
 - Workspace lifecycle `git-clone` steps now create the run branch from the
   configured base ref instead of treating that ref as a pathspec.
 - Workspace lifecycle locks now wait for in-flight setup instead of timing

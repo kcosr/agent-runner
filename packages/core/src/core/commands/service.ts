@@ -833,6 +833,7 @@ async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
     await backend.renameSession({
       sessionId: manifest.backendSessionId,
       cwd: runBackendCwd(manifest),
+      processCwd: manifest.cwd,
       env: process.env as Record<string, string>,
       backendConfig: manifest.backendConfig,
       resolvedBackendArgs: manifest.resolvedBackendArgs,

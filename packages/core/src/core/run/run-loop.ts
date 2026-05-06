@@ -825,6 +825,7 @@ async function validateBootstrapBackendSessionId(
   sessionId: string,
   backend: Backend,
   cwd: string,
+  processCwd: string,
   backendConfig: unknown,
   resolvedBackendArgs: ResolvedBackendArgs,
 ): Promise<void> {
@@ -842,6 +843,7 @@ async function validateBootstrapBackendSessionId(
   const result = await backend.validateSessionId({
     sessionId,
     cwd,
+    processCwd,
     env: process.env as Record<string, string>,
     backendConfig: cloneBackendConfig(backendConfig),
     resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
@@ -1927,6 +1929,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       opts.bootstrapBackendSessionId,
       currentBackend,
       executionEnvironment?.cwd ?? cwd,
+      cwd,
       backendConfig,
       resolvedBackendArgs,
     );
