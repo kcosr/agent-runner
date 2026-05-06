@@ -203,8 +203,8 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     unarchiveRun(target: string) {
       return { result: ctx.unarchive(target) };
     },
-    deleteRun(target: string) {
-      return { result: ctx.deleteArchivedRun(target) };
+    async deleteRun(target: string) {
+      return { result: await ctx.deleteArchivedRun(target) };
     },
     async setRunName(target: string, input: Parameters<typeof renameRun>[1]) {
       return { result: await ctx.renameRun(target, input) };
@@ -260,8 +260,8 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     abortRun(target: string) {
       return ctx.abortRun(target);
     },
-    resetRun(target: string) {
-      return { run: ctx.reset(target) };
+    async resetRun(target: string) {
+      return { run: await ctx.reset(target) };
     },
     async reconfigureRun(params: RunsReconfigureParams) {
       return {

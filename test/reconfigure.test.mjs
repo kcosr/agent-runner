@@ -33,6 +33,12 @@ function writeLauncher(baseDir, name, body) {
   writeFileSync(join(dir, `${name}.yaml`), body);
 }
 
+function writeEnvironment(baseDir, name, body) {
+  const dir = join(baseDir, "environments");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}.yaml`), body);
+}
+
 function writeScript(baseDir, name, body) {
   const path = join(baseDir, name);
   writeFileSync(path, body);
@@ -266,6 +272,74 @@ Assignment.
   assert.equal(manifest.cwd, init.manifest.cwd);
   assert.deepEqual(manifest.launcher, expectedLauncher);
   assert.deepEqual(manifest.resetSeed.launcher, expectedLauncher);
+});
+
+test("reconfigure: preserves frozen execution environment", async () => {
+  const dir = tempDir();
+  writeEnvironment(
+    dir,
+    "dev-container",
+    `schemaVersion: 1
+kind: container
+mode: existing
+engine: docker
+cwd: /workspace/{{branch}}
+container: devbox
+env:
+  TARGET: "{{target}}"
+`,
+  );
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+executionEnvironment: dev-container
+---
+Agent for {{target}}.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+message: original message
+vars:
+  target:
+    type: string
+    required: true
+  branch:
+    type: string
+    required: true
+tasks:
+  - id: t1
+    title: Work {{target}}
+---
+Assignment for {{target}}.
+`,
+  );
+
+  const init = await initRunIn(dir, {
+    cliVars: { target: "alpha", branch: "main" },
+  });
+  const initialManifest = readManifest(init.workspaceDir);
+
+  await withSharedRuntimeEnv(dir, () =>
+    reconfigureRun(init.runId, {
+      vars: { target: "beta" },
+    }),
+  );
+  const manifest = readManifest(init.workspaceDir);
+
+  assert.deepEqual(manifest.executionEnvironment, initialManifest.executionEnvironment);
+  assert.deepEqual(
+    manifest.resetSeed.executionEnvironment,
+    initialManifest.resetSeed.executionEnvironment,
+  );
 });
 
 test("reconfigure: ignores leaked env run group when re-freezing launcher", async () => {

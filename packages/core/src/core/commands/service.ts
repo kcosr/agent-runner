@@ -87,6 +87,7 @@ import {
 } from "../run/dependencies.js";
 import {
   cleanupExecutionEnvironment,
+  groupEnvironmentHasPendingUsers as hasPendingGroupEnvironmentUsers,
   prepareExecutionEnvironment,
 } from "../run/execution-environments.js";
 import { RunGroupValidationError, listRunGroupMembers, validateRunGroupId } from "../run/groups.js";
@@ -108,6 +109,8 @@ import {
   type RunEventOrigin,
   appendRunArchivedEvent,
   appendRunBackendSessionUpdatedEvent,
+  appendRunContainerCleanupFailedEvent,
+  appendRunContainerRemovedEvent,
   appendRunFinishedEvent,
   appendRunGroupChangedEvent,
   appendRunQueuedResumeMessageAddedEvent,
@@ -218,6 +221,50 @@ export type RunListScopeFilter =
 export interface RunListFilter {
   includeArchived?: boolean;
   scope?: RunListScopeFilter;
+}
+
+async function cleanupManagedEnvironmentForMutation(
+  manifest: RunManifest,
+  auditOrigin: RunEventOrigin,
+  emitAuditEnvelope: AuditEnvelopeEmitter | undefined,
+): Promise<void> {
+  if (
+    manifest.executionEnvironment?.mode !== "managed" ||
+    hasPendingGroupEnvironmentUsers(manifest, listRunManifests())
+  ) {
+    return;
+  }
+  const previousCleanedAt = manifest.executionEnvironment.cleanup.cleanedAt;
+  try {
+    const cleaned = await cleanupExecutionEnvironment(manifest.executionEnvironment, {
+      includeManual: true,
+      throwOnFailure: true,
+    });
+    manifest.executionEnvironment = cleaned;
+    if (
+      cleaned?.mode === "managed" &&
+      previousCleanedAt === null &&
+      cleaned.cleanup.cleanedAt !== null
+    ) {
+      emitPersistedAudit(
+        emitAuditEnvelope,
+        appendRunContainerRemovedEvent({
+          manifest,
+          context: systemRunEventContext(auditOrigin),
+        }),
+      );
+    }
+  } catch (error) {
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunContainerCleanupFailedEvent({
+        manifest,
+        context: systemRunEventContext(auditOrigin),
+        error: (error as Error).message,
+      }),
+    );
+    throw error;
+  }
 }
 
 export interface TaskListResult {
@@ -1021,31 +1068,6 @@ export function readRunEnvironment(target: string): RunEnvironmentResult {
   };
 }
 
-function groupEnvironmentHasPendingUsers(manifest: RunManifest): boolean {
-  const environment = manifest.executionEnvironment;
-  if (environment?.mode !== "managed" || environment.lifetime !== "group") {
-    return false;
-  }
-  return listRunManifests().some(({ manifest: candidate }) => {
-    if (candidate.runId === manifest.runId) {
-      return false;
-    }
-    if (
-      candidate.runGroupId !== manifest.runGroupId ||
-      candidate.executionEnvironment?.mode !== "managed" ||
-      candidate.executionEnvironment.lifetime !== "group" ||
-      candidate.executionEnvironment.containerName !== environment.containerName
-    ) {
-      return false;
-    }
-    return (
-      candidate.status === "initialized" ||
-      candidate.status === "ready" ||
-      candidate.status === "running"
-    );
-  });
-}
-
 export async function validateRunEnvironment(target: string): Promise<RunEnvironmentResult> {
   const resolved = resolveRun(target);
   if (resolved.manifest.executionEnvironment === null) {
@@ -1080,13 +1102,14 @@ export async function cleanupRunEnvironment(target: string): Promise<RunEnvironm
   if (resolved.manifest.status === "running") {
     throw new CommandError("cannot cleanup the execution environment for a running run");
   }
-  if (groupEnvironmentHasPendingUsers(resolved.manifest)) {
+  if (hasPendingGroupEnvironmentUsers(resolved.manifest, listRunManifests())) {
     throw new CommandError(
       "cannot cleanup a group-scoped execution environment while another group run can still use it",
     );
   }
   const cleaned = await cleanupExecutionEnvironment(resolved.manifest.executionEnvironment, {
     includeManual: true,
+    throwOnFailure: true,
   });
   return withTaskStateLock(resolved.workspaceDir, () => {
     const latest = resolveResumeTarget(resolved.workspaceDir).manifest;
@@ -1199,13 +1222,14 @@ export function showDefinition(
   };
 }
 
-export function resetRun(
+export async function resetRun(
   target: string,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
   emitAuditEnvelope?: AuditEnvelopeEmitter,
-): RunResetResult {
+): Promise<RunResetResult> {
   const resolved = resolveRun(target);
   requireResettableRun(resolved.manifest);
+  await cleanupManagedEnvironmentForMutation(resolved.manifest, auditOrigin, emitAuditEnvelope);
   return {
     manifest: resetWorkspaceRun(resolved.workspaceDir, {
       afterManifestWrite: (manifest, previousStatus, previousBackendSessionId) => {
@@ -1485,11 +1509,16 @@ export function unarchiveRun(
   return setRunArchived(target, false, auditOrigin, emitAuditEnvelope);
 }
 
-export function deleteRun(target: string): RunDeleteResult {
+export async function deleteRun(
+  target: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): Promise<RunDeleteResult> {
   const resolved = resolveRun(target);
-  withTaskStateLock(resolved.workspaceDir, () => {
+  await withTaskStateLockAsync(resolved.workspaceDir, async () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     requireDeletableRun(resolved.manifest);
+    await cleanupManagedEnvironmentForMutation(resolved.manifest, auditOrigin, emitAuditEnvelope);
     rmSync(resolved.workspaceDir, { recursive: true, force: true });
   });
   return { runId: resolved.manifest.runId };

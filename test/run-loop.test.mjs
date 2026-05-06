@@ -386,7 +386,7 @@ test("fresh runs freeze selected backend args on manifest, resetSeed, and invoke
   assert.deepEqual(outcome.manifest.resolvedBackendArgs, ["--claude-extra", "value"]);
   assert.deepEqual(outcome.manifest.resetSeed.resolvedBackendArgs, ["--claude-extra", "value"]);
 
-  const reset = withSharedRuntimeEnv(dir, () => resetRun(outcome.runId).manifest);
+  const reset = (await withSharedRuntimeEnv(dir, () => resetRun(outcome.runId))).manifest;
   assert.deepEqual(reset.resolvedBackendArgs, ["--claude-extra", "value"]);
   assert.deepEqual(reset.resetSeed.resolvedBackendArgs, ["--claude-extra", "value"]);
 });

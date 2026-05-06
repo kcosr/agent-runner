@@ -308,8 +308,8 @@ const routes: RouteDefinition[] = [
   {
     method: "POST",
     pattern: ["api", "runs", ":runId", "reset"],
-    handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, ctx.operations.resetRun(routeParam(params, "runId")));
+    handler: async (_req, res, ctx, params) => {
+      sendJson(res, 200, await ctx.operations.resetRun(routeParam(params, "runId")));
     },
   },
   {
@@ -328,8 +328,8 @@ const routes: RouteDefinition[] = [
   {
     method: "DELETE",
     pattern: ["api", "runs", ":runId"],
-    handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, ctx.operations.deleteRun(routeParam(params, "runId")));
+    handler: async (_req, res, ctx, params) => {
+      sendJson(res, 200, await ctx.operations.deleteRun(routeParam(params, "runId")));
     },
   },
   {

@@ -2678,8 +2678,8 @@ export async function serveDaemon(
           inferDependentFanout: true,
         },
       ),
-    deleteArchivedRun: (target) => {
-      const result = app.deleteArchivedRun(target);
+    deleteArchivedRun: async (target) => {
+      const result = await app.deleteArchivedRun(target, mutationAuditContext, publishAudit);
       publishRunDeletion(result.runId);
       return result;
     },
@@ -2738,9 +2738,13 @@ export async function serveDaemon(
     removeRunAttachment: (target, attachmentId) =>
       withPublishedMutation(target, () => app.removeRunAttachment(target, attachmentId)),
     reset: (target) =>
-      withPublishedMutation(target, () => app.reset(target, mutationAuditContext, publishAudit), {
-        inferDependentFanout: true,
-      }),
+      withPublishedMutationAsync(
+        target,
+        () => app.reset(target, mutationAuditContext, publishAudit),
+        {
+          inferDependentFanout: true,
+        },
+      ),
     reconfigureRun: (target, patch) =>
       withPublishedMutationAsync(target, () =>
         app.reconfigureRun(target, patch, mutationAuditContext, publishAudit),
@@ -3311,7 +3315,7 @@ export async function serveDaemon(
             ws,
             resultResponse(
               request.id,
-              operations.resetRun(
+              await operations.resetRun(
                 requiredString(asRecord(params, "runs.reset params").target, "target"),
               ),
             ),
@@ -3327,7 +3331,7 @@ export async function serveDaemon(
             ws,
             resultResponse(
               request.id,
-              operations.deleteRun(
+              await operations.deleteRun(
                 requiredString(asRecord(params, "runs.delete params").target, "target"),
               ),
             ),

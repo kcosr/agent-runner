@@ -1788,10 +1788,10 @@ async function runResetCommand(parsed: ParsedArgs, connect?: DaemonConnectContex
   try {
     const result =
       connect === undefined
-        ? reset(target)
+        ? await reset(target)
         : await withDaemonClient(connect, (client) =>
             client
-              .call<{ run: ReturnType<typeof reset> }>("runs.reset", { target })
+              .call<{ run: Awaited<ReturnType<typeof reset>> }>("runs.reset", { target })
               .then((r) => r.run),
           );
     if (parsed.outputFormat === "json") {
@@ -1956,10 +1956,12 @@ async function runDeleteCommand(
   try {
     const result =
       connect === undefined
-        ? deleteArchivedRun(target)
+        ? await deleteArchivedRun(target)
         : await withDaemonClient(connect, (client) =>
             client
-              .call<{ result: ReturnType<typeof deleteArchivedRun> }>("runs.delete", { target })
+              .call<{ result: Awaited<ReturnType<typeof deleteArchivedRun>> }>("runs.delete", {
+                target,
+              })
               .then((r) => r.result),
           );
     if (parsed.outputFormat === "json") {

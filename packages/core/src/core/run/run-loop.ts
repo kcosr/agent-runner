@@ -34,6 +34,7 @@ import type { ResolvedHookDescriptor } from "../hooks/types.js";
 import {
   buildEnvironmentLauncher,
   cleanupExecutionEnvironment,
+  groupEnvironmentHasPendingUsers as hasPendingGroupEnvironmentUsers,
   prepareExecutionEnvironment,
   resolveFreshExecutionEnvironment,
 } from "./execution-environments.js";
@@ -57,6 +58,7 @@ import {
   attemptStdoutLogRelativePath,
   buildRunResetSeed,
   cloneRunDependencyRefs,
+  cloneRunExecutionEnvironment,
   cloneRuntimeVarSources,
   findRunManifestsById,
   listRunManifests,
@@ -532,6 +534,41 @@ function copyFrozenAgentSeed(sourceManifest: RunManifest, targetWorkspaceDir: st
   copyFileSync(workspaceAgentPath(sourceManifest.workspaceDir), targetAgentPath);
 }
 
+function cloneExecutionEnvironmentForRecurringRun(
+  environment: RunManifest["executionEnvironment"],
+  sourceRunId: string,
+  runId: string,
+): RunManifest["executionEnvironment"] {
+  const cloned = cloneRunExecutionEnvironment(environment);
+  if (cloned?.mode !== "managed") {
+    return cloned;
+  }
+  const sourceDefaultName = `task-runner-${sourceRunId}`;
+  return {
+    ...cloned,
+    containerName:
+      cloned.lifetime === "group" || cloned.containerName !== sourceDefaultName
+        ? cloned.containerName
+        : `task-runner-${runId}`,
+    containerId: null,
+    workspace:
+      cloned.workspace?.scope === "run" && cloned.workspace.hostRoot !== null
+        ? {
+            ...cloned.workspace,
+            hostPath: join(cloned.workspace.hostRoot, runId),
+            createdAt: null,
+          }
+        : cloned.workspace,
+    cleanup: {
+      ...cloned.cleanup,
+      cleanedAt: null,
+      lastError: null,
+    },
+    lastValidatedAt: null,
+    lastError: null,
+  };
+}
+
 function buildRecurringCloneManifest(params: {
   sourceManifest: RunManifest;
   schedule: RunSchedule;
@@ -542,6 +579,11 @@ function buildRecurringCloneManifest(params: {
   const runId = shortId();
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
+  const executionEnvironment = cloneExecutionEnvironmentForRecurringRun(
+    seed.executionEnvironment,
+    sourceManifest.runId,
+    runId,
+  );
   return {
     schemaVersion: 22,
     runId,
@@ -593,33 +635,7 @@ function buildRecurringCloneManifest(params: {
     runtimeVars: { ...seed.runtimeVars },
     runtimeVarSources: cloneRuntimeVarSources(seed.runtimeVarSources),
     execution: sourceManifest.execution,
-    executionEnvironment:
-      seed.executionEnvironment?.mode === "managed"
-        ? {
-            ...seed.executionEnvironment,
-            containerName:
-              seed.executionEnvironment.lifetime === "group"
-                ? seed.executionEnvironment.containerName
-                : `task-runner-${runId}`,
-            containerId: null,
-            workspace:
-              seed.executionEnvironment.workspace?.scope === "run" &&
-              seed.executionEnvironment.workspace.hostRoot !== null
-                ? {
-                    ...seed.executionEnvironment.workspace,
-                    hostPath: join(seed.executionEnvironment.workspace.hostRoot, runId),
-                    createdAt: null,
-                  }
-                : seed.executionEnvironment.workspace,
-            cleanup: {
-              ...seed.executionEnvironment.cleanup,
-              cleanedAt: null,
-              lastError: null,
-            },
-            lastValidatedAt: null,
-            lastError: null,
-          }
-        : seed.executionEnvironment,
+    executionEnvironment,
     brief: seed.brief,
     resolvedHooks: sourceManifest.resolvedHooks.map((descriptor) => ({
       ...descriptor,
@@ -634,33 +650,7 @@ function buildRecurringCloneManifest(params: {
       backendConfig: cloneBackendConfig(seed.backendConfig),
       resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(seed.launcher),
-      executionEnvironment:
-        seed.executionEnvironment?.mode === "managed"
-          ? {
-              ...seed.executionEnvironment,
-              containerName:
-                seed.executionEnvironment.lifetime === "group"
-                  ? seed.executionEnvironment.containerName
-                  : `task-runner-${runId}`,
-              containerId: null,
-              workspace:
-                seed.executionEnvironment.workspace?.scope === "run" &&
-                seed.executionEnvironment.workspace.hostRoot !== null
-                  ? {
-                      ...seed.executionEnvironment.workspace,
-                      hostPath: join(seed.executionEnvironment.workspace.hostRoot, runId),
-                      createdAt: null,
-                    }
-                  : seed.executionEnvironment.workspace,
-              cleanup: {
-                ...seed.executionEnvironment.cleanup,
-                cleanedAt: null,
-                lastError: null,
-              },
-              lastValidatedAt: null,
-              lastError: null,
-            }
-          : seed.executionEnvironment,
+      executionEnvironment,
       lockedFields: [...seed.lockedFields],
       runGroupId: seed.runGroupId,
       dependencies: cloneRunDependencyRefs(seed.dependencies),
@@ -677,31 +667,6 @@ function buildRecurringCloneManifest(params: {
     sessions: [],
     attemptRecords: [],
   };
-}
-
-function groupEnvironmentHasPendingUsers(manifest: RunManifest): boolean {
-  const environment = manifest.executionEnvironment;
-  if (environment?.mode !== "managed" || environment.lifetime !== "group") {
-    return false;
-  }
-  return listRunManifests().some(({ manifest: candidate }) => {
-    if (candidate.runId === manifest.runId) {
-      return false;
-    }
-    if (
-      candidate.runGroupId !== manifest.runGroupId ||
-      candidate.executionEnvironment?.mode !== "managed" ||
-      candidate.executionEnvironment.lifetime !== "group" ||
-      candidate.executionEnvironment.containerName !== environment.containerName
-    ) {
-      return false;
-    }
-    return (
-      candidate.status === "initialized" ||
-      candidate.status === "ready" ||
-      candidate.status === "running"
-    );
-  });
 }
 
 function resolveFreshRunCwd(
@@ -2315,7 +2280,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     let preparedEnvironment: RunManifest["executionEnvironment"];
     const previousEnvironment = manifest.executionEnvironment;
     try {
-      preparedEnvironment = await prepareExecutionEnvironment(manifest.executionEnvironment);
+      preparedEnvironment = await prepareExecutionEnvironment(manifest.executionEnvironment, {
+        signal: opts.abortSignal,
+      });
     } catch (error) {
       emitAuditEnvelope(
         appendRunEnvironmentValidationFailedEvent({
@@ -2327,13 +2294,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       throw error;
     }
     manifest.executionEnvironment = preparedEnvironment;
-    if (reusingWorkspace) {
-      await withTaskStateLockAsync(workspaceDir, async () => {
-        const latest = resolveResumeTarget(workspaceDir).manifest;
-        latest.executionEnvironment = preparedEnvironment;
-        writeManifest(workspaceDir, latest);
-      });
-    }
+    await withTaskStateLockAsync(workspaceDir, async () => {
+      const latest = resolveResumeTarget(workspaceDir).manifest;
+      latest.executionEnvironment = preparedEnvironment;
+      writeManifest(workspaceDir, latest);
+    });
     emitAuditEnvelope(
       appendRunEnvironmentValidatedEvent({
         manifest,
@@ -3091,7 +3056,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   if (
     manifest.executionEnvironment?.mode === "managed" &&
-    !groupEnvironmentHasPendingUsers(manifest)
+    !hasPendingGroupEnvironmentUsers(manifest, listRunManifests())
   ) {
     const cleanedEnvironment = await cleanupExecutionEnvironment(manifest.executionEnvironment);
     withTaskStateLock(workspaceDir, () => {

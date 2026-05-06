@@ -538,13 +538,8 @@ Add environment/container events to `run-events.jsonl`:
 - `run.environment.validated`
 - `run.environment.validation_failed`
 - `run.container.created`
-- `run.container.reused`
-- `run.container.exec_started`
-- `run.container.exec_finished`
-- `run.container.stopped`
 - `run.container.removed`
 - `run.container.cleanup_failed`
-- `run.container.disappeared`
 
 Audit fields should include:
 
@@ -621,6 +616,8 @@ Deferred:
 - same-path session-store validation before backend session sync
 - daemon startup scavenging for labeled abandoned managed containers
 - `attempt` and `session` managed container lifetimes
+- extended container audit events for reuse, exec start/finish, stopped,
+  and disappeared transitions
 - richer web status/capability rendering
 - optional native `openai-agents` backend integration
 

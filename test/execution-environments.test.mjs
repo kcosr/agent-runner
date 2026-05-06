@@ -159,27 +159,34 @@ test("buildEnvironmentLauncher wraps backend commands in a container exec launch
     expectedMounts: [],
   };
 
-  assert.deepEqual(buildEnvironmentLauncher(environment, { FOO: "from-backend", BAR: "baz" }), {
-    kind: "prefix",
-    command: "docker",
-    args: [
-      "exec",
-      "-i",
-      "--user",
-      "coder",
-      "-w",
-      "/workspace",
-      "-e",
-      "FOO=from-environment",
-      "-e",
-      "BAR=baz",
-      "-e",
-      "ONLY_ENVIRONMENT=yes",
-      "devbox",
-    ],
-    name: null,
-    source: "inline",
-  });
+  assert.deepEqual(
+    buildEnvironmentLauncher(environment, {
+      FOO: "from-backend",
+      BAR: "baz",
+      TASK_RUNNER_RUN_ID: "run-123",
+    }),
+    {
+      kind: "prefix",
+      command: "docker",
+      args: [
+        "exec",
+        "-i",
+        "--user",
+        "coder",
+        "-w",
+        "/workspace",
+        "-e",
+        "TASK_RUNNER_RUN_ID=run-123",
+        "-e",
+        "FOO=from-environment",
+        "-e",
+        "ONLY_ENVIRONMENT=yes",
+        "devbox",
+      ],
+      name: null,
+      source: "inline",
+    },
+  );
 });
 
 test("resolveFreshExecutionEnvironment resolves group-scoped workspace mounts and rewrites cwd", () =>
@@ -364,4 +371,66 @@ process.exit(0);
     assert.ok(commands[1].includes(`${workspacePath}:/workspace:rw`));
     assert.ok(commands[1].includes(`${codexSessionsPath}:${codexSessionsPath}:rw`));
     assert.deepEqual(commands.at(-1), ["exec", "container-123", "test", "-d", "/workspace"]);
+  }));
+
+test("prepareExecutionEnvironment removes a newly-started container when cwd validation fails", async () =>
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+    const binDir = join(rootDir, "bin");
+    const logPath = join(rootDir, "docker.log");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(binDir, "docker"),
+      `#!/usr/bin/env node
+import fs from "node:fs";
+const logPath = process.env.FAKE_DOCKER_LOG;
+fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
+const [cmd, target] = process.argv.slice(2);
+if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "run") {
+  process.stdout.write("container-123\\n");
+  process.exit(0);
+}
+if (cmd === "exec") process.exit(1);
+if (cmd === "rm") process.exit(0);
+process.exit(0);
+`,
+      { mode: 0o755 },
+    );
+
+    const environment = {
+      kind: "container",
+      mode: "managed",
+      name: "workspace-dev",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/missing",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: null,
+      lastError: null,
+      image: "node:22",
+      lifetime: "run",
+      containerName: "task-runner-run-123",
+      containerId: null,
+      workspace: null,
+      sessionMounts: [],
+      mounts: [],
+      network: "default",
+      security: { capDrop: [], capAdd: [] },
+      extraRunArgs: [],
+      cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+    };
+
+    await assert.rejects(
+      withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
+        prepareExecutionEnvironment(environment),
+      ),
+      /docker exec failed/,
+    );
+
+    const commands = readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(commands.at(-1), ["rm", "-f", "container-123"]);
   }));

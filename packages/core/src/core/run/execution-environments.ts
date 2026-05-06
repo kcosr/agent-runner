@@ -15,6 +15,7 @@ import type {
   RunExecutionEnvironment,
   RunExistingContainerEnvironment,
   RunManagedContainerEnvironment,
+  RunManifest,
 } from "./manifest.js";
 
 const execFileAsync = promisify(execFile);
@@ -26,6 +27,9 @@ export class ExecutionEnvironmentError extends Error {
     this.name = "ExecutionEnvironmentError";
   }
 }
+
+const ENGINE_DEFAULT_TIMEOUT_MS = 30_000;
+const ENGINE_START_TIMEOUT_MS = 60_000;
 
 interface ResolveEnvironmentOptions {
   reference: EnvironmentReference | undefined;
@@ -329,11 +333,14 @@ interface InspectSummary {
 async function runEngine(
   environment: RunExecutionEnvironment,
   args: string[],
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   try {
     const result = await execFileAsync(environment.engine, args, {
       encoding: "utf8",
-      maxBuffer: 1024 * 1024,
+      maxBuffer: 8 * 1024 * 1024,
+      signal: options.signal,
+      timeout: options.timeoutMs ?? ENGINE_DEFAULT_TIMEOUT_MS,
     });
     return {
       stdout: result.stdout,
@@ -349,8 +356,11 @@ async function runEngine(
 async function inspectContainer(
   environment: RunExecutionEnvironment,
   container: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<InspectSummary> {
-  const result = await runEngine(environment, ["inspect", container]);
+  const result = await runEngine(environment, ["inspect", container], {
+    signal: options.signal,
+  });
   let parsed: unknown;
   try {
     parsed = JSON.parse(result.stdout);
@@ -386,8 +396,14 @@ async function inspectContainer(
   };
 }
 
-async function validateCwd(environment: RunExecutionEnvironment, container: string): Promise<void> {
-  await runEngine(environment, ["exec", container, "test", "-d", environment.cwd]);
+async function validateCwd(
+  environment: RunExecutionEnvironment,
+  container: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  await runEngine(environment, ["exec", container, "test", "-d", environment.cwd], {
+    signal: options.signal,
+  });
 }
 
 function validateExpectedMounts(
@@ -413,6 +429,7 @@ function validateExpectedMounts(
 
 async function startManagedContainer(
   environment: RunManagedContainerEnvironment,
+  options: { signal?: AbortSignal } = {},
 ): Promise<RunManagedContainerEnvironment> {
   const args = [
     "run",
@@ -466,7 +483,10 @@ async function startManagedContainer(
     "-lc",
     'trap "exit 0" TERM INT; while true; do sleep 3600; done',
   );
-  const started = await runEngine(environment, args);
+  const started = await runEngine(environment, args, {
+    signal: options.signal,
+    timeoutMs: ENGINE_START_TIMEOUT_MS,
+  });
   const containerId = started.stdout.trim() || environment.containerName;
   return {
     ...environment,
@@ -482,17 +502,20 @@ async function startManagedContainer(
 
 export async function prepareExecutionEnvironment(
   environment: RunExecutionEnvironment | null,
+  options: { signal?: AbortSignal } = {},
 ): Promise<RunExecutionEnvironment | null> {
   if (environment === null) {
     return null;
   }
   if (environment.mode === "existing") {
-    const inspected = await inspectContainer(environment, environment.container);
+    const inspected = await inspectContainer(environment, environment.container, {
+      signal: options.signal,
+    });
     if (!inspected.running) {
       throw new ExecutionEnvironmentError(`container ${environment.container} is not running`);
     }
     validateExpectedMounts(environment, inspected);
-    await validateCwd(environment, environment.container);
+    await validateCwd(environment, environment.container, { signal: options.signal });
     return {
       ...environment,
       containerIdAtValidation: inspected.id,
@@ -516,9 +539,12 @@ export async function prepareExecutionEnvironment(
   for (const sessionMount of next.sessionMounts) {
     mkdirSync(sessionMount.hostPath, { recursive: true });
   }
+  let startedContainer = false;
   if (next.containerId === null) {
     try {
-      const inspected = await inspectContainer(next, next.containerName);
+      const inspected = await inspectContainer(next, next.containerName, {
+        signal: options.signal,
+      });
       if (!inspected.running) {
         throw new ExecutionEnvironmentError(`container ${next.containerName} is not running`);
       }
@@ -535,18 +561,60 @@ export async function prepareExecutionEnvironment(
       if (!(error instanceof ExecutionEnvironmentError)) {
         throw error;
       }
-      next = await startManagedContainer(next);
+      try {
+        next = await startManagedContainer(next, { signal: options.signal });
+        startedContainer = true;
+      } catch (startError) {
+        if (next.lifetime === "group") {
+          try {
+            const inspected = await inspectContainer(next, next.containerName, {
+              signal: options.signal,
+            });
+            if (inspected.running) {
+              next = {
+                ...next,
+                containerId: inspected.id,
+                cleanup: {
+                  ...next.cleanup,
+                  cleanedAt: null,
+                  lastError: null,
+                },
+                lastError: null,
+              };
+            } else {
+              throw startError;
+            }
+          } catch {
+            throw startError;
+          }
+        } else {
+          throw startError;
+        }
+      }
     }
   } else {
-    const inspected = await inspectContainer(next, next.containerId);
+    const inspected = await inspectContainer(next, next.containerId, { signal: options.signal });
     if (!inspected.running) {
-      next = await startManagedContainer({
-        ...next,
-        containerId: null,
-      });
+      next = await startManagedContainer(
+        {
+          ...next,
+          containerId: null,
+        },
+        { signal: options.signal },
+      );
+      startedContainer = true;
     }
   }
-  await validateCwd(next, next.containerId ?? next.containerName);
+  try {
+    await validateCwd(next, next.containerId ?? next.containerName, { signal: options.signal });
+  } catch (error) {
+    if (startedContainer && next.containerId !== null) {
+      await runEngine(next, ["rm", "-f", next.containerId], {
+        signal: options.signal,
+      }).catch(() => undefined);
+    }
+    throw error;
+  }
   return {
     ...next,
     lastValidatedAt: new Date().toISOString(),
@@ -567,13 +635,16 @@ export function buildEnvironmentLauncher(
   if (environment === null) {
     return undefined;
   }
+  const forwardedEnv = Object.fromEntries(
+    Object.entries(env).filter(([key]) => key.startsWith("TASK_RUNNER_")),
+  );
   const args = [
     "exec",
     "-i",
     ...environment.extraExecArgs,
     "-w",
     environment.cwd,
-    ...Object.entries({ ...env, ...environment.env }).flatMap(([key, value]) => [
+    ...Object.entries({ ...forwardedEnv, ...environment.env }).flatMap(([key, value]) => [
       "-e",
       `${key}=${value}`,
     ]),
@@ -590,7 +661,7 @@ export function buildEnvironmentLauncher(
 
 export async function cleanupExecutionEnvironment(
   environment: RunExecutionEnvironment | null,
-  options: { includeManual?: boolean } = {},
+  options: { includeManual?: boolean; throwOnFailure?: boolean } = {},
 ): Promise<RunExecutionEnvironment | null> {
   if (environment === null || environment.mode === "existing") {
     return environment;
@@ -614,6 +685,9 @@ export async function cleanupExecutionEnvironment(
       },
     };
   } catch (error) {
+    if (options.throwOnFailure === true) {
+      throw error;
+    }
     return {
       ...environment,
       cleanup: {
@@ -623,4 +697,37 @@ export async function cleanupExecutionEnvironment(
       lastError: (error as Error).message,
     };
   }
+}
+
+export function groupEnvironmentHasPendingUsers(
+  manifest: Pick<RunManifest, "runId" | "runGroupId" | "executionEnvironment">,
+  candidates: Iterable<{
+    manifest: Pick<RunManifest, "runId" | "runGroupId" | "status" | "executionEnvironment">;
+  }>,
+): boolean {
+  const environment = manifest.executionEnvironment;
+  if (environment?.mode !== "managed" || environment.lifetime !== "group") {
+    return false;
+  }
+  for (const { manifest: candidate } of candidates) {
+    if (candidate.runId === manifest.runId) {
+      continue;
+    }
+    if (
+      candidate.runGroupId !== manifest.runGroupId ||
+      candidate.executionEnvironment?.mode !== "managed" ||
+      candidate.executionEnvironment.lifetime !== "group" ||
+      candidate.executionEnvironment.containerName !== environment.containerName
+    ) {
+      continue;
+    }
+    if (
+      candidate.status === "initialized" ||
+      candidate.status === "ready" ||
+      candidate.status === "running"
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

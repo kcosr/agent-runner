@@ -478,13 +478,14 @@ export function unarchive(
   return unarchiveRun(target, auditContext, emitAuditEnvelope);
 }
 
-export function reset(
+export async function reset(
   target: string,
   auditContext?: MutationAuditContext,
   emitAuditEnvelope?: AuditEnvelopeEmitter,
-): RunDetail {
+): Promise<RunDetail> {
+  const result = await resetRun(target, auditContext, emitAuditEnvelope);
   return toRunDetail({
-    manifest: resetRun(target, auditContext, emitAuditEnvelope).manifest,
+    manifest: result.manifest,
     isLive: false,
   });
 }
@@ -524,8 +525,12 @@ export function setRunScheduleEnabled(
   return setRunScheduleEnabledCommand(target, input.enabled, auditContext, emitAuditEnvelope);
 }
 
-export function deleteArchivedRun(target: string): RunDeleteResult {
-  return deleteRun(target);
+export function deleteArchivedRun(
+  target: string,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): Promise<RunDeleteResult> {
+  return deleteRun(target, auditContext, emitAuditEnvelope);
 }
 
 export function renameRun(

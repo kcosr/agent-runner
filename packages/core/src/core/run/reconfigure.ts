@@ -16,6 +16,7 @@ import {
   buildRunResetSeed,
   cloneBackendSessionSyncState,
   cloneRunDependencyRefs,
+  cloneRunExecutionEnvironment,
   cloneRuntimeVarSources,
   readManifest,
   resolveResumeTarget,
@@ -254,6 +255,7 @@ function restoreFrozenManifestFields(
     backendSessionSync: cloneBackendSessionSyncState(previous.backendSessionSync),
     maxAttemptsPerSession: previous.maxAttemptsPerSession,
     execution: previous.execution,
+    executionEnvironment: cloneRunExecutionEnvironment(previous.executionEnvironment),
     attachments: previous.attachments.map((attachment) => ({ ...attachment })),
   };
 
@@ -272,6 +274,7 @@ function restoreFrozenManifestFields(
     backendConfig: cloneBackendConfig(restored.backendConfig),
     resolvedBackendArgs: cloneResolvedBackendArgs(restored.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(restored.launcher),
+    executionEnvironment: cloneRunExecutionEnvironment(restored.executionEnvironment),
     cwd: restored.cwd,
     lockedFields: [...restored.lockedFields],
     message: restored.message,

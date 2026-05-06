@@ -32,6 +32,7 @@ import {
   clearRunDependencies,
   clearRunGroup,
   clearRunSchedule,
+  deleteRun,
   downloadAttachment,
   drainQueuedResumeMessages,
   isCommandError,
@@ -45,6 +46,7 @@ import {
   removeAttachment,
   removeQueuedResumeMessage,
   removeRunDependency,
+  resetRun,
   setRunBackendSession,
   setRunGroup,
   setRunName,
@@ -1408,6 +1410,87 @@ test("command services: group-scoped execution environments pin group membership
       /another group run can still use it/,
     );
   });
+});
+
+test("command services: reset and delete cleanup owned managed containers", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const resetTarget = await initRun(dir);
+  const deleteTarget = await initRun(dir);
+  const binDir = join(dir, "bin");
+  const logPath = join(dir, "docker.log");
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(
+    join(binDir, "docker"),
+    `#!/usr/bin/env node
+import fs from "node:fs";
+fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");
+process.exit(0);
+`,
+    { mode: 0o755 },
+  );
+
+  const environment = (containerId) => ({
+    kind: "container",
+    mode: "managed",
+    name: "run-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: "2026-05-06T01:00:00.000Z",
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: `task-runner-${containerId}`,
+    containerId,
+    workspace: null,
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  });
+
+  patchManifest(resetTarget.workspaceDir, (manifest) => {
+    manifest.executionEnvironment = environment("reset-container");
+    manifest.resetSeed.executionEnvironment = {
+      ...environment(null),
+      containerName: "task-runner-reset-container",
+      containerId: null,
+      lastValidatedAt: null,
+    };
+  });
+  patchManifest(deleteTarget.workspaceDir, (manifest) => {
+    manifest.executionEnvironment = environment("delete-container");
+    manifest.resetSeed.executionEnvironment = {
+      ...environment(null),
+      containerName: "task-runner-delete-container",
+      containerId: null,
+      lastValidatedAt: null,
+    };
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    await withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, async () => {
+      const reset = await resetRun(resetTarget.runId);
+      assert.equal(reset.manifest.executionEnvironment.containerId, null);
+      archiveRun(deleteTarget.runId);
+      await deleteRun(deleteTarget.runId);
+    });
+  });
+
+  const commands = readFileSync(logPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(commands, [
+    ["rm", "-f", "reset-container"],
+    ["rm", "-f", "delete-container"],
+  ]);
+  assert.equal(existsSync(deleteTarget.workspaceDir), false);
 });
 
 test("command services: group dependencies project aggregate readiness and reverse edges", async () => {

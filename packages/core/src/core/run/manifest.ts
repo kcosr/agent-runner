@@ -1277,6 +1277,7 @@ function isValidExecutionEnvironment(value: unknown): value is RunExecutionEnvir
   if (record.mode === "existing") {
     return (
       typeof record.container === "string" &&
+      record.container.trim().length > 0 &&
       (record.containerIdAtValidation === null ||
         typeof record.containerIdAtValidation === "string") &&
       Array.isArray(record.expectedMounts) &&
@@ -1289,6 +1290,7 @@ function isValidExecutionEnvironment(value: unknown): value is RunExecutionEnvir
     typeof record.image === "string" &&
     (record.lifetime === "run" || record.lifetime === "group") &&
     typeof record.containerName === "string" &&
+    record.containerName.trim().length > 0 &&
     (record.containerId === null || typeof record.containerId === "string") &&
     isValidEnvironmentWorkspace(record.workspace) &&
     Array.isArray(record.sessionMounts) &&
@@ -1299,13 +1301,13 @@ function isValidExecutionEnvironment(value: unknown): value is RunExecutionEnvir
     Boolean(security) &&
     typeof security === "object" &&
     !Array.isArray(security) &&
-    (((security as Record<string, unknown>).userns === undefined ||
+    ((security as Record<string, unknown>).userns === undefined ||
       (security as Record<string, unknown>).userns === "keep-id" ||
-      (security as Record<string, unknown>).userns === "host") as boolean) &&
-    (((security as Record<string, unknown>).selinuxLabel === undefined ||
+      (security as Record<string, unknown>).userns === "host") &&
+    ((security as Record<string, unknown>).selinuxLabel === undefined ||
       (security as Record<string, unknown>).selinuxLabel === "disable" ||
       (security as Record<string, unknown>).selinuxLabel === "shared" ||
-      (security as Record<string, unknown>).selinuxLabel === "private") as boolean) &&
+      (security as Record<string, unknown>).selinuxLabel === "private") &&
     ((security as Record<string, unknown>).readOnlyRootFilesystem === undefined ||
       typeof (security as Record<string, unknown>).readOnlyRootFilesystem === "boolean") &&
     Array.isArray((security as Record<string, unknown>).capDrop) &&

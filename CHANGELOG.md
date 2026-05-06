@@ -171,6 +171,18 @@
 
 ### Fixed
 
+- Managed container environments are now cleaned up before run reset and
+  delete, and manual cleanup reports engine failures instead of returning
+  success with a stale container.
+- Containerized backend invocation now forwards only task-runner runtime
+  environment variables plus environment-authored values into `docker exec`
+  or `podman exec`, avoiding accidental propagation of host secrets.
+- Reconfiguring initialized runs now preserves the frozen execution
+  environment and reset seed.
+- Managed container preparation now times out engine operations, honors
+  abort signals, rolls back a newly-started container when cwd validation
+  fails, and attaches to a concurrently-created group container.
+
 - OpenCode backend session history sync now treats transient SQLite
   busy/locked reads as `source_busy` so pre-resume sync can skip and retry
   later instead of failing the resume.
