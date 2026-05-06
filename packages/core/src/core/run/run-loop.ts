@@ -557,6 +557,14 @@ function cloneExecutionEnvironmentForRecurringRun(
             ...cloned.workspace,
             hostPath: join(cloned.workspace.hostRoot, runId),
             createdAt: null,
+            lifecycle:
+              cloned.workspace.lifecycle === null
+                ? null
+                : {
+                    ...cloned.workspace.lifecycle,
+                    completedAt: null,
+                    lastError: null,
+                  },
           }
         : cloned.workspace,
     cleanup: {
@@ -585,7 +593,7 @@ function buildRecurringCloneManifest(params: {
     runId,
   );
   return {
-    schemaVersion: 22,
+    schemaVersion: 23,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -1672,7 +1680,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 22,
+      schemaVersion: 23,
       runId,
       repo,
       agent: {
@@ -1983,7 +1991,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 22,
+      schemaVersion: 23,
       runId,
       repo,
       agent: {

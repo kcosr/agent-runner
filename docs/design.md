@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `22`. Older manifest shapes are not
+The current manifest schema is version `23`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -187,6 +187,8 @@ the next session. Attempts are backend invocations within a session.
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
 
+Manifest schema version 23 adds resolved managed-container workspace
+lifecycle state.
 Manifest schema version 22 adds resolved backend session mount presets.
 Manifest schema version 21 adds managed-container workspace mount state
 and group-scoped container lifetimes. Manifest schema version 20 adds

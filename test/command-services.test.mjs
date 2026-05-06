@@ -1377,6 +1377,7 @@ test("command services: group-scoped execution environments pin group membership
       mode: "rw",
       create: true,
       createdAt: null,
+      lifecycle: null,
     },
     sessionMounts: [],
     mounts: [],

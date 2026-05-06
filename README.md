@@ -261,6 +261,11 @@ workspace:
   scope: group
   hostRoot: "{{state_dir}}/workspaces"
   containerPath: /workspace
+  lifecycle:
+    onCreate:
+      - kind: command
+        command: npm
+        args: [install]
 sessionMounts: backend
 ```
 
@@ -269,7 +274,9 @@ into the container, rewrite cwd to the container path, and keep a
 group-scoped container alive until no initialized, ready, or running run
 in the group still references it. `sessionMounts: backend` adds a
 same-path mount for the selected backend's session store so host-side
-session sync can read the backend history.
+session sync can read the backend history. `workspace.lifecycle.onCreate`
+runs container-side setup once per host workspace before backend cwd
+validation.
 
 Agents may also author backend-owned argv tokens:
 

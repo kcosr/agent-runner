@@ -334,6 +334,33 @@ const environmentWorkspaceSchema = z
     containerPath: environmentPathTemplateSchema,
     mode: z.enum(["ro", "rw"]).default("rw"),
     create: z.boolean().default(true),
+    lifecycle: z
+      .object({
+        onCreate: z
+          .array(
+            z.discriminatedUnion("kind", [
+              z
+                .object({
+                  kind: z.literal("command"),
+                  command: z.string().trim().min(1),
+                  args: z.array(z.string()).default([]),
+                  env: z.record(z.string().trim().min(1), z.string()).default({}),
+                })
+                .strict(),
+              z
+                .object({
+                  kind: z.literal("git-clone"),
+                  source: environmentPathTemplateSchema,
+                  baseRef: z.string().trim().min(1),
+                  branch: z.string().trim().min(1),
+                })
+                .strict(),
+            ]),
+          )
+          .default([]),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine(

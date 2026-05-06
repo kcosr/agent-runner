@@ -236,6 +236,15 @@ workspace:
   containerPath: /workspace
   mode: rw
   create: true
+  lifecycle:
+    onCreate:
+      - kind: git-clone
+        source: /host/repos/project.git
+        baseRef: origin/main
+        branch: "task-runner/{{run_id}}"
+      - kind: command
+        command: npm
+        args: [install]
 sessionMounts: backend
 mounts:
   - hostPath: /home/kevin/.cache/agent-tools
@@ -279,6 +288,14 @@ Generic `mounts` remain available for auth stores, caches, sockets, and other
 explicit bind mounts. After resolving the workspace, managed environments can
 interpolate `workspace_host_path` and `workspace_container_path` in cwd, env,
 image, container name, and generic mount paths.
+
+Workspaces may define `lifecycle.onCreate` steps that run inside the managed
+container before backend cwd validation. The `git-clone` step clones into the
+workspace root and checks out a branch from a base ref. The `command` step runs
+an arbitrary command in the workspace root with optional args and env.
+Host-side state next to the workspace records successful completion, so
+group-scoped workspaces run setup once and later runs skip it without dirtying
+the mounted workspace.
 
 `sessionMounts` expands same-path read-write mounts for built-in backend
 session stores. `sessionMounts: backend` resolves to the selected backend's

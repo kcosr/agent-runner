@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import { loadEnvironmentConfig } from "../../config/loader.js";
 import type { BackendName } from "../backends/types.js";
@@ -12,6 +13,7 @@ import type {
   RunEnvironmentSessionMount,
   RunEnvironmentSessionMountPreset,
   RunEnvironmentWorkspace,
+  RunEnvironmentWorkspaceLifecycleStep,
   RunExecutionEnvironment,
   RunExistingContainerEnvironment,
   RunManagedContainerEnvironment,
@@ -30,6 +32,12 @@ export class ExecutionEnvironmentError extends Error {
 
 const ENGINE_DEFAULT_TIMEOUT_MS = 30_000;
 const ENGINE_START_TIMEOUT_MS = 60_000;
+const WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS = 30 * 60_000;
+const WORKSPACE_LIFECYCLE_LOCK_WAIT_MS = 100;
+const WORKSPACE_LIFECYCLE_LOCK_TIMEOUT_MS = 30_000;
+const WORKSPACE_LIFECYCLE_MARKER = ".task-runner-workspace-lifecycle.json";
+const WORKSPACE_LIFECYCLE_LOCK = ".task-runner-workspace-lifecycle.lock";
+const WORKSPACE_LIFECYCLE_STATE_SUFFIX = ".task-runner-lifecycle";
 
 interface ResolveEnvironmentOptions {
   reference: EnvironmentReference | undefined;
@@ -230,7 +238,48 @@ function resolveWorkspace(
     mode: workspace.mode,
     create: workspace.create,
     createdAt: null,
+    lifecycle: null,
   };
+}
+
+function applyWorkspaceLifecycle(
+  workspace: RunEnvironmentWorkspace | null,
+  lifecycle: { onCreate: RunEnvironmentWorkspaceLifecycleStep[] } | undefined,
+  vars: Record<string, unknown>,
+): RunEnvironmentWorkspace | null {
+  if (workspace === null || lifecycle === undefined) {
+    return workspace;
+  }
+  return {
+    ...workspace,
+    lifecycle: {
+      onCreate: resolveWorkspaceLifecycleSteps(lifecycle.onCreate, vars),
+      completedAt: null,
+      lastError: null,
+    },
+  };
+}
+
+function resolveWorkspaceLifecycleSteps(
+  steps: RunEnvironmentWorkspaceLifecycleStep[],
+  vars: Record<string, unknown>,
+): RunEnvironmentWorkspaceLifecycleStep[] {
+  return steps.map((step) => {
+    if (step.kind === "command") {
+      return {
+        kind: "command",
+        command: interpolateString(step.command, vars),
+        args: step.args.map((arg) => interpolateString(arg, vars)),
+        env: interpolateStringRecord(step.env, vars),
+      };
+    }
+    return {
+      kind: "git-clone",
+      source: interpolateString(step.source, vars),
+      baseRef: interpolateString(step.baseRef, vars),
+      branch: interpolateString(step.branch, vars),
+    };
+  });
 }
 
 function resolveEnvironmentConfig(
@@ -241,16 +290,20 @@ function resolveEnvironmentConfig(
   backend: BackendName,
 ): RunExecutionEnvironment {
   const config = loaded.config;
-  const workspace =
+  const resolvedWorkspace =
     config.mode === "managed" ? resolveWorkspace(config.workspace, vars, runId, runGroupId) : null;
   const environmentVars =
-    workspace === null
+    resolvedWorkspace === null
       ? vars
       : {
           ...vars,
-          workspace_host_path: workspace.hostPath,
-          workspace_container_path: workspace.containerPath,
+          workspace_host_path: resolvedWorkspace.hostPath,
+          workspace_container_path: resolvedWorkspace.containerPath,
         };
+  const workspace =
+    config.mode === "managed"
+      ? applyWorkspaceLifecycle(resolvedWorkspace, config.workspace?.lifecycle, environmentVars)
+      : null;
   const cwd = rewriteWorkspacePath(workspace, interpolateString(config.cwd, environmentVars));
   assertAbsolutePath(cwd, "executionEnvironment.cwd");
   const env = interpolateStringRecord(config.env, environmentVars);
@@ -406,6 +459,218 @@ async function validateCwd(
   });
 }
 
+async function runContainerCommand(
+  environment: RunExecutionEnvironment,
+  container: string,
+  cwd: string,
+  env: Record<string, string>,
+  command: string,
+  args: string[],
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<void> {
+  await runEngine(
+    environment,
+    [
+      "exec",
+      "-i",
+      ...environment.extraExecArgs,
+      "-w",
+      cwd,
+      ...Object.entries({ ...environment.env, ...env }).flatMap(([key, value]) => [
+        "-e",
+        `${key}=${value}`,
+      ]),
+      container,
+      command,
+      ...args,
+    ],
+    {
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+    },
+  );
+}
+
+function workspaceLifecycleStateDir(hostPath: string): string {
+  return `${hostPath}${WORKSPACE_LIFECYCLE_STATE_SUFFIX}`;
+}
+
+function readWorkspaceLifecycleMarker(stateDir: string): string | null {
+  const markerPath = join(stateDir, WORKSPACE_LIFECYCLE_MARKER);
+  if (!existsSync(markerPath)) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(markerPath, "utf8"));
+  } catch (error) {
+    throw new ExecutionEnvironmentError(
+      `workspace lifecycle marker ${markerPath} is invalid JSON: ${(error as Error).message}`,
+    );
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    typeof (parsed as Record<string, unknown>).completedAt !== "string"
+  ) {
+    throw new ExecutionEnvironmentError(
+      `workspace lifecycle marker ${markerPath} is missing completedAt`,
+    );
+  }
+  return (parsed as { completedAt: string }).completedAt;
+}
+
+function writeWorkspaceLifecycleMarker(stateDir: string, completedAt: string): void {
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(
+    join(stateDir, WORKSPACE_LIFECYCLE_MARKER),
+    `${JSON.stringify({ completedAt }, null, 2)}\n`,
+  );
+}
+
+async function acquireWorkspaceLifecycleLock(
+  stateDir: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<string> {
+  mkdirSync(stateDir, { recursive: true });
+  const lockPath = join(stateDir, WORKSPACE_LIFECYCLE_LOCK);
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      mkdirSync(lockPath);
+      return lockPath;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== "EEXIST") {
+        throw error;
+      }
+      if (Date.now() - startedAt >= WORKSPACE_LIFECYCLE_LOCK_TIMEOUT_MS) {
+        throw new ExecutionEnvironmentError(
+          `timed out waiting for workspace lifecycle lock ${lockPath}`,
+        );
+      }
+      await sleep(WORKSPACE_LIFECYCLE_LOCK_WAIT_MS, undefined, { signal: options.signal });
+    }
+  }
+}
+
+async function runWorkspaceLifecycleStep(
+  environment: RunManagedContainerEnvironment,
+  workspace: RunEnvironmentWorkspace,
+  container: string,
+  step: RunEnvironmentWorkspaceLifecycleStep,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  if (step.kind === "command") {
+    await runContainerCommand(
+      environment,
+      container,
+      workspace.containerPath,
+      step.env,
+      step.command,
+      step.args,
+      {
+        signal: options.signal,
+        timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+      },
+    );
+    return;
+  }
+  await runContainerCommand(
+    environment,
+    container,
+    workspace.containerPath,
+    {},
+    "git",
+    ["clone", step.source, "."],
+    {
+      signal: options.signal,
+      timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+    },
+  );
+  await runContainerCommand(
+    environment,
+    container,
+    workspace.containerPath,
+    {},
+    "git",
+    ["checkout", "-B", step.branch, step.baseRef],
+    {
+      signal: options.signal,
+      timeoutMs: WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS,
+    },
+  );
+}
+
+async function runWorkspaceLifecycle(
+  environment: RunManagedContainerEnvironment,
+  options: { signal?: AbortSignal } = {},
+): Promise<RunManagedContainerEnvironment> {
+  const workspace = environment.workspace;
+  if (workspace === null || workspace.lifecycle === null) {
+    return environment;
+  }
+  const lifecycleStateDir = workspaceLifecycleStateDir(workspace.hostPath);
+  const completedAt = readWorkspaceLifecycleMarker(lifecycleStateDir);
+  if (completedAt !== null) {
+    return {
+      ...environment,
+      workspace: {
+        ...workspace,
+        lifecycle: {
+          ...workspace.lifecycle,
+          completedAt,
+          lastError: null,
+        },
+      },
+    };
+  }
+
+  const lockPath = await acquireWorkspaceLifecycleLock(lifecycleStateDir, options);
+  try {
+    const lockedCompletedAt = readWorkspaceLifecycleMarker(lifecycleStateDir);
+    if (lockedCompletedAt !== null) {
+      return {
+        ...environment,
+        workspace: {
+          ...workspace,
+          lifecycle: {
+            ...workspace.lifecycle,
+            completedAt: lockedCompletedAt,
+            lastError: null,
+          },
+        },
+      };
+    }
+
+    const container = containerTarget(environment);
+    try {
+      for (const step of workspace.lifecycle.onCreate) {
+        await runWorkspaceLifecycleStep(environment, workspace, container, step, options);
+      }
+      const lifecycleCompletedAt = new Date().toISOString();
+      writeWorkspaceLifecycleMarker(lifecycleStateDir, lifecycleCompletedAt);
+      return {
+        ...environment,
+        workspace: {
+          ...workspace,
+          lifecycle: {
+            ...workspace.lifecycle,
+            completedAt: lifecycleCompletedAt,
+            lastError: null,
+          },
+        },
+      };
+    } catch (error) {
+      const message = (error as Error).message;
+      throw new ExecutionEnvironmentError(`workspace lifecycle failed: ${message}`);
+    }
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true });
+  }
+}
+
 function validateExpectedMounts(
   environment: RunExistingContainerEnvironment,
   inspect: InspectSummary,
@@ -441,7 +706,9 @@ async function startManagedContainer(
     "--label",
     `task-runner-environment=${environment.name ?? "inline"}`,
     "--workdir",
-    environment.cwd,
+    environment.workspace?.lifecycle === null || environment.workspace === null
+      ? environment.cwd
+      : environment.workspace.containerPath,
   ];
 
   if (environment.network !== "default") {
@@ -606,6 +873,7 @@ export async function prepareExecutionEnvironment(
     }
   }
   try {
+    next = await runWorkspaceLifecycle(next, { signal: options.signal });
     await validateCwd(next, next.containerId ?? next.containerName, { signal: options.signal });
   } catch (error) {
     if (startedContainer && next.containerId !== null) {

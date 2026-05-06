@@ -4,6 +4,8 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `23`. Managed container workspace state now
+  persists resolved workspace lifecycle steps and lifecycle completion state.
 - Manifest schema version is now `22`. Managed container environments now
   persist resolved backend session mount presets so resume/reset reuse
   the frozen host paths used for backend session sync.
@@ -142,6 +144,9 @@
 - Added first-class managed-container workspaces with `workspace.scope:
   run|group`, automatic host directory creation, host-to-container cwd
   rewriting, and `lifetime: group` container reuse/cleanup semantics.
+- Added managed-container `workspace.lifecycle.onCreate` steps for
+  container-side workspace setup, including `git-clone` and arbitrary
+  `command` steps guarded by host-side completion state.
 - Added managed-container `sessionMounts` presets for built-in backend
   session stores (`backend`, `claude`, `codex`, `cursor`, `opencode`,
   and `pi`) so backend session sync can use same-path host mounts.

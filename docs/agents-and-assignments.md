@@ -255,6 +255,15 @@ workspace:
   containerPath: /workspace
   mode: rw
   create: true
+  lifecycle:
+    onCreate:
+      - kind: git-clone
+        source: /host/repos/project.git
+        baseRef: origin/main
+        branch: "task-runner/{{run_id}}"
+      - kind: command
+        command: npm
+        args: [install]
 sessionMounts: backend
 cleanup:
   policy: terminal
@@ -270,6 +279,14 @@ container path before invoking the backend. With `create: true`,
 task-runner creates the host directory before starting the container.
 Managed environments can interpolate `workspace_host_path` and
 `workspace_container_path` after the workspace has been resolved.
+
+`workspace.lifecycle.onCreate` runs once per host workspace inside the
+managed container before backend `cwd` validation. A `git-clone` step
+clones `source` into the workspace root and checks out `branch` from
+`baseRef`; a `command` step runs an arbitrary command in the workspace
+root with optional `args` and `env`. Completion is guarded by host-side
+state next to the workspace, so later runs reusing the same group
+workspace skip the lifecycle without dirtying the mounted workspace.
 
 `sessionMounts` expands built-in backend session stores into same-path
 read-write mounts. `sessionMounts: backend` mounts the selected backend's
