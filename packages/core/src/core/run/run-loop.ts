@@ -1,5 +1,6 @@
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { BackendConfigError, resolveBackend } from "../../backends/registry.js";
 import {
@@ -37,6 +38,7 @@ import {
   groupEnvironmentHasPendingUsers as hasPendingGroupEnvironmentUsers,
   prepareExecutionEnvironment,
   resolveFreshExecutionEnvironment,
+  resolveFreshExecutionEnvironmentDefinition,
 } from "./execution-environments.js";
 import { validateRunGroupId } from "./groups.js";
 import {
@@ -66,6 +68,7 @@ import {
   snapshotTasks,
   workspaceAgentPath,
   workspaceAssignmentPath,
+  workspaceEnvironmentPath,
   writeAttemptLog,
   writeManifest,
 } from "./manifest.js";
@@ -180,6 +183,7 @@ export interface RunOptions {
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
   stageInitialize?: boolean;
   resolvedHooksOverride?: ResolvedHookDescriptor[];
+  varsSchemaOverride?: Record<string, VarDef>;
 }
 
 export interface RunOutcome {
@@ -532,6 +536,19 @@ function copyFrozenAgentSeed(sourceManifest: RunManifest, targetWorkspaceDir: st
   const targetAgentPath = workspaceAgentPath(targetWorkspaceDir);
   mkdirSync(dirname(targetAgentPath), { recursive: true });
   copyFileSync(workspaceAgentPath(sourceManifest.workspaceDir), targetAgentPath);
+}
+
+function copyFrozenEnvironmentSeed(sourceManifest: RunManifest, targetWorkspaceDir: string): void {
+  if (sourceManifest.executionEnvironment === null) {
+    return;
+  }
+  const sourceEnvironmentPath = workspaceEnvironmentPath(sourceManifest.workspaceDir);
+  if (!existsSync(sourceEnvironmentPath)) {
+    return;
+  }
+  const targetEnvironmentPath = workspaceEnvironmentPath(targetWorkspaceDir);
+  mkdirSync(dirname(targetEnvironmentPath), { recursive: true });
+  copyFileSync(sourceEnvironmentPath, targetEnvironmentPath);
 }
 
 function cloneExecutionEnvironmentForRecurringRun(
@@ -906,7 +923,7 @@ function assertKnownCliVars(
   const unknown = Object.keys(cliVars).filter((key) => !declared.has(key));
   if (unknown.length === 0) return;
   throw new VarResolutionError(
-    `unknown --var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or remove the extra --var flag(s).`,
+    `unknown --var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or environment.vars, or remove the extra --var flag(s).`,
   );
 }
 
@@ -918,8 +935,25 @@ function assertKnownWebVars(
   const unknown = Object.keys(webVars).filter((key) => !declared.has(key));
   if (unknown.length === 0) return;
   throw new VarResolutionError(
-    `unknown web var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or remove the extra web field(s).`,
+    `unknown web var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or environment.vars, or remove the extra web field(s).`,
   );
+}
+
+function mergeRunVarSchemas(
+  assignmentVars: Record<string, VarDef>,
+  environmentVars: Record<string, VarDef>,
+): Record<string, VarDef> {
+  const merged = { ...environmentVars };
+  for (const [key, assignmentDef] of Object.entries(assignmentVars)) {
+    const environmentDef = environmentVars[key];
+    if (environmentDef !== undefined && !isDeepStrictEqual(environmentDef, assignmentDef)) {
+      throw new VarResolutionError(
+        `var "${key}" is declared by both assignment.vars and environment.vars with different definitions`,
+      );
+    }
+    merged[key] = assignmentDef;
+  }
+  return merged;
 }
 
 export class LineageResolutionError extends VarResolutionError {
@@ -1491,10 +1525,25 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const backendOverridden = overrides?.backend !== undefined;
   let model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   let effort = overrides?.effort ?? agentConfig.effort;
-  // Vars live on the assignment. Chat mode (no assignment) has no var
-  // schema, so there is nothing to validate against or resolve from.
-  const varsSchema = assignmentConfig?.vars ?? {};
-  if (assignmentConfig) {
+  const initialCwd = reusesFrozenSetup ? resume.manifest.cwd : (opts.callerCwd ?? process.cwd());
+  const selectedExecutionEnvironment = reusesFrozenSetup
+    ? null
+    : resolveFreshExecutionEnvironmentDefinition({
+        reference: loaded.executionEnvironment,
+        overrideEnvironment: overrides?.executionEnvironment,
+        cwd: initialCwd,
+      });
+  const varsSchema =
+    opts.varsSchemaOverride ??
+    mergeRunVarSchemas(
+      assignmentConfig?.vars ?? {},
+      selectedExecutionEnvironment?.config.vars ?? {},
+    );
+  if (
+    opts.varsSchemaOverride !== undefined ||
+    assignmentConfig ||
+    selectedExecutionEnvironment !== null
+  ) {
     assertKnownCliVars(varsSchema, cliVars);
     assertKnownWebVars(varsSchema, webVars);
   }
@@ -1519,7 +1568,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         lineageChain[0]?.manifest.runGroupId ??
         runId);
   const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
-  let cwd = reusesFrozenSetup ? resume.manifest.cwd : (opts.callerCwd ?? process.cwd());
+  let cwd = initialCwd;
   let injectedVars = buildInjectedVars({
     runtimeVars,
     runId,
@@ -1561,6 +1610,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     : resolveFreshExecutionEnvironment({
         reference: loaded.executionEnvironment,
         overrideEnvironment: overrides?.executionEnvironment,
+        selectedEnvironment: selectedExecutionEnvironment,
         cwd,
         injectedVars,
         runId,
@@ -1829,6 +1879,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     executionEnvironment = resolveFreshExecutionEnvironment({
       reference: loaded.executionEnvironment,
       overrideEnvironment: overrides?.executionEnvironment,
+      selectedEnvironment: selectedExecutionEnvironment,
       cwd,
       injectedVars,
       runId,
@@ -2135,6 +2186,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
   } else if (isReinitialize) {
     rmSync(workspaceAgentPath(workspaceDir), { force: true });
+  }
+
+  const environmentSeedPath = workspaceEnvironmentPath(workspaceDir);
+  if ((resume === undefined || isReinitialize) && selectedExecutionEnvironment !== null) {
+    if (selectedExecutionEnvironment.sourcePath !== environmentSeedPath) {
+      copyFileSync(selectedExecutionEnvironment.sourcePath, environmentSeedPath);
+    }
+  } else if (isReinitialize) {
+    rmSync(environmentSeedPath, { force: true });
   }
 
   const lifecycleContext = lifecycleRunEventContext(execution);
@@ -3148,6 +3208,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       mkdirSync(cloneManifest.workspaceDir, { recursive: true });
       copyFrozenAgentSeed(latest, cloneManifest.workspaceDir);
       copyFrozenAssignmentSeed(latest, cloneManifest.workspaceDir);
+      copyFrozenEnvironmentSeed(latest, cloneManifest.workspaceDir);
       copySeedAttachments(latest, cloneManifest);
       writeManifest(cloneManifest.workspaceDir, cloneManifest);
       latest.schedule = null;

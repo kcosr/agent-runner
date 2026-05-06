@@ -257,6 +257,10 @@ engine: podman
 image: agent-dev:latest
 lifetime: group
 cwd: "{{workspace_host_path}}"
+vars:
+  repo_source:
+    sources: [cli, web]
+    required: true
 workspace:
   scope: group
   hostRoot: "{{state_dir}}/workspaces"
@@ -276,7 +280,8 @@ in the group still references it. `sessionMounts: backend` adds a
 same-path mount for the selected backend's session store so host-side
 session sync can read the backend history. `workspace.lifecycle.onCreate`
 runs container-side setup once per host workspace before backend cwd
-validation.
+validation. Environment `vars` are merged with assignment vars for the
+selected run and frozen into the normal runtime var map.
 
 Agents may also author backend-owned argv tokens:
 

@@ -714,6 +714,10 @@ export function workspaceAgentPath(workspaceDir: string): string {
   return join(workspaceDir, "agent-seed.md");
 }
 
+export function workspaceEnvironmentPath(workspaceDir: string): string {
+  return join(workspaceDir, "environment-seed.yaml");
+}
+
 export class ResumeError extends Error {
   constructor(message: string) {
     super(message);

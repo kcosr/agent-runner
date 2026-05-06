@@ -1,8 +1,10 @@
 # Variables
 
-Assignments declare typed variables that are resolved at run creation,
-frozen into the manifest, and interpolated into agent instructions,
-assignment instructions, task titles, task bodies, and caller instructions.
+Assignments and execution environments declare typed variables that are
+resolved at run creation, frozen into the manifest, and interpolated into
+agent instructions, assignment instructions, task titles, task bodies,
+caller instructions, environment fields, mounts, and workspace lifecycle
+steps.
 
 ## Declaring variables
 
@@ -32,6 +34,33 @@ tasks: [...]
 ---
 ```
 
+Selected execution environments can also declare `vars` using the same
+schema. Environment vars are merged with assignment vars for that run, so
+environment-required inputs are accepted through the normal `--var`, web,
+env, default, and parent channels without every assignment having to
+redeclare them.
+
+```yaml
+schemaVersion: 1
+kind: container
+mode: managed
+cwd: /workspace
+vars:
+  repo_source:
+    type: string
+    sources: [cli, web]
+    required: true
+  base_ref:
+    type: string
+    sources: [cli, web]
+    default: main
+image: node:22
+```
+
+If an assignment and the selected environment declare the same variable,
+the definitions must be identical. Different definitions are rejected
+instead of applying precedence.
+
 `implementation_run_id` is specific to the implementation-path
 `code-review` assignment, where the reviewer checks a completed
 implementation run for plan coverage. Direct reviews use
@@ -54,8 +83,8 @@ implementation run for plan coverage. Direct reviews use
 
 ## Resolution at run creation
 
-For each declared variable, task-runner walks the authored `sources` array
-from left to right:
+For each variable declared by the assignment or the selected environment,
+task-runner walks the authored `sources` array from left to right:
 
 1. `cli` reads `--var key=value`.
 2. `env` reads `envName` (or the var key when `envName` is omitted).

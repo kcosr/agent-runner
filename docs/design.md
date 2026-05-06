@@ -364,8 +364,10 @@ blocked with the rest completed or blocked → `blocked`; otherwise
    Named and explicit-path task refs are resolved here, before runtime
    interpolation.
 2. enforces locked fields
-3. resolves vars in authored `sources` order (`cli`, `env`, `parent`)
-   and applies `default` / `required` only after every source fails
+3. loads the selected execution environment, merges any environment
+   `vars` with assignment `vars`, resolves the merged vars in authored
+   `sources` order (`cli`, `env`, `parent`), and applies `default` /
+   `required` only after every source fails
 4. allocates or reuses the run id and resolves `runGroupId`. Fresh
    workspaces use explicit request, `TASK_RUNNER_RUN_GROUP_ID`, nearest
    parent lineage, or the singleton run id; reinitializing an existing

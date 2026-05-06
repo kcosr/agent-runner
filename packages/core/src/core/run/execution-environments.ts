@@ -43,6 +43,7 @@ const WORKSPACE_LIFECYCLE_STATE_SUFFIX = ".task-runner-lifecycle";
 interface ResolveEnvironmentOptions {
   reference: EnvironmentReference | undefined;
   overrideEnvironment?: string;
+  selectedEnvironment?: LoadedEnvironmentDefinition | null;
   cwd: string;
   injectedVars: Record<string, unknown>;
   runId: string;
@@ -57,6 +58,19 @@ function loadReferencedEnvironment(
   return reference.kind === "path"
     ? loadEnvironmentConfig(reference.path, cwd)
     : loadEnvironmentConfig(reference.name, cwd);
+}
+
+export function resolveFreshExecutionEnvironmentDefinition(options: {
+  reference: EnvironmentReference | undefined;
+  overrideEnvironment?: string;
+  cwd: string;
+}): LoadedEnvironmentDefinition | null {
+  if (options.overrideEnvironment !== undefined) {
+    return loadEnvironmentConfig(options.overrideEnvironment, options.cwd);
+  }
+  return options.reference === undefined
+    ? null
+    : loadReferencedEnvironment(options.reference, options.cwd);
 }
 
 function interpolateString(value: string, vars: Record<string, unknown>): string {
@@ -371,11 +385,13 @@ export function resolveFreshExecutionEnvironment(
   options: ResolveEnvironmentOptions,
 ): RunExecutionEnvironment | null {
   const selected =
-    options.overrideEnvironment !== undefined
-      ? loadEnvironmentConfig(options.overrideEnvironment, options.cwd)
-      : options.reference === undefined
-        ? null
-        : loadReferencedEnvironment(options.reference, options.cwd);
+    options.selectedEnvironment !== undefined
+      ? options.selectedEnvironment
+      : resolveFreshExecutionEnvironmentDefinition({
+          reference: options.reference,
+          overrideEnvironment: options.overrideEnvironment,
+          cwd: options.cwd,
+        });
   if (selected === null) {
     return null;
   }

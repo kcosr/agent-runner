@@ -249,6 +249,13 @@ engine: podman
 image: node:22
 lifetime: group
 cwd: "{{workspace_host_path}}"
+vars:
+  repo_source:
+    sources: [cli, web]
+    required: true
+  base_ref:
+    sources: [cli, web]
+    default: main
 workspace:
   scope: group
   hostRoot: "{{state_dir}}/workspaces"
@@ -258,8 +265,8 @@ workspace:
   lifecycle:
     onCreate:
       - kind: git-clone
-        source: /host/repos/project.git
-        baseRef: origin/main
+        source: "{{repo_source}}"
+        baseRef: "{{base_ref}}"
         branch: "task-runner/{{run_id}}"
       - kind: command
         command: npm
@@ -279,6 +286,10 @@ container path before invoking the backend. With `create: true`,
 task-runner creates the host directory before starting the container.
 Managed environments can interpolate `workspace_host_path` and
 `workspace_container_path` after the workspace has been resolved.
+Environment `vars` use the same schema and approved sources as
+assignment vars. The selected environment's vars are merged with the
+assignment vars for the run and then frozen into `runtimeVars`; duplicate
+names must have identical definitions.
 
 `workspace.lifecycle.onCreate` runs once per host workspace inside the
 managed container before backend `cwd` validation. A `git-clone` step

@@ -147,6 +147,9 @@
 - Added managed-container `workspace.lifecycle.onCreate` steps for
   container-side workspace setup, including `git-clone` and arbitrary
   `command` steps guarded by host-side completion state.
+- Added execution environment `vars`, merged with assignment vars for the
+  selected run and frozen into normal runtime vars for environment,
+  assignment, and lifecycle interpolation.
 - Added managed-container `sessionMounts` presets for built-in backend
   session stores (`backend`, `claude`, `codex`, `cursor`, `opencode`,
   and `pi`) so backend session sync can use same-path host mounts.

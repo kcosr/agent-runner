@@ -397,6 +397,7 @@ const baseContainerEnvironmentSchema = z.object({
   kind: z.literal("container"),
   engine: containerEngineSchema.default("docker"),
   cwd: environmentPathTemplateSchema,
+  vars: z.record(z.string(), varDefSchema).default({}),
   env: containerEnvSchema.default({}),
   extraExecArgs: z.array(z.string().trim().min(1)).default([]),
 });

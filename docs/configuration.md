@@ -38,8 +38,11 @@ select them with `executionEnvironment`, and fresh callers may override
 with `--environment`. Managed environments can define a first-class
 workspace mount with run or group scope; after that workspace resolves,
 `workspace_host_path` and `workspace_container_path` are available to
-environment interpolation. They can also define `sessionMounts` presets
-for same-path backend session-store mounts used by session sync.
+environment interpolation. Environment definitions can declare `vars`
+using the same schema as assignments; selected environment vars are
+merged into the run var schema before interpolation. They can also define
+`sessionMounts` presets for same-path backend session-store mounts used
+by session sync.
 
 Assignment `tasks:` entries may mix inline objects, named task refs such
 as `review/reuse`, and explicit path refs. Bare strings resolve only

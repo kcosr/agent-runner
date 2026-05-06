@@ -344,6 +344,10 @@ export function renderDefinitionDetails(result: DefinitionDetail): string {
     lines.push(`  mode:         ${config.mode}`);
     lines.push(`  engine:       ${config.engine}`);
     lines.push(`  cwd:          ${config.cwd}`);
+    const varNames = Object.keys(config.vars);
+    if (varNames.length > 0) {
+      lines.push(`  vars:         ${varNames.join(", ")}`);
+    }
     if (config.mode === "existing") {
       lines.push(`  container:    ${config.container}`);
       lines.push(`  mounts:       ${config.expectedMounts.length}`);
