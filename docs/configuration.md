@@ -199,7 +199,7 @@ values using `runtimeVarSources`.
 
 ## Manifest upgrades
 
-The current manifest schema is version `23`. Older manifests are not
+The current manifest schema is version `24`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
