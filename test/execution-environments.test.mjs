@@ -1085,12 +1085,32 @@ if (cmd === "exec" && args.includes("after-start")) {
       cleanup: { policy: "manual", cleanedAt: null, lastError: null },
     };
 
-    await assert.rejects(
-      withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
-        prepareExecutionEnvironment(environment, { signal: AbortSignal.timeout(500) }),
-      ),
-      /afterStart lifecycle failed/,
+    const controller = new AbortController();
+    const preparing = withEnv(
+      { PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath },
+      () => prepareExecutionEnvironment(environment, { signal: controller.signal }),
     );
+    try {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if (
+          existsSync(logPath) &&
+          readFileSync(logPath, "utf8")
+            .split("\n")
+            .some((line) => line.includes("after-start"))
+        ) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.match(readFileSync(logPath, "utf8"), /after-start/);
+      controller.abort();
+
+      await assert.rejects(preparing, /afterStart lifecycle failed/);
+    } finally {
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+    }
 
     const commands = readFileSync(logPath, "utf8")
       .trim()
