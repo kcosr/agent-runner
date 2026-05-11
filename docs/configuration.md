@@ -208,6 +208,11 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   persisted; dry-run by default, `--write` for in-place creation,
   supports repeated `--repo <name>` and `--file <path>` filters plus
   `--root <path>`
+- `scripts/migrate-manifests-v24.mjs` — v19-v23 → v24 (adds
+  `executionEnvironment` defaults and moves managed container workspace
+  lifecycle state to top-level environment lifecycle state; dry-run by
+  default, `--write` to apply, supports repeated `--repo <name>` and
+  `--file <path>` filters plus `--root <path>`)
 - `scripts/migrate-manifests-v12.mjs` — v11 → v12 (adds `schedule:
   null`; supports repeated `--file <path>` targets for single-manifest
   migrations)

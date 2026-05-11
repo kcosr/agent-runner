@@ -1313,10 +1313,23 @@ function isValidEnvironmentLifecycleStep(value: unknown): value is RunEnvironmen
   if (record.target !== "host" && record.target !== "container") {
     return false;
   }
-  if (record.timeoutMs !== null && typeof record.timeoutMs !== "number") {
+  if (
+    record.timeoutMs !== null &&
+    !(
+      typeof record.timeoutMs === "number" &&
+      Number.isInteger(record.timeoutMs) &&
+      record.timeoutMs > 0
+    )
+  ) {
     return false;
   }
   if (record.kind === "command") {
+    if (
+      record.target === "host" &&
+      ((record.user !== null && record.user !== undefined) || record.detach !== false)
+    ) {
+      return false;
+    }
     return (
       typeof record.command === "string" &&
       Array.isArray(record.args) &&

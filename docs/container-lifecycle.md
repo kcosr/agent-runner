@@ -313,6 +313,12 @@ as `acl-proxy`, then run a host command such as `aw-iptables add
 an ordinary command step. `mode: existing` environments reject lifecycle
 phases.
 
+`afterStart` completion is stored outside the run manifest under
+`{{state_dir}}/container-state/<container-key>` and is keyed by the inspected
+container id. This lets separate runs in the same run group skip startup hooks
+for a shared live container while still rerunning them when the container is
+recreated with a new id.
+
 `onWorkspaceCreate` runs once per host workspace. The `git-clone` step
 clones into the workspace root and checks out a branch from a base ref.
 The `command` step runs an arbitrary host or container command with

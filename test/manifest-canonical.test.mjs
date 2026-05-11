@@ -400,6 +400,70 @@ test("resolveResumeTarget rejects old workspace lifecycle environment state", as
   );
 });
 
+test("resolveResumeTarget rejects invalid lifecycle command invariants", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const executionEnvironment = {
+    kind: "container",
+    mode: "managed",
+    name: "managed-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace/repo",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: "task-runner-run123",
+    containerId: null,
+    workspace: null,
+    lifecycle: {
+      afterStart: {
+        steps: [
+          {
+            kind: "command",
+            target: "host",
+            command: "sudo",
+            args: [],
+            env: {},
+            cwd: null,
+            timeoutMs: -1,
+            user: "0",
+            detach: false,
+          },
+        ],
+        completedContainerId: null,
+        completedAt: null,
+        lastError: null,
+      },
+      onWorkspaceCreate: null,
+    },
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+  manifest.executionEnvironment = executionEnvironment;
+  manifest.resetSeed.executionEnvironment = executionEnvironment;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  assert.throws(
+    () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
+    (err) => {
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
+});
+
 test("first write freezes agent.instructions, lockedFields, and timeoutSec", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);

@@ -67,27 +67,39 @@ const runEnvironmentMountSchema = z.object({
   containerPath: z.string(),
   mode: z.enum(["ro", "rw"]),
 });
-const runEnvironmentLifecycleStepSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("command"),
-    target: z.enum(["host", "container"]),
-    command: z.string(),
-    args: z.array(z.string()),
-    env: z.record(z.string(), z.string()),
-    cwd: z.string().nullable(),
-    timeoutMs: z.number().nullable(),
-    user: z.string().nullable(),
-    detach: z.boolean(),
-  }),
-  z.object({
-    kind: z.literal("git-clone"),
-    target: z.enum(["host", "container"]),
-    source: z.string(),
-    baseRef: z.string(),
-    branch: z.string(),
-    timeoutMs: z.number().nullable(),
-  }),
-]);
+const runEnvironmentLifecycleTimeoutSchema = z.number().int().positive().nullable();
+const runEnvironmentLifecycleStepSchema = z
+  .discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("command"),
+      target: z.enum(["host", "container"]),
+      command: z.string(),
+      args: z.array(z.string()),
+      env: z.record(z.string(), z.string()),
+      cwd: z.string().nullable(),
+      timeoutMs: runEnvironmentLifecycleTimeoutSchema,
+      user: z.string().nullable(),
+      detach: z.boolean(),
+    }),
+    z.object({
+      kind: z.literal("git-clone"),
+      target: z.enum(["host", "container"]),
+      source: z.string(),
+      baseRef: z.string(),
+      branch: z.string(),
+      timeoutMs: runEnvironmentLifecycleTimeoutSchema,
+    }),
+  ])
+  .refine(
+    (step) =>
+      step.kind !== "command" ||
+      step.target !== "host" ||
+      (step.user === null && step.detach === false),
+    {
+      path: ["target"],
+      message: "host lifecycle command steps cannot set user or detach",
+    },
+  );
 const runEnvironmentAfterStartLifecycleSchema = z.object({
   steps: z.array(runEnvironmentLifecycleStepSchema),
   completedContainerId: z.string().nullable(),

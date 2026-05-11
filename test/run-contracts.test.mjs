@@ -446,6 +446,24 @@ test("run contracts: runDetailSchema accepts top-level lifecycle and rejects wor
   };
   Reflect.deleteProperty(oldShape.executionEnvironment, "lifecycle");
   assert.equal(runDetailSchema.safeParse(oldShape).success, false);
+
+  const invalidHostCommand = structuredClone(detail);
+  invalidHostCommand.executionEnvironment.lifecycle.afterStart.steps[0] = {
+    kind: "command",
+    target: "host",
+    command: "sudo",
+    args: [],
+    env: {},
+    cwd: null,
+    timeoutMs: null,
+    user: "0",
+    detach: false,
+  };
+  assert.equal(runDetailSchema.safeParse(invalidHostCommand).success, false);
+
+  const invalidTimeout = structuredClone(detail);
+  invalidTimeout.executionEnvironment.lifecycle.afterStart.steps[0].timeoutMs = -1;
+  assert.equal(runDetailSchema.safeParse(invalidTimeout).success, false);
 });
 
 test("run contracts: toRunDetail projects hook descriptors and audit attemptNumber", () => {

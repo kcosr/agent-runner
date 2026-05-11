@@ -44,6 +44,9 @@ const WORKSPACE_LIFECYCLE_MARKER = ".task-runner-workspace-lifecycle.json";
 const WORKSPACE_LIFECYCLE_LOCK = ".task-runner-workspace-lifecycle.lock";
 const WORKSPACE_LIFECYCLE_LOCK_METADATA = "metadata.json";
 const WORKSPACE_STATE_DIR = "workspace-state";
+const CONTAINER_STATE_DIR = "container-state";
+const AFTER_START_LIFECYCLE_MARKER = ".task-runner-after-start-lifecycle.json";
+const AFTER_START_LIFECYCLE_LOCK = ".task-runner-after-start-lifecycle.lock";
 
 interface ResolveEnvironmentOptions {
   reference: EnvironmentReference | undefined;
@@ -796,6 +799,16 @@ function workspaceLifecycleStateDir(workspace: RunEnvironmentWorkspace): string 
   );
 }
 
+function afterStartLifecycleStateDir(
+  environment: RunManagedContainerEnvironment,
+  inspect: InspectSummary,
+): string {
+  const key = createHash("sha256")
+    .update(`${environment.engine}\0${environment.containerName}\0${inspect.id}`)
+    .digest("hex");
+  return join(resolveTaskRunnerStateDir(), CONTAINER_STATE_DIR, key);
+}
+
 function readWorkspaceLifecycleMarker(stateDir: string): string | null {
   const markerPath = join(stateDir, WORKSPACE_LIFECYCLE_MARKER);
   let raw: string;
@@ -828,6 +841,39 @@ function readWorkspaceLifecycleMarker(stateDir: string): string | null {
   return (parsed as { completedAt: string }).completedAt;
 }
 
+function readAfterStartLifecycleMarker(stateDir: string, containerId: string): string | null {
+  const markerPath = join(stateDir, AFTER_START_LIFECYCLE_MARKER);
+  let raw: string;
+  try {
+    raw = readFileSync(markerPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new ExecutionEnvironmentError(
+      `afterStart lifecycle marker ${markerPath} is invalid JSON: ${(error as Error).message}`,
+    );
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    (parsed as Record<string, unknown>).containerId !== containerId ||
+    typeof (parsed as Record<string, unknown>).completedAt !== "string"
+  ) {
+    throw new ExecutionEnvironmentError(
+      `afterStart lifecycle marker ${markerPath} is missing completed state`,
+    );
+  }
+  return (parsed as { completedAt: string }).completedAt;
+}
+
 function writeWorkspaceLifecycleMarker(stateDir: string, completedAt: string): void {
   mkdirSync(stateDir, { recursive: true });
   writeTextFileAtomic(
@@ -836,13 +882,26 @@ function writeWorkspaceLifecycleMarker(stateDir: string, completedAt: string): v
   );
 }
 
-async function acquireWorkspaceLifecycleLock(
+function writeAfterStartLifecycleMarker(
   stateDir: string,
+  containerId: string,
+  completedAt: string,
+): void {
+  mkdirSync(stateDir, { recursive: true });
+  writeTextFileAtomic(
+    join(stateDir, AFTER_START_LIFECYCLE_MARKER),
+    `${JSON.stringify({ containerId, completedAt }, null, 2)}\n`,
+  );
+}
+
+async function acquireLifecycleLock(
+  stateDir: string,
+  lockName: string,
   staleAfterMs: number,
   options: { signal?: AbortSignal } = {},
 ): Promise<string> {
   mkdirSync(stateDir, { recursive: true });
-  const lockPath = join(stateDir, WORKSPACE_LIFECYCLE_LOCK);
+  const lockPath = join(stateDir, lockName);
   while (true) {
     try {
       mkdirSync(lockPath);
@@ -865,6 +924,14 @@ async function acquireWorkspaceLifecycleLock(
       await sleep(WORKSPACE_LIFECYCLE_LOCK_WAIT_MS, undefined, { signal: options.signal });
     }
   }
+}
+
+async function acquireWorkspaceLifecycleLock(
+  stateDir: string,
+  staleAfterMs: number,
+  options: { signal?: AbortSignal } = {},
+): Promise<string> {
+  return acquireLifecycleLock(stateDir, WORKSPACE_LIFECYCLE_LOCK, staleAfterMs, options);
 }
 
 interface WorkspaceLifecycleLockMetadata {
@@ -932,9 +999,14 @@ function isStaleWorkspaceLifecycleLock(lockPath: string, staleAfterMs: number): 
   return workspaceLifecycleLockAgeMs(lockPath) > staleAfterMs;
 }
 
-function workspaceLifecycleLockStaleAfterMs(stepCount: number): number {
+function lifecycleStepTimeoutMs(step: RunEnvironmentLifecycleStep): number {
+  return step.timeoutMs ?? WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS;
+}
+
+function lifecycleLockStaleAfterMs(steps: RunEnvironmentLifecycleStep[]): number {
+  const timeoutBudget = steps.reduce((total, step) => total + lifecycleStepTimeoutMs(step), 0);
   return (
-    Math.max(1, stepCount) * WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS +
+    Math.max(WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS, timeoutBudget) +
     WORKSPACE_LIFECYCLE_LOCK_STALE_BUFFER_MS
   );
 }
@@ -1036,12 +1108,35 @@ async function runAfterStartLifecycle(
   if (phase === null || phase.completedContainerId === inspect.id) {
     return environment;
   }
+  const lifecycleStateDir = afterStartLifecycleStateDir(environment, inspect);
+  const completedAt = readAfterStartLifecycleMarker(lifecycleStateDir, inspect.id);
+  if (completedAt !== null) {
+    return updateAfterStartLifecycle(environment, {
+      completedContainerId: inspect.id,
+      completedAt,
+      lastError: null,
+    });
+  }
+  const lockPath = await acquireLifecycleLock(
+    lifecycleStateDir,
+    AFTER_START_LIFECYCLE_LOCK,
+    lifecycleLockStaleAfterMs(phase.steps),
+    options,
+  );
   const container = containerTarget(environment);
-  const steps = resolvePhaseSteps(phase.steps, lifecycleMetadataVars(environment, inspect), {
-    hostCwd: process.cwd(),
-    containerCwd: environment.cwd,
-  });
   try {
+    const lockedCompletedAt = readAfterStartLifecycleMarker(lifecycleStateDir, inspect.id);
+    if (lockedCompletedAt !== null) {
+      return updateAfterStartLifecycle(environment, {
+        completedContainerId: inspect.id,
+        completedAt: lockedCompletedAt,
+        lastError: null,
+      });
+    }
+    const steps = resolvePhaseSteps(phase.steps, lifecycleMetadataVars(environment, inspect), {
+      hostCwd: process.cwd(),
+      containerCwd: environment.cwd,
+    });
     for (const [index, step] of steps.entries()) {
       try {
         await runLifecycleStep(environment, container, step, options);
@@ -1052,9 +1147,11 @@ async function runAfterStartLifecycle(
         );
       }
     }
+    const lifecycleCompletedAt = new Date().toISOString();
+    writeAfterStartLifecycleMarker(lifecycleStateDir, inspect.id, lifecycleCompletedAt);
     return updateAfterStartLifecycle(environment, {
       completedContainerId: inspect.id,
-      completedAt: new Date().toISOString(),
+      completedAt: lifecycleCompletedAt,
       lastError: null,
     });
   } catch (error) {
@@ -1065,6 +1162,8 @@ async function runAfterStartLifecycle(
         lastError: message,
       }),
     );
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true });
   }
 }
 
@@ -1089,7 +1188,7 @@ async function runWorkspaceLifecycle(
 
   const lockPath = await acquireWorkspaceLifecycleLock(
     lifecycleStateDir,
-    workspaceLifecycleLockStaleAfterMs(phase.steps.length),
+    lifecycleLockStaleAfterMs(phase.steps),
     options,
   );
   try {

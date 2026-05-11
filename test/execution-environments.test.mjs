@@ -1366,6 +1366,94 @@ process.exit(0);
     assert.ok(afterStartCommands[0].includes("2222"));
   }));
 
+test("prepareExecutionEnvironment shares afterStart completion across group runs for the same container", async () =>
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+    const binDir = join(rootDir, "bin");
+    const logPath = join(rootDir, "docker.log");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(binDir, "docker"),
+      `#!/usr/bin/env node
+import fs from "node:fs";
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
+const [cmd, target] = args;
+if (cmd === "inspect" && target === "task-runner-group-123") {
+  process.stdout.write(JSON.stringify([{ Id: "container-shared", State: { Running: true, Pid: 5678 }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "exec") process.exit(0);
+process.exit(0);
+`,
+      { mode: 0o755 },
+    );
+
+    const environment = {
+      kind: "container",
+      mode: "managed",
+      name: "workspace-dev",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/workspace",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: null,
+      lastError: null,
+      image: "node:22",
+      lifetime: "group",
+      containerName: "task-runner-group-123",
+      containerId: null,
+      workspace: null,
+      lifecycle: {
+        afterStart: {
+          steps: [
+            {
+              kind: "command",
+              target: "container",
+              command: "after-start",
+              args: ["{{container_pid}}"],
+              env: {},
+              cwd: null,
+              timeoutMs: null,
+              user: null,
+              detach: false,
+            },
+          ],
+          completedContainerId: null,
+          completedAt: null,
+          lastError: null,
+        },
+        onWorkspaceCreate: null,
+      },
+      sessionMounts: [],
+      mounts: [],
+      network: "default",
+      security: { capDrop: [], capAdd: [] },
+      extraRunArgs: [],
+      cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+    };
+
+    const first = await withEnv(
+      { PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath },
+      () => prepareExecutionEnvironment(environment),
+    );
+    assert.equal(first.lifecycle.afterStart.completedContainerId, "container-shared");
+
+    const second = await withEnv(
+      { PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath },
+      () => prepareExecutionEnvironment(structuredClone(environment)),
+    );
+    assert.equal(second.lifecycle.afterStart.completedContainerId, "container-shared");
+
+    const commands = readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const afterStartCommands = commands.filter((command) => command.includes("after-start"));
+    assert.equal(afterStartCommands.length, 1);
+    assert.ok(afterStartCommands[0].includes("5678"));
+  }));
+
 test("prepareExecutionEnvironment waits for a contended workspace lifecycle lock", async () =>
   withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
@@ -1464,6 +1552,116 @@ process.exit(0);
       .map((line) => JSON.parse(line));
     assert.ok(commands.some((command) => command.includes("npm")));
     assert.ok(existsSync(join(lifecycleStatePath, ".task-runner-workspace-lifecycle.json")));
+  }));
+
+test("prepareExecutionEnvironment keeps workspace lifecycle locks alive for custom timeout budgets", async () =>
+  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
+    const binDir = join(rootDir, "bin");
+    const logPath = join(rootDir, "docker.log");
+    const workspacePath = join(rootDir, "workspace");
+    const lifecycleStatePath = explicitWorkspaceLifecycleStatePath(stateDir, workspacePath);
+    const lockPath = join(lifecycleStatePath, ".task-runner-workspace-lifecycle.lock");
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(lockPath, { recursive: true });
+    writeFileSync(
+      join(lockPath, "metadata.json"),
+      `${JSON.stringify({
+        pid: process.pid,
+        acquiredAt: new Date(Date.now() - 45 * 60_000).toISOString(),
+      })}\n`,
+    );
+    writeFileSync(
+      join(binDir, "docker"),
+      `#!/usr/bin/env node
+import fs from "node:fs";
+const logPath = process.env.FAKE_DOCKER_LOG;
+fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
+const [cmd, target] = process.argv.slice(2);
+if (cmd === "inspect") {
+  if (target === "task-runner-run-123") process.exit(1);
+  process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true, Pid: 1234 }, Mounts: [] }]));
+  process.exit(0);
+}
+if (cmd === "run") {
+  process.stdout.write("container-123\\n");
+  process.exit(0);
+}
+if (cmd === "exec") process.exit(0);
+process.exit(0);
+`,
+      { mode: 0o755 },
+    );
+
+    const environment = {
+      kind: "container",
+      mode: "managed",
+      name: "workspace-dev",
+      sourcePath: null,
+      engine: "docker",
+      cwd: "/workspace",
+      env: {},
+      extraExecArgs: [],
+      lastValidatedAt: null,
+      lastError: null,
+      image: "node:22",
+      lifetime: "run",
+      containerName: "task-runner-run-123",
+      containerId: null,
+      workspace: {
+        scope: "run",
+        hostRoot: null,
+        hostPath: workspacePath,
+        containerPath: "/workspace",
+        mode: "rw",
+        create: true,
+        createdAt: null,
+      },
+      lifecycle: {
+        afterStart: null,
+        onWorkspaceCreate: {
+          steps: [
+            {
+              kind: "command",
+              target: "container",
+              command: "npm",
+              args: ["install"],
+              env: {},
+              cwd: null,
+              timeoutMs: 2 * 60 * 60_000,
+              user: null,
+              detach: false,
+            },
+          ],
+          completedAt: null,
+          lastError: null,
+        },
+      },
+      sessionMounts: [],
+      mounts: [],
+      network: "default",
+      security: { capDrop: [], capAdd: [] },
+      extraRunArgs: [],
+      cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+    };
+
+    await assert.rejects(
+      withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
+        prepareExecutionEnvironment(environment, { signal: AbortSignal.timeout(200) }),
+      ),
+      /abort/i,
+    );
+
+    const commands = existsSync(logPath)
+      ? readFileSync(logPath, "utf8")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      : [];
+    assert.equal(
+      commands.some((command) => command.includes("npm")),
+      false,
+    );
   }));
 
 test("prepareExecutionEnvironment removes a newly-started container when cwd validation fails", async () =>
