@@ -10,6 +10,7 @@
   `workspace.lifecycle.onCreate` is no longer accepted. Use
   `scripts/migrate-manifests-v24.mjs` before resuming or listing schema
   v19-v23 runs.
+  ([#139](https://github.com/kcosr/task-runner/pull/139))
 - Manifest schema version is now `23`. Managed container workspace state now
   persists resolved workspace lifecycle steps and lifecycle completion state.
   ([#138](https://github.com/kcosr/task-runner/pull/138))
