@@ -803,8 +803,15 @@ function afterStartLifecycleStateDir(
   environment: RunManagedContainerEnvironment,
   inspect: InspectSummary,
 ): string {
+  return afterStartLifecycleStateDirForContainerId(environment, inspect.id);
+}
+
+function afterStartLifecycleStateDirForContainerId(
+  environment: Pick<RunManagedContainerEnvironment, "containerName" | "engine">,
+  containerId: string,
+): string {
   const key = createHash("sha256")
-    .update(`${environment.engine}\0${environment.containerName}\0${inspect.id}`)
+    .update(`${environment.engine}\0${environment.containerName}\0${containerId}`)
     .digest("hex");
   return join(resolveTaskRunnerStateDir(), CONTAINER_STATE_DIR, key);
 }
@@ -860,15 +867,20 @@ function readAfterStartLifecycleMarker(stateDir: string, containerId: string): s
       `afterStart lifecycle marker ${markerPath} is invalid JSON: ${(error as Error).message}`,
     );
   }
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    Array.isArray(parsed) ||
-    (parsed as Record<string, unknown>).containerId !== containerId ||
-    typeof (parsed as Record<string, unknown>).completedAt !== "string"
-  ) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new ExecutionEnvironmentError(
       `afterStart lifecycle marker ${markerPath} is missing completed state`,
+    );
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.containerId !== containerId) {
+    throw new ExecutionEnvironmentError(
+      `afterStart lifecycle marker ${markerPath} has containerId ${String(record.containerId)} but expected ${containerId}`,
+    );
+  }
+  if (typeof record.completedAt !== "string") {
+    throw new ExecutionEnvironmentError(
+      `afterStart lifecycle marker ${markerPath} is missing completedAt`,
     );
   }
   return (parsed as { completedAt: string }).completedAt;
@@ -1564,6 +1576,12 @@ export async function cleanupExecutionEnvironment(
   const target = environment.containerId ?? environment.containerName;
   try {
     await runEngine(environment, ["rm", "-f", target]);
+    if (environment.containerId !== null) {
+      rmSync(afterStartLifecycleStateDirForContainerId(environment, environment.containerId), {
+        recursive: true,
+        force: true,
+      });
+    }
     return {
       ...environment,
       containerId: null,

@@ -256,7 +256,11 @@ function normalizeWorkspace(workspace, version) {
   return { workspace: nextWorkspace, onWorkspaceCreate };
 }
 
-function normalizeExecutionEnvironment(environment, version) {
+function recordRepair(repairs, description) {
+  repairs.push(description);
+}
+
+function normalizeExecutionEnvironment(environment, version, repairs, label) {
   if (environment === undefined || environment === null) {
     return null;
   }
@@ -269,7 +273,17 @@ function normalizeExecutionEnvironment(environment, version) {
   const next = { ...environment };
   const { workspace, onWorkspaceCreate } = normalizeWorkspace(next.workspace, version);
   next.workspace = workspace;
-  next.sessionMounts = Array.isArray(next.sessionMounts) ? next.sessionMounts : [];
+  if (next.sessionMounts === undefined) {
+    if (version === TARGET_SCHEMA_VERSION) {
+      recordRepair(repairs, `${label}.sessionMounts`);
+    }
+    next.sessionMounts = [];
+  } else if (!Array.isArray(next.sessionMounts)) {
+    throw new Error(`schemaVersion ${version} ${label}.sessionMounts must be an array`);
+  }
+  if (version === TARGET_SCHEMA_VERSION && !("lifecycle" in next)) {
+    recordRepair(repairs, `${label}.lifecycle`);
+  }
   next.lifecycle = normalizeManagedLifecycle(next.lifecycle, onWorkspaceCreate);
   return next;
 }
@@ -358,49 +372,90 @@ function migrateManifest(manifest) {
   }
 
   const originalVersion = manifest.schemaVersion;
+  const repairs = [];
   const next = cloneJson(manifest);
   if (!isObjectRecord(next.resetSeed)) {
     throw new Error(`schemaVersion ${originalVersion} manifest is missing resetSeed object`);
   }
   next.schemaVersion = TARGET_SCHEMA_VERSION;
   if (!isObjectRecord(next.runtimeVarSources)) {
+    if (next.runtimeVarSources !== undefined) {
+      throw new Error(
+        `schemaVersion ${originalVersion} manifest runtimeVarSources must be an object`,
+      );
+    }
+    if (originalVersion === TARGET_SCHEMA_VERSION) {
+      recordRepair(repairs, "runtimeVarSources");
+    }
     next.runtimeVarSources = {};
   }
   if (!isObjectRecord(next.resetSeed.runtimeVarSources)) {
+    if (next.resetSeed.runtimeVarSources !== undefined) {
+      throw new Error(
+        `schemaVersion ${originalVersion} manifest resetSeed.runtimeVarSources must be an object`,
+      );
+    }
+    if (originalVersion === TARGET_SCHEMA_VERSION) {
+      recordRepair(repairs, "resetSeed.runtimeVarSources");
+    }
     next.resetSeed.runtimeVarSources = {};
   }
   if (next.parentRunId === undefined) {
+    if (originalVersion === TARGET_SCHEMA_VERSION) {
+      recordRepair(repairs, "parentRunId");
+    }
     next.parentRunId = null;
   }
   if (next.resetSeed.parentRunId === undefined) {
+    if (originalVersion === TARGET_SCHEMA_VERSION) {
+      recordRepair(repairs, "resetSeed.parentRunId");
+    }
     next.resetSeed.parentRunId = null;
   }
   next.executionEnvironment = normalizeExecutionEnvironment(
     next.executionEnvironment,
     originalVersion,
+    repairs,
+    "executionEnvironment",
   );
   next.resetSeed.executionEnvironment = normalizeExecutionEnvironment(
     next.resetSeed.executionEnvironment,
     originalVersion,
+    repairs,
+    "resetSeed.executionEnvironment",
   );
 
   validateCanonicalV24(next);
-  return { manifest: next, changed: JSON.stringify(next) !== JSON.stringify(manifest) };
+  return {
+    manifest: next,
+    changed: JSON.stringify(next) !== JSON.stringify(manifest),
+    repaired: originalVersion === TARGET_SCHEMA_VERSION && repairs.length > 0,
+    repairs,
+  };
 }
 
 function migrateManifestFile(record, write, stats) {
   const before = readManifest(record.path);
-  const { manifest: after, changed } = migrateManifest(before);
+  const { manifest: after, changed, repaired, repairs } = migrateManifest(before);
   if (!changed) {
     process.stdout.write(`OK    ${record.label}: already canonical schemaVersion 24\n`);
     return;
   }
   stats.migrated += 1;
+  const repairSuffix = repairs.length > 0 ? ` (${repairs.join(", ")})` : "";
   if (write) {
     atomicWriteJson(record.path, after);
-    process.stdout.write(`WRITE ${record.label}: promoted to schemaVersion 24\n`);
+    process.stdout.write(
+      repaired
+        ? `WRITE ${record.label}: repaired canonical schemaVersion 24${repairSuffix}\n`
+        : `WRITE ${record.label}: promoted to schemaVersion 24\n`,
+    );
   } else {
-    process.stdout.write(`DRY   ${record.label}: would promote to schemaVersion 24\n`);
+    process.stdout.write(
+      repaired
+        ? `DRY   ${record.label}: would repair canonical schemaVersion 24${repairSuffix}\n`
+        : `DRY   ${record.label}: would promote to schemaVersion 24\n`,
+    );
   }
 }
 

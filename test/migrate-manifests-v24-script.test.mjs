@@ -348,6 +348,32 @@ test("migrate-manifests-v24 reports canonical v24 manifests as no-op", () => {
   assert.match(stdout, /SUMMARY migrated=0 conversionErrors=0/);
 });
 
+test("migrate-manifests-v24 reports dry-run repairs separately from promotion", () => {
+  const root = tempDir();
+  const manifest = {
+    ...baseV19Manifest("run-v24-dry-repair"),
+    schemaVersion: 24,
+    executionEnvironment: null,
+    resetSeed: {
+      ...baseV19Manifest("run-v24-dry-repair").resetSeed,
+      executionEnvironment: null,
+    },
+  };
+  manifest.runtimeVarSources = undefined;
+  manifest.resetSeed.runtimeVarSources = undefined;
+  const manifestPath = writeManifest(root, "demo", "run-v24-dry-repair", manifest);
+
+  const stdout = execFileSync("node", [SCRIPT_PATH, "--root", root], {
+    encoding: "utf8",
+  });
+
+  assert.match(
+    stdout,
+    /DRY\s+runs\/demo\/run-v24-dry-repair\/run\.json: would repair canonical schemaVersion 24 \(runtimeVarSources, resetSeed\.runtimeVarSources\)/,
+  );
+  assert.equal(readJson(manifestPath).runtimeVarSources, undefined);
+});
+
 test("migrate-manifests-v24 repairs v24 manifests missing runtime var source maps", () => {
   const root = tempDir();
   const manifest = {
@@ -369,7 +395,7 @@ test("migrate-manifests-v24 repairs v24 manifests missing runtime var source map
 
   assert.match(
     stdout,
-    /WRITE\s+runs\/demo\/run-v24-repair\/run\.json: promoted to schemaVersion 24/,
+    /WRITE\s+runs\/demo\/run-v24-repair\/run\.json: repaired canonical schemaVersion 24 \(runtimeVarSources, resetSeed\.runtimeVarSources\)/,
   );
   const migrated = readJson(manifestPath);
   assert.deepEqual(migrated.runtimeVarSources, {});
@@ -396,6 +422,48 @@ test("migrate-manifests-v24 repairs v24 manifests missing parent run ids", () =>
   const migrated = readJson(manifestPath);
   assert.equal(migrated.parentRunId, null);
   assert.equal(migrated.resetSeed.parentRunId, null);
+});
+
+test("migrate-manifests-v24 rejects invalid repair field shapes", () => {
+  const root = tempDir();
+  const invalidRuntimeSources = {
+    ...baseV19Manifest("run-v24-invalid-vars"),
+    schemaVersion: 24,
+    runtimeVarSources: [],
+    executionEnvironment: null,
+    resetSeed: {
+      ...baseV19Manifest("run-v24-invalid-vars").resetSeed,
+      executionEnvironment: null,
+    },
+  };
+  invalidRuntimeSources.resetSeed.runtimeVarSources = [];
+  const invalidMounts = {
+    ...baseV19Manifest("run-v24-invalid-mounts"),
+    schemaVersion: 24,
+    executionEnvironment: {
+      ...managedEnvironment(),
+      lifecycle: null,
+      sessionMounts: "backend",
+    },
+    resetSeed: {
+      ...baseV19Manifest("run-v24-invalid-mounts").resetSeed,
+      executionEnvironment: null,
+    },
+  };
+  writeManifest(root, "demo", "run-v24-invalid-vars", invalidRuntimeSources);
+  writeManifest(root, "demo", "run-v24-invalid-mounts", invalidMounts);
+
+  const result = spawnSync("node", [SCRIPT_PATH, "--root", root], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /schemaVersion 24 manifest runtimeVarSources must be an object/);
+  assert.match(
+    result.stdout,
+    /schemaVersion 24 executionEnvironment\.sessionMounts must be an array/,
+  );
+  assert.match(result.stdout, /SUMMARY migrated=0 conversionErrors=2/);
 });
 
 test("migrate-manifests-v24 rejects running and unsupported manifests", () => {
