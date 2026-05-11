@@ -265,11 +265,12 @@ workspace:
   scope: group
   hostRoot: "{{state_dir}}/workspaces"
   containerPath: /workspace
-  lifecycle:
-    onCreate:
-      - kind: command
-        command: npm
-        args: [install]
+lifecycle:
+  onWorkspaceCreate:
+    - kind: command
+      target: container
+      command: npm
+      args: [install]
 sessionMounts: backend
 ```
 
@@ -278,9 +279,10 @@ into the container, rewrite cwd to the container path, and keep a
 group-scoped container alive until no initialized, ready, or running run
 in the group still references it. `sessionMounts: backend` adds a
 same-path mount for the selected backend's session store so host-side
-session sync can read the backend history. `workspace.lifecycle.onCreate`
-runs container-side setup once per host workspace before backend cwd
-validation. Environment `vars` are merged with assignment vars for the
+session sync can read the backend history. `lifecycle.onWorkspaceCreate`
+runs setup once per host workspace before backend cwd validation, and
+`lifecycle.afterStart` can run container or host setup immediately after
+the managed container is inspected. Environment `vars` are merged with assignment vars for the
 selected run and frozen into the normal runtime var map.
 
 Agents may also author backend-owned argv tokens:

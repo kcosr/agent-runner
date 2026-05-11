@@ -33,6 +33,7 @@ import { resolveAssignmentHooks } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
 import type { ResolvedHookDescriptor } from "../hooks/types.js";
 import {
+  ExecutionEnvironmentError,
   buildEnvironmentLauncher,
   cleanupExecutionEnvironment,
   groupEnvironmentHasPendingUsers as hasPendingGroupEnvironmentUsers,
@@ -567,29 +568,60 @@ function cloneExecutionEnvironmentForRecurringRun(
     return cloned;
   }
   const sourceDefaultName = `task-runner-${sourceRunId}`;
+  const containerName =
+    cloned.lifetime === "group" || cloned.containerName !== sourceDefaultName
+      ? cloned.containerName
+      : `task-runner-${runId}`;
+  const runScopedRootedWorkspace =
+    cloned.workspace !== null &&
+    cloned.workspace.scope === "run" &&
+    cloned.workspace.hostRoot !== null
+      ? { workspace: cloned.workspace, hostRoot: cloned.workspace.hostRoot }
+      : null;
+  const workspaceIdentityChanges = runScopedRootedWorkspace !== null;
+  const lifecycle =
+    cloned.lifecycle === null
+      ? null
+      : {
+          afterStart:
+            cloned.lifecycle.afterStart === null
+              ? null
+              : {
+                  ...cloned.lifecycle.afterStart,
+                  completedContainerId:
+                    containerName === cloned.containerName
+                      ? cloned.lifecycle.afterStart.completedContainerId
+                      : null,
+                  completedAt:
+                    containerName === cloned.containerName
+                      ? cloned.lifecycle.afterStart.completedAt
+                      : null,
+                  lastError: null,
+                },
+          onWorkspaceCreate:
+            cloned.lifecycle.onWorkspaceCreate === null
+              ? null
+              : {
+                  ...cloned.lifecycle.onWorkspaceCreate,
+                  completedAt: workspaceIdentityChanges
+                    ? null
+                    : cloned.lifecycle.onWorkspaceCreate.completedAt,
+                  lastError: null,
+                },
+        };
   return {
     ...cloned,
-    containerName:
-      cloned.lifetime === "group" || cloned.containerName !== sourceDefaultName
-        ? cloned.containerName
-        : `task-runner-${runId}`,
+    containerName,
     containerId: null,
     workspace:
-      cloned.workspace?.scope === "run" && cloned.workspace.hostRoot !== null
+      runScopedRootedWorkspace !== null
         ? {
-            ...cloned.workspace,
-            hostPath: join(cloned.workspace.hostRoot, runId),
+            ...runScopedRootedWorkspace.workspace,
+            hostPath: join(runScopedRootedWorkspace.hostRoot, runId),
             createdAt: null,
-            lifecycle:
-              cloned.workspace.lifecycle === null
-                ? null
-                : {
-                    ...cloned.workspace.lifecycle,
-                    completedAt: null,
-                    lastError: null,
-                  },
           }
         : cloned.workspace,
+    lifecycle,
     cleanup: {
       ...cloned.cleanup,
       cleanedAt: null,
@@ -618,7 +650,7 @@ function buildRecurringCloneManifest(params: {
     runId,
   );
   return {
-    schemaVersion: 23,
+    schemaVersion: 24,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -1766,7 +1798,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 23,
+      schemaVersion: 24,
       runId,
       repo,
       agent: {
@@ -2075,7 +2107,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 23,
+      schemaVersion: 24,
       runId,
       repo,
       agent: {
@@ -2385,6 +2417,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         signal: opts.abortSignal,
       });
     } catch (error) {
+      if (error instanceof ExecutionEnvironmentError && error.environment !== null) {
+        const failedEnvironment = error.environment;
+        manifest.executionEnvironment = failedEnvironment;
+        if (reusingWorkspace) {
+          await withTaskStateLockAsync(workspaceDir, async () => {
+            const latest = resolveResumeTarget(workspaceDir).manifest;
+            latest.executionEnvironment = failedEnvironment;
+            writeManifest(workspaceDir, latest);
+          });
+        } else {
+          writeManifest(workspaceDir, manifest);
+        }
+      }
       emitAuditEnvelope(
         appendRunEnvironmentValidationFailedEvent({
           manifest,

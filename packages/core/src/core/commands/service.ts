@@ -86,6 +86,7 @@ import {
   wouldCreateDependencyCycle,
 } from "../run/dependencies.js";
 import {
+  ExecutionEnvironmentError,
   cleanupExecutionEnvironment,
   groupEnvironmentHasPendingUsers as hasPendingGroupEnvironmentUsers,
   prepareExecutionEnvironment,
@@ -1080,7 +1081,20 @@ export async function validateRunEnvironment(target: string): Promise<RunEnviron
       environment: null,
     };
   }
-  const prepared = await prepareExecutionEnvironment(resolved.manifest.executionEnvironment);
+  let prepared: RunManifest["executionEnvironment"];
+  try {
+    prepared = await prepareExecutionEnvironment(resolved.manifest.executionEnvironment);
+  } catch (error) {
+    if (error instanceof ExecutionEnvironmentError && error.environment !== null) {
+      return withTaskStateLock(resolved.workspaceDir, () => {
+        const latest = resolveResumeTarget(resolved.workspaceDir).manifest;
+        latest.executionEnvironment = error.environment;
+        writeManifest(resolved.workspaceDir, latest);
+        throw error;
+      });
+    }
+    throw error;
+  }
   return withTaskStateLock(resolved.workspaceDir, () => {
     const latest = resolveResumeTarget(resolved.workspaceDir).manifest;
     latest.executionEnvironment = prepared;

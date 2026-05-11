@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { runDetailSchema } from "../packages/core/dist/contracts/run-schemas.js";
 import {
   deriveRunCapabilities,
   isDaemonAutoRunnableReadyRun,
@@ -32,7 +33,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 23,
+    schemaVersion: 24,
     runId: "run123",
     runGroupId: "run123",
     repo: "demo-repo",
@@ -356,6 +357,113 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     executionEnvironment: null,
     capabilities: detail.capabilities,
   });
+});
+
+test("run contracts: runDetailSchema accepts top-level lifecycle and rejects workspace lifecycle", () => {
+  const executionEnvironment = {
+    kind: "container",
+    mode: "managed",
+    name: "managed-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace/repo",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: "task-runner-run123",
+    containerId: "container-123",
+    workspace: {
+      scope: "run",
+      hostRoot: "/tmp/task-runner-workspaces",
+      hostPath: "/tmp/task-runner-workspaces/run123",
+      containerPath: "/workspace",
+      mode: "rw",
+      create: true,
+      createdAt: null,
+    },
+    lifecycle: {
+      afterStart: {
+        steps: [
+          {
+            kind: "command",
+            target: "container",
+            command: "acl-proxy",
+            args: ["--config", "/etc/acl-proxy.toml"],
+            env: { TOKEN: "token" },
+            cwd: "/workspace",
+            timeoutMs: 120000,
+            user: "0",
+            detach: true,
+          },
+        ],
+        completedContainerId: "container-123",
+        completedAt: "2026-05-06T21:00:00.000Z",
+        lastError: null,
+      },
+      onWorkspaceCreate: {
+        steps: [
+          {
+            kind: "git-clone",
+            target: "host",
+            source: "/repo/source",
+            baseRef: "origin/main",
+            branch: "feature/env-lifecycle",
+            timeoutMs: null,
+          },
+        ],
+        completedAt: null,
+        lastError: null,
+      },
+    },
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+  const detail = toRunDetail({
+    manifest: buildManifest({
+      executionEnvironment,
+      resetSeed: {
+        ...buildManifest().resetSeed,
+        executionEnvironment,
+      },
+    }),
+    isLive: false,
+  });
+
+  assert.equal(runDetailSchema.safeParse(detail).success, true);
+
+  const oldShape = structuredClone(detail);
+  oldShape.executionEnvironment.workspace.lifecycle = {
+    onCreate: [],
+    completedAt: null,
+    lastError: null,
+  };
+  Reflect.deleteProperty(oldShape.executionEnvironment, "lifecycle");
+  assert.equal(runDetailSchema.safeParse(oldShape).success, false);
+
+  const invalidHostCommand = structuredClone(detail);
+  invalidHostCommand.executionEnvironment.lifecycle.afterStart.steps[0] = {
+    kind: "command",
+    target: "host",
+    command: "sudo",
+    args: [],
+    env: {},
+    cwd: null,
+    timeoutMs: null,
+    user: "0",
+    detach: false,
+  };
+  assert.equal(runDetailSchema.safeParse(invalidHostCommand).success, false);
+
+  const invalidTimeout = structuredClone(detail);
+  invalidTimeout.executionEnvironment.lifecycle.afterStart.steps[0].timeoutMs = -1;
+  assert.equal(runDetailSchema.safeParse(invalidTimeout).success, false);
 });
 
 test("run contracts: toRunDetail projects hook descriptors and audit attemptNumber", () => {

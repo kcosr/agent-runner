@@ -170,12 +170,12 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 23, captures repo, initializes updatedAt, and starts with no queued resume messages", async () => {
+test("manifest schemaVersion is 24, captures repo, initializes updatedAt, and starts with no queued resume messages", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 23);
+  assert.equal(outcome.manifest.schemaVersion, 24);
   assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.updatedAt, outcome.manifest.startedAt);
   assert.equal(outcome.manifest.archivedAt, null);
@@ -250,6 +250,209 @@ test("resolveResumeTarget rejects current manifests missing archivedAt", async (
   const manifestPath = join(outcome.workspaceDir, "run.json");
   const manifest = readManifest(outcome.workspaceDir);
   manifest.archivedAt = undefined;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  assert.throws(
+    () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
+    (err) => {
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
+});
+
+test("resolveResumeTarget accepts top-level environment lifecycle state", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const executionEnvironment = {
+    kind: "container",
+    mode: "managed",
+    name: "managed-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace/repo",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: "task-runner-run123",
+    containerId: null,
+    workspace: {
+      scope: "run",
+      hostRoot: "/tmp/task-runner-workspaces",
+      hostPath: "/tmp/task-runner-workspaces/run123",
+      containerPath: "/workspace",
+      mode: "rw",
+      create: true,
+      createdAt: null,
+    },
+    lifecycle: {
+      afterStart: {
+        steps: [
+          {
+            kind: "command",
+            target: "host",
+            command: "sudo",
+            args: ["/opt/aw/bin/aw-iptables", "add", "{{container_pid}}"],
+            env: {},
+            cwd: null,
+            timeoutMs: null,
+            user: null,
+            detach: false,
+          },
+        ],
+        completedContainerId: null,
+        completedAt: null,
+        lastError: null,
+      },
+      onWorkspaceCreate: {
+        steps: [
+          {
+            kind: "git-clone",
+            target: "container",
+            source: "/repo/source",
+            baseRef: "origin/main",
+            branch: "feature/env-lifecycle",
+            timeoutMs: 120000,
+          },
+        ],
+        completedAt: null,
+        lastError: null,
+      },
+    },
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+  manifest.executionEnvironment = executionEnvironment;
+  manifest.resetSeed.executionEnvironment = executionEnvironment;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const resolved = withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir));
+  assert.deepEqual(
+    resolved.manifest.executionEnvironment.lifecycle,
+    executionEnvironment.lifecycle,
+  );
+});
+
+test("resolveResumeTarget rejects old workspace lifecycle environment state", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const oldEnvironment = {
+    kind: "container",
+    mode: "managed",
+    name: "managed-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace/repo",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: "task-runner-run123",
+    containerId: null,
+    workspace: {
+      scope: "run",
+      hostRoot: "/tmp/task-runner-workspaces",
+      hostPath: "/tmp/task-runner-workspaces/run123",
+      containerPath: "/workspace",
+      mode: "rw",
+      create: true,
+      createdAt: null,
+      lifecycle: {
+        onCreate: [],
+        completedAt: null,
+        lastError: null,
+      },
+    },
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+  manifest.executionEnvironment = oldEnvironment;
+  manifest.resetSeed.executionEnvironment = oldEnvironment;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  assert.throws(
+    () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
+    (err) => {
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
+});
+
+test("resolveResumeTarget rejects invalid lifecycle command invariants", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const executionEnvironment = {
+    kind: "container",
+    mode: "managed",
+    name: "managed-dev",
+    sourcePath: null,
+    engine: "docker",
+    cwd: "/workspace/repo",
+    env: {},
+    extraExecArgs: [],
+    lastValidatedAt: null,
+    lastError: null,
+    image: "node:22",
+    lifetime: "run",
+    containerName: "task-runner-run123",
+    containerId: null,
+    workspace: null,
+    lifecycle: {
+      afterStart: {
+        steps: [
+          {
+            kind: "command",
+            target: "host",
+            command: "sudo",
+            args: [],
+            env: {},
+            cwd: null,
+            timeoutMs: -1,
+            user: "0",
+            detach: false,
+          },
+        ],
+        completedContainerId: null,
+        completedAt: null,
+        lastError: null,
+      },
+      onWorkspaceCreate: null,
+    },
+    sessionMounts: [],
+    mounts: [],
+    network: "default",
+    security: { capDrop: [], capAdd: [] },
+    extraRunArgs: [],
+    cleanup: { policy: "manual", cleanedAt: null, lastError: null },
+  };
+  manifest.executionEnvironment = executionEnvironment;
+  manifest.resetSeed.executionEnvironment = executionEnvironment;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   assert.throws(
@@ -574,7 +777,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 23/);
+        assert.match(err.message, /requires schemaVersion 24/);
         return true;
       },
     );
@@ -625,7 +828,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 23/);
+        assert.match(err.message, /requires schemaVersion 24/);
         return true;
       },
     );
@@ -677,7 +880,7 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 23/);
+        assert.match(err.message, /requires schemaVersion 24/);
         return true;
       },
     );
@@ -729,7 +932,7 @@ test("schemaVersion mismatch: resume rejects a v10 manifest with a clear error",
       () => resolveResumeTarget("stale10", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 10/);
-        assert.match(err.message, /requires schemaVersion 23/);
+        assert.match(err.message, /requires schemaVersion 24/);
         return true;
       },
     );
@@ -750,7 +953,7 @@ test("schemaVersion mismatch: resume rejects a v12 manifest with the v17 migrati
       () => resolveResumeTarget("stale12", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 12/);
-        assert.match(err.message, /requires schemaVersion 23/);
+        assert.match(err.message, /requires schemaVersion 24/);
         return true;
       },
     );
@@ -771,7 +974,7 @@ test("schemaVersion mismatch: resume rejects a v13 manifest with the v17 migrati
       () => resolveResumeTarget("stale13", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 13/);
-        assert.match(err.message, /requires schemaVersion 23/);
+        assert.match(err.message, /requires schemaVersion 24/);
         return true;
       },
     );
@@ -792,7 +995,7 @@ test("schemaVersion mismatch: resume rejects a v15 manifest with the v17 migrati
       () => resolveResumeTarget("stale15", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 15/);
-        assert.match(err.message, /requires schemaVersion 23/);
+        assert.match(err.message, /requires schemaVersion 24/);
         return true;
       },
     );

@@ -4,6 +4,13 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `24`. Managed container lifecycle state now
+  lives at `executionEnvironment.lifecycle`, and authored environment config
+  uses top-level `lifecycle.afterStart` / `lifecycle.onWorkspaceCreate`;
+  `workspace.lifecycle.onCreate` is no longer accepted. Use
+  `scripts/migrate-manifests-v24.mjs` before resuming or listing schema
+  v19-v23 runs.
+  ([#139](https://github.com/kcosr/task-runner/pull/139))
 - Manifest schema version is now `23`. Managed container workspace state now
   persists resolved workspace lifecycle steps and lifecycle completion state.
   ([#138](https://github.com/kcosr/task-runner/pull/138))
@@ -139,6 +146,11 @@
 
 ### Added
 
+- Added managed-container `lifecycle.afterStart` for host or container setup
+  after start/reuse and inspect, including late `{{container_name}}`,
+  `{{container_id}}`, and `{{container_pid}}` interpolation.
+- Added managed-container `lifecycle.onWorkspaceCreate` as the current
+  workspace clone/install phase with explicit host/container targets.
 - Added first-class container execution environments. Agents can select
   named environment definitions from
   `${TASK_RUNNER_CONFIG_DIR}/environments/*.yaml|*.yml`, fresh runs can
@@ -150,9 +162,8 @@
   run|group`, automatic host directory creation, host-to-container cwd
   rewriting, and `lifetime: group` container reuse/cleanup semantics.
   ([#138](https://github.com/kcosr/task-runner/pull/138))
-- Added managed-container `workspace.lifecycle.onCreate` steps for
-  container-side workspace setup, including `git-clone` and arbitrary
-  `command` steps guarded by host-side completion state.
+- Added managed-container workspace setup steps for `git-clone` and
+  arbitrary `command` execution guarded by host-side completion state.
   ([#138](https://github.com/kcosr/task-runner/pull/138))
 - Added execution environment `vars`, merged with assignment vars for the
   selected run and frozen into normal runtime vars for environment,

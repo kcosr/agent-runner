@@ -236,15 +236,30 @@ workspace:
   containerPath: /workspace
   mode: rw
   create: true
-  lifecycle:
-    onCreate:
-      - kind: git-clone
-        source: /host/repos/project.git
-        baseRef: origin/main
-        branch: "task-runner/{{run_id}}"
-      - kind: command
-        command: npm
-        args: [install]
+lifecycle:
+  afterStart:
+    - kind: command
+      target: container
+      user: "0"
+      detach: true
+      command: acl-proxy
+      args: [--config, /etc/acl-proxy/acl-proxy.toml]
+      env:
+        AW_IDENTITY_TOKEN: "{{aw_identity_token}}"
+    - kind: command
+      target: host
+      command: sudo
+      args: ["{{aw_home}}/bin/aw-iptables", add, "{{container_pid}}"]
+  onWorkspaceCreate:
+    - kind: git-clone
+      target: container
+      source: /host/repos/project.git
+      baseRef: origin/main
+      branch: "task-runner/{{run_id}}"
+    - kind: command
+      target: container
+      command: npm
+      args: [install]
 sessionMounts: backend
 mounts:
   - hostPath: /home/kevin/.cache/agent-tools
@@ -289,22 +304,36 @@ explicit bind mounts. After resolving the workspace, managed environments can
 interpolate `workspace_host_path` and `workspace_container_path` in cwd, env,
 image, container name, and generic mount paths.
 
-Workspaces may define `lifecycle.onCreate` steps that run inside the managed
-container before backend cwd validation. The `git-clone` step clones into the
-workspace root and checks out a branch from a base ref. The `command` step runs
-an arbitrary command in the workspace root with optional args and env.
-Host-side state outside the mounted workspace records successful completion, so
-group-scoped workspaces run setup once and later runs skip it without dirtying
-the checked-out repository.
+Managed environments may define top-level `lifecycle.afterStart` and
+`lifecycle.onWorkspaceCreate` phases. `afterStart` runs after the managed
+container is started or reused and inspected, before workspace setup and
+backend cwd validation. It can start a detached container-local helper such
+as `acl-proxy`, then run a host command such as `aw-iptables add
+{{container_pid}}`. Readiness is not a built-in primitive; express it as
+an ordinary command step. `mode: existing` environments reject lifecycle
+phases.
+
+`afterStart` completion is stored outside the run manifest under
+`{{state_dir}}/container-state/<container-key>` and is keyed by the inspected
+container id. This lets separate runs in the same run group skip startup hooks
+for a shared live container while still rerunning them when the container is
+recreated with a new id.
+
+`onWorkspaceCreate` runs once per host workspace. The `git-clone` step
+clones into the workspace root and checks out a branch from a base ref.
+The `command` step runs an arbitrary host or container command with
+optional args and env. Host-side state outside the mounted workspace
+records successful completion, so group-scoped workspaces run setup once
+and later runs skip it without dirtying the checked-out repository.
 Lifecycle state is stored outside the mounted workspace under
 `{{state_dir}}/workspace-state/<workspace-key>`. For workspaces derived from
 `hostRoot`, the key is the path under that root, such as the run id or run
 group id. Explicit `hostPath` workspaces use a stable hash of the resolved host
 path. Clearing that state directory causes the lifecycle to run again on the
-next environment validation. When a lifecycle is configured, the managed
-container starts with `--workdir` set to the workspace mount root; task-runner
-validates the authored `cwd` only after lifecycle setup has had a chance to
-create it.
+next environment validation. When `onWorkspaceCreate` is configured, the
+managed container starts with `--workdir` set to the workspace mount root;
+task-runner validates the authored `cwd` only after lifecycle setup has
+had a chance to create it.
 
 `sessionMounts` expands same-path read-write mounts for built-in backend
 session stores. `sessionMounts: backend` resolves to the selected backend's
@@ -343,8 +372,11 @@ Managed runtime example:
       "containerPath": "/workspace",
       "mode": "rw",
       "create": true,
-      "createdAt": "2026-05-06T00:00:00.000Z",
-      "lifecycle": null
+      "createdAt": "2026-05-06T00:00:00.000Z"
+    },
+    "lifecycle": {
+      "afterStart": null,
+      "onWorkspaceCreate": null
     },
     "mounts": [],
     "cleanup": {
@@ -628,15 +660,16 @@ Implemented:
   override
 - frozen `manifest.executionEnvironment` and
   `manifest.resetSeed.executionEnvironment`
-- schemaVersion `23` manifest validation
+- schemaVersion `24` manifest validation
 - existing-container validation for running state, cwd, and expected
   mounts
 - managed run- and group-lifetime container creation, reuse, and
   terminal/manual cleanup state
 - first-class managed workspaces with run/group scope, host directory
   creation, bind mounting, and host-to-container cwd rewriting
-- managed workspace lifecycle hooks with `command` and `git-clone`
-  `onCreate` steps plus host-side completion state
+- top-level managed lifecycle phases with `afterStart` and
+  `onWorkspaceCreate` `command` / `git-clone` steps plus host-side
+  workspace completion state
 - backend session mount presets for same-path Claude, Codex, Cursor,
   OpenCode, and Pi session stores
 - generated `docker exec` / `podman exec` subprocess launchers for

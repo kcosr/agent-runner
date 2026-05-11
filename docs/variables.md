@@ -212,7 +212,12 @@ Runtime interpolation is applied to:
 - Assignment hook `with`, `when`, and `path` values
 - Fresh resolved launcher `command` and `args[]` values
 - Fresh resolved execution environment cwd, env, image, container names,
-  mounts, workspace paths, and workspace lifecycle step values
+  mounts, workspace paths, and lifecycle step values
+
+Execution environment lifecycle steps may retain only
+`{{container_name}}`, `{{container_id}}`, and `{{container_pid}}` after
+fresh resolution. Task-runner resolves those late-bound values after a
+managed container has been started or reused and inspected.
 
 Values are stringified with `String(value)` before substitution.
 
