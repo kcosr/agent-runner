@@ -148,6 +148,10 @@ Backend args agent prompt.
 const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
   new URL("../assignments/plan-feature/assignment.md", import.meta.url).pathname,
 );
+const REPO_ROOT = new URL("..", import.meta.url).pathname;
+const BUILTIN_PLAN_IMPLEMENT_FEATURE_PATH = resolvePath(
+  new URL("../assignments/plan-implement-feature/assignment.md", import.meta.url).pathname,
+);
 const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
   new URL("../assignments/plan-feature/template.md", import.meta.url).pathname,
 );
@@ -2332,8 +2336,8 @@ Work.
 });
 
 async function initBuiltInPlanFeature(baseDir, repoDir, cliVars) {
-  return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("three", baseDir);
+  return withEnv({ ...sharedRuntimeEnv(baseDir), TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, async () => {
+    const loaded = loadAgentConfig(join(baseDir, "agents", "three", "agent.md"), baseDir);
     const loadedAssignment = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -2342,6 +2346,33 @@ async function initBuiltInPlanFeature(baseDir, repoDir, cliVars) {
         loaded,
         loadedAssignment,
         cliVars,
+        parentRunId: null,
+        backend: {
+          id: "claude",
+          async invoke() {
+            throw new Error("backend should not be invoked during init");
+          },
+        },
+        initialize: true,
+        callerCwd: repoDir,
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+}
+
+async function initBuiltInPlanImplementFeature(baseDir, repoDir) {
+  return withEnv({ ...sharedRuntimeEnv(baseDir), TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, async () => {
+    const loaded = loadAgentConfig(join(baseDir, "agents", "three", "agent.md"), baseDir);
+    const loadedAssignment = loadAssignmentConfig(BUILTIN_PLAN_IMPLEMENT_FEATURE_PATH);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
         parentRunId: null,
         backend: {
           id: "claude",
@@ -2382,6 +2413,50 @@ test("built-in plan-feature prepare hook freezes repo_root, worktree_path, and d
   assert.equal(initialized.manifest.runtimeVarSources.worktree_path.source, "hook");
   assert.equal(initialized.manifest.runtimeVars.worktree_base_ref, "origin/main");
   assert.equal(initialized.manifest.runtimeVarSources.worktree_base_ref.source, "default");
+});
+
+test("built-in plan-implement-feature initializes as one run without worktree lineage vars", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+
+  const initialized = await initBuiltInPlanImplementFeature(dir, repoDir);
+
+  assert.equal(initialized.manifest.cwd, repoDir);
+  assert.equal(initialized.manifest.runtimeVars.worktree_slug, undefined);
+  assert.equal(initialized.manifest.runtimeVars.worktree_path, undefined);
+  assert.equal(initialized.manifest.runtimeVars.worktree_base_ref, undefined);
+  assert.deepEqual(
+    Object.values(initialized.manifest.finalTasks).map((task) => task.id),
+    [
+      "feature-plan/orient",
+      "feature-plan/capture-feature",
+      "feature-plan/survey-impact",
+      "feature-plan/check-existing-code",
+      "feature-plan/risks-and-tests",
+      "feature-plan/contract",
+      "feature-plan/surface-inventory",
+      "feature-plan/produce-summary",
+      "feature-plan/attach-summary",
+      "feature-plan/await-user-approval",
+      "feature-implement/scaffold",
+      "feature-implement/implement-core",
+      "feature-implement/implement-tests",
+      "feature-implement/verify-surface-coverage",
+      "feature-implement/docs-drift",
+      "feature-implement/fresh-eyes",
+      "feature-implement/check-gate",
+      "feature-implement/commit",
+      "feature-implement/internal-code-review",
+      "feature-implement/apply-review-fixes",
+      "feature-implement/self-check",
+      "feature-implement/push-pr",
+      "feature-implement/merge-after-approval",
+    ],
+  );
+  assert.equal(initialized.manifest.resolvedHooks.length, 1);
+  assert.equal(initialized.manifest.resolvedHooks[0].source.builtin, "require-children-success");
+  assert.equal(initialized.manifest.resolvedHooks[0].phase, "taskTransition");
 });
 
 test("built-in plan-feature prepare hook preserves explicit worktree_base_ref", async () => {

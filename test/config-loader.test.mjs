@@ -98,6 +98,9 @@ function writeEnvironment(baseDir, name, body, ext = ".yaml") {
 const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
   new URL("../assignments/plan-feature/assignment.md", import.meta.url).pathname,
 );
+const BUILTIN_PLAN_IMPLEMENT_FEATURE_PATH = resolvePath(
+  new URL("../assignments/plan-implement-feature/assignment.md", import.meta.url).pathname,
+);
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
   new URL("../assignments/plan-feature/template.md", import.meta.url).pathname,
@@ -127,6 +130,35 @@ const SHARED_REVIEW_TASK_IDS = [
   "review/test-coverage",
   "review/docs-drift",
   "review/surface-completeness",
+];
+
+const SHARED_FEATURE_PLAN_TASK_IDS = [
+  "feature-plan/orient",
+  "feature-plan/capture-feature",
+  "feature-plan/survey-impact",
+  "feature-plan/check-existing-code",
+  "feature-plan/risks-and-tests",
+  "feature-plan/contract",
+  "feature-plan/surface-inventory",
+  "feature-plan/produce-summary",
+  "feature-plan/attach-summary",
+  "feature-plan/await-user-approval",
+];
+
+const SHARED_FEATURE_IMPLEMENT_TASK_IDS = [
+  "feature-implement/scaffold",
+  "feature-implement/implement-core",
+  "feature-implement/implement-tests",
+  "feature-implement/verify-surface-coverage",
+  "feature-implement/docs-drift",
+  "feature-implement/fresh-eyes",
+  "feature-implement/check-gate",
+  "feature-implement/commit",
+  "feature-implement/internal-code-review",
+  "feature-implement/apply-review-fixes",
+  "feature-implement/self-check",
+  "feature-implement/push-pr",
+  "feature-implement/merge-after-approval",
 ];
 
 test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", () =>
@@ -1648,6 +1680,24 @@ Assignment body.
     assert.match(loaded.config.tasks[0].body, /review\/simplification-and-duplication/);
   }));
 
+test("built-in shared feature task files are valid config-root named task definitions", () =>
+  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+    for (const taskId of [...SHARED_FEATURE_PLAN_TASK_IDS, ...SHARED_FEATURE_IMPLEMENT_TASK_IDS]) {
+      const loaded = loadTaskConfig(taskId, REPO_ROOT);
+      assert.equal(loaded.task.id, taskId);
+      assert.ok(loaded.task.title.length > 0, `${taskId} should have a title`);
+      assert.ok((loaded.task.body ?? "").length > 0, `${taskId} should have a body`);
+    }
+
+    const awaitApproval = loadTaskConfig("feature-plan/await-user-approval", REPO_ROOT);
+    assert.match(awaitApproval.task.body ?? "", /assignment-summary\.md/);
+    assert.match(awaitApproval.task.body ?? "", /no `assignment-seed\.md` was generated/);
+
+    const internalReview = loadTaskConfig("feature-implement/internal-code-review", REPO_ROOT);
+    assert.match(internalReview.task.body ?? "", /--assignment code-review/);
+    assert.match(internalReview.task.body ?? "", /implementation_run_id=\{\{run_id\}\}/);
+  }));
+
 test("loadAssignmentConfig hard-fails when a referenced named task is missing", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
@@ -1736,57 +1786,114 @@ test("built-in code-review-direct assignment resolves shared review tasks withou
     assert.doesNotMatch(approval.body ?? "", /plan_coverage/);
   }));
 
-test("built-in plan-feature assignment uses cwd instead of repo_path for canonical repo context", () => {
-  const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
-  assert.equal(loaded.config.vars.repo_path, undefined);
-  assert.deepEqual(loaded.config.vars.worktree_slug?.sources, ["cli", "web"]);
-  assert.deepEqual(loaded.config.vars.worktree_base_ref?.sources, ["cli", "web"]);
-  assert.equal(loaded.config.vars.worktree_base_ref?.required, false);
-  assert.equal(loaded.config.vars.worktree_base_ref?.default, "origin/main");
-  assert.equal(loaded.config.hooks.prepare[0]?.path, "hooks/derive-worktree-vars.ts");
-  assert.match(loaded.instructions, /`{{cwd}}`/);
-  assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
-  assert.match(loaded.config.callerInstructions ?? "", /--var worktree_slug=<git-safe-slug>/);
-  assert.match(
-    loaded.config.callerInstructions ?? "",
-    /--var worktree_base_ref=origin\/<feature-branch>/,
-  );
-  assert.match(loaded.config.callerInstructions ?? "", /`worktree_base_ref` is optional/);
+test("built-in plan-feature assignment uses cwd instead of repo_path for canonical repo context", () =>
+  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+    const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
+    assert.equal(loaded.config.vars.repo_path, undefined);
+    assert.deepEqual(loaded.config.vars.worktree_slug?.sources, ["cli", "web"]);
+    assert.deepEqual(loaded.config.vars.worktree_base_ref?.sources, ["cli", "web"]);
+    assert.equal(loaded.config.vars.worktree_base_ref?.required, false);
+    assert.equal(loaded.config.vars.worktree_base_ref?.default, "origin/main");
+    assert.equal(loaded.config.hooks.prepare[0]?.path, "hooks/derive-worktree-vars.ts");
+    assert.match(loaded.instructions, /`{{cwd}}`/);
+    assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
+    assert.match(loaded.config.callerInstructions ?? "", /--var worktree_slug=<git-safe-slug>/);
+    assert.match(
+      loaded.config.callerInstructions ?? "",
+      /--var worktree_base_ref=origin\/<feature-branch>/,
+    );
+    assert.match(loaded.config.callerInstructions ?? "", /`worktree_base_ref` is optional/);
 
-  const taskIds = loaded.config.tasks.map((task) => task.id);
-  assert.ok(taskIds.includes("create_initialized_implementer_run"));
+    const taskIds = loaded.config.tasks.map((task) => task.id);
+    assert.deepEqual(taskIds.slice(0, 7), SHARED_FEATURE_PLAN_TASK_IDS.slice(0, 7));
+    assert.ok(taskIds.includes("create_initialized_implementer_run"));
 
-  const createTask = loaded.config.tasks.find(
-    (task) => task.id === "create_initialized_implementer_run",
-  );
-  assert.ok(createTask);
-  assert.match(createTask.body ?? "", /--agent implementer/);
-  assert.doesNotMatch(
-    createTask.body ?? "",
-    /Always use `--agent implementer --backend passive`|--agent implementer \\\n\s+--backend passive/,
-  );
-  assert.match(
-    createTask.body ?? "",
-    /resulting implementer run is left in\s+`initialized`, not `ready`/,
-  );
-  assert.match(createTask.body ?? "", /--run-id <existing-implementer-run-id>/);
-  assert.doesNotMatch(createTask.body ?? "", /--cwd <confirmed-worktree-dir>/);
-  assert.match(createTask.body ?? "", /cwd: "\{\{worktree_path\}\}"/);
-  assert.match(
-    createTask.body ?? "",
-    /Do not assume updating the draft file or refreshing the\s+planning-run attachments alone updates the implementer\s+run/i,
-  );
-  assert.match(createTask.body ?? "", /run ready <new-run-id>/);
-  assert.match(createTask.body ?? "", /run --resume-run <new-run-id>/);
+    const createTask = loaded.config.tasks.find(
+      (task) => task.id === "create_initialized_implementer_run",
+    );
+    assert.ok(createTask);
+    assert.match(createTask.body ?? "", /--agent implementer/);
+    assert.doesNotMatch(
+      createTask.body ?? "",
+      /Always use `--agent implementer --backend passive`|--agent implementer \\\n\s+--backend passive/,
+    );
+    assert.match(
+      createTask.body ?? "",
+      /resulting implementer run is left in\s+`initialized`, not `ready`/,
+    );
+    assert.match(createTask.body ?? "", /--run-id <existing-implementer-run-id>/);
+    assert.doesNotMatch(createTask.body ?? "", /--cwd <confirmed-worktree-dir>/);
+    assert.match(createTask.body ?? "", /cwd: "\{\{worktree_path\}\}"/);
+    assert.match(
+      createTask.body ?? "",
+      /Do not assume updating the draft file or refreshing the\s+planning-run attachments alone updates the implementer\s+run/i,
+    );
+    assert.match(createTask.body ?? "", /run ready <new-run-id>/);
+    assert.match(createTask.body ?? "", /run --resume-run <new-run-id>/);
 
-  assert.match(loaded.config.callerInstructions ?? "", /run ready <new-run-id>/);
-  assert.match(loaded.config.callerInstructions ?? "", /run --resume-run <new-run-id>/);
-  assert.match(
-    loaded.config.callerInstructions ?? "",
-    /reinitialize the same initialized\s+implementer run from the updated draft/i,
-  );
-  assert.doesNotMatch(loaded.config.callerInstructions ?? "", /passive backend/i);
-});
+    assert.match(loaded.config.callerInstructions ?? "", /run ready <new-run-id>/);
+    assert.match(loaded.config.callerInstructions ?? "", /run --resume-run <new-run-id>/);
+    assert.match(
+      loaded.config.callerInstructions ?? "",
+      /reinitialize the same initialized\s+implementer run from the updated draft/i,
+    );
+    assert.doesNotMatch(loaded.config.callerInstructions ?? "", /passive backend/i);
+  }));
+
+test("built-in plan-implement-feature assignment composes shared tasks for a single-run flow", () =>
+  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+    const loaded = loadAssignmentConfig(BUILTIN_PLAN_IMPLEMENT_FEATURE_PATH);
+
+    assert.equal(loaded.config.name, "plan-implement-feature");
+    assert.equal(loaded.config.maxRetries, 4);
+    assert.deepEqual(loaded.config.lockedFields, ["tasks"]);
+    assert.deepEqual(Object.keys(loaded.config.vars), []);
+    assert.deepEqual(loaded.config.hooks.prepare, []);
+    assert.deepEqual(loaded.config.hooks.beforeAttempt, []);
+    assert.deepEqual(
+      loaded.config.tasks.map((task) => task.id),
+      [...SHARED_FEATURE_PLAN_TASK_IDS, ...SHARED_FEATURE_IMPLEMENT_TASK_IDS],
+    );
+
+    const produceSummary = loaded.config.tasks.find(
+      (task) => task.id === "feature-plan/produce-summary",
+    );
+    const attachSummary = loaded.config.tasks.find(
+      (task) => task.id === "feature-plan/attach-summary",
+    );
+    const awaitApproval = loaded.config.tasks.find(
+      (task) => task.id === "feature-plan/await-user-approval",
+    );
+    const internalReview = loaded.config.tasks.find(
+      (task) => task.id === "feature-implement/internal-code-review",
+    );
+    const mergeGate = loaded.config.tasks.find(
+      (task) => task.id === "feature-implement/merge-after-approval",
+    );
+
+    assert.ok(produceSummary);
+    assert.ok(attachSummary);
+    assert.ok(awaitApproval);
+    assert.ok(internalReview);
+    assert.ok(mergeGate);
+    assert.match(produceSummary.body ?? "", /summary-template\.md/);
+    assert.match(attachSummary.body ?? "", /--name assignment-summary\.md/);
+    assert.match(awaitApproval.body ?? "", /mark this task `blocked`/);
+    assert.match(internalReview.body ?? "", /--assignment code-review/);
+    assert.match(mergeGate.body ?? "", /waiting for explicit caller approval/i);
+
+    assert.match(loaded.config.callerInstructions ?? "", /plan-implement-feature/);
+    assert.match(loaded.config.callerInstructions ?? "", /assignment-summary\.md/);
+    assert.match(loaded.config.callerInstructions ?? "", /does not generate `assignment-seed\.md`/);
+    assert.match(loaded.config.callerInstructions ?? "", /does not run\s+`plan-review`/);
+    assert.match(
+      loaded.config.callerInstructions ?? "",
+      /does not create a separate initialized implementer\s+run/,
+    );
+    assert.doesNotMatch(loaded.config.callerInstructions ?? "", /assignment-seed\.md`.*attach/s);
+    assert.doesNotMatch(loaded.config.callerInstructions ?? "", /--assignment plan-review/);
+    assert.doesNotMatch(loaded.config.callerInstructions ?? "", /--agent implementer/);
+  }));
 
 test("built-in plan-feature template emits implement-prefixed assignment names", () => {
   const template = readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8");

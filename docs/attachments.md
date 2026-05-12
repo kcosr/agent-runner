@@ -152,8 +152,13 @@ selected run's group, matching `attachment list --scope group`.
 - **Handoff between grouped runs**: attach artifacts to a planning run so
   an implementation or review run in the same run group can discover
   them via `--scope group`.
+- **Single-run approval pause**: `plan-implement-feature` attaches only
+  `assignment-summary.md` to the current run, blocks for caller approval,
+  and resumes implementation in the same run. It does not create
+  `assignment-seed.md` or a separate implementer run.
 - **Audit trail**: attach the exact generated draft so the manifest
   captures byte-for-byte what was handed to the next stage.
 
-See [examples.md](examples.md) for how the bundled `plan-feature`
-assignment uses attachments as a handoff surface.
+See [examples.md](examples.md) for how the bundled `plan-feature` and
+`plan-implement-feature` assignments use attachments as handoff and
+approval surfaces.
