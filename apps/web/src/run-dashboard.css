@@ -2010,7 +2010,10 @@ pre {
     overflow-x: hidden;
   }
   .runs-list-rows {
+    gap: 10px;
     min-width: 0;
+    padding: 10px;
+    background: transparent;
   }
   .status-filter-chips {
     padding: 8px 10px;
@@ -2019,7 +2022,14 @@ pre {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
     gap: 8px 10px;
-    padding: 10px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+  }
+  .run-row--selected {
+    border-color: var(--ring);
   }
   .run-row__main,
   .run-row__metadata,

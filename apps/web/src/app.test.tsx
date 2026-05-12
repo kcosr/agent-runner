@@ -1490,6 +1490,15 @@ async function findRunRow(name: string | RegExp) {
   );
 }
 
+async function findRunRowSurface(name: string | RegExp) {
+  const button = await findRunRow(name);
+  const row = button.closest(".run-row");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error("Expected run row surface");
+  }
+  return row;
+}
+
 function nativeCancel(dialog: HTMLElement) {
   fireEvent(dialog, new Event("cancel", { cancelable: true }));
 }
@@ -1918,7 +1927,7 @@ describe("web app", () => {
       screen.queryByRole("button", { name: /^Open run Ready list$/i }),
     ).not.toBeInTheDocument();
 
-    await user.click(await findRunRow("Completed list"));
+    await user.click(await findRunRowSurface("Completed list"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(screen.getAllByText("Completed list").length).toBeGreaterThanOrEqual(1);
 
@@ -1931,7 +1940,22 @@ describe("web app", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
 
-    fireEvent.contextMenu(await findRunRow("Completed list"), { clientX: 48, clientY: 56 });
+    fireEvent.contextMenu(await findRunRowSurface("Completed list"), { clientX: 48, clientY: 56 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    expect(within(getRunActionMenuElement()).getByText("No available actions")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
+
+    dispatchPointerEvent(await findRunRowSurface("Completed list"), "pointerdown", {
+      button: 0,
+      clientX: 52,
+      clientY: 64,
+      pointerType: "touch",
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 540));
+    });
+
     await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
     expect(within(getRunActionMenuElement()).getByText("No available actions")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });

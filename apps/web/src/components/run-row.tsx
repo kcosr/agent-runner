@@ -1,5 +1,12 @@
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
-import { useEffect, useRef } from "react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import { formatScheduleState, formatTimestampWithRelative, truncateEnd } from "../lib/format.js";
 import type { DashboardSortField, DashboardStructuredFilters } from "../lib/settings.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
@@ -15,6 +22,10 @@ import {
   RunningIcon,
 } from "./icons.js";
 import { StatusBadge } from "./status-badge.js";
+
+const ROW_MENU_LONG_PRESS_MS = 520;
+const ROW_MENU_LONG_PRESS_MOVE_TOLERANCE_PX = 8;
+const ROW_MENU_CLICK_SUPPRESS_MS = 900;
 
 function runIdLabel(run: RunSummary): string {
   return run.runGroupId === run.runId ? run.runId : `${run.runGroupId}/${run.runId}`;
@@ -46,6 +57,19 @@ function timeFieldValue(run: RunSummary, sortField: DashboardSortField): string 
   }
 }
 
+function eventStartedFromControl(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest("button, a, input, select, textarea, summary, [role='button']") !== null
+  );
+}
+
+function eventStartedFromAuxiliaryControl(target: EventTarget | null): boolean {
+  return eventStartedFromControl(target) && target instanceof Element
+    ? target.closest(".run-row__main") === null
+    : false;
+}
+
 export function RunRow({
   actionPending,
   run,
@@ -68,6 +92,10 @@ export function RunRow({
   onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
 }) {
   const rowRef = useRef<HTMLElement | null>(null);
+  const longPressTimeoutRef = useRef<number | null>(null);
+  const longPressStartRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const suppressNextClickTimeoutRef = useRef<number | null>(null);
   const accessibleName = run.name ?? "Unnamed";
   const visibleName = truncateEnd(accessibleName, 72);
   const assignmentName = run.assignmentName ?? "Ad hoc run";
@@ -93,6 +121,99 @@ export function RunRow({
     });
   }
 
+  const clearLongPressTimeout = useCallback(() => {
+    longPressStartRef.current = null;
+    if (longPressTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+    window.clearTimeout(longPressTimeoutRef.current);
+    longPressTimeoutRef.current = null;
+  }, []);
+
+  const clearSuppressNextClickTimeout = useCallback(() => {
+    if (suppressNextClickTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+    window.clearTimeout(suppressNextClickTimeoutRef.current);
+    suppressNextClickTimeoutRef.current = null;
+  }, []);
+
+  const suppressNextClick = useCallback(() => {
+    suppressNextClickRef.current = true;
+    clearSuppressNextClickTimeout();
+    if (typeof window === "undefined") {
+      return;
+    }
+    suppressNextClickTimeoutRef.current = window.setTimeout(() => {
+      suppressNextClickRef.current = false;
+      suppressNextClickTimeoutRef.current = null;
+    }, ROW_MENU_CLICK_SUPPRESS_MS);
+  }, [clearSuppressNextClickTimeout]);
+
+  function handleRowClick(event: MouseEvent<HTMLElement>) {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      clearSuppressNextClickTimeout();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (event.defaultPrevented || eventStartedFromControl(event.target)) {
+      return;
+    }
+    onSelect();
+  }
+
+  function handleRowKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (
+      event.defaultPrevented ||
+      eventStartedFromControl(event.target) ||
+      (event.key !== "Enter" && event.key !== " ")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onSelect();
+  }
+
+  function handleRowContextMenu(event: MouseEvent<HTMLElement>) {
+    event.preventDefault();
+    clearLongPressTimeout();
+    onRequestActionMenu({ clientX: event.clientX, clientY: event.clientY });
+  }
+
+  function handleRowPointerDown(event: PointerEvent<HTMLElement>) {
+    if (
+      (event.pointerType !== "touch" && event.pointerType !== "pen") ||
+      eventStartedFromAuxiliaryControl(event.target) ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+
+    clearLongPressTimeout();
+    const point = { clientX: event.clientX, clientY: event.clientY };
+    longPressStartRef.current = point;
+    longPressTimeoutRef.current = window.setTimeout(() => {
+      longPressTimeoutRef.current = null;
+      longPressStartRef.current = null;
+      suppressNextClick();
+      onRequestActionMenu(point);
+    }, ROW_MENU_LONG_PRESS_MS);
+  }
+
+  function handleRowPointerMove(event: PointerEvent<HTMLElement>) {
+    const start = longPressStartRef.current;
+    if (!start) {
+      return;
+    }
+    const deltaX = event.clientX - start.clientX;
+    const deltaY = event.clientY - start.clientY;
+    if (Math.hypot(deltaX, deltaY) > ROW_MENU_LONG_PRESS_MOVE_TOLERANCE_PX) {
+      clearLongPressTimeout();
+    }
+  }
+
   useEffect(() => {
     if (!selected) {
       return;
@@ -100,10 +221,29 @@ export function RunRow({
     rowRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [selected]);
 
+  useEffect(() => {
+    window.addEventListener("scroll", clearLongPressTimeout, true);
+    window.addEventListener("blur", clearLongPressTimeout);
+    return () => {
+      window.removeEventListener("scroll", clearLongPressTimeout, true);
+      window.removeEventListener("blur", clearLongPressTimeout);
+      clearLongPressTimeout();
+      clearSuppressNextClickTimeout();
+    };
+  }, [clearLongPressTimeout, clearSuppressNextClickTimeout]);
+
   return (
     <article
       className={selected ? "run-row run-row--selected" : "run-row"}
       data-run-id={run.runId}
+      onClick={handleRowClick}
+      onContextMenu={handleRowContextMenu}
+      onKeyDown={handleRowKeyDown}
+      onPointerCancel={clearLongPressTimeout}
+      onPointerDown={handleRowPointerDown}
+      onPointerLeave={clearLongPressTimeout}
+      onPointerMove={handleRowPointerMove}
+      onPointerUp={clearLongPressTimeout}
       ref={rowRef}
     >
       <button
@@ -111,10 +251,6 @@ export function RunRow({
         aria-pressed={selected}
         className="run-row__main"
         onClick={onSelect}
-        onContextMenu={(event) => {
-          event.preventDefault();
-          onRequestActionMenu({ clientX: event.clientX, clientY: event.clientY });
-        }}
         type="button"
       >
         <span className="run-row__status">
