@@ -172,14 +172,15 @@ function RunActionMenu({
         return;
       }
       event.preventDefault();
+      event.stopImmediatePropagation();
       onClose();
     }
 
     window.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
     return () => {
       window.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [onClose]);
 

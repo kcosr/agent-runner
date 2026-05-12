@@ -8785,6 +8785,52 @@ describe("web app", () => {
     await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
   });
 
+  it("closes the run action menu on Escape without closing the selected run", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Menu escape",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Menu escape",
+            sourcePath: "/tmp/menu-escape.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    const card = await findRunCard("Menu escape");
+    await user.click(card);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-1"));
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    fireEvent.contextMenu(await findRunCard("Menu escape"), { clientX: 48, clientY: 56 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
+    expect(router.state.location.pathname).toBe("/runs/run-1");
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+  });
+
   it("does not open the run action menu from mouse pointerdown", async () => {
     installFetchMock({
       runs: [
