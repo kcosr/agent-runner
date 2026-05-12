@@ -584,17 +584,9 @@ export function RunsDashboardRoute() {
           setDestructiveConfirmation({ action: item.action, runId: menu.runId });
           return;
         case "ready":
-          void currentState.runActions.ready(menu.runId);
-          return;
         case "start":
-          void currentState.runActions.resume(menu.runId);
-          return;
         case "resume":
-          if (currentState.selectedRunId === menu.runId) {
-            currentState.openSelectedRunResumeDialog();
-            return;
-          }
-          void currentState.runActions.resume(menu.runId);
+          void currentState.triggerRunPrimaryAction(menu.runId);
           return;
       }
 

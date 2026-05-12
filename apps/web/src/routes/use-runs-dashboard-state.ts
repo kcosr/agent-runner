@@ -87,6 +87,7 @@ export type RunActionPending =
 
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
 const DETAIL_LOAD_DELAY_MS = 120;
+const PENDING_RESUME_DIALOG_QUERY_KEY = ["dashboard", "pendingResumeDialogRunId"] as const;
 
 function useSettledDetailRunId(selectedRunId?: string) {
   const [detailRunId, setDetailRunId] = useState<string | undefined>(selectedRunId);
@@ -1238,25 +1239,89 @@ export function useRunsDashboardState() {
     }
   }
 
+  async function getRunDetailForPrimaryAction(runId: string) {
+    if (selectedRunDetail?.runId === runId) {
+      return selectedRunDetail;
+    }
+    const cachedRunDetail = queryClient.getQueryData<RunDetail>(runQueryKeys.detail(runId));
+    if (cachedRunDetail) {
+      return cachedRunDetail;
+    }
+    const runDetail = await api.getRun(runId);
+    queryClient.setQueryData(runQueryKeys.detail(runId), runDetail);
+    return runDetail;
+  }
+
+  const runHasIncompleteTasks = useCallback((run: RunDetail) => {
+    return run.tasks.some((task) => task.status !== "completed");
+  }, []);
+
+  const openLoadedResumeDialog = useCallback(
+    (run: RunDetail) => {
+      setResumeMessageDraft("");
+      setResumeMessageExpanded(!runHasIncompleteTasks(run));
+      setResumeDialogOpen(true);
+    },
+    [runHasIncompleteTasks],
+  );
+
+  function openResumeDialogForRun(run: RunDetail) {
+    if (selectedRunId !== run.runId) {
+      queryClient.setQueryData(PENDING_RESUME_DIALOG_QUERY_KEY, run.runId);
+      navigateToRunDetail(run.runId);
+      return;
+    }
+    openLoadedResumeDialog(run);
+  }
+
+  async function triggerRunPrimaryAction(runId: string) {
+    if (actionPending !== undefined) {
+      return;
+    }
+    try {
+      const run = await getRunDetailForPrimaryAction(runId);
+      const primaryAction = getRunPrimaryAction(run);
+      if (primaryAction === null) {
+        return;
+      }
+      if (primaryAction === "resume") {
+        openResumeDialogForRun(run);
+        return;
+      }
+      if (primaryAction === "ready") {
+        await readyMutation.mutateAsync(runId);
+      } else {
+        await resumeMutation.mutateAsync({ runId });
+      }
+      setActionError(undefined);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Primary action failed.");
+    }
+  }
+
   async function triggerSelectedRunPrimaryAction() {
     if (!selectedRunId || selectedRunPrimaryAction === null || actionPending !== undefined) {
       return;
     }
-    if (selectedRunPrimaryAction === "resume") {
-      openResumeDialog();
+    await triggerRunPrimaryAction(selectedRunId);
+  }
+
+  useEffect(() => {
+    if (!selectedRunDetail) {
       return;
     }
-    try {
-      if (selectedRunPrimaryAction === "ready") {
-        await readyMutation.mutateAsync(selectedRunId);
-      } else {
-        await resumeMutation.mutateAsync({ runId: selectedRunId });
-      }
-      setActionError(undefined);
-    } catch {
-      // actionError is surfaced by the shared mutation handler.
+    const pendingResumeDialogRunId = queryClient.getQueryData<string>(
+      PENDING_RESUME_DIALOG_QUERY_KEY,
+    );
+    if (pendingResumeDialogRunId !== selectedRunDetail.runId) {
+      return;
     }
-  }
+    queryClient.removeQueries({ exact: true, queryKey: PENDING_RESUME_DIALOG_QUERY_KEY });
+    if (getRunPrimaryAction(selectedRunDetail) !== "resume") {
+      return;
+    }
+    openLoadedResumeDialog(selectedRunDetail);
+  }, [openLoadedResumeDialog, selectedRunDetail]);
 
   function navigateToRunDetail(runId: string, options?: RunNavigationOptions) {
     void navigate({
@@ -1484,6 +1549,7 @@ export function useRunsDashboardState() {
     auditState,
     submitSelectedRunResume,
     timelineState,
+    triggerRunPrimaryAction,
     triggerSelectedRunPrimaryAction,
     returnSelectedRunToAttachments: () => {
       if (!selectedRunId) {

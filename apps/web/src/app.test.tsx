@@ -8874,7 +8874,7 @@ describe("web app", () => {
     expect(router.state.location.pathname).toBe("/");
   });
 
-  it("resumes from an unselected run action menu without selecting the card", async () => {
+  it("opens the resume dialog from an unselected run action menu", async () => {
     let resumeRequestCount = 0;
     installFetchMock(
       {
@@ -8897,6 +8897,24 @@ describe("web app", () => {
               sourcePath: "/tmp/resume-from-menu.md",
             },
             status: "success",
+            tasks: [
+              {
+                id: "orient",
+                title: "Orient",
+                body: "Read the repo",
+                status: "completed",
+                notes: "done",
+              },
+              {
+                id: "ship",
+                title: "Ship it",
+                body: "Land the change",
+                status: "completed",
+                notes: "done",
+              },
+            ],
+            tasksCompleted: 2,
+            tasksTotal: 2,
             capabilities: {
               canReady: false,
               canResume: true,
@@ -8919,9 +8937,11 @@ describe("web app", () => {
 
     fireEvent.contextMenu(await findRunCard("Resume from menu"), { clientX: 48, clientY: 56 });
     await user.click(within(getRunActionMenuElement()).getByText("Resume"));
-    await waitFor(() => expect(resumeRequestCount).toBe(1));
-    expect(router.state.location.pathname).toBe("/");
-    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-resume"));
+    const resumeDialog = await screen.findByRole("dialog", { name: "Resume run" });
+    expect(within(resumeDialog).getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(within(resumeDialog).getByLabelText("Message")).toBeInTheDocument();
+    expect(resumeRequestCount).toBe(0);
   });
 
   it("uses menu Archive and Unarchive without selecting the card", async () => {
