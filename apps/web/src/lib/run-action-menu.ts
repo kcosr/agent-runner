@@ -36,6 +36,11 @@ const PRIMARY_LABELS = {
   start: "Start",
 } satisfies Record<NonNullable<ReturnType<typeof getRunPrimaryAction>>, string>;
 
+const DESTRUCTIVE_LABELS = {
+  "archive-delete": "Archive + Delete",
+  delete: "Delete",
+} satisfies Record<RunDestructiveCleanupAction, string>;
+
 export function getRunDestructiveCleanupAction(
   run: RunActionMenuRun,
 ): RunDestructiveCleanupAction | null {
@@ -67,17 +72,11 @@ export function getRunActionMenuItems(run: RunActionMenuRun): RunActionMenuItem[
   }
 
   const destructiveCleanupAction = getRunDestructiveCleanupAction(run);
-  if (destructiveCleanupAction === "archive-delete") {
+  if (destructiveCleanupAction !== null) {
     items.push({
       action: destructiveCleanupAction,
       kind: destructiveCleanupAction,
-      label: "Archive + Delete",
-    });
-  } else if (destructiveCleanupAction === "delete") {
-    items.push({
-      action: destructiveCleanupAction,
-      kind: destructiveCleanupAction,
-      label: "Delete",
+      label: DESTRUCTIVE_LABELS[destructiveCleanupAction],
     });
   }
 

@@ -1,6 +1,8 @@
+import type { ParsedHistoryState } from "@tanstack/history";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { ReactNode } from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { useNativeModalDialog } from "../components/native-dialog.js";
 import { RunFilters } from "../components/run-filters.js";
@@ -42,7 +44,17 @@ interface RunActionMenuState {
   y: number;
 }
 
-let pendingRunActionMenu: RunActionMenuState | null = null;
+interface PendingRunActionMenuRequest {
+  runId: string;
+  x: number;
+  y: number;
+}
+
+declare module "@tanstack/history" {
+  interface HistoryState {
+    pendingRunActionMenu?: PendingRunActionMenuRequest;
+  }
+}
 
 function isBoardFilterShortcutCommand(command: string): command is BoardFilterShortcutCommand {
   return command in BOARD_FILTER_PREFERENCE_KEYS;
@@ -214,9 +226,12 @@ function RunActionMenu({
 
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [destructiveConfirmation, setDestructiveConfirmation] =
     useState<DestructiveRunConfirmation | null>(null);
   const [runActionMenu, setRunActionMenu] = useState<RunActionMenuState | null>(null);
+  const pendingRunActionMenuRef = useRef<RunActionMenuState | null>(null);
   const runActionMenuSelectionMatchedRef = useRef(false);
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
   const [noteEditRequestVersion, setNoteEditRequestVersion] = useState(0);
@@ -229,6 +244,15 @@ export function RunsDashboardRoute() {
 
   latestStateRef.current = state;
   latestNavigableBoardColumnsRef.current = navigableBoardColumns;
+
+  const clearPendingRunActionMenuLocationState = useCallback(() => {
+    void navigate({
+      replace: true,
+      state: (current: ParsedHistoryState) => {
+        return { ...current, pendingRunActionMenu: undefined };
+      },
+    });
+  }, [navigate]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -401,9 +425,7 @@ export function RunsDashboardRoute() {
         if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
           return;
         }
-        const selectedRun =
-          currentState.runs.find((run) => run.runId === currentState.selectedRunId) ??
-          currentState.selectedRunQuery.data;
+        const selectedRun = findDashboardRun(currentState, currentState.selectedRunId);
         if (!selectedRun) {
           return;
         }
@@ -416,9 +438,7 @@ export function RunsDashboardRoute() {
         if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
           return;
         }
-        const selectedRun =
-          currentState.runs.find((run) => run.runId === currentState.selectedRunId) ??
-          currentState.selectedRunQuery.data;
+        const selectedRun = findDashboardRun(currentState, currentState.selectedRunId);
         if (!selectedRun) {
           return;
         }
@@ -482,6 +502,7 @@ export function RunsDashboardRoute() {
     if (!destructiveConfirmation || destructiveConfirmation.runId === state.selectedRunId) {
       return;
     }
+    pendingRunActionMenuRef.current = null;
     setDestructiveConfirmation(null);
   }, [destructiveConfirmation, state.selectedRunId]);
 
@@ -502,18 +523,49 @@ export function RunsDashboardRoute() {
   }, [runActionMenu, state.selectedRunId]);
 
   useEffect(() => {
-    if (!pendingRunActionMenu || pendingRunActionMenu.runId !== state.selectedRunId) {
+    const pendingRunActionMenu = pendingRunActionMenuRef.current;
+    const pendingRequest = location.state.pendingRunActionMenu;
+    const pendingRunId = pendingRunActionMenu?.runId ?? pendingRequest?.runId;
+    if (!pendingRunId || pendingRunId !== state.selectedRunId) {
       return;
     }
-    setRunActionMenu(pendingRunActionMenu);
-    pendingRunActionMenu = null;
-  }, [state.selectedRunId]);
+
+    const currentState = latestStateRef.current;
+    const run = findDashboardRun(currentState, pendingRunId);
+    const items = pendingRunActionMenu?.items ?? (run ? getRunActionMenuItems(run) : []);
+    pendingRunActionMenuRef.current = null;
+    if (pendingRequest) {
+      clearPendingRunActionMenuLocationState();
+    }
+    if (items.length === 0) {
+      return;
+    }
+    setRunActionMenu({
+      items,
+      runId: pendingRunId,
+      x: pendingRunActionMenu?.x ?? pendingRequest?.x ?? 8,
+      y: pendingRunActionMenu?.y ?? pendingRequest?.y ?? 8,
+    });
+  }, [
+    clearPendingRunActionMenuLocationState,
+    location.state.pendingRunActionMenu,
+    state.selectedRunId,
+  ]);
 
   useEffect(() => {
     if (state.actionPending !== undefined) {
+      pendingRunActionMenuRef.current = null;
       setRunActionMenu(null);
     }
   }, [state.actionPending]);
+
+  const closeRunActionMenu = useCallback(() => {
+    pendingRunActionMenuRef.current = null;
+    if (location.state.pendingRunActionMenu) {
+      clearPendingRunActionMenuLocationState();
+    }
+    setRunActionMenu(null);
+  }, [clearPendingRunActionMenuLocationState, location.state.pendingRunActionMenu]);
 
   async function submitDestructiveConfirmation() {
     const confirmation = destructiveConfirmation;
@@ -523,6 +575,7 @@ export function RunsDashboardRoute() {
 
     const currentState = latestStateRef.current;
     if (currentState.selectedRunId !== confirmation.runId) {
+      pendingRunActionMenuRef.current = null;
       setDestructiveConfirmation(null);
       return;
     }
@@ -530,10 +583,12 @@ export function RunsDashboardRoute() {
     const currentRun = findDashboardRun(currentState, confirmation.runId);
     const currentAction = currentRun ? getRunDestructiveCleanupAction(currentRun) : null;
     if (currentAction !== confirmation.action) {
+      pendingRunActionMenuRef.current = null;
       setDestructiveConfirmation(null);
       return;
     }
 
+    pendingRunActionMenuRef.current = null;
     setDestructiveConfirmation(null);
     try {
       if (confirmation.action === "archive-delete") {
@@ -549,15 +604,16 @@ export function RunsDashboardRoute() {
   function openRunActionMenu(runId: string, point: { clientX: number; clientY: number }) {
     const currentState = latestStateRef.current;
     const run = findDashboardRun(currentState, runId);
-    currentState.openRun(runId);
-    pendingRunActionMenu = null;
+    pendingRunActionMenuRef.current = null;
     setRunActionMenu(null);
 
     if (!run) {
+      currentState.openRun(runId);
       return;
     }
     const items = getRunActionMenuItems(run);
     if (items.length === 0) {
+      currentState.openRun(runId);
       return;
     }
 
@@ -574,41 +630,55 @@ export function RunsDashboardRoute() {
       y: Math.min(Math.max(8, clientY), Math.max(8, viewportHeight - height - 8)),
     };
     if (currentState.selectedRunId !== runId) {
-      pendingRunActionMenu = nextMenu;
+      pendingRunActionMenuRef.current = nextMenu;
+      currentState.openRun(runId, {
+        state: (current) => ({
+          ...current,
+          pendingRunActionMenu: {
+            runId,
+            x: nextMenu.x,
+            y: nextMenu.y,
+          },
+        }),
+      });
       return;
     }
     setRunActionMenu(nextMenu);
   }
 
-  function activateRunActionMenuItem(item: RunActionMenuItem) {
-    const menu = runActionMenu;
-    if (!menu || state.actionPending !== undefined) {
-      return;
-    }
-    setRunActionMenu(null);
+  const activateRunActionMenuItem = useCallback(
+    (item: RunActionMenuItem) => {
+      const menu = runActionMenu;
+      const currentState = latestStateRef.current;
+      if (!menu || currentState.actionPending !== undefined) {
+        return;
+      }
+      setRunActionMenu(null);
 
-    if (item.action === "archive") {
-      state.runActions.archive(menu.runId);
-      return;
-    }
-    if (item.action === "unarchive") {
-      state.runActions.unarchive(menu.runId);
-      return;
-    }
-    if (item.action === "archive-delete" || item.action === "delete") {
-      setDestructiveConfirmation({ action: item.action, runId: menu.runId });
-      return;
-    }
-    if (state.selectedRunId !== menu.runId) {
-      state.openRun(menu.runId);
-      return;
-    }
-    if (item.action === "resume") {
-      state.openSelectedRunResumeDialog();
-      return;
-    }
-    void state.triggerSelectedRunPrimaryAction();
-  }
+      if (item.action === "archive") {
+        currentState.runActions.archive(menu.runId);
+        return;
+      }
+      if (item.action === "unarchive") {
+        currentState.runActions.unarchive(menu.runId);
+        return;
+      }
+      if (item.action === "archive-delete" || item.action === "delete") {
+        setDestructiveConfirmation({ action: item.action, runId: menu.runId });
+        return;
+      }
+      if (currentState.selectedRunId !== menu.runId) {
+        currentState.openRun(menu.runId);
+        return;
+      }
+      if (item.action === "resume") {
+        currentState.openSelectedRunResumeDialog();
+        return;
+      }
+      void currentState.triggerSelectedRunPrimaryAction();
+    },
+    [runActionMenu],
+  );
 
   const topNotices = [
     state.streamStale ? (
@@ -767,11 +837,11 @@ export function RunsDashboardRoute() {
           onConfirm={() => void submitDestructiveConfirmation()}
         />
       ) : null}
-      {runActionMenu && runActionMenu.items.length > 0 ? (
+      {runActionMenu ? (
         <RunActionMenu
           items={runActionMenu.items}
           onActivate={activateRunActionMenuItem}
-          onClose={() => setRunActionMenu(null)}
+          onClose={closeRunActionMenu}
           runId={runActionMenu.runId}
           x={runActionMenu.x}
           y={runActionMenu.y}

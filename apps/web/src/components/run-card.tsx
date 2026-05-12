@@ -241,7 +241,10 @@ export function RunCard({
   }
 
   function handleCardPointerDown(event: PointerEvent<HTMLButtonElement>) {
-    if (event.pointerType === "mouse" || typeof window === "undefined") {
+    if (
+      (event.pointerType !== "touch" && event.pointerType !== "pen") ||
+      typeof window === "undefined"
+    ) {
       return;
     }
 

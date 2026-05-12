@@ -307,7 +307,10 @@ Every action button consults the run's `RunCapabilities`:
 
 Detail-drawer destructive actions (delete, reset, abort) use inline
 confirmations. The selected-run `Shift+A` cleanup shortcut and run-card
-action menu use modal confirmation before archive/delete cleanup.
+action menu use modal confirmation before archive/delete cleanup. Open
+the run-card action menu by right-clicking a run card on desktop or
+long-pressing a run card on touch devices; there is no visible overflow
+button.
 
 ## Keyboard shortcuts
 
@@ -342,7 +345,7 @@ is open. Native modal dialogs, including Resume and the run-note editor,
 handle Escape/back dismissal before dashboard shortcuts.
 
 When the detail drawer is fullscreen, selected-run shortcuts including
-`Enter`, `N`, `P`, `A`, and `C`/`D`/`N`/`T` remain active. Board movement,
+`Enter`, `N`, `P`, `A`, `Shift+A`, and `C`/`D`/`N`/`T` remain active. Board movement,
 search, and filter shortcuts remain suppressed in fullscreen drawer
 mode. Attachment preview keeps only surface navigation, fullscreen
 toggle, and Escape shortcuts active so hidden header actions do not fire.

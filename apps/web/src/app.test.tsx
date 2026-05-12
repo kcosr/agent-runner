@@ -1518,6 +1518,23 @@ function getRunActionMenuElement() {
   return menu as HTMLElement;
 }
 
+function dispatchPointerEvent(
+  target: Element,
+  type: string,
+  init: {
+    button?: number;
+    clientX?: number;
+    clientY?: number;
+    pointerType?: string;
+  },
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  for (const [key, value] of Object.entries(init)) {
+    Object.defineProperty(event, key, { value });
+  }
+  return fireEvent(target, event);
+}
+
 function getCloseDetailButton() {
   const closeButtons = screen.queryAllByRole("button", { name: /close selected run panel/i });
   const closeButton = closeButtons[0];
@@ -8761,6 +8778,54 @@ describe("web app", () => {
     expect(within(menu).getByText("Archive")).toBeInTheDocument();
     expect(within(menu).getByText("Archive + Delete")).toBeInTheDocument();
     await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-1"));
+
+    fireEvent.pointerDown(document.body, { clientX: 2, clientY: 2 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
+  });
+
+  it("does not open the run action menu from mouse pointerdown", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Mouse pointer menu",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Mouse pointer menu",
+            sourcePath: "/tmp/mouse-pointer-menu.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    await renderApp();
+    const card = await findRunCard("Mouse pointer menu");
+
+    dispatchPointerEvent(card, "pointerdown", {
+      button: 0,
+      clientX: 64,
+      clientY: 72,
+      pointerType: "mouse",
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 540));
+    });
+
+    expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument();
   });
 
   it("opens the run action menu on touch long-press and suppresses empty menus", async () => {
@@ -8816,7 +8881,7 @@ describe("web app", () => {
     await renderApp();
     const menuCard = await findRunCard("Long press menu");
 
-    fireEvent.pointerDown(menuCard, {
+    dispatchPointerEvent(menuCard, "pointerdown", {
       button: 0,
       clientX: 64,
       clientY: 72,
@@ -8829,7 +8894,7 @@ describe("web app", () => {
     await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
     expect(router.state.location.pathname).toBe("/runs/run-1");
 
-    fireEvent.pointerDown(await findRunCard("No menu actions"), {
+    dispatchPointerEvent(await findRunCard("No menu actions"), "pointerdown", {
       button: 0,
       clientX: 70,
       clientY: 80,
@@ -8972,6 +9037,51 @@ describe("web app", () => {
       ),
     );
     expect(fetchMutationUrls(fetchMock).slice(-1)).toEqual(["/api/runs/run-archived"]);
+  });
+
+  it("leaves Shift+A unhandled when the selected run cannot archive or delete", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "No cleanup shortcut",
+          capabilities: {
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "No cleanup shortcut",
+            sourcePath: "/tmp/no-cleanup-shortcut.md",
+          },
+          capabilities: {
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("No cleanup shortcut"));
+
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "A",
+      shiftKey: true,
+    });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(screen.queryByRole("button", { name: "Archive + Delete" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /delete run/i })).not.toBeInTheDocument();
+    expect(fetchMutationUrls(fetchMock)).toEqual([]);
   });
 
   it("uses Shift+A to confirm Archive + Delete or Delete for the selected run", async () => {

@@ -1,3 +1,4 @@
+import type { HistoryState, ParsedHistoryState } from "@tanstack/history";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type {
@@ -56,6 +57,11 @@ interface HistoryActivationState {
   runId?: string;
   timeline: boolean;
 }
+
+type RunNavigationOptions = {
+  replace?: boolean;
+  state?: true | ((current: ParsedHistoryState) => HistoryState);
+};
 
 export type RunActionPending =
   | "archive"
@@ -1254,15 +1260,20 @@ export function useRunsDashboardState() {
     }
   }
 
-  function navigateToRunDetail(runId: string, options?: { replace?: boolean }) {
-    void navigate({ params: { runId }, replace: options?.replace, to: "/runs/$runId" });
+  function navigateToRunDetail(runId: string, options?: RunNavigationOptions) {
+    void navigate({
+      params: { runId },
+      replace: options?.replace,
+      state: options?.state,
+      to: "/runs/$runId",
+    });
   }
 
   function navigateToAttachmentPreview(
     runId: string,
     attachmentOwnerRunId: string,
     attachmentId: string,
-    options?: { replace?: boolean },
+    options?: RunNavigationOptions,
   ) {
     void navigate({
       params: {
@@ -1271,6 +1282,7 @@ export function useRunsDashboardState() {
         runId,
       },
       replace: options?.replace,
+      state: options?.state,
       to: "/runs/$runId/attachments/$attachmentOwnerRunId/$attachmentId",
     });
   }
@@ -1345,7 +1357,7 @@ export function useRunsDashboardState() {
       setNotices((current) => current.filter((notice) => notice.id !== id));
     },
     notices,
-    openRun: (runId: string, options?: { replace?: boolean }) => {
+    openRun: (runId: string, options?: RunNavigationOptions) => {
       setActionError(undefined);
       const drawerView = viewState.drawerViewsByRunId[runId];
       if (drawerView?.mode === "attachment") {
