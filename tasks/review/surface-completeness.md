@@ -28,8 +28,9 @@ internal implementation details.
   - If the review has access to a planning artifact
     (e.g. via `implementation_run_id` or an attached
     Surface Inventory), use that inventory as ground
-    truth. The implementation run's orient task should
-    expose it under a Surface Inventory section.
+    truth. The implementation run should expose it in
+    the orient task or a dedicated inventory task such
+    as `feature-plan/surface-inventory`.
   - If no planning artifact exists (direct/ad-hoc review),
     derive the inventory yourself from the diff. Look for
     every newly-added or modified named entity in:

@@ -52,8 +52,8 @@ every planned task actually shipped — that is what
 the reviewer's plan-coverage task consumes.
 
 Keep `--cwd {{cwd}}` on the nested review command so the
-reviewer stays in the same sibling worktree without recomputing the
-path or manually re-passing lineage vars.
+reviewer inspects the same checkout this run used, without
+recomputing the repository path.
 
 Use the same short topic label the caller used when they
 initialized this run:

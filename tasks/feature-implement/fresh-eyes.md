@@ -8,7 +8,7 @@ title: Fresh-eyes simplification pass
 Before kicking off the internal code review, re-read
 your own diff with fresh eyes. Look for:
   - Duplication with existing helpers (cross-reference
-    the planning run's duplication-check task notes).
+    the `feature-plan/check-existing-code` Notes).
   - Dead code, unused imports, or accidentally-
     introduced abstractions that do not pay for
     themselves.
