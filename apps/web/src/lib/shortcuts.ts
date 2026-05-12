@@ -1,5 +1,5 @@
 import type { BoardColumn } from "../components/run-column.js";
-import type { RunDrawerView } from "./settings.js";
+import type { DashboardViewMode, RunDrawerView } from "./settings.js";
 
 type RunsShortcutCommand =
   | "board.moveUp"
@@ -20,6 +20,7 @@ type RunsShortcutCommand =
   | "run.togglePinned"
   | "ui.toggleFilters"
   | "ui.toggleDrawerFullscreen"
+  | "ui.cycleViewMode"
   | "ui.blurSearch"
   | "ui.clearStructuredFilters"
   | "run.close"
@@ -52,6 +53,7 @@ interface RunsShortcutContext {
   selectedDrawerView?: RunDrawerView;
   selectedRunId?: string;
   typingTarget: boolean;
+  viewMode: DashboardViewMode;
 }
 
 type BoardDirection = "up" | "down" | "left" | "right";
@@ -109,6 +111,10 @@ function matchesShortcut(
     event.shiftKey === Boolean(shortcut.shiftKey) &&
     event.altKey === false
   );
+}
+
+function matchesBareLetter(event: ShortcutEventLike, key: string): boolean {
+  return normalizeEventKey(event.key) === key && !event.altKey && !event.ctrlKey && !event.metaKey;
 }
 
 function firstRunIdInColumn(column: BoardColumn | undefined): string | null {
@@ -343,6 +349,9 @@ export function resolveRunsShortcutCommand(
 
   const boardFilterCommand = resolveBoardFilterShortcut(event, context);
   if (boardFilterCommand) {
+    if (boardFilterCommand === "ui.toggleHideEmptyColumns" && context.viewMode !== "board") {
+      return null;
+    }
     return boardFilterCommand;
   }
 
@@ -355,6 +364,15 @@ export function resolveRunsShortcutCommand(
 
   if (context.resumeDialogOpen) {
     return null;
+  }
+
+  if (
+    matchesBareLetter(event, "v") &&
+    !context.typingTarget &&
+    !context.searchFocused &&
+    context.selectedDrawerView?.mode !== "attachment"
+  ) {
+    return "ui.cycleViewMode";
   }
 
   if (normalizeEventKey(event.key) === "escape") {
@@ -382,6 +400,10 @@ export function resolveRunsShortcutCommand(
 
   if (context.typingTarget) {
     return null;
+  }
+
+  if (context.viewMode !== "board") {
+    return resolveSelectedRunShortcut(event, context);
   }
 
   if (matchesShortcut(event, { key: "arrowup" })) {

@@ -33,6 +33,7 @@ import {
   DEFAULT_DRAWER_VIEW,
   type DashboardRightSurface,
   type DashboardStructuredFilters,
+  type DashboardViewMode,
   type DrawerDetailSection,
   EMPTY_DASHBOARD_STRUCTURED_FILTERS,
   type RunDrawerView,
@@ -60,6 +61,25 @@ interface HistoryActivationState {
 type RunNavigationOptions = {
   replace?: boolean;
 };
+
+const LIST_STATUS_FILTERS = [
+  { status: "initialized", label: "Initialized" },
+  { status: "ready", label: "Ready" },
+  { status: "running", label: "Running" },
+  { status: "blocked", label: "Blocked" },
+  { status: "exhausted", label: "Exhausted" },
+  { status: "error", label: "Error" },
+  { status: "aborted", label: "Aborted" },
+  { status: "success", label: "Completed" },
+] as const satisfies readonly { status: RunStatus; label: string }[];
+
+export type DashboardListStatusFilter = (typeof LIST_STATUS_FILTERS)[number]["status"];
+
+export interface DashboardListStatusCount {
+  count: number;
+  label: string;
+  status: DashboardListStatusFilter;
+}
 
 export type RunActionPending =
   | "archive"
@@ -197,6 +217,22 @@ function buildColumns(
       compareRuns,
     ),
   }));
+}
+
+function buildListStatusCounts(runs: RunSummary[]): DashboardListStatusCount[] {
+  const countsByStatus = new Map<RunStatus, number>();
+  for (const run of runs) {
+    countsByStatus.set(run.effectiveStatus, (countsByStatus.get(run.effectiveStatus) ?? 0) + 1);
+  }
+
+  return LIST_STATUS_FILTERS.flatMap((statusFilter) => {
+    const count = countsByStatus.get(statusFilter.status) ?? 0;
+    return count > 0 ? [{ ...statusFilter, count }] : [];
+  });
+}
+
+function nextDashboardViewMode(viewMode: DashboardViewMode): DashboardViewMode {
+  return viewMode === "board" ? "list" : "board";
 }
 
 function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[] {
@@ -429,6 +465,7 @@ export function useRunsDashboardState() {
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
+  const [listStatusFilter, setListStatusFilter] = useState<DashboardListStatusFilter | null>(null);
   const [historyActivation, setHistoryActivation] = useState<HistoryActivationState>({
     audit: false,
     timeline: false,
@@ -607,6 +644,14 @@ export function useRunsDashboardState() {
     () => createRunComparator(preferences.sortField, preferences.sortDirection),
     [preferences.sortDirection, preferences.sortField],
   );
+  const listStatusCounts = useMemo(() => buildListStatusCounts(visibleRuns), [visibleRuns]);
+  const listRows = useMemo(() => {
+    const rows =
+      listStatusFilter === null
+        ? visibleRuns
+        : visibleRuns.filter((run) => run.effectiveStatus === listStatusFilter);
+    return [...rows].sort(compareRuns);
+  }, [compareRuns, listStatusFilter, visibleRuns]);
   const columns = useMemo(
     () => buildColumns(visibleRuns, preferences.collapseFailureStates, compareRuns),
     [compareRuns, preferences.collapseFailureStates, visibleRuns],
@@ -1454,6 +1499,9 @@ export function useRunsDashboardState() {
     preferences,
     filterOptions,
     hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
+    listRows,
+    listStatusCounts,
+    listStatusFilter,
     resumeDialogOpen,
     selectedRunResumeRequiresMessage,
     resumePendingRunId,
@@ -1559,6 +1607,7 @@ export function useRunsDashboardState() {
       navigateToRunDetail(selectedRunId, { replace: true });
     },
     resetBoardFilters: () => {
+      setListStatusFilter(null);
       updateViewState({ search: "" });
       updatePreferences({
         showArchived: false,
@@ -1579,6 +1628,18 @@ export function useRunsDashboardState() {
       updateViewState({ activeBoardColumnKey: columnKey });
     },
     setActiveRightSurface,
+    setListStatusFilter,
+    setViewMode: (viewMode: DashboardViewMode) => {
+      if (viewState.viewMode === viewMode) {
+        return;
+      }
+      updateViewState({ viewMode });
+    },
+    cycleViewMode: () => {
+      updateViewState((current) => ({
+        viewMode: nextDashboardViewMode(current.viewMode),
+      }));
+    },
     toggleDrawerFullscreen: () => {
       updateViewState({ drawerFullscreen: !viewState.drawerFullscreen });
     },
@@ -1601,6 +1662,7 @@ export function useRunsDashboardState() {
     updatePreferences,
     updateViewState,
     visibleRuns,
+    viewMode: viewState.viewMode,
     viewState,
     closeSelectedRunResumeDialog: closeResumeDialog,
   };

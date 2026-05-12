@@ -41,6 +41,11 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Toggle Filters",
       },
       {
+        description: "Cycle the dashboard between Board and List view modes.",
+        keys: ["V"],
+        title: "Cycle view mode",
+      },
+      {
         description: "Toggle the board filter that keeps only scheduled runs visible.",
         keys: ["Ctrl", "Shift", "S"],
         macKeys: ["Cmd", "Shift", "S"],

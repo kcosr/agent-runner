@@ -56,11 +56,13 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
 };
 
 const DEFAULT_DASHBOARD_VIEW_STATE: {
+  viewMode: "board" | "list";
   collapsedColumnKeys: string[];
   drawerWidth: number;
   activeRightSurface: "detail" | "chat" | "notes" | "tasks";
   drawerFullscreen: boolean;
 } = {
+  viewMode: "board",
   collapsedColumnKeys: [],
   drawerWidth: 540,
   activeRightSurface: "detail",
@@ -1476,6 +1478,18 @@ async function findRunCard(name: string | RegExp) {
   );
 }
 
+async function findRunRow(name: string | RegExp) {
+  return await screen.findByRole(
+    "button",
+    {
+      name: typeof name === "string" ? new RegExp(`^Open run ${escapeRegExp(name)}$`, "i") : name,
+    },
+    {
+      timeout: 5000,
+    },
+  );
+}
+
 function nativeCancel(dialog: HTMLElement) {
   fireEvent(dialog, new Event("cancel", { cancelable: true }));
 }
@@ -1761,6 +1775,308 @@ describe("web app", () => {
     expect(screen.getByText("/tmp/task-runner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy cwd path/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+  });
+
+  it("toggles list mode, filters by status, sorts globally, and preserves row actions", async () => {
+    const runs = [
+      makeRun({
+        runId: "run-list-running",
+        repo: "repo-a",
+        assignmentName: "Running list",
+        name: "Running list",
+        status: "running",
+        effectiveStatus: "running",
+        startedAt: "2026-04-13T05:00:00.000Z",
+        updatedAt: "2026-04-13T05:00:00.000Z",
+        attachmentCount: 2,
+        queuedResumeMessageCount: 1,
+        notePresent: true,
+      }),
+      makeRun({
+        runId: "run-list-completed",
+        repo: "repo-a",
+        assignmentName: "Completed list",
+        name: "Completed list",
+        status: "success",
+        effectiveStatus: "success",
+        startedAt: "2026-04-13T06:00:00.000Z",
+        updatedAt: "2026-04-13T06:00:00.000Z",
+        endedAt: "2026-04-13T06:30:00.000Z",
+      }),
+      makeRun({
+        runId: "run-list-ready",
+        repo: "repo-b",
+        assignmentName: "Ready list",
+        name: "Ready list",
+        status: "ready",
+        effectiveStatus: "ready",
+        startedAt: "2026-04-13T07:00:00.000Z",
+        updatedAt: "2026-04-13T07:00:00.000Z",
+        activeTask: null,
+        capabilities: {
+          canReady: true,
+        },
+      }),
+      makeRun({
+        runId: "run-list-blocked",
+        repo: "repo-c",
+        assignmentName: "Blocked list",
+        name: "Blocked list",
+        status: "blocked",
+        effectiveStatus: "blocked",
+        startedAt: "2026-04-13T04:00:00.000Z",
+        updatedAt: "2026-04-13T04:00:00.000Z",
+      }),
+    ];
+    const fetchMock = installFetchMock({
+      runs,
+      details: Object.fromEntries(
+        runs.map((run) => [
+          run.runId,
+          makeDetail({
+            runId: run.runId,
+            repo: run.repo,
+            status: run.status,
+            effectiveStatus: run.effectiveStatus,
+            assignment: run.assignmentName
+              ? { name: run.assignmentName, sourcePath: `/tmp/${run.runId}.md` }
+              : null,
+            name: run.name,
+            pinned: run.pinned,
+            note: run.notePresent ? "List note" : null,
+            capabilities: run.capabilities,
+          }),
+        ]),
+      ),
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await findRunCard("Ready list");
+    await user.click(screen.getByRole("button", { name: "List" }));
+
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /hide empty columns/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /collapse failure states/i }),
+    ).not.toBeInTheDocument();
+
+    const list = await screen.findByLabelText("Runs list");
+    expect(
+      within(list)
+        .getAllByRole("button", { name: /^Open run / })
+        .map((button) => button.textContent),
+    ).toEqual([
+      expect.stringContaining("Ready list"),
+      expect.stringContaining("Completed list"),
+      expect.stringContaining("Running list"),
+      expect.stringContaining("Blocked list"),
+    ]);
+    expect(screen.getByRole("button", { name: "All statuses, 4 runs" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Completed, 1 run" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Initialized, 1 run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Exhausted, 1 run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Error, 1 run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Aborted, 1 run" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Completed, 1 run" }));
+    expect(await findRunRow("Completed list")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Open run Running list$/i }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "All statuses, 4 runs" }));
+    expect(await findRunRow("Running list")).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText("Search runs"), "ready");
+    expect(await findRunRow("Ready list")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Open run Completed list$/i }),
+    ).not.toBeInTheDocument();
+
+    await user.clear(screen.getByPlaceholderText("Search runs"));
+    const repoFilterButton = screen.getAllByRole("button", { name: "Filter by repo repo-a" }).at(0);
+    if (!repoFilterButton) {
+      throw new Error("Expected at least one repo-a filter button in list mode.");
+    }
+    await user.click(repoFilterButton);
+    expect(await findRunRow("Completed list")).toBeInTheDocument();
+    expect(await findRunRow("Running list")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Open run Ready list$/i }),
+    ).not.toBeInTheDocument();
+
+    await user.click(await findRunRow("Completed list"));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    expect(screen.getAllByText("Completed list").length).toBeGreaterThanOrEqual(1);
+
+    await user.click(screen.getByRole("button", { name: "Run actions for run-list-completed" }));
+    expect(getRunActionMenuElement()).toHaveAttribute(
+      "aria-label",
+      "Run actions for run-list-completed",
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Pin run run-list-completed" }));
+    await waitFor(() =>
+      expect(
+        fetchMutationUrls(fetchMock).some((url) => url === "/api/runs/run-list-completed/pinned"),
+      ).toBe(true),
+    );
+  });
+
+  it("renders list status chips for every run status label", async () => {
+    const statusRuns = [
+      ["initialized", "Initialized"],
+      ["ready", "Ready"],
+      ["running", "Running"],
+      ["blocked", "Blocked"],
+      ["exhausted", "Exhausted"],
+      ["error", "Error"],
+      ["aborted", "Aborted"],
+      ["success", "Completed"],
+    ] as const;
+    installFetchMock({
+      runs: statusRuns.map(([status, label]) =>
+        makeRun({
+          runId: `run-chip-${status}`,
+          assignmentName: `${label} chip`,
+          name: `${label} chip`,
+          status,
+          effectiveStatus: status,
+          endedAt: status === "success" ? "2026-04-13T06:30:00.000Z" : null,
+        }),
+      ),
+      details: Object.fromEntries(
+        statusRuns.map(([status, label]) => [
+          `run-chip-${status}`,
+          makeDetail({
+            runId: `run-chip-${status}`,
+            assignment: { name: `${label} chip`, sourcePath: `/tmp/run-chip-${status}.md` },
+            name: `${label} chip`,
+            status,
+            effectiveStatus: status,
+          }),
+        ]),
+      ),
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await findRunCard("Ready chip");
+    await user.click(screen.getByRole("button", { name: "List" }));
+
+    expect(await screen.findByRole("button", { name: "All statuses, 8 runs" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    for (const [, label] of statusRuns) {
+      expect(screen.getByRole("button", { name: `${label}, 1 run` })).toBeInTheDocument();
+    }
+  });
+
+  it("cycles view modes with V, suppresses V while typing, and hydrates persisted list mode", async () => {
+    installFetchMock({
+      runs: [makeRun({ runId: "run-list-cycle", name: "Cycle list" })],
+      details: { "run-list-cycle": makeDetail({ runId: "run-list-cycle", name: "Cycle list" }) },
+    });
+
+    const user = userEvent.setup();
+    const rendered = await renderApp();
+
+    await findRunCard("Cycle list");
+    expect(screen.getByRole("button", { name: "Board" })).toHaveAttribute("aria-pressed", "true");
+    await user.keyboard("v");
+    expect(await screen.findByLabelText("Runs list")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.type(screen.getByPlaceholderText("Search runs"), "cycle");
+    await user.keyboard("v");
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+
+    rendered.unmount();
+    cleanup();
+    queryClient.clear();
+    setStoredDashboardViewState({ viewMode: "list" });
+    await renderApp();
+
+    expect(await screen.findByLabelText("Runs list")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("switches modes without clearing board collapse, search, selected run, or list status state", async () => {
+    const runs = [
+      makeRun({
+        runId: "run-mode-running",
+        assignmentName: "Mode running",
+        name: "Mode running",
+        status: "running",
+        effectiveStatus: "running",
+      }),
+      makeRun({
+        runId: "run-mode-completed",
+        assignmentName: "Mode completed",
+        name: "Mode completed",
+        status: "success",
+        effectiveStatus: "success",
+        endedAt: "2026-04-13T06:30:00.000Z",
+      }),
+    ];
+    installFetchMock({
+      runs,
+      details: {
+        "run-mode-running": makeDetail({
+          runId: "run-mode-running",
+          name: "Mode running",
+          assignment: { name: "Mode running", sourcePath: "/tmp/mode-running.md" },
+        }),
+        "run-mode-completed": makeDetail({
+          runId: "run-mode-completed",
+          name: "Mode completed",
+          status: "success",
+          effectiveStatus: "success",
+          assignment: { name: "Mode completed", sourcePath: "/tmp/mode-completed.md" },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await findRunCard("Mode running");
+    await user.click(screen.getByRole("button", { name: "Collapse Running column" }));
+    expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "true");
+    await user.click(await findRunCard("Mode completed"));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Search runs"), "mode");
+
+    await user.click(screen.getByRole("button", { name: "List" }));
+    expect(await screen.findByLabelText("Runs list")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search runs")).toHaveValue("mode");
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Completed, 1 run" }));
+    expect(await findRunRow("Mode completed")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Open run Mode running$/i }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Board" }));
+    expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.getByPlaceholderText("Search runs")).toHaveValue("mode");
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "List" }));
+    expect(screen.getByRole("button", { name: "Completed, 1 run" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(await findRunRow("Mode completed")).toBeInTheDocument();
   });
 
   it("shows an explicit empty state when the selected run has no tasks", async () => {
@@ -7362,6 +7678,7 @@ describe("web app", () => {
 
     const storedViewState = window.localStorage.getItem("task-runner:web:dashboard-view-state");
     expect(storedViewState ? JSON.parse(storedViewState) : null).toEqual({
+      viewMode: "board",
       collapsedColumnKeys: [],
       drawerWidth: 570,
       activeRightSurface: "detail",
@@ -10311,6 +10628,7 @@ describe("web app", () => {
     });
     expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
+        viewMode: "board",
         collapsedColumnKeys: ["running"],
         drawerWidth: 540,
         activeRightSurface: "detail",
@@ -10329,6 +10647,7 @@ describe("web app", () => {
     });
     expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
+        viewMode: "board",
         collapsedColumnKeys: [],
         drawerWidth: 540,
         activeRightSurface: "detail",

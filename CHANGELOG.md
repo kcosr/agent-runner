@@ -146,6 +146,9 @@
 
 ### Added
 
+- Added a web dashboard Board/List view-mode toggle. The new List view shows
+  globally sorted compact run rows with status chips while preserving the
+  existing Board workflow and persisted view-mode choice.
 - Added the `plan-implement-feature` assignment for single-run feature
   planning, approval, implementation, review, and PR handoff, plus shared
   `feature-plan/*` and `feature-implement/*` task definitions.

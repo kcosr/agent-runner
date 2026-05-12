@@ -52,7 +52,7 @@ normal run detail/status DTOs do not expose the run's frozen
 
 ## Views
 
-- `/` — Runs dashboard with Board, Chat, Detail, Notes, and Tasks surfaces.
+- `/` — Runs dashboard with Board/List, Chat, Detail, Notes, and Tasks surfaces.
 - `/runs/:runId` — Same dashboard with a specific run selected for the
   selected-run surfaces.
 - `/settings/general` — General preferences.
@@ -63,28 +63,32 @@ normal run detail/status DTOs do not expose the run's frozen
 A multi-surface workspace:
 
 - **Left** — search, grouped Filters control, and preference toggles.
-- **Center** — Board, the kanban run list grouped by run status.
+- **Center** — Board or List, switchable from the toolbar.
 - **Right** — one selected-run panel with Chat, Detail, Notes, and Tasks tabs.
 
-Board is always visible. Selecting a run opens one resizable selected-run
-panel. Its header owns the run identity plus action toolbar, and the tabs
-below the toolbar switch between Chat, Detail, Notes, and Tasks. Chat does not
-create a separate chat route or backend chat contract; it follows the
-selected run, derives messages from `RunDetail` plus timeline history,
-and streams live output through the existing timeline stream.
+The center surface defaults to Board. The toolbar view-mode toggle switches
+between Board and List, and the durable mode choice persists in
+`task-runner:web:dashboard-view-state.viewMode`. Selecting a run opens one
+resizable selected-run panel. Its header owns the run identity plus action
+toolbar, and the tabs below the toolbar switch between Chat, Detail, Notes,
+and Tasks. Chat does not create a separate chat route or backend chat
+contract; it follows the selected run, derives messages from `RunDetail`
+plus timeline history, and streams live output through the existing
+timeline stream.
 
 Closing the selected-run panel navigates back to `/` and clears the
 selected run. Chat, Detail, Notes, and Tasks tab choice persists as the active right
 surface.
 
 Dashboard view state persists the durable surface layout fields:
-collapsed board columns, selected-run panel width, and the active
-Chat/Detail/Notes/Tasks tab. Search text, fullscreen state, per-run drawer tabs, and
-the active board column remain transient.
+center-surface view mode, collapsed board columns, selected-run panel width,
+and the active Chat/Detail/Notes/Tasks tab. Search text, fullscreen state,
+per-run drawer tabs, the active board column, and the active list status chip
+remain transient.
 
 On desktop layouts, the selected-run panel renders inline to the right of
-the board. On narrow mobile layouts, the selected-run panel becomes an
-in-layout sheet over the board.
+the center surface. On narrow mobile layouts, the selected-run panel becomes
+an in-layout sheet over the center surface.
 
 The grouped **Filters** control opens an anchored popover on desktop and a
 sheet-style overlay on narrow/mobile layouts. It applies exact-match
@@ -137,10 +141,30 @@ layouts default to **Preview** mode first.
 
 Above the board, a **jump strip** exposes only the currently rendered
 non-empty columns and scrolls them into view when the board overflows
-horizontally.
+horizontally. Jumpbar behavior is board-only; switching to List hides the
+jump strip and disables board movement shortcuts until Board is active again.
 
 Motion animations highlight insertions and reorders. Empty columns can
 be auto-hidden.
+
+### List
+
+The list view shows the same filtered `RunSummary` collection as the board
+as compact rows sorted globally by the active sort field and direction. It
+does not bucket rows by status, and pinned runs stay represented by a row
+signal and pin action rather than a separate pinned-first bucket.
+
+Status chips above the rows show `All` plus only statuses that currently
+have at least one visible run. The status labels are `Initialized`, `Ready`,
+`Running`, `Blocked`, `Exhausted`, `Error`, `Aborted`, and `Completed`.
+Choosing a status filters the list rows; choosing `All` clears only that
+status chip. Search and structured filters compose with the selected status
+chip, and reset actions clear the same dashboard filters used by the board.
+
+Each compact row opens the selected-run panel, exposes repo/agent/backend
+and run-group filter shortcuts, shows task progress and row signals for
+pin, notes, schedule, dependencies, attachments, queued messages, and active
+task, and uses the same pin and overflow action menu as board cards.
 
 ### Detail drawer
 
@@ -260,7 +284,7 @@ The dashboard consumes four independent streams:
 
 | Stream | Source | Consumer |
 |--------|--------|----------|
-| `run_summary` | `/api/events/run-summaries` | Board cards |
+| `run_summary` | `/api/events/run-summaries` | Board cards and List rows |
 | `run_detail` | `/api/runs/:runId/events/detail` | Drawer header, tabs |
 | `run_audit` | `/api/runs/:runId/events/audit` (+ `/audit` history) | Audit tab |
 | `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Attempts tab and Chat |
@@ -331,6 +355,7 @@ The dashboard's shortcut system is customizable from
 | `Ctrl+Shift+N` | Toggle notes-only filter |
 | `Ctrl+Shift+A` | Toggle archived filter |
 | `Ctrl+Shift+E` | Toggle hide-empty-columns |
+| `V` | Cycle the center surface between Board and List |
 | `P` | Pin or unpin the selected run |
 | `C` | Show the selected run's Chat tab, or focus its composer when Chat is open |
 | `D` | Show the selected run's Detail tab |
@@ -358,6 +383,7 @@ the existing fullscreen and drawer close behavior.
 
 Preferences are persisted to `localStorage` and include:
 
+- Center-surface view mode (`board` or `list`).
 - Hide empty columns.
 - Collapse failure states into a single column.
 - Board sort field (`startedAt`, `updatedAt`, or `endedAt`) and direction
@@ -404,8 +430,8 @@ is no standalone web server in the shipped runtime.
    requests.
 3. Subscribes to the global summary stream; mutations arrive as
    `summary_upsert` / `summary_removed` events and update the
-   TanStack React Query cache. Board sorting is recomputed from cached
-   canonical summary timestamps.
+   TanStack React Query cache. Board and List ordering are recomputed from
+   cached canonical summary timestamps.
 4. Selecting a run subscribes to its detail stream; opening Attempts or
    Audit starts the corresponding history load and live stream, which remain
    active while that run stays selected.

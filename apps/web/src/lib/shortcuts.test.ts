@@ -120,9 +120,34 @@ describe("resolveRunsShortcutCommand", () => {
     selectedDrawerView: undefined,
     selectedRunId: "run-running-1",
     typingTarget: false,
+    viewMode: "board",
   } as const;
 
   it("maps global navigation and focus shortcuts", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("ui.cycleViewMode");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "V",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.cycleViewMode");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -745,6 +770,66 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          typingTarget: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          resumeDialogOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          searchFocused: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
           key: "p",
           metaKey: false,
           shiftKey: false,
@@ -923,6 +1008,33 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBeNull();
   });
 
+  it("scopes board arrow navigation and hide-empty shortcuts to board mode", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowRight",
+          metaKey: false,
+          shiftKey: false,
+        },
+        { ...context, viewMode: "list" },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "e",
+          metaKey: false,
+          shiftKey: true,
+        },
+        { ...context, viewMode: "list" },
+      ),
+    ).toBeNull();
+  });
+
   it("allows selected-run actions but blocks board shortcuts while the drawer is fullscreen", () => {
     const fullscreenContext = {
       ...context,
@@ -983,6 +1095,18 @@ describe("resolveRunsShortcutCommand", () => {
           altKey: false,
           ctrlKey: true,
           key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
           metaKey: false,
           shiftKey: false,
         },

@@ -62,8 +62,10 @@ export type RunDrawerView =
     };
 
 export type DashboardRightSurface = "detail" | "chat" | "notes" | "tasks";
+export type DashboardViewMode = "board" | "list";
 
 export interface DashboardViewState {
+  viewMode: DashboardViewMode;
   search: string;
   collapsedColumnKeys: string[];
   drawerWidth: number;
@@ -101,6 +103,7 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
 };
 
 const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
+  viewMode: "board",
   search: "",
   collapsedColumnKeys: [],
   drawerWidth: DRAWER_WIDTH_DEFAULT,
@@ -269,8 +272,13 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
   }
 
   const record = value as Record<string, unknown>;
+  const viewMode =
+    record.viewMode === "board" || record.viewMode === "list"
+      ? record.viewMode
+      : DEFAULT_DASHBOARD_VIEW_STATE.viewMode;
   return {
     ...DEFAULT_DASHBOARD_VIEW_STATE,
+    viewMode,
     drawerWidth:
       typeof record.drawerWidth === "number"
         ? clampDrawerWidth(record.drawerWidth)
@@ -330,6 +338,7 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
     window.localStorage.setItem(
       VIEW_STATE_STORAGE_KEY,
       JSON.stringify({
+        viewMode: viewState.viewMode,
         collapsedColumnKeys: viewState.collapsedColumnKeys,
         drawerWidth: viewState.drawerWidth,
         activeRightSurface: viewState.activeRightSurface,
@@ -341,6 +350,7 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
     viewState.collapsedColumnKeys,
     viewState.drawerFullscreen,
     viewState.drawerWidth,
+    viewState.viewMode,
   ]);
 
   useEffect(() => {

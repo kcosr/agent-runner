@@ -11,6 +11,7 @@ import {
   getRunDestructiveCleanupAction,
 } from "../lib/run-action-menu.js";
 import type { DashboardPreferences } from "../lib/settings.js";
+import type { DashboardViewMode } from "../lib/settings.js";
 import {
   isEditableEventTarget,
   resolveBoardNeighborRunId,
@@ -19,6 +20,7 @@ import {
 import { RunChatView } from "./run-chat-panel.js";
 import { RunDetailPanel } from "./run-detail-panel.js";
 import { RunsBoardPanel } from "./runs-board-panel.js";
+import { RunsListPanel } from "./runs-list-panel.js";
 import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 
 const BOARD_FILTER_PREFERENCE_KEYS = {
@@ -30,6 +32,8 @@ const BOARD_FILTER_PREFERENCE_KEYS = {
 } satisfies Record<string, keyof DashboardPreferences>;
 
 type BoardFilterShortcutCommand = keyof typeof BOARD_FILTER_PREFERENCE_KEYS;
+type RunsDashboardState = ReturnType<typeof useRunsDashboardState>;
+
 interface DestructiveRunConfirmation {
   action: RunDestructiveCleanupAction;
   runId: string;
@@ -62,15 +66,15 @@ function findDashboardRun(
 }
 
 function DashboardSurfaces({
-  board,
+  primary,
   detail,
 }: {
-  board: ReactNode;
+  primary: ReactNode;
   detail: ReactNode;
 }) {
   return (
     <div className="dashboard-surfaces">
-      <div className="dashboard-board-surface">{board}</div>
+      <div className="dashboard-board-surface">{primary}</div>
       {detail ? (
         <div className="dashboard-right-surfaces">
           <div className="dashboard-panel-shell">{detail}</div>
@@ -79,6 +83,60 @@ function DashboardSurfaces({
     </div>
   );
 }
+
+interface DashboardPanelRendererProps {
+  onRequestActionMenu: (runId: string, point: { clientX: number; clientY: number }) => void;
+  state: RunsDashboardState;
+}
+
+const DASHBOARD_PANEL_RENDERERS = {
+  board: ({ onRequestActionMenu, state }: DashboardPanelRendererProps) => (
+    <RunsBoardPanel
+      actionPending={state.actionPending}
+      activeBoardColumnKey={state.activeBoardColumnKey}
+      boardColumns={state.boardColumns}
+      collapsedColumnKeys={state.collapsedColumnKeys}
+      hasActiveStructuredFilters={state.hasActiveStructuredFilters}
+      onExpandColumn={state.columnActions.expand}
+      onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
+      onResetFilters={state.resetBoardFilters}
+      onRequestActionMenu={onRequestActionMenu}
+      onSetNote={state.runActions.setNote}
+      onSetPinned={state.runActions.setPinned}
+      onSelectRun={state.openRun}
+      onStructuredFilterToggle={state.toggleStructuredFilter}
+      onToggleColumnCollapse={state.columnActions.toggleCollapse}
+      runs={state.runs}
+      runsQuery={state.runsQuery}
+      searchValue={state.viewState.search}
+      selectedRunId={state.selectedRunId}
+      structuredFilters={state.preferences.structuredFilters}
+      visibleRuns={state.visibleRuns}
+    />
+  ),
+  list: ({ onRequestActionMenu, state }: DashboardPanelRendererProps) => (
+    <RunsListPanel
+      actionPending={state.actionPending}
+      hasActiveStructuredFilters={state.hasActiveStructuredFilters}
+      listRows={state.listRows}
+      listStatusCounts={state.listStatusCounts}
+      listStatusFilter={state.listStatusFilter}
+      onListStatusFilterChange={state.setListStatusFilter}
+      onRequestActionMenu={onRequestActionMenu}
+      onResetFilters={state.resetBoardFilters}
+      onSelectRun={state.openRun}
+      onSetPinned={state.runActions.setPinned}
+      onStructuredFilterToggle={state.toggleStructuredFilter}
+      runs={state.runs}
+      runsQuery={state.runsQuery}
+      searchValue={state.viewState.search}
+      selectedRunId={state.selectedRunId}
+      sortField={state.preferences.sortField}
+      structuredFilters={state.preferences.structuredFilters}
+      visibleRuns={state.visibleRuns}
+    />
+  ),
+} satisfies Record<DashboardViewMode, (props: DashboardPanelRendererProps) => ReactNode>;
 
 function DestructiveRunConfirmationDialog({
   action,
@@ -258,6 +316,7 @@ export function RunsDashboardRoute() {
         selectedRunId: currentState.selectedRunId,
         typingTarget,
         actionPending: currentState.actionPending !== undefined,
+        viewMode: currentState.viewMode,
       });
 
       if (!command) {
@@ -295,6 +354,12 @@ export function RunsDashboardRoute() {
       if (command === "ui.toggleFilters") {
         event.preventDefault();
         setToggleFiltersVersion((current) => current + 1);
+        return;
+      }
+
+      if (command === "ui.cycleViewMode") {
+        event.preventDefault();
+        currentState.cycleViewMode();
         return;
       }
 
@@ -626,36 +691,14 @@ export function RunsDashboardRoute() {
       </div>
     </div>
   ));
+  const renderDashboardPanel = DASHBOARD_PANEL_RENDERERS[state.viewMode];
 
   return (
     <>
       <AppShell
         primary={
           <DashboardSurfaces
-            board={
-              <RunsBoardPanel
-                actionPending={state.actionPending}
-                activeBoardColumnKey={state.activeBoardColumnKey}
-                boardColumns={state.boardColumns}
-                collapsedColumnKeys={state.collapsedColumnKeys}
-                hasActiveStructuredFilters={state.hasActiveStructuredFilters}
-                onExpandColumn={state.columnActions.expand}
-                onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
-                onResetFilters={state.resetBoardFilters}
-                onRequestActionMenu={openRunActionMenu}
-                onSetNote={state.runActions.setNote}
-                onSetPinned={state.runActions.setPinned}
-                onSelectRun={state.openRun}
-                onStructuredFilterToggle={state.toggleStructuredFilter}
-                onToggleColumnCollapse={state.columnActions.toggleCollapse}
-                runs={state.runs}
-                runsQuery={state.runsQuery}
-                searchValue={state.viewState.search}
-                selectedRunId={state.selectedRunId}
-                structuredFilters={state.preferences.structuredFilters}
-                visibleRuns={state.visibleRuns}
-              />
-            }
+            primary={renderDashboardPanel({ onRequestActionMenu: openRunActionMenu, state })}
             detail={
               state.selectedRunId ? (
                 <RunDetailPanel
@@ -739,6 +782,7 @@ export function RunsDashboardRoute() {
             preferences={state.preferences}
             toggleFiltersVersion={toggleFiltersVersion}
             searchInputRef={searchInputRef}
+            onViewModeChange={state.setViewMode}
             updatePreferences={state.updatePreferences}
             updateViewState={state.updateViewState}
             viewState={state.viewState}

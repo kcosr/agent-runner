@@ -4,6 +4,7 @@ import type {
   DashboardPreferences,
   DashboardSortField,
   DashboardStructuredFilters,
+  DashboardViewMode,
   DashboardViewState,
 } from "../lib/settings.js";
 import {
@@ -37,6 +38,11 @@ const SORT_FIELD_TITLES: Record<DashboardSortField, string> = {
   updatedAt: "Sort by last updated",
   endedAt: "Sort by ended time",
 };
+
+const VIEW_MODE_OPTIONS: readonly { label: string; value: DashboardViewMode }[] = [
+  { label: "Board", value: "board" },
+  { label: "List", value: "list" },
+];
 
 function mediaQueryMatches(query: string) {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -77,6 +83,7 @@ export function RunFilters({
   updatePreferences,
   updateViewState,
   viewState,
+  onViewModeChange,
 }: {
   preferences: DashboardPreferences;
   filterOptions: {
@@ -89,6 +96,7 @@ export function RunFilters({
   updatePreferences: (updates: Partial<DashboardPreferences>) => void;
   updateViewState: (updates: Partial<DashboardViewState>) => void;
   viewState: DashboardViewState;
+  onViewModeChange: (viewMode: DashboardViewMode) => void;
 }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -215,6 +223,20 @@ export function RunFilters({
         ) : null}
       </span>
       <span className="topbar-spacer" />
+      <fieldset className="view-mode-toggle">
+        <legend className="sr-only">Dashboard view mode</legend>
+        {VIEW_MODE_OPTIONS.map((option) => (
+          <button
+            aria-pressed={viewState.viewMode === option.value}
+            className="view-mode-toggle__button"
+            key={option.value}
+            onClick={() => onViewModeChange(option.value)}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </fieldset>
       <div className="sort-controls">
         <label className="field select sort-field" title={sortFieldTitle}>
           <ClockIcon aria-hidden="true" />
@@ -400,31 +422,35 @@ export function RunFilters({
           ) : null}
         </div>
 
-        <button
-          aria-label="Hide empty columns"
-          aria-pressed={preferences.hideEmptyColumns}
-          className="icon-btn"
-          onClick={() => updatePreferences({ hideEmptyColumns: !preferences.hideEmptyColumns })}
-          title="Hide empty columns"
-          type="button"
-        >
-          <ChevronsRightLeftIcon aria-hidden="true" />
-        </button>
+        {viewState.viewMode === "board" ? (
+          <>
+            <button
+              aria-label="Hide empty columns"
+              aria-pressed={preferences.hideEmptyColumns}
+              className="icon-btn"
+              onClick={() => updatePreferences({ hideEmptyColumns: !preferences.hideEmptyColumns })}
+              title="Hide empty columns"
+              type="button"
+            >
+              <ChevronsRightLeftIcon aria-hidden="true" />
+            </button>
 
-        <button
-          aria-label="Collapse failure states"
-          aria-pressed={preferences.collapseFailureStates}
-          className="icon-btn"
-          onClick={() =>
-            updatePreferences({
-              collapseFailureStates: !preferences.collapseFailureStates,
-            })
-          }
-          title="Collapse failure states"
-          type="button"
-        >
-          <AlertIcon aria-hidden="true" />
-        </button>
+            <button
+              aria-label="Collapse failure states"
+              aria-pressed={preferences.collapseFailureStates}
+              className="icon-btn"
+              onClick={() =>
+                updatePreferences({
+                  collapseFailureStates: !preferences.collapseFailureStates,
+                })
+              }
+              title="Collapse failure states"
+              type="button"
+            >
+              <AlertIcon aria-hidden="true" />
+            </button>
+          </>
+        ) : null}
 
         <button
           aria-label="Show scheduled runs only"

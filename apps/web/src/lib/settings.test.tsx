@@ -79,10 +79,20 @@ function SettingsProbe() {
       <button
         onClick={() =>
           updateViewState({
+            viewMode: "list",
             drawerWidth: 700,
             activeRightSurface: "chat",
             drawerFullscreen: true,
             search: "task-runner-web",
+            activeBoardColumnKey: "running",
+            drawerViewsByRunId: {
+              "run-1": {
+                mode: "detail",
+                detailSection: "events",
+                attachmentId: null,
+                attachmentOwnerRunId: null,
+              },
+            },
           })
         }
         type="button"
@@ -173,6 +183,7 @@ describe("DashboardSettingsProvider", () => {
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent(
       JSON.stringify({
+        viewMode: "board",
         search: "",
         collapsedColumnKeys: [],
         drawerWidth: 540,
@@ -280,11 +291,13 @@ describe("DashboardSettingsProvider", () => {
         drawerWidth: 700,
         activeRightSurface: "notes",
         drawerFullscreen: true,
+        viewMode: "list",
       }),
     );
 
     renderSettingsProbe();
 
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"viewMode":"list"');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"collapsedColumnKeys":["running"]');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"notes"');
@@ -297,11 +310,13 @@ describe("DashboardSettingsProvider", () => {
       JSON.stringify({
         drawerWidth: Number.NaN,
         activeRightSurface: "messages",
+        viewMode: "table",
       }),
     );
 
     renderSettingsProbe();
 
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"viewMode":"board"');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"detail"');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerFullscreen":false');
@@ -420,8 +435,12 @@ describe("DashboardSettingsProvider", () => {
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"search":"task-runner-web"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"viewMode":"list"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"activeBoardColumnKey":"running"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerViewsByRunId":{"run-1"');
     expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
+        viewMode: "list",
         collapsedColumnKeys: ["running"],
         drawerWidth: 700,
         activeRightSurface: "chat",
