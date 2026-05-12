@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
-import type { CSSProperties, FocusEvent, MouseEvent } from "react";
+import type { CSSProperties, FocusEvent, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createApiClient } from "../lib/api-client.js";
@@ -37,6 +37,9 @@ interface CardRectSnapshot {
 
 const CARD_MOVE_DURATION_MS = 260;
 const CARD_HIGHLIGHT_DURATION_MS = 720;
+const CARD_MENU_LONG_PRESS_MS = 520;
+const CARD_MENU_LONG_PRESS_MOVE_TOLERANCE_PX = 8;
+const CARD_MENU_CLICK_SUPPRESS_MS = 900;
 const NOTE_PREVIEW_CLOSE_DELAY_MS = 140;
 const NOTE_CONTROL_REOPEN_SUPPRESS_MS = 900;
 const cardRectByRunId = new Map<string, CardRectSnapshot>();
@@ -76,6 +79,7 @@ export function RunCard({
   run,
   selected,
   onSelect,
+  onRequestActionMenu,
   onSetNote,
   onSetPinned,
   onStructuredFilterToggle,
@@ -86,6 +90,7 @@ export function RunCard({
   run: RunSummary;
   selected: boolean;
   onSelect: () => void;
+  onRequestActionMenu: (point: { clientX: number; clientY: number }) => void;
   onSetNote: (note: string | null) => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
   onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
@@ -97,6 +102,10 @@ export function RunCard({
   const notePreviewRef = useRef<HTMLDivElement | null>(null);
   const notePreviewCloseTimeoutRef = useRef<number | null>(null);
   const noteControlSuppressedUntilRef = useRef(0);
+  const longPressTimeoutRef = useRef<number | null>(null);
+  const longPressStartRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const suppressNextClickTimeoutRef = useRef<number | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const preferredNoteEditorMode = usePreferredRunNoteEditorMode();
   const previewFirstNoteMode = preferredNoteEditorMode === "preview";
@@ -168,6 +177,26 @@ export function RunCard({
     notePreviewCloseTimeoutRef.current = null;
   }, []);
 
+  const clearSuppressNextClickTimeout = useCallback(() => {
+    if (suppressNextClickTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+    window.clearTimeout(suppressNextClickTimeoutRef.current);
+    suppressNextClickTimeoutRef.current = null;
+  }, []);
+
+  const suppressNextClick = useCallback(() => {
+    suppressNextClickRef.current = true;
+    clearSuppressNextClickTimeout();
+    if (typeof window === "undefined") {
+      return;
+    }
+    suppressNextClickTimeoutRef.current = window.setTimeout(() => {
+      suppressNextClickRef.current = false;
+      suppressNextClickTimeoutRef.current = null;
+    }, CARD_MENU_CLICK_SUPPRESS_MS);
+  }, [clearSuppressNextClickTimeout]);
+
   function openNotePreview() {
     if (
       !run.notePresent ||
@@ -193,6 +222,14 @@ export function RunCard({
   }
 
   function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      clearSuppressNextClickTimeout();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     const filterBadge =
       event.target instanceof Element
         ? event.target.closest<HTMLElement>("[data-structured-filter-key]")
@@ -208,6 +245,52 @@ export function RunCard({
 
     if (!selected) {
       onSelect();
+    }
+  }
+
+  const clearLongPressTimeout = useCallback(() => {
+    longPressStartRef.current = null;
+    if (longPressTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+    window.clearTimeout(longPressTimeoutRef.current);
+    longPressTimeoutRef.current = null;
+  }, []);
+
+  function handleCardContextMenu(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    clearLongPressTimeout();
+    onRequestActionMenu({ clientX: event.clientX, clientY: event.clientY });
+  }
+
+  function handleCardPointerDown(event: PointerEvent<HTMLButtonElement>) {
+    if (
+      (event.pointerType !== "touch" && event.pointerType !== "pen") ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+
+    clearLongPressTimeout();
+    const point = { clientX: event.clientX, clientY: event.clientY };
+    longPressStartRef.current = point;
+    longPressTimeoutRef.current = window.setTimeout(() => {
+      longPressTimeoutRef.current = null;
+      longPressStartRef.current = null;
+      suppressNextClick();
+      onRequestActionMenu(point);
+    }, CARD_MENU_LONG_PRESS_MS);
+  }
+
+  function handleCardPointerMove(event: PointerEvent<HTMLButtonElement>) {
+    const start = longPressStartRef.current;
+    if (!start) {
+      return;
+    }
+    const deltaX = event.clientX - start.clientX;
+    const deltaY = event.clientY - start.clientY;
+    if (Math.hypot(deltaX, deltaY) > CARD_MENU_LONG_PRESS_MOVE_TOLERANCE_PX) {
+      clearLongPressTimeout();
     }
   }
 
@@ -263,6 +346,17 @@ export function RunCard({
       window.clearTimeout(notePreviewCloseTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    window.addEventListener("scroll", clearLongPressTimeout, true);
+    window.addEventListener("blur", clearLongPressTimeout);
+    return () => {
+      window.removeEventListener("scroll", clearLongPressTimeout, true);
+      window.removeEventListener("blur", clearLongPressTimeout);
+      clearLongPressTimeout();
+      clearSuppressNextClickTimeout();
+    };
+  }, [clearLongPressTimeout, clearSuppressNextClickTimeout]);
 
   useLayoutEffect(() => {
     if (
@@ -367,6 +461,12 @@ export function RunCard({
         data-motion-revision={motion?.revision}
         data-run-id={run.runId}
         onClick={handleCardClick}
+        onContextMenu={handleCardContextMenu}
+        onPointerCancel={clearLongPressTimeout}
+        onPointerDown={handleCardPointerDown}
+        onPointerLeave={clearLongPressTimeout}
+        onPointerMove={handleCardPointerMove}
+        onPointerUp={clearLongPressTimeout}
         title={accessibleName}
         type="button"
       >

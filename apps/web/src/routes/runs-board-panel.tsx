@@ -58,6 +58,7 @@ export function RunsBoardPanel({
   onResetFilters,
   onSetNote,
   onSetPinned,
+  onRequestActionMenu,
   onSelectRun,
   onStructuredFilterToggle,
   onToggleColumnCollapse,
@@ -79,6 +80,7 @@ export function RunsBoardPanel({
   onSetNote: (runId: string, note: string | null) => Promise<void>;
   onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   onSelectRun: (runId: string) => void;
+  onRequestActionMenu: (runId: string, point: { clientX: number; clientY: number }) => void;
   onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
   onToggleColumnCollapse: (columnKey: string) => void;
   runs: RunSummary[];
@@ -532,6 +534,7 @@ export function RunsBoardPanel({
             motionsByRunId={motionsByRunId}
             onSetNote={onSetNote}
             onSetPinned={onSetPinned}
+            onRequestActionMenu={onRequestActionMenu}
             onSelectRun={onSelectRun}
             onStructuredFilterToggle={onStructuredFilterToggle}
             onToggleCollapse={() => onToggleColumnCollapse(column.key)}

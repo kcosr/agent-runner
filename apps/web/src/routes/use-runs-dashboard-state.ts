@@ -57,6 +57,10 @@ interface HistoryActivationState {
   timeline: boolean;
 }
 
+type RunNavigationOptions = {
+  replace?: boolean;
+};
+
 export type RunActionPending =
   | "archive"
   | "unarchive"
@@ -83,6 +87,7 @@ export type RunActionPending =
 
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
 const DETAIL_LOAD_DELAY_MS = 120;
+const PENDING_RESUME_DIALOG_QUERY_KEY = ["dashboard", "pendingResumeDialogRunId"] as const;
 
 function useSettledDetailRunId(selectedRunId?: string) {
   const [detailRunId, setDetailRunId] = useState<string | undefined>(selectedRunId);
@@ -1234,35 +1239,103 @@ export function useRunsDashboardState() {
     }
   }
 
+  async function getRunDetailForPrimaryAction(runId: string) {
+    if (selectedRunDetail?.runId === runId) {
+      return selectedRunDetail;
+    }
+    const cachedRunDetail = queryClient.getQueryData<RunDetail>(runQueryKeys.detail(runId));
+    if (cachedRunDetail) {
+      return cachedRunDetail;
+    }
+    const runDetail = await api.getRun(runId);
+    queryClient.setQueryData(runQueryKeys.detail(runId), runDetail);
+    return runDetail;
+  }
+
+  const runHasIncompleteTasks = useCallback((run: RunDetail) => {
+    return run.tasks.some((task) => task.status !== "completed");
+  }, []);
+
+  const openLoadedResumeDialog = useCallback(
+    (run: RunDetail) => {
+      setResumeMessageDraft("");
+      setResumeMessageExpanded(!runHasIncompleteTasks(run));
+      setResumeDialogOpen(true);
+    },
+    [runHasIncompleteTasks],
+  );
+
+  function openResumeDialogForRun(run: RunDetail) {
+    if (selectedRunId !== run.runId) {
+      queryClient.setQueryData(PENDING_RESUME_DIALOG_QUERY_KEY, run.runId);
+      navigateToRunDetail(run.runId);
+      return;
+    }
+    openLoadedResumeDialog(run);
+  }
+
+  async function triggerRunPrimaryAction(runId: string) {
+    if (actionPending !== undefined) {
+      return;
+    }
+    try {
+      const run = await getRunDetailForPrimaryAction(runId);
+      const primaryAction = getRunPrimaryAction(run);
+      if (primaryAction === null) {
+        return;
+      }
+      if (primaryAction === "resume") {
+        openResumeDialogForRun(run);
+        return;
+      }
+      if (primaryAction === "ready") {
+        await readyMutation.mutateAsync(runId);
+      } else {
+        await resumeMutation.mutateAsync({ runId });
+      }
+      setActionError(undefined);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Primary action failed.");
+    }
+  }
+
   async function triggerSelectedRunPrimaryAction() {
     if (!selectedRunId || selectedRunPrimaryAction === null || actionPending !== undefined) {
       return;
     }
-    if (selectedRunPrimaryAction === "resume") {
-      openResumeDialog();
-      return;
-    }
-    try {
-      if (selectedRunPrimaryAction === "ready") {
-        await readyMutation.mutateAsync(selectedRunId);
-      } else {
-        await resumeMutation.mutateAsync({ runId: selectedRunId });
-      }
-      setActionError(undefined);
-    } catch {
-      // actionError is surfaced by the shared mutation handler.
-    }
+    await triggerRunPrimaryAction(selectedRunId);
   }
 
-  function navigateToRunDetail(runId: string, options?: { replace?: boolean }) {
-    void navigate({ params: { runId }, replace: options?.replace, to: "/runs/$runId" });
+  useEffect(() => {
+    if (!selectedRunDetail) {
+      return;
+    }
+    const pendingResumeDialogRunId = queryClient.getQueryData<string>(
+      PENDING_RESUME_DIALOG_QUERY_KEY,
+    );
+    if (pendingResumeDialogRunId !== selectedRunDetail.runId) {
+      return;
+    }
+    queryClient.removeQueries({ exact: true, queryKey: PENDING_RESUME_DIALOG_QUERY_KEY });
+    if (getRunPrimaryAction(selectedRunDetail) !== "resume") {
+      return;
+    }
+    openLoadedResumeDialog(selectedRunDetail);
+  }, [openLoadedResumeDialog, selectedRunDetail]);
+
+  function navigateToRunDetail(runId: string, options?: RunNavigationOptions) {
+    void navigate({
+      params: { runId },
+      replace: options?.replace,
+      to: "/runs/$runId",
+    });
   }
 
   function navigateToAttachmentPreview(
     runId: string,
     attachmentOwnerRunId: string,
     attachmentId: string,
-    options?: { replace?: boolean },
+    options?: RunNavigationOptions,
   ) {
     void navigate({
       params: {
@@ -1345,7 +1418,7 @@ export function useRunsDashboardState() {
       setNotices((current) => current.filter((notice) => notice.id !== id));
     },
     notices,
-    openRun: (runId: string, options?: { replace?: boolean }) => {
+    openRun: (runId: string, options?: RunNavigationOptions) => {
       setActionError(undefined);
       const drawerView = viewState.drawerViewsByRunId[runId];
       if (drawerView?.mode === "attachment") {
@@ -1359,6 +1432,7 @@ export function useRunsDashboardState() {
       }
       navigateToRunDetail(runId, options);
     },
+    openSelectedRunResumeDialog: openResumeDialog,
     openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
       if (!selectedRunId) {
         return;
@@ -1393,10 +1467,17 @@ export function useRunsDashboardState() {
         await addDependencyMutation.mutateAsync({ runId, dependency });
       },
       archive: (runId: string) => archiveMutation.mutate(runId),
+      archiveThenDelete: async (runId: string) => {
+        await archiveMutation.mutateAsync(runId);
+        await deleteMutation.mutateAsync(runId);
+      },
       clearDependencies: async (runId: string) => {
         await clearDependenciesMutation.mutateAsync(runId);
       },
       delete: (runId: string) => deleteMutation.mutate(runId),
+      deleteConfirmed: async (runId: string) => {
+        await deleteMutation.mutateAsync(runId);
+      },
       ready: async (runId: string) => {
         await readyMutation.mutateAsync(runId);
       },
@@ -1468,6 +1549,7 @@ export function useRunsDashboardState() {
     auditState,
     submitSelectedRunResume,
     timelineState,
+    triggerRunPrimaryAction,
     triggerSelectedRunPrimaryAction,
     returnSelectedRunToAttachments: () => {
       if (!selectedRunId) {

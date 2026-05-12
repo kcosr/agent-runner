@@ -113,6 +113,12 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       },
       {
         description:
+          "Open destructive cleanup confirmation for the selected run when archive/delete is available.",
+        keys: ["Shift", "A"],
+        title: "Confirm cleanup",
+      },
+      {
+        description:
           "Toggle the selected detail drawer or attachment preview between normal and fullscreen widths.",
         keys: ["F"],
         title: "Toggle drawer fullscreen",

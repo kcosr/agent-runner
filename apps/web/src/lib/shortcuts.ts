@@ -15,6 +15,7 @@ type RunsShortcutCommand =
   | "run.showDetail"
   | "run.showNotes"
   | "run.showTasks"
+  | "run.destructiveCleanup"
   | "run.toggleArchived"
   | "run.togglePinned"
   | "ui.toggleFilters"
@@ -38,6 +39,7 @@ interface ShortcutEventLike {
 }
 
 interface RunsShortcutContext {
+  actionPending: boolean;
   activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
   drawerFullscreen: boolean;
@@ -139,6 +141,7 @@ function canTriggerPrimaryAction(context: RunsShortcutContext): boolean {
     !context.searchFocused &&
     !context.modalOpen &&
     !context.resumeDialogOpen &&
+    !context.actionPending &&
     context.selectedDrawerView?.mode !== "attachment" &&
     Boolean(context.selectedRunId) &&
     context.selectedRunPrimaryActionAvailable
@@ -151,9 +154,35 @@ function canTriggerSelectedRunShortcut(context: RunsShortcutContext): boolean {
     !context.searchFocused &&
     !context.modalOpen &&
     !context.resumeDialogOpen &&
+    !context.actionPending &&
     context.selectedDrawerView?.mode !== "attachment" &&
     Boolean(context.selectedRunId)
   );
+}
+
+function resolveSelectedRunShortcut(
+  event: ShortcutEventLike,
+  context: RunsShortcutContext,
+): Extract<
+  RunsShortcutCommand,
+  "run.primaryAction" | "run.togglePinned" | "run.destructiveCleanup" | "run.toggleArchived"
+> | null {
+  if (matchesShortcut(event, { key: "enter" }) && canTriggerPrimaryAction(context)) {
+    return "run.primaryAction";
+  }
+  if (matchesShortcut(event, { key: "p" }) && canTriggerSelectedRunShortcut(context)) {
+    return "run.togglePinned";
+  }
+  if (
+    matchesShortcut(event, { key: "a", shiftKey: true }) &&
+    canTriggerSelectedRunShortcut(context)
+  ) {
+    return "run.destructiveCleanup";
+  }
+  if (matchesShortcut(event, { key: "a" }) && canTriggerSelectedRunShortcut(context)) {
+    return "run.toggleArchived";
+  }
+  return null;
 }
 
 function resolveRunSurfaceShortcut(
@@ -284,17 +313,12 @@ export function resolveRunsShortcutCommand(
         return "ui.toggleDrawerFullscreen";
       }
     }
-    if (matchesShortcut(event, { key: "enter" }) && canTriggerPrimaryAction(context)) {
-      return "run.primaryAction";
+    const selectedRunCommand = resolveSelectedRunShortcut(event, context);
+    if (selectedRunCommand) {
+      return selectedRunCommand;
     }
     if (context.selectedDrawerView?.mode === "attachment") {
       return null;
-    }
-    if (matchesShortcut(event, { key: "p" }) && canTriggerSelectedRunShortcut(context)) {
-      return "run.togglePinned";
-    }
-    if (matchesShortcut(event, { key: "a" }) && canTriggerSelectedRunShortcut(context)) {
-      return "run.toggleArchived";
     }
     return null;
   }
@@ -372,17 +396,8 @@ export function resolveRunsShortcutCommand(
   if (matchesShortcut(event, { key: "arrowright" })) {
     return "board.moveRight";
   }
-  if (matchesShortcut(event, { key: "enter" }) && canTriggerPrimaryAction(context)) {
-    return "run.primaryAction";
-  }
-  if (matchesShortcut(event, { key: "p" }) && canTriggerSelectedRunShortcut(context)) {
-    return "run.togglePinned";
-  }
-  if (matchesShortcut(event, { key: "a" }) && canTriggerSelectedRunShortcut(context)) {
-    return "run.toggleArchived";
-  }
 
-  return null;
+  return resolveSelectedRunShortcut(event, context);
 }
 
 export function resolveSettingsShortcutCommand(

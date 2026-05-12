@@ -639,6 +639,50 @@ pre {
   color: var(--foreground);
 }
 
+.run-action-menu {
+  position: fixed;
+  z-index: 80;
+  width: 212px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+}
+
+.run-action-menu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.run-action-menu__item:hover,
+.run-action-menu__item:focus-visible {
+  background: var(--accent);
+}
+
+.run-action-menu__item--destructive {
+  color: var(--destructive-foreground);
+}
+
+.run-action-menu__item--destructive:hover,
+.run-action-menu__item--destructive:focus-visible {
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+}
+
 .card-note-preview {
   position: fixed;
   overflow: auto;

@@ -305,8 +305,12 @@ Every action button consults the run's `RunCapabilities`:
 | Task notes input | `taskMutation.canEditNotes` |
 | Add task button | `taskMutation.canAdd` |
 
-Destructive actions (delete, reset, abort) use inline confirmations
-rather than modal prompts.
+Detail-drawer destructive actions (delete, reset, abort) use inline
+confirmations. The selected-run `Shift+A` cleanup shortcut and run-card
+action menu use modal confirmation before archive/delete cleanup. Open
+the run-card action menu by right-clicking a run card on desktop or
+long-pressing a run card on touch devices; there is no visible overflow
+button.
 
 ## Keyboard shortcuts
 
@@ -333,6 +337,7 @@ The dashboard's shortcut system is customizable from
 | `N` | Show the selected run's Notes tab, or focus its editor when Notes is open |
 | `T` | Show the selected run's Tasks tab |
 | `A` | Archive or restore the selected run |
+| `Shift+A` | Confirm archive/delete cleanup for the selected run |
 | `F` | Toggle the detail drawer fullscreen |
 
 Shortcuts are suppressed while typing in inputs or when a modal dialog
@@ -340,7 +345,7 @@ is open. Native modal dialogs, including Resume and the run-note editor,
 handle Escape/back dismissal before dashboard shortcuts.
 
 When the detail drawer is fullscreen, selected-run shortcuts including
-`Enter`, `N`, `P`, `A`, and `C`/`D`/`N`/`T` remain active. Board movement,
+`Enter`, `N`, `P`, `A`, `Shift+A`, and `C`/`D`/`N`/`T` remain active. Board movement,
 search, and filter shortcuts remain suppressed in fullscreen drawer
 mode. Attachment preview keeps only surface navigation, fullscreen
 toggle, and Escape shortcuts active so hidden header actions do not fire.

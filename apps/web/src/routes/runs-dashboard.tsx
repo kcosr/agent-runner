@@ -1,7 +1,15 @@
+import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";
+import { useNativeModalDialog } from "../components/native-dialog.js";
 import { RunFilters } from "../components/run-filters.js";
+import {
+  type RunActionMenuItem,
+  type RunDestructiveCleanupAction,
+  getRunActionMenuItems,
+  getRunDestructiveCleanupAction,
+} from "../lib/run-action-menu.js";
 import type { DashboardPreferences } from "../lib/settings.js";
 import {
   isEditableEventTarget,
@@ -22,9 +30,35 @@ const BOARD_FILTER_PREFERENCE_KEYS = {
 } satisfies Record<string, keyof DashboardPreferences>;
 
 type BoardFilterShortcutCommand = keyof typeof BOARD_FILTER_PREFERENCE_KEYS;
+interface DestructiveRunConfirmation {
+  action: RunDestructiveCleanupAction;
+  runId: string;
+}
+
+interface RunActionMenuState {
+  items: RunActionMenuItem[];
+  runId: string;
+  selectedRunIdAtOpen?: string;
+  x: number;
+  y: number;
+}
 
 function isBoardFilterShortcutCommand(command: string): command is BoardFilterShortcutCommand {
   return command in BOARD_FILTER_PREFERENCE_KEYS;
+}
+
+function findDashboardRun(
+  state: {
+    runs: RunSummary[];
+    selectedRunQuery: { data?: RunDetail };
+  },
+  runId: string,
+): RunDetail | RunSummary | undefined {
+  const selectedRun = state.selectedRunQuery.data;
+  if (selectedRun?.runId === runId) {
+    return selectedRun;
+  }
+  return state.runs.find((run) => run.runId === runId);
 }
 
 function DashboardSurfaces({
@@ -46,8 +80,143 @@ function DashboardSurfaces({
   );
 }
 
+function DestructiveRunConfirmationDialog({
+  action,
+  actionPending,
+  onCancel,
+  onConfirm,
+}: {
+  action: RunDestructiveCleanupAction;
+  actionPending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const titleId = useId();
+  const { dialogProps, ref: dialogRef } = useNativeModalDialog(true, onCancel);
+  const title = action === "archive-delete" ? "Archive and delete run?" : "Delete run?";
+  const body =
+    action === "archive-delete"
+      ? "This will archive the run first, then delete it using the existing delete guardrails."
+      : "This will delete the archived run using the existing delete guardrails.";
+  const confirmLabel = action === "archive-delete" ? "Archive + Delete" : "Delete";
+
+  return (
+    <dialog
+      aria-labelledby={titleId}
+      className="note-dialog-backdrop"
+      {...dialogProps}
+      ref={dialogRef}
+    >
+      <div className="note-dialog note-dialog--confirm" role="document">
+        <div className="note-dialog__header">
+          <div>
+            <h3 className="note-dialog__title" id={titleId}>
+              {title}
+            </h3>
+            <p className="note-dialog__copy">{body}</p>
+          </div>
+        </div>
+        <div className="note-editor__actions">
+          <button
+            className="btn btn--quiet"
+            disabled={actionPending}
+            onClick={onCancel}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="btn btn-destructive-outline"
+            disabled={actionPending}
+            onClick={onConfirm}
+            type="button"
+          >
+            {actionPending ? "Working..." : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function RunActionMenu({
+  items,
+  onActivate,
+  onClose,
+  runId,
+  x,
+  y,
+}: {
+  items: RunActionMenuItem[];
+  onActivate: (item: RunActionMenuItem) => void;
+  onClose: () => void;
+  runId: string;
+  x: number;
+  y: number;
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    menuRef.current?.focus({ preventScroll: true });
+
+    function handlePointerDown(event: globalThis.PointerEvent) {
+      const menu = menuRef.current;
+      if (!menu || !(event.target instanceof Node) || menu.contains(event.target)) {
+        return;
+      }
+      onClose();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      aria-label={`Run actions for ${runId}`}
+      className="run-action-menu"
+      ref={menuRef}
+      role="menu"
+      style={{ left: x, top: y }}
+      tabIndex={-1}
+    >
+      {items.map((item) => (
+        <button
+          className={
+            item.kind === "archive-delete" || item.kind === "delete"
+              ? "run-action-menu__item run-action-menu__item--destructive"
+              : "run-action-menu__item"
+          }
+          key={item.action}
+          onClick={() => onActivate(item)}
+          role="menuitem"
+          type="button"
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
+  const [destructiveConfirmation, setDestructiveConfirmation] =
+    useState<DestructiveRunConfirmation | null>(null);
+  const [runActionMenu, setRunActionMenu] = useState<RunActionMenuState | null>(null);
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
   const [noteEditRequestVersion, setNoteEditRequestVersion] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -88,9 +257,29 @@ export function RunsDashboardRoute() {
         selectedDrawerView: currentState.selectedDrawerView,
         selectedRunId: currentState.selectedRunId,
         typingTarget,
+        actionPending: currentState.actionPending !== undefined,
       });
 
       if (!command) {
+        return;
+      }
+
+      if (command === "run.destructiveCleanup") {
+        if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
+          return;
+        }
+        const selectedRun = findDashboardRun(currentState, currentState.selectedRunId);
+        if (!selectedRun) {
+          return;
+        }
+        const action = getRunDestructiveCleanupAction(selectedRun);
+        if (action === null) {
+          return;
+        }
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setRunActionMenu(null);
+        setDestructiveConfirmation({ action, runId: selectedRun.runId });
         return;
       }
 
@@ -212,9 +401,7 @@ export function RunsDashboardRoute() {
         if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
           return;
         }
-        const selectedRun =
-          currentState.runs.find((run) => run.runId === currentState.selectedRunId) ??
-          currentState.selectedRunQuery.data;
+        const selectedRun = findDashboardRun(currentState, currentState.selectedRunId);
         if (!selectedRun) {
           return;
         }
@@ -227,9 +414,7 @@ export function RunsDashboardRoute() {
         if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
           return;
         }
-        const selectedRun =
-          currentState.runs.find((run) => run.runId === currentState.selectedRunId) ??
-          currentState.selectedRunQuery.data;
+        const selectedRun = findDashboardRun(currentState, currentState.selectedRunId);
         if (!selectedRun) {
           return;
         }
@@ -289,6 +474,128 @@ export function RunsDashboardRoute() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!destructiveConfirmation) {
+      return;
+    }
+    if (findDashboardRun(state, destructiveConfirmation.runId)) {
+      return;
+    }
+    setDestructiveConfirmation(null);
+  }, [destructiveConfirmation, state]);
+
+  useEffect(() => {
+    if (!runActionMenu) {
+      return;
+    }
+    if (!findDashboardRun(state, runActionMenu.runId)) {
+      setRunActionMenu(null);
+      return;
+    }
+    if (state.selectedRunId === runActionMenu.selectedRunIdAtOpen) {
+      return;
+    }
+    setRunActionMenu(null);
+  }, [runActionMenu, state]);
+
+  useEffect(() => {
+    if (state.actionPending !== undefined) {
+      setRunActionMenu(null);
+    }
+  }, [state.actionPending]);
+
+  const closeRunActionMenu = useCallback(() => {
+    setRunActionMenu(null);
+  }, []);
+
+  async function submitDestructiveConfirmation() {
+    const confirmation = destructiveConfirmation;
+    if (!confirmation || state.actionPending !== undefined) {
+      return;
+    }
+
+    const currentState = latestStateRef.current;
+    const currentRun = findDashboardRun(currentState, confirmation.runId);
+    const currentAction = currentRun ? getRunDestructiveCleanupAction(currentRun) : null;
+    if (currentAction !== confirmation.action) {
+      setDestructiveConfirmation(null);
+      return;
+    }
+
+    setDestructiveConfirmation(null);
+    try {
+      if (confirmation.action === "archive-delete") {
+        await currentState.runActions.archiveThenDelete(confirmation.runId);
+      } else {
+        await currentState.runActions.deleteConfirmed(confirmation.runId);
+      }
+    } catch {
+      // actionError is surfaced by the shared mutation handlers.
+    }
+  }
+
+  function openRunActionMenu(runId: string, point: { clientX: number; clientY: number }) {
+    const currentState = latestStateRef.current;
+    const run = findDashboardRun(currentState, runId);
+    setRunActionMenu(null);
+
+    if (!run) {
+      return;
+    }
+    const items = getRunActionMenuItems(run);
+    if (items.length === 0) {
+      return;
+    }
+
+    const width = 220;
+    const height = Math.min(360, items.length * 36 + 12);
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const clientX = Number.isFinite(point.clientX) ? point.clientX : 8;
+    const clientY = Number.isFinite(point.clientY) ? point.clientY : 8;
+    const nextMenu = {
+      items,
+      runId,
+      selectedRunIdAtOpen: currentState.selectedRunId,
+      x: Math.min(Math.max(8, clientX), Math.max(8, viewportWidth - width - 8)),
+      y: Math.min(Math.max(8, clientY), Math.max(8, viewportHeight - height - 8)),
+    };
+    setRunActionMenu(nextMenu);
+  }
+
+  const activateRunActionMenuItem = useCallback(
+    (item: RunActionMenuItem) => {
+      const menu = runActionMenu;
+      const currentState = latestStateRef.current;
+      if (!menu || currentState.actionPending !== undefined) {
+        return;
+      }
+      setRunActionMenu(null);
+
+      switch (item.action) {
+        case "archive":
+          currentState.runActions.archive(menu.runId);
+          return;
+        case "unarchive":
+          currentState.runActions.unarchive(menu.runId);
+          return;
+        case "archive-delete":
+        case "delete":
+          setDestructiveConfirmation({ action: item.action, runId: menu.runId });
+          return;
+        case "ready":
+        case "start":
+        case "resume":
+          void currentState.triggerRunPrimaryAction(menu.runId);
+          return;
+      }
+
+      const exhaustiveAction: never = item.action;
+      throw new Error(`Unhandled run action menu item: ${exhaustiveAction}`);
+    },
+    [runActionMenu],
+  );
+
   const topNotices = [
     state.streamStale ? (
       <div className="notice" data-tone="warning" key="stream-stale">
@@ -321,120 +628,141 @@ export function RunsDashboardRoute() {
   ));
 
   return (
-    <AppShell
-      primary={
-        <DashboardSurfaces
-          board={
-            <RunsBoardPanel
-              actionPending={state.actionPending}
-              activeBoardColumnKey={state.activeBoardColumnKey}
-              boardColumns={state.boardColumns}
-              collapsedColumnKeys={state.collapsedColumnKeys}
-              hasActiveStructuredFilters={state.hasActiveStructuredFilters}
-              onExpandColumn={state.columnActions.expand}
-              onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
-              onResetFilters={state.resetBoardFilters}
-              onSetNote={state.runActions.setNote}
-              onSetPinned={state.runActions.setPinned}
-              onSelectRun={state.openRun}
-              onStructuredFilterToggle={state.toggleStructuredFilter}
-              onToggleColumnCollapse={state.columnActions.toggleCollapse}
-              runs={state.runs}
-              runsQuery={state.runsQuery}
-              searchValue={state.viewState.search}
-              selectedRunId={state.selectedRunId}
-              structuredFilters={state.preferences.structuredFilters}
-              visibleRuns={state.visibleRuns}
-            />
-          }
-          detail={
-            state.selectedRunId ? (
-              <RunDetailPanel
-                activeRightSurface={state.activeRightSurface}
-                onAddDependency={state.runActions.addDependency}
-                actionError={state.actionError}
+    <>
+      <AppShell
+        primary={
+          <DashboardSurfaces
+            board={
+              <RunsBoardPanel
                 actionPending={state.actionPending}
-                chatSurface={
-                  <RunChatView
-                    detailSettling={state.detailSettling}
-                    onDownloadAttachment={state.runActions.downloadAttachment}
-                    onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
-                    onRemoveQueuedMessage={state.runActions.removeQueuedResumeMessage}
-                    onQueueMessage={state.runActions.queueResumeMessage}
-                    onSubmitResume={state.runActions.resume}
-                    queuePending={state.queueResumeMessagePendingRunId === state.selectedRunId}
-                    removingQueuedMessageId={state.removeQueuedResumeMessagePendingId}
-                    resumePending={state.resumePendingRunId === state.selectedRunId}
-                    selectedRunId={state.selectedRunId}
-                    selectedRunQuery={state.selectedRunQuery}
-                    timelineState={state.timelineState}
-                  />
-                }
-                drawerFullscreen={state.viewState.drawerFullscreen}
-                drawerWidth={state.viewState.drawerWidth}
-                drawerView={state.selectedDrawerView}
-                noteEditRequestVersion={noteEditRequestVersion}
-                runs={state.runs}
-                onBackToAttachments={state.returnSelectedRunToAttachments}
-                onAbort={state.runActions.abort}
-                onArchive={state.runActions.archive}
-                onClearDependencies={state.runActions.clearDependencies}
-                onClose={state.closeRun}
-                onCloseResumeDialog={state.closeSelectedRunResumeDialog}
-                onCopy={state.copyText}
-                onDelete={state.runActions.delete}
-                onDownloadAttachment={state.runActions.downloadAttachment}
-                onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
-                onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
-                onSelectRun={state.openRun}
-                onClearBackendSession={state.runActions.clearBackendSession}
-                onClearSchedule={state.runActions.clearSchedule}
-                onRemoveDependency={state.runActions.removeDependency}
-                onRemoveAttachment={state.runActions.removeAttachment}
-                onReset={state.runActions.reset}
-                onReconfigure={state.runActions.reconfigure}
-                onRename={state.runActions.rename}
-                onResumeMessageDraftChange={state.setResumeMessageDraft}
-                onResumeMessageExpandedChange={state.setResumeMessageExpanded}
+                activeBoardColumnKey={state.activeBoardColumnKey}
+                boardColumns={state.boardColumns}
+                collapsedColumnKeys={state.collapsedColumnKeys}
+                hasActiveStructuredFilters={state.hasActiveStructuredFilters}
+                onExpandColumn={state.columnActions.expand}
+                onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
+                onResetFilters={state.resetBoardFilters}
+                onRequestActionMenu={openRunActionMenu}
                 onSetNote={state.runActions.setNote}
-                onSetBackendSession={state.runActions.setBackendSession}
-                onSetGroup={state.runActions.setGroup}
-                onClearGroup={state.runActions.clearGroup}
                 onSetPinned={state.runActions.setPinned}
-                onSetScheduleEnabled={state.runActions.setScheduleEnabled}
-                onSelectDetailSection={state.updateSelectedRunDetailSection}
-                onSelectRightSurface={state.setActiveRightSurface}
-                onSubmitResume={state.submitSelectedRunResume}
-                onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}
-                onUnarchive={state.runActions.unarchive}
-                onUploadAttachment={state.runActions.uploadAttachment}
-                resumeDialogOpen={state.resumeDialogOpen}
-                resumeRequiresMessage={state.selectedRunResumeRequiresMessage}
-                resumeMessageDraft={state.resumeMessageDraft}
-                resumeMessageExpanded={state.resumeMessageExpanded}
-                detailSettling={state.detailSettling}
-                selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
-                selectedRunQuery={state.selectedRunQuery}
-                auditState={state.auditState}
-                timelineState={state.timelineState}
+                onSelectRun={state.openRun}
+                onStructuredFilterToggle={state.toggleStructuredFilter}
+                onToggleColumnCollapse={state.columnActions.toggleCollapse}
+                runs={state.runs}
+                runsQuery={state.runsQuery}
+                searchValue={state.viewState.search}
+                selectedRunId={state.selectedRunId}
+                structuredFilters={state.preferences.structuredFilters}
+                visibleRuns={state.visibleRuns}
               />
-            ) : null
-          }
+            }
+            detail={
+              state.selectedRunId ? (
+                <RunDetailPanel
+                  activeRightSurface={state.activeRightSurface}
+                  onAddDependency={state.runActions.addDependency}
+                  actionError={state.actionError}
+                  actionPending={state.actionPending}
+                  chatSurface={
+                    <RunChatView
+                      detailSettling={state.detailSettling}
+                      onDownloadAttachment={state.runActions.downloadAttachment}
+                      onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
+                      onRemoveQueuedMessage={state.runActions.removeQueuedResumeMessage}
+                      onQueueMessage={state.runActions.queueResumeMessage}
+                      onSubmitResume={state.runActions.resume}
+                      queuePending={state.queueResumeMessagePendingRunId === state.selectedRunId}
+                      removingQueuedMessageId={state.removeQueuedResumeMessagePendingId}
+                      resumePending={state.resumePendingRunId === state.selectedRunId}
+                      selectedRunId={state.selectedRunId}
+                      selectedRunQuery={state.selectedRunQuery}
+                      timelineState={state.timelineState}
+                    />
+                  }
+                  drawerFullscreen={state.viewState.drawerFullscreen}
+                  drawerWidth={state.viewState.drawerWidth}
+                  drawerView={state.selectedDrawerView}
+                  noteEditRequestVersion={noteEditRequestVersion}
+                  runs={state.runs}
+                  onBackToAttachments={state.returnSelectedRunToAttachments}
+                  onAbort={state.runActions.abort}
+                  onArchive={state.runActions.archive}
+                  onClearDependencies={state.runActions.clearDependencies}
+                  onClose={state.closeRun}
+                  onCloseResumeDialog={state.closeSelectedRunResumeDialog}
+                  onCopy={state.copyText}
+                  onDelete={state.runActions.delete}
+                  onDownloadAttachment={state.runActions.downloadAttachment}
+                  onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
+                  onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
+                  onSelectRun={state.openRun}
+                  onClearBackendSession={state.runActions.clearBackendSession}
+                  onClearSchedule={state.runActions.clearSchedule}
+                  onRemoveDependency={state.runActions.removeDependency}
+                  onRemoveAttachment={state.runActions.removeAttachment}
+                  onReset={state.runActions.reset}
+                  onReconfigure={state.runActions.reconfigure}
+                  onRename={state.runActions.rename}
+                  onResumeMessageDraftChange={state.setResumeMessageDraft}
+                  onResumeMessageExpandedChange={state.setResumeMessageExpanded}
+                  onSetNote={state.runActions.setNote}
+                  onSetBackendSession={state.runActions.setBackendSession}
+                  onSetGroup={state.runActions.setGroup}
+                  onClearGroup={state.runActions.clearGroup}
+                  onSetPinned={state.runActions.setPinned}
+                  onSetScheduleEnabled={state.runActions.setScheduleEnabled}
+                  onSelectDetailSection={state.updateSelectedRunDetailSection}
+                  onSelectRightSurface={state.setActiveRightSurface}
+                  onSubmitResume={state.submitSelectedRunResume}
+                  onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}
+                  onUnarchive={state.runActions.unarchive}
+                  onUploadAttachment={state.runActions.uploadAttachment}
+                  resumeDialogOpen={state.resumeDialogOpen}
+                  resumeRequiresMessage={state.selectedRunResumeRequiresMessage}
+                  resumeMessageDraft={state.resumeMessageDraft}
+                  resumeMessageExpanded={state.resumeMessageExpanded}
+                  detailSettling={state.detailSettling}
+                  selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
+                  selectedRunQuery={state.selectedRunQuery}
+                  auditState={state.auditState}
+                  timelineState={state.timelineState}
+                />
+              ) : null
+            }
+          />
+        }
+        bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
+        topNotices={topNotices.length > 0 ? topNotices : undefined}
+        toolbar={
+          <RunFilters
+            filterOptions={state.filterOptions}
+            preferences={state.preferences}
+            toggleFiltersVersion={toggleFiltersVersion}
+            searchInputRef={searchInputRef}
+            updatePreferences={state.updatePreferences}
+            updateViewState={state.updateViewState}
+            viewState={state.viewState}
+          />
+        }
+      />
+      {destructiveConfirmation ? (
+        <DestructiveRunConfirmationDialog
+          action={destructiveConfirmation.action}
+          actionPending={state.actionPending !== undefined}
+          onCancel={() => setDestructiveConfirmation(null)}
+          onConfirm={() => void submitDestructiveConfirmation()}
         />
-      }
-      bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
-      topNotices={topNotices.length > 0 ? topNotices : undefined}
-      toolbar={
-        <RunFilters
-          filterOptions={state.filterOptions}
-          preferences={state.preferences}
-          toggleFiltersVersion={toggleFiltersVersion}
-          searchInputRef={searchInputRef}
-          updatePreferences={state.updatePreferences}
-          updateViewState={state.updateViewState}
-          viewState={state.viewState}
+      ) : null}
+      {runActionMenu ? (
+        <RunActionMenu
+          items={runActionMenu.items}
+          onActivate={activateRunActionMenuItem}
+          onClose={closeRunActionMenu}
+          runId={runActionMenu.runId}
+          x={runActionMenu.x}
+          y={runActionMenu.y}
         />
-      }
-    />
+      ) : null}
+    </>
   );
 }

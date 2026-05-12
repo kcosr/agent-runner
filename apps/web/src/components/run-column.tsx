@@ -22,6 +22,7 @@ export function RunColumn({
   motionsByRunId,
   onSetNote,
   onSetPinned,
+  onRequestActionMenu,
   selectedRunId,
   onToggleCollapse,
   onSelectRun,
@@ -39,6 +40,7 @@ export function RunColumn({
   selectedRunId?: string;
   onToggleCollapse: () => void;
   onSelectRun: (runId: string) => void;
+  onRequestActionMenu: (runId: string, point: { clientX: number; clientY: number }) => void;
   onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
   structuredFilters: DashboardStructuredFilters;
 }) {
@@ -119,6 +121,7 @@ export function RunColumn({
             motion={motionsByRunId[run.runId]}
             onSetNote={(note) => onSetNote(run.runId, note)}
             onSetPinned={(pinned) => onSetPinned(run.runId, pinned)}
+            onRequestActionMenu={(point) => onRequestActionMenu(run.runId, point)}
             onSelect={() => onSelectRun(run.runId)}
             onStructuredFilterToggle={onStructuredFilterToggle}
             run={run}
