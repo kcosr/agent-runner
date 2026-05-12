@@ -40,13 +40,10 @@ Once approved:
      `git status`, and fast-forward evidence in Notes.
 
 Follow existing repo conventions for PR text, changelog
-formatting, and merge strategy.
-
-For a follow-up commit that only updates `CHANGELOG.md` with
-the PR link and touches no source, test, package, generated,
-or other documentation files, set `HUSKY=0` on that commit to
-skip the expensive pre-commit `npm run check` gate. Do not set
-`HUSKY=0` for any other follow-up commit.
+formatting, pre-commit hooks, and merge strategy. If a
+follow-up commit is needed after PR creation, use the repo's
+normal hook and verification conventions captured in
+`feature-plan/orient` and this run's check-gate Notes.
 
 Do not mark this task `completed` until the caller has
 approved merge/fast-forward and every step above has

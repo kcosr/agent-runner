@@ -108,9 +108,11 @@ run, and emits generated implementation plans that end with a terminal
 Notable feature uses:
 
 - **Shared planning tasks**: the initial planning pass uses named refs
-  under `tasks/feature-plan/`, including the `feature-plan/capture-feature`
-  ambiguity gate.
-- **Locked task list** prevents silent deferrals.
+  under `tasks/feature-plan/` from `feature-plan/orient` through
+  `feature-plan/surface-inventory`; the draft/review/init pipeline stays
+  inline so the planner can fill placeholders.
+- **Locked generated task list** prevents silent deferrals in the
+  implementation assignment produced by the planner.
 - **Nested reviews** via `plan-review` invoked as a child `task-runner
   run`.
 - **Attachment coupling**: approved draft (`assignment-seed.md`) and
@@ -222,7 +224,7 @@ subagents for parallelism.
 | Agent | Typical assignment | Notes |
 |-------|-------------------|-------|
 | `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review` and creates an initialized implementer run for caller approval. |
-| any | `plan-implement-feature` | Single-run plan, approval pause, implementation, review, and PR flow using shared feature tasks. |
+| `planner` or `implementer` | `plan-implement-feature` | Single-run plan, approval pause, implementation, review, and PR flow using shared feature tasks. |
 | `implementer` | generated plan assignment | Created by `plan-feature` after approval; inspect `run brief` and then execute with `run --resume-run`. |
 | `code-reviewer` | `plan-review`, `code-review`, or `code-review-direct` | Nested and direct review surfaces. |
 | `doc-reviewer` | `doc-review` | Review-only, writes no files. |

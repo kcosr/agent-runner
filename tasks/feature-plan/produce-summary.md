@@ -14,6 +14,9 @@ Use the existing summary template unchanged. It lives in one of:
   - `{{config_dir}}/assignments/plan-feature/summary-template.md`
   - under the task-runner install root
 
+If no template can be found, mark this task `blocked` with the exact
+locations searched.
+
 Fill each `<<PLACEHOLDER_*>>` marker from existing Notes only:
   - `<<PLACEHOLDER_FEATURE_SHORT_TITLE>>` — a short title, five words or fewer.
   - `<<PLACEHOLDER_OVERVIEW>>` — source: `feature-plan/capture-feature`.

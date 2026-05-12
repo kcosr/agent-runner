@@ -23,7 +23,8 @@ On the initial pass, immediately mark this task `blocked` after `assignment-summ
 
 On resume, read the caller's latest message carefully:
   - If the caller clearly approved implementation, record the approval text in Notes and mark this task `completed`.
-  - If the caller requested changes, revise the affected planning task Notes, regenerate and reattach `assignment-summary.md`, then mark this task `blocked` again with the new attachment evidence.
+  - If the caller requested changes, revise the affected planning task Notes, regenerate and reattach `assignment-summary.md`, then mark this task `blocked` again with the new attachment evidence. Notes on completed upstream planning tasks may be appended directly with `task append-notes`; you do not need to re-open those tasks.
+  - If the caller gives conditional approval such as "approved, but ..." or "continue after ...", treat it as requested changes unless the message explicitly says to implement first and track the condition later.
   - If the caller response is ambiguous, keep this task `blocked` with up to three targeted questions.
 
 Do not proceed to implementation tasks unless approval is explicit.

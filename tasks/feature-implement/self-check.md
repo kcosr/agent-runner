@@ -5,9 +5,10 @@ title: Final self-check and synthesis
 ---
 **Category**: process
 
-Re-run the full check gate after review fixes and docs updates:
-
-    npm run check
+Re-run the same full check pipeline recorded in
+`feature-implement/check-gate` Notes after review fixes and docs updates.
+If review fixes require a broader gate than the original check pass, use
+the broader command set and explain why in Notes.
 
 Paste exit codes into Notes.
 

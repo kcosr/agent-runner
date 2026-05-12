@@ -54,9 +54,11 @@ and implementation task definitions under `tasks/feature-implement/`.
 Bundled assignments reference those files with named refs such as
 `review/architecture`, `feature-plan/orient`, and
 `feature-implement/check-gate`, resolved from
-`${TASK_RUNNER_CONFIG_DIR}/tasks`. If you copy bundled assignments into
-another config directory, copy the referenced shared task directories
-with them so those named refs continue to resolve.
+`${TASK_RUNNER_CONFIG_DIR}/tasks`. Some files in those directories are
+currently reused by multiple bundled assignments, while others are
+named refs owned by a single bundled workflow. If you copy bundled
+assignments into another config directory, copy the referenced task
+directories with them so those named refs continue to resolve.
 
 ### State directory
 

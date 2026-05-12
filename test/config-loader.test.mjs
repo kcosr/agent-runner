@@ -1702,6 +1702,25 @@ test("built-in shared feature task files are valid config-root named task defini
     const freshEyes = loadTaskConfig("feature-implement/fresh-eyes", REPO_ROOT);
     assert.match(freshEyes.task.body ?? "", /feature-plan\/check-existing-code/);
     assert.doesNotMatch(freshEyes.task.body ?? "", /planning run's/);
+
+    const checkGate = loadTaskConfig("feature-implement/check-gate", REPO_ROOT);
+    assert.match(checkGate.task.body ?? "", /feature-plan\/risks-and-tests/);
+    assert.match(checkGate.task.body ?? "", /block this task/);
+    assert.doesNotMatch(checkGate.task.body ?? "", /npm run check/);
+
+    const selfCheck = loadTaskConfig("feature-implement/self-check", REPO_ROOT);
+    assert.match(selfCheck.task.body ?? "", /feature-implement\/check-gate/);
+    assert.doesNotMatch(selfCheck.task.body ?? "", /npm run check/);
+
+    const mergeGate = loadTaskConfig("feature-implement/merge-after-approval", REPO_ROOT);
+    assert.match(mergeGate.task.body ?? "", /pre-commit hooks/);
+    assert.doesNotMatch(mergeGate.task.body ?? "", /HUSKY/);
+
+    const produceSummary = loadTaskConfig("feature-plan/produce-summary", REPO_ROOT);
+    assert.match(produceSummary.task.body ?? "", /locations searched/);
+
+    const scaffold = loadTaskConfig("feature-implement/scaffold", REPO_ROOT);
+    assert.match(scaffold.task.body ?? "", /derive a short branch name/);
   }));
 
 test("loadAssignmentConfig hard-fails when a referenced named task is missing", () =>

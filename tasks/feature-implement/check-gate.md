@@ -5,10 +5,12 @@ title: Run the lint / build / test gate
 ---
 **Category**: process
 
-Run the project's full check pipeline from `feature-plan/orient` and `feature-plan/risks-and-tests`. Every command must pass before moving to `feature-implement/commit`.
+Run the project's full check pipeline exactly as captured in
+`feature-plan/orient` and `feature-plan/risks-and-tests` Notes. Every
+command must pass before moving to `feature-implement/commit`.
 
-For this repository, prefer the standard gate captured by onboarding unless planning Notes specify a narrower approved gate:
-
-    npm run check
+If those planning Notes did not record check commands, block this task
+with the missing evidence instead of guessing a toolchain-specific
+default.
 
 Paste each command, exit code, and relevant failure/fix evidence into Notes. If a command fails, fix the underlying issue in this task before continuing.

@@ -599,13 +599,16 @@ Agents (under `agents/`):
 
 Assignments (under `assignments/`):
 
-- `repo-orientation`, `test`, `plan-feature`, `plan-review`,
-  `code-review`, `code-review-direct`, `doc-review`, `familiarize`
+- `repo-orientation`, `test`, `plan-feature`, `plan-implement-feature`,
+  `plan-review`, `code-review`, `code-review-direct`, `doc-review`,
+  `familiarize`
 
 Shared task definitions (under `tasks/`):
 
 - reusable `review/architecture` through `review/docs-drift`
   code-review dimensions used by both code-review assignments
+- reusable `feature-plan/*` and `feature-implement/*` task definitions
+  used by bundled feature-planning and single-run implementation flows
 - inspect reusable task definitions with `task-runner list tasks` and
   `task-runner show task <name|path>`; these are read-only definition
   surfaces, distinct from `task-runner task ...` run task-state commands
