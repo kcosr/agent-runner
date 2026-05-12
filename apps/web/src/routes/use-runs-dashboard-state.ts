@@ -650,7 +650,7 @@ export function useRunsDashboardState() {
       listStatusFilter === null
         ? visibleRuns
         : visibleRuns.filter((run) => run.effectiveStatus === listStatusFilter);
-    return [...rows].sort(compareRuns);
+    return sortRunsWithPinnedFirst(rows, compareRuns);
   }, [compareRuns, listStatusFilter, visibleRuns]);
   const columns = useMemo(
     () => buildColumns(visibleRuns, preferences.collapseFailureStates, compareRuns),

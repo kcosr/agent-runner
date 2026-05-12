@@ -170,11 +170,6 @@ export function RunRow({
       </div>
 
       <div className="run-row__signals" aria-label={`Signals for ${accessibleName}`}>
-        {run.pinned ? (
-          <span aria-label="Pinned" className="run-row-signal run-row-signal--neutral">
-            <PinIcon aria-hidden="true" />
-          </span>
-        ) : null}
         {run.notePresent ? (
           <span aria-label="Note present" className="run-row-signal run-row-signal--neutral">
             <NotepadTextIcon aria-hidden="true" />

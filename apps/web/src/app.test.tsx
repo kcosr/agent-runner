@@ -1797,11 +1797,19 @@ describe("web app", () => {
         repo: "repo-a",
         assignmentName: "Completed list",
         name: "Completed list",
+        pinned: true,
         status: "success",
         effectiveStatus: "success",
         startedAt: "2026-04-13T06:00:00.000Z",
         updatedAt: "2026-04-13T06:00:00.000Z",
         endedAt: "2026-04-13T06:30:00.000Z",
+        capabilities: {
+          canArchive: false,
+          canDelete: false,
+          canReady: false,
+          canResume: false,
+          canUnarchive: false,
+        },
       }),
       makeRun({
         runId: "run-list-ready",
@@ -1868,11 +1876,12 @@ describe("web app", () => {
         .getAllByRole("button", { name: /^Open run / })
         .map((button) => button.textContent),
     ).toEqual([
-      expect.stringContaining("Ready list"),
       expect.stringContaining("Completed list"),
+      expect.stringContaining("Ready list"),
       expect.stringContaining("Running list"),
       expect.stringContaining("Blocked list"),
     ]);
+    expect(within(await findRunRow("Completed list")).queryByLabelText("Pinned")).toBeNull();
     expect(screen.getByRole("button", { name: "All statuses, 4 runs" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -1918,10 +1927,17 @@ describe("web app", () => {
       "aria-label",
       "Run actions for run-list-completed",
     );
+    expect(within(getRunActionMenuElement()).getByText("No available actions")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
 
-    await user.click(screen.getByRole("button", { name: "Pin run run-list-completed" }));
+    fireEvent.contextMenu(await findRunRow("Completed list"), { clientX: 48, clientY: 56 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    expect(within(getRunActionMenuElement()).getByText("No available actions")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Unpin run run-list-completed" }));
     await waitFor(() =>
       expect(
         fetchMutationUrls(fetchMock).some((url) => url === "/api/runs/run-list-completed/pinned"),
@@ -9506,7 +9522,7 @@ describe("web app", () => {
     expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument();
   });
 
-  it("opens the run action menu on touch long-press and suppresses empty menus", async () => {
+  it("opens the run action menu on touch long-press and shows empty menus", async () => {
     installFetchMock({
       runs: [
         makeRun({
@@ -9586,7 +9602,9 @@ describe("web app", () => {
 
     expect(router.state.location.pathname).toBe("/");
     expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
-    expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument();
+    const emptyMenu = getRunActionMenuElement();
+    expect(emptyMenu).toHaveAttribute("aria-label", "Run actions for run-empty");
+    expect(within(emptyMenu).getByText("No available actions")).toBeInTheDocument();
   });
 
   it("clears long-press click suppression when no synthetic click arrives", async () => {

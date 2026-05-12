@@ -482,6 +482,41 @@ pre {
   overflow: hidden;
 }
 
+.dashboard-surfaces {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dashboard-board-surface {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dashboard-right-surfaces,
+.dashboard-panel-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.dashboard-right-surfaces {
+  z-index: 20;
+}
+
+.dashboard-panel-shell > * {
+  pointer-events: auto;
+}
+
 /* ─── board ──────────────────────────────────────────── */
 .board {
   flex: 1;
@@ -803,6 +838,11 @@ pre {
   color: var(--foreground);
 }
 
+.run-row-signal--active svg {
+  color: var(--info-foreground);
+  animation: spin 1.6s linear infinite;
+}
+
 .run-row__time {
   display: grid;
   gap: 2px;
@@ -994,6 +1034,15 @@ pre {
 .run-action-menu__item--destructive:hover,
 .run-action-menu__item--destructive:focus-visible {
   background: color-mix(in srgb, var(--destructive) 8%, transparent);
+}
+
+.run-action-menu__empty {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
 }
 
 .card-note-preview {
@@ -1222,8 +1271,11 @@ pre {
 
 /* ─── drawer ─────────────────────────────────────────── */
 .drawer {
-  flex: 0 0 540px;
-  max-width: 540px;
+  position: relative;
+  z-index: 1;
+  width: var(--drawer-width, 540px);
+  max-width: min(var(--drawer-width, 540px), 100%);
+  flex: 0 0 var(--drawer-width, 540px);
   display: flex;
   flex-direction: column;
   background: var(--background);
@@ -1231,6 +1283,22 @@ pre {
   box-shadow: var(--shadow-drawer);
   overflow: hidden;
 }
+
+.drawer--fullscreen {
+  width: 100%;
+  max-width: 100%;
+  flex-basis: 100%;
+}
+
+.drawer-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
 .drawer-head {
   display: flex;
   align-items: center;
@@ -1936,6 +2004,7 @@ pre {
   .drawer {
     position: fixed;
     inset: 52px 0 0 0;
+    width: auto;
     flex-basis: 100%;
     max-width: 100%;
     z-index: 20;

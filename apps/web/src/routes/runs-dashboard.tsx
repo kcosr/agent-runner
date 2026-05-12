@@ -251,21 +251,27 @@ function RunActionMenu({
       style={{ left: x, top: y }}
       tabIndex={-1}
     >
-      {items.map((item) => (
-        <button
-          className={
-            item.kind === "archive-delete" || item.kind === "delete"
-              ? "run-action-menu__item run-action-menu__item--destructive"
-              : "run-action-menu__item"
-          }
-          key={item.action}
-          onClick={() => onActivate(item)}
-          role="menuitem"
-          type="button"
-        >
-          {item.label}
-        </button>
-      ))}
+      {items.length === 0 ? (
+        <div aria-disabled="true" className="run-action-menu__empty" role="menuitem" tabIndex={-1}>
+          No available actions
+        </div>
+      ) : (
+        items.map((item) => (
+          <button
+            className={
+              item.kind === "archive-delete" || item.kind === "delete"
+                ? "run-action-menu__item run-action-menu__item--destructive"
+                : "run-action-menu__item"
+            }
+            key={item.action}
+            onClick={() => onActivate(item)}
+            role="menuitem"
+            type="button"
+          >
+            {item.label}
+          </button>
+        ))
+      )}
     </div>
   );
 }
@@ -608,12 +614,9 @@ export function RunsDashboardRoute() {
       return;
     }
     const items = getRunActionMenuItems(run);
-    if (items.length === 0) {
-      return;
-    }
 
     const width = 220;
-    const height = Math.min(360, items.length * 36 + 12);
+    const height = items.length === 0 ? 44 : Math.min(360, items.length * 36 + 12);
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const clientX = Number.isFinite(point.clientX) ? point.clientX : 8;
