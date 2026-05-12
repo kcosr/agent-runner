@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   truncateSync,
   writeFileSync,
@@ -281,6 +282,20 @@ function patchManifest(workspaceDir, mutator) {
     mutator(manifest);
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   });
+}
+
+function moveRunToRepoBucket(baseDir, workspaceDir, repo, options = {}) {
+  const runId = options.runId ?? readManifest(workspaceDir).runId;
+  const nextWorkspaceDir = join(baseDir, "runs", repo, runId);
+  mkdirSync(dirname(nextWorkspaceDir), { recursive: true });
+  renameSync(workspaceDir, nextWorkspaceDir);
+  patchManifest(nextWorkspaceDir, (manifest) => {
+    manifest.runId = runId;
+    manifest.repo = repo;
+    manifest.cwd = options.cwd ?? join(baseDir, repo);
+    manifest.workspaceDir = nextWorkspaceDir;
+  });
+  return nextWorkspaceDir;
 }
 
 function markRunRunning(workspaceDir) {
@@ -3277,6 +3292,120 @@ test("daemon mutation-driven projection SSE events include dependent summary fan
   });
 });
 
+test("daemon resumes unique cross-bucket short ids through RPC and HTTP", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const rpcRun = await initRun(dir);
+  const httpRun = await initRun(dir);
+  const rpcWorkspaceDir = moveRunToRepoBucket(dir, rpcRun.workspaceDir, "assistant", {
+    cwd: join(dir, "assistant-rpc"),
+  });
+  const httpWorkspaceDir = moveRunToRepoBucket(dir, httpRun.workspaceDir, "assistant", {
+    cwd: join(dir, "assistant-http"),
+  });
+  markRunReady(rpcWorkspaceDir);
+  markRunReady(httpWorkspaceDir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const resumeTargets = [];
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun({ target, emitEvent }) {
+        resumeTargets.push(target);
+        const manifest = readManifest(target);
+        markRunRunning(target);
+        emitRunStarted(emitEvent, manifest.runId, manifest.cwd);
+        return { runId: manifest.runId };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const rpcResult = await client.call("runs.resume", {
+        target: rpcRun.runId,
+        overrides: {},
+      });
+      assert.equal(rpcResult.runId, rpcRun.runId);
+      assert.equal(
+        (await waitForRunStatus(httpBaseUrl, rpcRun.runId, "running")).runId,
+        rpcRun.runId,
+      );
+
+      const httpResult = await httpJson(httpBaseUrl, `/api/runs/${httpRun.runId}/resume`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ overrides: {} }),
+      });
+      assert.equal(httpResult.status, 200);
+      assert.deepEqual(httpResult.body, { runId: httpRun.runId });
+      assert.equal(
+        (await waitForRunStatus(httpBaseUrl, httpRun.runId, "running")).runId,
+        httpRun.runId,
+      );
+
+      assert.deepEqual(resumeTargets, [rpcWorkspaceDir, httpWorkspaceDir]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon rejects ambiguous cross-bucket short ids through RPC and HTTP", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const first = await initRun(dir);
+  const duplicate = await initRun(dir);
+  const firstWorkspaceDir = moveRunToRepoBucket(dir, first.workspaceDir, "assistant");
+  const duplicateWorkspaceDir = moveRunToRepoBucket(dir, duplicate.workspaceDir, "other-repo", {
+    runId: first.runId,
+  });
+  markRunReady(firstWorkspaceDir);
+  markRunReady(duplicateWorkspaceDir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const ambiguityMessage = `run id "${first.runId}" is ambiguous across repo buckets; use a workspace path instead`;
+  const originalConsoleError = console.error;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    console.error = () => undefined;
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun() {
+        throw new Error("ambiguous run id should not reach app.resumeRun");
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await assert.rejects(
+        () => client.call("runs.resume", { target: first.runId, overrides: {} }),
+        (err) =>
+          err instanceof DaemonRpcError &&
+          err.code === RPC_ERROR_COMMAND &&
+          err.message === ambiguityMessage,
+      );
+
+      const httpResult = await httpJson(httpBaseUrl, `/api/runs/${first.runId}/resume`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ overrides: {} }),
+      });
+      assert.equal(httpResult.status, 409);
+      assert.equal(httpResult.body.error.code, "CONFLICT");
+      assert.equal(httpResult.body.error.message, ambiguityMessage);
+    } finally {
+      console.error = originalConsoleError;
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
 test("daemon auto-starts ready dependency runs immediately when dependencies are already satisfied", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
@@ -3298,11 +3427,11 @@ test("daemon auto-starts ready dependency runs immediately when dependencies are
     const server = await serveDaemon(listenUrl, {
       async resumeRun({ target, emitEvent }) {
         autoStartCalls += 1;
-        assert.equal(target, dependent.runId);
+        assert.equal(target, dependent.workspaceDir);
         markRunRunning(dependent.workspaceDir);
-        emitRunStarted(emitEvent, target, dir);
+        emitRunStarted(emitEvent, dependent.runId, dir);
         resolveAutoStarted();
-        return { runId: target };
+        return { runId: dependent.runId };
       },
     });
     const client = await DaemonClient.connect(listenUrl);
@@ -3343,10 +3472,10 @@ test("daemon auto-starts ready group dependency runs when a member leaves the bl
     const server = await serveDaemon(listenUrl, {
       async resumeRun({ target, emitEvent }) {
         resumeTargets.push(target);
-        assert.equal(target, dependent.runId);
+        assert.equal(target, dependent.workspaceDir);
         markRunRunning(dependent.workspaceDir);
-        emitRunStarted(emitEvent, target, dir);
-        return { runId: target };
+        emitRunStarted(emitEvent, dependent.runId, dir);
+        return { runId: dependent.runId };
       },
     });
     const client = await DaemonClient.connect(listenUrl);
@@ -3365,7 +3494,7 @@ test("daemon auto-starts ready group dependency runs when a member leaves the bl
       await client.call("runs.setGroup", { target: movingMember.runId, runGroupId: "group-b" });
       const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
       assert.equal(running.runId, dependent.runId);
-      assert.deepEqual(resumeTargets, [dependent.runId]);
+      assert.deepEqual(resumeTargets, [dependent.workspaceDir]);
     } finally {
       await client.close();
       await server.close();
@@ -3389,18 +3518,18 @@ test("daemon auto-starts ready dependency runs after the final dependency succee
     const server = await serveDaemon(listenUrl, {
       async resumeRun({ target, emitEvent }) {
         resumeTargets.push(target);
-        if (target === source.runId) {
+        if (target === source.workspaceDir) {
           markRunRunning(source.workspaceDir);
-          emitRunStarted(emitEvent, target, dir);
+          emitRunStarted(emitEvent, source.runId, dir);
           markRunSuccessful(source.workspaceDir);
-          emitRunFinished(emitEvent, target);
-          return { runId: target };
+          emitRunFinished(emitEvent, source.runId);
+          return { runId: source.runId };
         }
 
-        assert.equal(target, dependent.runId);
+        assert.equal(target, dependent.workspaceDir);
         markRunRunning(dependent.workspaceDir);
-        emitRunStarted(emitEvent, target, dir);
-        return { runId: target };
+        emitRunStarted(emitEvent, dependent.runId, dir);
+        return { runId: dependent.runId };
       },
     });
     const client = await DaemonClient.connect(listenUrl);
@@ -3418,7 +3547,7 @@ test("daemon auto-starts ready dependency runs after the final dependency succee
       await client.call("runs.resume", { target: source.runId, overrides: {} });
       const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
       assert.equal(running.runId, dependent.runId);
-      assert.deepEqual(resumeTargets, [source.runId, dependent.runId]);
+      assert.deepEqual(resumeTargets, [source.workspaceDir, dependent.workspaceDir]);
     } finally {
       await client.close();
       await server.close();
@@ -3615,21 +3744,21 @@ test("daemon drains queued resume messages before evaluating a due schedule", as
       },
       async resumeRun({ target, overrides, emitEvent }) {
         resumeTargets.push(target);
-        assert.equal(target, run.runId);
+        assert.equal(target, run.workspaceDir);
         resumeMessages.push(overrides.message ?? "");
         markRunRunning(run.workspaceDir);
         removeQueuedResumeMessageCommand({
-          target,
+          target: run.runId,
           messageId: firstQueuedMessageId,
         });
         const newerQueued = queueResumeMessageCommand({
-          target,
+          target: run.runId,
           message: "Newer queued follow-up.",
         });
         newerQueuedMessageId = newerQueued.queuedResumeMessage.id;
-        emitRunStarted(emitEvent, target, dir);
+        emitRunStarted(emitEvent, run.runId, dir);
         resolveQueuedResume();
-        return { runId: target };
+        return { runId: run.runId };
       },
     });
     const client = await DaemonClient.connect(listenUrl);
@@ -3671,7 +3800,7 @@ test("daemon drains queued resume messages before evaluating a due schedule", as
       assert.doesNotMatch(resumeMessages[0], /Resuming after scheduled delay/);
 
       await sleep(100);
-      assert.deepEqual(resumeTargets, [run.runId]);
+      assert.deepEqual(resumeTargets, [run.workspaceDir]);
       assert.equal(resumeMessages.length, 1);
       const audit = await httpJson(httpBaseUrl, `/api/runs/${run.runId}/audit`);
       const drainedAudit = audit.body.history.events.find(
@@ -3795,11 +3924,11 @@ test("daemon startup sweep auto-starts eligible ready dependency runs", async ()
   await withEnv(sharedRuntimeEnv(dir), async () => {
     const server = await serveDaemon(listenUrl, {
       async resumeRun({ target, emitEvent }) {
-        assert.equal(target, dependent.runId);
+        assert.equal(target, dependent.workspaceDir);
         markRunRunning(dependent.workspaceDir);
-        emitRunStarted(emitEvent, target, dir);
+        emitRunStarted(emitEvent, dependent.runId, dir);
         resolveAutoStarted();
-        return { runId: target };
+        return { runId: dependent.runId };
       },
     });
     try {
@@ -3839,14 +3968,14 @@ test("daemon suppresses duplicate dependency auto-start attempts while one is al
       },
       async resumeRun({ target, emitEvent }) {
         autoStartCalls += 1;
-        assert.equal(target, dependent.runId);
+        assert.equal(target, dependent.workspaceDir);
         resolveFirstCall();
         await new Promise((resolve) => {
           releaseAutoStart = resolve;
         });
         markRunRunning(dependent.workspaceDir);
-        emitRunStarted(emitEvent, target, dir);
-        return { runId: target };
+        emitRunStarted(emitEvent, dependent.runId, dir);
+        return { runId: dependent.runId };
       },
     });
     const client = await DaemonClient.connect(listenUrl);
@@ -3893,14 +4022,14 @@ test("daemon scheduler defers due one-time schedules during pending dependency a
       },
       async resumeRun({ target, emitEvent }) {
         autoStartCalls += 1;
-        assert.equal(target, dependent.runId);
+        assert.equal(target, dependent.workspaceDir);
         resolveFirstCall();
         await new Promise((resolve) => {
           releaseAutoStart = resolve;
         });
         markRunRunning(dependent.workspaceDir);
-        emitRunStarted(emitEvent, target, dir);
-        return { runId: target };
+        emitRunStarted(emitEvent, dependent.runId, dir);
+        return { runId: dependent.runId };
       },
     });
     const client = await DaemonClient.connect(listenUrl);
@@ -3953,7 +4082,7 @@ test("daemon clears pending dependency auto-start markers after resume failures"
     const failingServer = await serveDaemon(firstListenUrl, {
       async resumeRun({ target }) {
         failedCalls += 1;
-        assert.equal(target, dependent.runId);
+        assert.equal(target, dependent.workspaceDir);
         await new Promise((resolve) => {
           releaseFailure = resolve;
         });
@@ -3987,11 +4116,11 @@ test("daemon clears pending dependency auto-start markers after resume failures"
     const retryServer = await serveDaemon(retryListenUrl, {
       async resumeRun({ target, emitEvent }) {
         retriedCalls += 1;
-        assert.equal(target, dependent.runId);
+        assert.equal(target, dependent.workspaceDir);
         markRunRunning(dependent.workspaceDir);
-        emitRunStarted(emitEvent, target, dir);
+        emitRunStarted(emitEvent, dependent.runId, dir);
         resolveRetryStarted();
-        return { runId: target };
+        return { runId: dependent.runId };
       },
     });
     try {
@@ -4072,14 +4201,14 @@ test("daemon scheduler rebuilds future timers after schedule mutations and start
       const server = await serveDaemon(listenUrl, {
         async resumeRun({ target, emitEvent }) {
           resumeCalls += 1;
-          assert.equal(target, run.runId);
+          assert.equal(target, run.workspaceDir);
           patchManifest(run.workspaceDir, (manifest) => {
             manifest.status = "running";
             manifest.schedule = null;
           });
-          emitRunStarted(emitEvent, target, dir);
+          emitRunStarted(emitEvent, run.runId, dir);
           resolveStarted();
-          return { runId: target };
+          return { runId: run.runId };
         },
       });
       const client = await DaemonClient.connect(listenUrl);
@@ -4132,14 +4261,14 @@ test("daemon scheduler rejects manual starts while a scheduled start is pending"
       const server = await serveDaemon(listenUrl, {
         async resumeRun({ target, emitEvent }) {
           resumeCalls += 1;
-          assert.equal(target, run.runId);
+          assert.equal(target, run.workspaceDir);
           resolveScheduledStart();
           await new Promise((resolve) => {
             releaseScheduledStart = resolve;
           });
           markRunRunning(run.workspaceDir);
-          emitRunStarted(emitEvent, target, dir);
-          return { runId: target };
+          emitRunStarted(emitEvent, run.runId, dir);
+          return { runId: run.runId };
         },
       });
       const client = await DaemonClient.connect(listenUrl);
@@ -4261,7 +4390,7 @@ test("daemon scheduler resumes completed runs for due one-time schedules", async
       const server = await serveDaemon(listenUrl, {
         async resumeRun({ target, overrides, emitEvent }) {
           resumeCalls += 1;
-          assert.equal(target, run.runId);
+          assert.equal(target, run.workspaceDir);
           assert.equal(overrides.message, "Resuming after scheduled delay.");
           patchManifest(run.workspaceDir, (manifest) => {
             manifest.status = "running";
@@ -4269,9 +4398,9 @@ test("daemon scheduler resumes completed runs for due one-time schedules", async
             manifest.exitCode = null;
             manifest.schedule = null;
           });
-          emitRunStarted(emitEvent, target, dir);
+          emitRunStarted(emitEvent, run.runId, dir);
           resolveStarted();
-          return { runId: target };
+          return { runId: run.runId };
         },
       });
       const client = await DaemonClient.connect(listenUrl);
@@ -4376,16 +4505,16 @@ test("daemon scheduler resumes recurring reuse runs with a synthetic message aft
       const server = await serveDaemon(listenUrl, {
         async resumeRun({ target, overrides, emitEvent }) {
           resumeCalls += 1;
-          assert.equal(target, run.runId);
+          assert.equal(target, run.workspaceDir);
           assert.equal(overrides.message, "Resuming after scheduled delay.");
           patchManifest(run.workspaceDir, (manifest) => {
             manifest.status = "running";
             manifest.endedAt = null;
             manifest.exitCode = null;
           });
-          emitRunStarted(emitEvent, target, dir);
+          emitRunStarted(emitEvent, run.runId, dir);
           resolveStarted();
-          return { runId: target };
+          return { runId: run.runId };
         },
       });
       const client = await DaemonClient.connect(listenUrl);
@@ -4433,7 +4562,7 @@ test("daemon scheduler indexes clones created while a run is active", async () =
     const server = await serveDaemon(listenUrl, {
       async resumeRun({ target, emitEvent, emitAuditEnvelope }) {
         resumeTargets.push(target);
-        if (target === source.runId) {
+        if (target === source.workspaceDir) {
           const sourceManifest = readManifest(source.workspaceDir);
           mkdirSync(cloneWorkspaceDir, { recursive: true });
           writeFileSync(
@@ -4469,18 +4598,18 @@ test("daemon scheduler indexes clones created while a run is active", async () =
             },
           });
           markRunRunning(source.workspaceDir);
-          emitRunStarted(emitEvent, target, dir);
-          return { runId: target };
+          emitRunStarted(emitEvent, source.runId, dir);
+          return { runId: source.runId };
         }
 
-        assert.equal(target, cloneRunId);
+        assert.equal(target, cloneWorkspaceDir);
         patchManifest(cloneWorkspaceDir, (manifest) => {
           manifest.status = "running";
           manifest.schedule = null;
         });
-        emitRunStarted(emitEvent, target, dir);
+        emitRunStarted(emitEvent, cloneRunId, dir);
         resolveCloneStarted();
-        return { runId: target };
+        return { runId: cloneRunId };
       },
     });
     const client = await DaemonClient.connect(listenUrl);
@@ -4490,7 +4619,7 @@ test("daemon scheduler indexes clones created while a run is active", async () =
       const running = await waitForRunStatus(httpBaseUrl, cloneRunId, "running");
       assert.equal(running.runId, cloneRunId);
       assert.equal(running.schedule, null);
-      assert.deepEqual(resumeTargets, [source.runId, cloneRunId]);
+      assert.deepEqual(resumeTargets, [source.workspaceDir, cloneWorkspaceDir]);
     } finally {
       await client.close();
       await server.close();
@@ -4667,12 +4796,12 @@ test("daemon scheduler defers due one-time schedules while a scheduled run is ac
     const server = await serveDaemon(listenUrl, {
       async resumeRun({ target, emitEvent }) {
         resumeCalls += 1;
-        assert.equal(target, run.runId);
+        assert.equal(target, run.workspaceDir);
         markRunRunning(run.workspaceDir);
-        emitRunStarted(emitEvent, target, dir);
+        emitRunStarted(emitEvent, run.runId, dir);
         resolveStarted();
         await release;
-        return { runId: target };
+        return { runId: run.runId };
       },
     });
     const client = await DaemonClient.connect(listenUrl);
