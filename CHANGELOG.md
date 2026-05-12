@@ -210,6 +210,7 @@
 
 ### Fixed
 
+- Pinning or archiving a run no longer changes its `updatedAt` timestamp.
 - Daemon-managed Start/Resume now resolves unique short run ids across repo
   buckets, so web, HTTP, WebSocket, and connected CLI resume the selected run
   even when the daemon process cwd is in a different repo bucket.

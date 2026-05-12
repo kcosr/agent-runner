@@ -2712,8 +2712,7 @@ test("command services: setRunNote and setRunPinned are idempotent and preserve 
     });
     const afterPin = readManifest(outcome.workspaceDir).updatedAt;
     assert.equal(pinned.updatedAt, afterPin);
-    assertTimestampAdvanced(previousUpdatedAt, afterPin, "setRunPinned updatedAt");
-    previousUpdatedAt = afterPin;
+    assert.equal(afterPin, previousUpdatedAt);
 
     const pinnedAgain = setRunPinned(outcome.runId, { pinned: true });
     assert.deepEqual(pinnedAgain, {
@@ -2892,7 +2891,7 @@ test("command services: archiveRun and unarchiveRun are idempotent and reject ru
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
-  let previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
+  const previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   await withSharedRuntimeEnv(dir, async () => {
     const archived = archiveRun(outcome.runId);
@@ -2900,8 +2899,8 @@ test("command services: archiveRun and unarchiveRun are idempotent and reject ru
     assert.ok(archived.archivedAt);
     assert.equal(archived.runId, outcome.runId);
     const afterArchive = readManifest(outcome.workspaceDir).updatedAt;
-    assertTimestampAdvanced(previousUpdatedAt, afterArchive, "archiveRun updatedAt");
-    previousUpdatedAt = afterArchive;
+    assert.equal(archived.updatedAt, previousUpdatedAt);
+    assert.equal(afterArchive, previousUpdatedAt);
 
     const archivedAgain = archiveRun(outcome.runId);
     assert.equal(archivedAgain.changed, false);
@@ -2912,8 +2911,8 @@ test("command services: archiveRun and unarchiveRun are idempotent and reject ru
     assert.equal(unarchived.changed, true);
     assert.equal(unarchived.archivedAt, null);
     const afterUnarchive = readManifest(outcome.workspaceDir).updatedAt;
-    assertTimestampAdvanced(previousUpdatedAt, afterUnarchive, "unarchiveRun updatedAt");
-    previousUpdatedAt = afterUnarchive;
+    assert.equal(unarchived.updatedAt, previousUpdatedAt);
+    assert.equal(afterUnarchive, previousUpdatedAt);
 
     const unarchivedAgain = unarchiveRun(outcome.runId);
     assert.equal(unarchivedAgain.changed, false);

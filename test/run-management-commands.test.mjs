@@ -323,14 +323,13 @@ test("run archive and run unarchive expose idempotent text and json results", as
   writeAgent(dir, "run-mgmt-agent", AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
-  let previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
+  const previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   const archivedText = runCli(["run", "archive", outcome.runId], { cwd: dir });
   assert.match(archivedText, new RegExp(`archived run ${outcome.runId}`));
   let manifest = readManifest(outcome.workspaceDir);
   assert.ok(manifest.archivedAt);
-  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run archive updatedAt");
-  previousUpdatedAt = manifest.updatedAt;
+  assert.equal(manifest.updatedAt, previousUpdatedAt);
 
   const archivedAgainJson = runCli(["run", "archive", outcome.runId, "--output-format", "json"], {
     cwd: dir,
@@ -344,8 +343,7 @@ test("run archive and run unarchive expose idempotent text and json results", as
   assert.match(unarchivedText, new RegExp(`unarchived run ${outcome.runId}`));
   manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.archivedAt, null);
-  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run unarchive updatedAt");
-  previousUpdatedAt = manifest.updatedAt;
+  assert.equal(manifest.updatedAt, previousUpdatedAt);
 
   const unarchivedAgainJson = runCli(
     ["run", "unarchive", outcome.runId, "--output-format", "json"],
