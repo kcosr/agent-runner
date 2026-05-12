@@ -82,7 +82,7 @@ surface.
 
 Dashboard view state persists the durable surface layout fields:
 center-surface view mode, collapsed board columns, selected-run panel width,
-and the active Chat/Detail/Notes/Tasks tab. Search text, fullscreen state,
+fullscreen state, and the active Chat/Detail/Notes/Tasks tab. Search text,
 per-run drawer tabs, the active board column, and the active list status chip
 remain transient.
 
