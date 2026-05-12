@@ -1,4 +1,3 @@
-import type { HistoryState, ParsedHistoryState } from "@tanstack/history";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type {
@@ -60,7 +59,6 @@ interface HistoryActivationState {
 
 type RunNavigationOptions = {
   replace?: boolean;
-  state?: true | ((current: ParsedHistoryState) => HistoryState);
 };
 
 export type RunActionPending =
@@ -1264,7 +1262,6 @@ export function useRunsDashboardState() {
     void navigate({
       params: { runId },
       replace: options?.replace,
-      state: options?.state,
       to: "/runs/$runId",
     });
   }
@@ -1282,7 +1279,6 @@ export function useRunsDashboardState() {
         runId,
       },
       replace: options?.replace,
-      state: options?.state,
       to: "/runs/$runId/attachments/$attachmentOwnerRunId/$attachmentId",
     });
   }

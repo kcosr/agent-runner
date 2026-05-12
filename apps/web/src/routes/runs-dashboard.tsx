@@ -1,5 +1,3 @@
-import type { ParsedHistoryState } from "@tanstack/history";
-import { useLocation, useNavigate } from "@tanstack/react-router";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
@@ -40,20 +38,9 @@ interface DestructiveRunConfirmation {
 interface RunActionMenuState {
   items: RunActionMenuItem[];
   runId: string;
+  selectedRunIdOnOpen?: string;
   x: number;
   y: number;
-}
-
-interface PendingRunActionMenuRequest {
-  runId: string;
-  x: number;
-  y: number;
-}
-
-declare module "@tanstack/history" {
-  interface HistoryState {
-    pendingRunActionMenu?: PendingRunActionMenuRequest;
-  }
 }
 
 function isBoardFilterShortcutCommand(command: string): command is BoardFilterShortcutCommand {
@@ -226,13 +213,9 @@ function RunActionMenu({
 
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
-  const location = useLocation();
-  const navigate = useNavigate();
   const [destructiveConfirmation, setDestructiveConfirmation] =
     useState<DestructiveRunConfirmation | null>(null);
   const [runActionMenu, setRunActionMenu] = useState<RunActionMenuState | null>(null);
-  const pendingRunActionMenuRef = useRef<RunActionMenuState | null>(null);
-  const runActionMenuSelectionMatchedRef = useRef(false);
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
   const [noteEditRequestVersion, setNoteEditRequestVersion] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -244,15 +227,6 @@ export function RunsDashboardRoute() {
 
   latestStateRef.current = state;
   latestNavigableBoardColumnsRef.current = navigableBoardColumns;
-
-  const clearPendingRunActionMenuLocationState = useCallback(() => {
-    void navigate({
-      replace: true,
-      state: (current: ParsedHistoryState) => {
-        return { ...current, pendingRunActionMenu: undefined };
-      },
-    });
-  }, [navigate]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -499,73 +473,34 @@ export function RunsDashboardRoute() {
   }, []);
 
   useEffect(() => {
-    if (!destructiveConfirmation || destructiveConfirmation.runId === state.selectedRunId) {
+    if (!destructiveConfirmation) {
       return;
     }
-    pendingRunActionMenuRef.current = null;
+    if (findDashboardRun(state, destructiveConfirmation.runId)) {
+      return;
+    }
     setDestructiveConfirmation(null);
-  }, [destructiveConfirmation, state.selectedRunId]);
+  }, [destructiveConfirmation, state]);
 
   useEffect(() => {
     if (!runActionMenu) {
-      runActionMenuSelectionMatchedRef.current = false;
       return;
     }
-    if (state.selectedRunId === runActionMenu.runId) {
-      runActionMenuSelectionMatchedRef.current = true;
+    if (state.selectedRunId === runActionMenu.selectedRunIdOnOpen) {
       return;
     }
-    if (state.selectedRunId === undefined && !runActionMenuSelectionMatchedRef.current) {
-      return;
-    }
-    runActionMenuSelectionMatchedRef.current = false;
     setRunActionMenu(null);
   }, [runActionMenu, state.selectedRunId]);
 
   useEffect(() => {
-    const pendingRunActionMenu = pendingRunActionMenuRef.current;
-    const pendingRequest = location.state.pendingRunActionMenu;
-    const pendingRunId = pendingRunActionMenu?.runId ?? pendingRequest?.runId;
-    if (!pendingRunId || pendingRunId !== state.selectedRunId) {
-      return;
-    }
-
-    const currentState = latestStateRef.current;
-    const run = findDashboardRun(currentState, pendingRunId);
-    const items = pendingRunActionMenu?.items ?? (run ? getRunActionMenuItems(run) : []);
-    pendingRunActionMenuRef.current = null;
-    if (pendingRequest) {
-      clearPendingRunActionMenuLocationState();
-    }
-    if (items.length === 0) {
-      return;
-    }
-    setRunActionMenu({
-      items,
-      runId: pendingRunId,
-      x: pendingRunActionMenu?.x ?? pendingRequest?.x ?? 8,
-      y: pendingRunActionMenu?.y ?? pendingRequest?.y ?? 8,
-    });
-  }, [
-    clearPendingRunActionMenuLocationState,
-    location.state.pendingRunActionMenu,
-    state.selectedRunId,
-  ]);
-
-  useEffect(() => {
     if (state.actionPending !== undefined) {
-      pendingRunActionMenuRef.current = null;
       setRunActionMenu(null);
     }
   }, [state.actionPending]);
 
   const closeRunActionMenu = useCallback(() => {
-    pendingRunActionMenuRef.current = null;
-    if (location.state.pendingRunActionMenu) {
-      clearPendingRunActionMenuLocationState();
-    }
     setRunActionMenu(null);
-  }, [clearPendingRunActionMenuLocationState, location.state.pendingRunActionMenu]);
+  }, []);
 
   async function submitDestructiveConfirmation() {
     const confirmation = destructiveConfirmation;
@@ -574,21 +509,13 @@ export function RunsDashboardRoute() {
     }
 
     const currentState = latestStateRef.current;
-    if (currentState.selectedRunId !== confirmation.runId) {
-      pendingRunActionMenuRef.current = null;
-      setDestructiveConfirmation(null);
-      return;
-    }
-
     const currentRun = findDashboardRun(currentState, confirmation.runId);
     const currentAction = currentRun ? getRunDestructiveCleanupAction(currentRun) : null;
     if (currentAction !== confirmation.action) {
-      pendingRunActionMenuRef.current = null;
       setDestructiveConfirmation(null);
       return;
     }
 
-    pendingRunActionMenuRef.current = null;
     setDestructiveConfirmation(null);
     try {
       if (confirmation.action === "archive-delete") {
@@ -604,16 +531,13 @@ export function RunsDashboardRoute() {
   function openRunActionMenu(runId: string, point: { clientX: number; clientY: number }) {
     const currentState = latestStateRef.current;
     const run = findDashboardRun(currentState, runId);
-    pendingRunActionMenuRef.current = null;
     setRunActionMenu(null);
 
     if (!run) {
-      currentState.openRun(runId);
       return;
     }
     const items = getRunActionMenuItems(run);
     if (items.length === 0) {
-      currentState.openRun(runId);
       return;
     }
 
@@ -626,23 +550,10 @@ export function RunsDashboardRoute() {
     const nextMenu = {
       items,
       runId,
+      selectedRunIdOnOpen: currentState.selectedRunId,
       x: Math.min(Math.max(8, clientX), Math.max(8, viewportWidth - width - 8)),
       y: Math.min(Math.max(8, clientY), Math.max(8, viewportHeight - height - 8)),
     };
-    if (currentState.selectedRunId !== runId) {
-      pendingRunActionMenuRef.current = nextMenu;
-      currentState.openRun(runId, {
-        state: (current) => ({
-          ...current,
-          pendingRunActionMenu: {
-            runId,
-            x: nextMenu.x,
-            y: nextMenu.y,
-          },
-        }),
-      });
-      return;
-    }
     setRunActionMenu(nextMenu);
   }
 

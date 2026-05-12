@@ -8738,7 +8738,7 @@ describe("web app", () => {
     expect(router.state.location.pathname).toBe("/runs/run-1");
   });
 
-  it("opens the run action menu on right-click after selecting the card", async () => {
+  it("opens the run action menu on right-click without selecting the card", async () => {
     installFetchMock({
       runs: [
         makeRun({
@@ -8769,6 +8769,7 @@ describe("web app", () => {
 
     await renderApp();
     const card = await findRunCard("Menu ready");
+    expect(router.state.location.pathname).toBe("/");
 
     expect(fireEvent.contextMenu(document.body, { clientX: 4, clientY: 4 })).toBe(true);
     expect(fireEvent.contextMenu(card, { clientX: 48, clientY: 56 })).toBe(false);
@@ -8777,7 +8778,8 @@ describe("web app", () => {
     const menu = getRunActionMenuElement();
     expect(within(menu).getByText("Archive")).toBeInTheDocument();
     expect(within(menu).getByText("Archive + Delete")).toBeInTheDocument();
-    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-1"));
+    expect(router.state.location.pathname).toBe("/");
+    expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
 
     fireEvent.pointerDown(document.body, { clientX: 2, clientY: 2 });
     await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
@@ -8880,6 +8882,7 @@ describe("web app", () => {
 
     await renderApp();
     const menuCard = await findRunCard("Long press menu");
+    expect(router.state.location.pathname).toBe("/");
 
     dispatchPointerEvent(menuCard, "pointerdown", {
       button: 0,
@@ -8892,7 +8895,8 @@ describe("web app", () => {
     });
 
     await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
-    expect(router.state.location.pathname).toBe("/runs/run-1");
+    expect(router.state.location.pathname).toBe("/");
+    expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
 
     dispatchPointerEvent(await findRunCard("No menu actions"), "pointerdown", {
       button: 0,
@@ -8904,7 +8908,8 @@ describe("web app", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 540));
     });
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-empty"));
+    expect(router.state.location.pathname).toBe("/");
+    expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
     expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument();
   });
 
