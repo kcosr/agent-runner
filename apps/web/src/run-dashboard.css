@@ -492,29 +492,25 @@ pre {
 }
 
 .dashboard-board-surface {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .dashboard-right-surfaces,
 .dashboard-panel-shell {
-  position: absolute;
-  inset: 0;
   display: flex;
-  justify-content: flex-end;
-  min-width: 0;
   min-height: 0;
-  pointer-events: none;
 }
 
 .dashboard-right-surfaces {
-  z-index: 20;
+  flex: 0 0 auto;
 }
 
-.dashboard-panel-shell > * {
-  pointer-events: auto;
+.dashboard-panel-shell {
+  flex: 0 0 auto;
 }
 
 /* ─── board ──────────────────────────────────────────── */
@@ -654,6 +650,7 @@ pre {
 .runs-list-rows {
   display: grid;
   gap: 1px;
+  min-width: 72rem;
   background: var(--border);
 }
 
@@ -1291,12 +1288,7 @@ pre {
 }
 
 .drawer-sheet-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  display: none;
 }
 
 .drawer-head {
@@ -2016,6 +2008,9 @@ pre {
   }
   .runs-list-region {
     overflow-x: hidden;
+  }
+  .runs-list-rows {
+    min-width: 0;
   }
   .status-filter-chips {
     padding: 8px 10px;
