@@ -15,6 +15,10 @@ const PLAN_FEATURE_ASSIGNMENT_PATH = new URL(
   "../assignments/plan-feature/assignment.md",
   import.meta.url,
 ).pathname;
+const PLAN_IMPLEMENT_FEATURE_ASSIGNMENT_PATH = new URL(
+  "../assignments/plan-implement-feature/assignment.md",
+  import.meta.url,
+).pathname;
 const CODE_REVIEW_ASSIGNMENT_PATH = new URL(
   "../assignments/code-review/assignment.md",
   import.meta.url,
@@ -48,70 +52,105 @@ function fieldByKey(fields, key) {
   return field;
 }
 
-test("static input surface: built-in planner + plan-feature surfaces the documented static fields", () => {
-  const loadedAgent = loadAgentConfig(PLANNER_AGENT_PATH, REPO_ROOT);
-  const loadedAssignment = loadAssignmentConfig(PLAN_FEATURE_ASSIGNMENT_PATH, REPO_ROOT);
+test("static input surface: built-in planner + plan-feature surfaces the documented static fields", () =>
+  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+    const loadedAgent = loadAgentConfig(PLANNER_AGENT_PATH, REPO_ROOT);
+    const loadedAssignment = loadAssignmentConfig(PLAN_FEATURE_ASSIGNMENT_PATH, REPO_ROOT);
 
-  const surface = resolveStaticInputSurface(loadedAgent, loadedAssignment);
-  const backend = fieldByKey(surface.runSettings, "backend");
-  const timeoutSec = fieldByKey(surface.runSettings, "timeoutSec");
-  const unrestricted = fieldByKey(surface.runSettings, "unrestricted");
-  const maxRetries = fieldByKey(surface.runSettings, "maxRetries");
-  const message = fieldByKey(surface.runSettings, "message");
-  const model = fieldByKey(surface.runSettings, "model");
-  const effort = fieldByKey(surface.runSettings, "effort");
+    const surface = resolveStaticInputSurface(loadedAgent, loadedAssignment);
+    const backend = fieldByKey(surface.runSettings, "backend");
+    const timeoutSec = fieldByKey(surface.runSettings, "timeoutSec");
+    const unrestricted = fieldByKey(surface.runSettings, "unrestricted");
+    const maxRetries = fieldByKey(surface.runSettings, "maxRetries");
+    const message = fieldByKey(surface.runSettings, "message");
+    const model = fieldByKey(surface.runSettings, "model");
+    const effort = fieldByKey(surface.runSettings, "effort");
 
-  assert.deepEqual(
-    surface.runSettings.map((field) => field.key),
-    [
-      "cwd",
-      "backend",
-      "launcher",
-      "model",
-      "effort",
-      "message",
-      "name",
-      "timeoutSec",
-      "unrestricted",
-      "maxRetries",
-    ],
-  );
+    assert.deepEqual(
+      surface.runSettings.map((field) => field.key),
+      [
+        "cwd",
+        "backend",
+        "launcher",
+        "model",
+        "effort",
+        "message",
+        "name",
+        "timeoutSec",
+        "unrestricted",
+        "maxRetries",
+      ],
+    );
 
-  assert.equal(backend.value, "codex");
-  assert.equal(backend.source, "agent");
-  assert.equal(timeoutSec.value, 14400);
-  assert.equal(timeoutSec.source, "agent");
-  assert.equal(unrestricted.value, true);
-  assert.equal(unrestricted.source, "schema_default");
-  assert.equal(maxRetries.value, 4);
-  assert.equal(maxRetries.source, "assignment");
+    assert.equal(backend.value, "codex");
+    assert.equal(backend.source, "agent");
+    assert.equal(timeoutSec.value, 14400);
+    assert.equal(timeoutSec.source, "agent");
+    assert.equal(unrestricted.value, true);
+    assert.equal(unrestricted.source, "schema_default");
+    assert.equal(maxRetries.value, 4);
+    assert.equal(maxRetries.source, "assignment");
 
-  assert.equal(message.editable, true);
-  assert.equal(message.valueStatus, "unset");
-  assert.equal(message.source, "available_override");
+    assert.equal(message.editable, true);
+    assert.equal(message.valueStatus, "unset");
+    assert.equal(message.source, "available_override");
 
-  assert.equal(model.editable, true);
-  assert.equal(model.valueStatus, "concrete");
-  assert.equal(model.source, "agent");
-  assert.equal(model.value, "gpt-5.5");
+    assert.equal(model.editable, true);
+    assert.equal(model.valueStatus, "concrete");
+    assert.equal(model.source, "agent");
+    assert.equal(model.value, "gpt-5.5");
 
-  assert.equal(effort.editable, true);
-  assert.equal(effort.valueStatus, "concrete");
-  assert.equal(effort.source, "agent");
-  assert.equal(effort.value, "high");
+    assert.equal(effort.editable, true);
+    assert.equal(effort.valueStatus, "concrete");
+    assert.equal(effort.source, "agent");
+    assert.equal(effort.value, "high");
 
-  assert.deepEqual(
-    surface.assignmentInputs.map((field) => field.key),
-    ["worktree_slug", "worktree_base_ref"],
-  );
-  const baseRef = fieldByKey(surface.assignmentInputs, "worktree_base_ref");
-  assert.equal(fieldByKey(surface.assignmentInputs, "worktree_slug").required, true);
-  assert.notEqual(baseRef.required, true);
-  assert.equal(baseRef.source, "var_default");
-  assert.equal(baseRef.value, "origin/main");
-  assert.ok(!surface.assignmentInputs.some((field) => field.key === "worktree_path"));
-  assert.ok(!surface.assignmentInputs.some((field) => field.key === "repo_root"));
-});
+    assert.deepEqual(
+      surface.assignmentInputs.map((field) => field.key),
+      ["worktree_slug", "worktree_base_ref"],
+    );
+    const baseRef = fieldByKey(surface.assignmentInputs, "worktree_base_ref");
+    assert.equal(fieldByKey(surface.assignmentInputs, "worktree_slug").required, true);
+    assert.notEqual(baseRef.required, true);
+    assert.equal(baseRef.source, "var_default");
+    assert.equal(baseRef.value, "origin/main");
+    assert.ok(!surface.assignmentInputs.some((field) => field.key === "worktree_path"));
+    assert.ok(!surface.assignmentInputs.some((field) => field.key === "repo_root"));
+  }));
+
+test("static input surface: built-in planner + plan-implement-feature has no assignment vars", () =>
+  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+    const loadedAgent = loadAgentConfig(PLANNER_AGENT_PATH, REPO_ROOT);
+    const loadedAssignment = loadAssignmentConfig(
+      PLAN_IMPLEMENT_FEATURE_ASSIGNMENT_PATH,
+      REPO_ROOT,
+    );
+
+    const surface = resolveStaticInputSurface(loadedAgent, loadedAssignment);
+    const maxRetries = fieldByKey(surface.runSettings, "maxRetries");
+    const message = fieldByKey(surface.runSettings, "message");
+
+    assert.deepEqual(
+      surface.runSettings.map((field) => field.key),
+      [
+        "cwd",
+        "backend",
+        "launcher",
+        "model",
+        "effort",
+        "message",
+        "name",
+        "timeoutSec",
+        "unrestricted",
+        "maxRetries",
+      ],
+    );
+    assert.equal(maxRetries.value, 4);
+    assert.equal(maxRetries.source, "assignment");
+    assert.equal(message.editable, true);
+    assert.equal(message.valueStatus, "unset");
+    assert.deepEqual(surface.assignmentInputs, []);
+  }));
 
 test("static input surface: review assignments expose the correct CLI/Web inputs", () =>
   withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {

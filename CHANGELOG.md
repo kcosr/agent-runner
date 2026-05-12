@@ -146,6 +146,10 @@
 
 ### Added
 
+- Added the `plan-implement-feature` assignment for single-run feature
+  planning, approval, implementation, review, and PR handoff, plus shared
+  `feature-plan/*` and `feature-implement/*` task definitions.
+  ([#141](https://github.com/kcosr/task-runner/pull/141))
 - Added run-card action menus in the web dashboard, plus a selected-run
   `Shift+A` cleanup shortcut that confirms existing archive/delete actions
   before running them. ([#140](https://github.com/kcosr/task-runner/pull/140))

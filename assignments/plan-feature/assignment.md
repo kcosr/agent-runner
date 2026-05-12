@@ -174,502 +174,13 @@ callerInstructions: |
   `init --run-id <implementer-run-id>` against the updated
   draft to refresh that implementer run's frozen copied state.
 tasks:
-  - id: orient
-    title: Target repo orientation and conventions
-    body: |
-      Read the high-signal entry points for the repository at
-      `{{cwd}}`:
-        - AGENTS.md, CLAUDE.md, CONTRIBUTING.md at the repo
-          root
-        - README.md
-        - Build manifest (package.json, Cargo.toml, go.mod,
-          pyproject.toml, etc.) for scripts, dependencies,
-          and language toolchain
-        - docs/ directory (design docs, architecture notes)
-        - Primary entry-point files
-
-      Capture in Notes: the exact build, test, lint, and
-      format commands, the test framework, any pre-commit
-      hooks, PR conventions, and any non-obvious repo-specific
-      rules the generated plan must respect. These command
-      strings will be cited verbatim by the implementer's
-      check-gate task, so copy them accurately.
-  - id: capture_feature
-    title: Capture the feature and implementation brief
-    body: |
-      The feature you are planning for was handed to you as
-      the user message that started this run. Read it in
-      full, then restate it in your own words in Notes:
-        - What is the feature? (one paragraph, concrete)
-        - What problem does it solve? What's the motivation?
-        - What is explicitly in scope?
-        - What is explicitly out of scope?
-
-      If the brief included a rough implementation plan,
-      capture every concrete step mentioned, even the ones
-      you don't yet fully understand. Your job as planner is
-      to refine those steps into an executable task list,
-      not to discard them.
-
-      ## Contract dimensions (ambiguity gate)
-
-      Before you move on, walk the list of **contract
-      dimensions** relevant to the type of feature you are
-      planning and check whether the brief actually pins
-      each one down. Do not guess; do not fill gaps with
-      assumptions. An unanswered contract question at this
-      stage becomes silently-wrong code later.
-
-      When the feature changes a config/schema/API contract,
-      plan for the end-state shape directly unless the caller
-      explicitly asks for compatibility or migration support.
-      Do not quietly introduce fallback parsing, heuristics,
-      alias fields, bridge routes, or dual-shape readers just
-      to smooth over a redesign.
-
-      Identify the feature type first:
-        - **CLI feature** — adds or changes a command,
-          subcommand, flag, or argument.
-        - **API / library feature** — adds or changes an
-          exported function, HTTP endpoint, RPC method,
-          or public type.
-        - **Data / schema feature** — adds or changes a
-          persisted shape, config file, database schema,
-          or migration.
-        - **UI feature** — adds or changes a screen, flow,
-          component, or interaction model.
-        - **Refactor** — restructures existing code
-          without an intended external behavior change.
-        - **Other** — infrastructure, tooling, build, etc.
-
-      Then apply the dimension checklist for that type:
-
-      **CLI**: exact command/subcommand name, exact flag
-      names and short/long forms, required vs optional
-      args, default values, text output format, JSON
-      output format if any, exit codes per failure mode,
-      behavior on malformed input, behavior on duplicate
-      or missing resources.
-
-      **API / library**: function/endpoint name, argument
-      types and names, return type, error types and when
-      each is raised, auth/permission model, request
-      schema, response schema, backwards compatibility
-      requirements.
-
-      **Data / schema**: exact field names and types,
-      nullability, defaults, indexes, migration direction
-      (additive only vs destructive), rollback plan,
-      behavior on pre-existing data.
-
-      **UI**: entry point, state transitions, loading
-      and error states, empty states, keyboard /
-      accessibility requirements, responsive behavior.
-
-      **Refactor**: scope boundaries (what files are in
-      and out), behavior-preservation criteria (what
-      existing tests must still pass), rollback plan.
-
-      For **every** dimension above that is relevant to
-      the feature type, ask: does the brief give me the
-      answer, or am I about to make it up? Write each
-      dimension and its status into Notes as:
-
-          - <dimension>: <answer from brief> — OR —
-          - <dimension>: **ambiguous**
-
-      ## If anything is ambiguous, block
-
-      If any relevant dimension is `ambiguous`, **mark this
-      task `blocked`** with the following in Notes:
-
-        1. The list of ambiguous dimensions.
-        2. Up to three **targeted, concrete** questions
-           you need the caller to answer before you can
-           plan. "What should this do?" is not targeted;
-           "Should `task list agents` print JSON by
-           default, or only with `--output-format json`
-           like the other commands?" is.
-        3. A one-sentence summary of what you have
-           understood so far, so the caller can confirm
-           your framing.
-
-      Task-runner will halt the run cleanly (exit 2). The
-      caller resumes with a follow-up message answering
-      your questions:
-
-          {{task_runner_cmd}} run --resume-run {{run_id}} \
-            "answers: <your answers here>"
-
-      On resume, the runner normalizes `blocked` back to
-      `pending` and you re-enter this task with the
-      caller's answers in the new turn. Update the Notes
-      block with the resolved dimensions and mark the
-      task `completed`.
-
-      **Do not assume**. Do not proceed to `survey_impact` with
-      unresolved ambiguity — your whole plan will be
-      built on a guess, and the ambiguity compounds
-      through impact survey, implementation tasks, and
-      review. A blocked run with three targeted
-      questions is faster than a bad plan you have to
-      throw away.
-
-      ## After the gate
-
-      Once every contract dimension is resolved (either
-      from the brief or from a caller follow-up), also
-      list in Notes any **remaining** assumptions you are
-      making on non-contract details (naming, directory
-      placement, test file naming, etc.). These become
-      validation points the reviewer will check in its
-      plan-coverage pass later, but they do not block —
-      the contract gate only fires on the enumerated
-      dimensions above.
-  - id: survey_impact
-    title: Survey the impact surface
-    body: |
-      Find every part of the repository the feature will
-      touch. For each area, list in Notes:
-        - File paths (repo-relative)
-        - The function / class / module responsible
-        - Existing behavior the feature must preserve
-        - Existing tests covering the area (if any)
-        - Shared paths the change would touch: parsers,
-          dispatchers, request/response builders, state reducers,
-          serializers, config loaders, lifecycle/workflow handlers,
-          database access layers, UI state transitions, or other
-          reused infrastructure, plus representative existing sibling
-          behaviors that also flow through that path
-
-      Read the identified files in full, not just skim. This
-      is the context the generated plan's implementation
-      tasks will cite. Vague impact surveys produce vague
-      plans, which produce sloppy implementations.
-
-      You may delegate impact-surface exploration to native
-      subagents (Claude's Agent tool, Codex subagents,
-      whatever your backend supports) if that would
-      parallelize the survey. Native subagents do not count
-      against task-runner's recursion depth.
-  - id: check_existing_code
-    title: Existing-code and duplication check
-    body: |
-      Before planning new code, check what already exists.
-      Specifically search for:
-        - Helpers or utilities that already do what the
-          feature needs — so the plan can reuse rather than
-          reimplement.
-        - Similar patterns elsewhere in the repo that the
-          feature should match for consistency (error
-          handling, config loading, state-machine shapes,
-          naming conventions).
-        - Near-duplicates of the logic the feature would
-          introduce, which may mean an extraction point
-          already exists and the plan should consolidate
-          rather than add a third copy.
-
-      For each reusable piece, cite `file:line` in Notes and
-      describe how the plan can use it. If you find
-      near-duplicates that complicate the clean landing of
-      the feature, note them — the plan may need a
-      pre-refactor task.
-
-      Also flag any proposed approach that relies on fallback
-      logic, heuristic detection, or compatibility shims where
-      a direct hot-cut design would be cleaner. The generated
-      plan should prefer explicit contracts over transitional
-      glue unless the caller asked for migration support.
-
-      This task is the primary defense against the plan
-      producing accidental duplication. Take it seriously.
-  - id: assess_risks_and_tests
-    title: Risks, edge cases, and test strategy
-    body: |
-      For each impact area from `survey_impact`, identify in Notes:
-        - Concurrency, state-machine, or lifecycle risks
-        - Error paths and edge cases the feature must
-          handle (malformed inputs, missing files,
-          permission errors, partial writes, cancellation)
-        - Existing test coverage on the area, or the
-          absence of it
-        - New tests the feature will need — unit,
-          integration, or end-to-end — and where they will
-          live (file paths from `orient` conventions)
-        - For any shared path that will be reordered, hoisted,
-          cached, centralized, split, or otherwise changed around
-          parsing, normalization, validation, state construction,
-          lifecycle transitions, or request/response projection:
-          representative existing sibling behaviors to test, or the
-          exact existing coverage that is sufficient and can be cited
-
-      Also capture the exact check command(s) the project
-      uses to gate commits (e.g. `npm run check`,
-      `cargo test`, `pytest`). These will be cited verbatim
-      by the generated plan's check-gate task.
-
-      If the feature changes a persisted or user-facing
-      contract, state explicitly whether the intended landing
-      is a hot cut or a compatibility-preserving migration.
-      Default to hot cut unless the caller said otherwise.
-  - id: produce_contract_artifact
-    title: Produce the feature contract artifact
-    body: |
-      Before you draft the plan, pin down the exact shape
-      of what the implementer is going to build. The
-      contract dimensions you walked in `capture_feature` were the
-      *requirements check*; this task is the *deliverable*
-      — a concrete, greppable artifact the implementer and
-      reviewer both work from.
-
-      Write the contract into this task's Notes using the
-      format appropriate for the feature type. The contract
-      must be specific enough that two people reading it
-      would produce identical implementations on the
-      observable surface. Vague contracts produce drifting
-      implementations and weak reviews.
-
-      **CLI features** — a command reference table:
-
-          ## `<command-name>`
-
-          **Synopsis**: `<binary> <command> [flags] <args>`
-
-          **Description**: one sentence on what it does.
-
-          **Args**:
-            - `<arg1>` — type, required/optional, default.
-
-          **Flags**:
-            - `--flag-name` — type, required/optional,
-              default, one-sentence description.
-
-          **Output (text)**:
-              <paste a sample block showing exactly what
-              the text output looks like for the happy
-              path>
-
-          **Output (json)**:
-              ```json
-              { "example": "exact shape" }
-              ```
-
-          **Exit codes**:
-            - 0 — success case
-            - 1 — specific failure case
-            - ... etc.
-
-          **Error behaviors**:
-            - malformed input → exit code, stderr message
-            - missing resource → exit code, stderr message
-            - duplicate / ambiguous match → exit code,
-              stderr message
-
-          **Examples**:
-              <2-3 real invocations with their output>
-
-      **API / library features** — a signature block plus
-      error matrix:
-
-          ## `<function-or-endpoint>`
-
-          **Signature**: exact type signature (TS, Go,
-          Python, etc.) or HTTP method/path + request
-          body schema.
-
-          **Returns**: exact return type / response shape.
-
-          **Errors**: table of `Error type → When raised
-          → Caller remediation`.
-
-          **Auth**: required permissions / tokens, if any.
-
-          **Migration / compatibility**: hot cut unless the
-          brief explicitly requires compatibility or an
-          additive/deprecation path.
-
-      **Data / schema features** — a schema diff plus
-      migration:
-
-          ## Schema change
-
-          **Before**: existing shape.
-          **After**: new shape.
-          **Migration**: hot cut / additive / rollback plan,
-          whichever the brief explicitly requires.
-          **Pre-existing data**: how it is handled.
-
-      **UI features** — a state-transition sketch:
-
-          ## Interaction model
-
-          **Entry points**: where the user enters.
-          **States**: list of states and transitions.
-          **Loading / empty / error states**: each with
-          a one-line description of what the user sees.
-          **Accessibility**: keyboard, screen-reader,
-          responsive requirements.
-
-      **Refactor** — a scope and behavior-preservation
-      statement:
-
-          ## Scope
-          **Files in scope**: list.
-          **Files out of scope**: list.
-          **Behavior preserved**: list of existing tests
-          that must still pass verbatim.
-          **Rollback**: one-line plan.
-
-      **Other** — adapt the nearest format above, or
-      produce a short "what success looks like" bullet
-      list if none of the above fit.
-
-      Once the contract artifact is written, paste the
-      entire block into this task's Notes. It will be
-      copied verbatim into the generated plan's
-      `<<PLACEHOLDER_FEATURE_CONTRACT>>` marker in `draft_plan`,
-      so the implementer reads it on every fresh task
-      attempt and the reviewer cross-checks the final
-      code against it in plan-coverage.
-
-      If you are mid-task and realize the contract is
-      still ambiguous on a dimension you missed in `capture_feature`,
-      mark **this** task `blocked` with the missing
-      dimension and targeted questions — same gate as
-      `capture_feature`. It is better to catch a contract gap here
-      than to let the implementer discover it.
-  - id: produce_surface_inventory
-    title: Produce the surface inventory
-    body: |
-      Some bug classes don't fall cleanly into any
-      review dimension. The most common: a feature is
-      "implemented" at one layer but never connected at
-      another — a CLI flag is parsed but never read, an
-      HTTP route is documented but has no handler, a UI
-      form field is collected but never POSTed, a config
-      key is loaded but never consulted. The surface is
-      *named* in user-visible text, but the data flow
-      stops short of completing the round trip. Unit
-      tests, lint, and docs checks all pass; the user
-      hits a silent dead end.
-
-      The defense is an explicit Surface Inventory: for
-      every named user-facing entity this feature
-      introduces, modifies, or removes, list the layers
-      it must travel and the symmetric peers it must
-      stay aligned with. The inventory becomes a
-      checklist the implementer must satisfy and the
-      reviewer can re-derive from the diff.
-
-      ## What counts as a surface element
-
-      A surface element is any named entity a user
-      types, clicks, or configures:
-        - CLI flag, positional, or subcommand name
-        - HTTP route or query/body parameter
-        - RPC method or RPC parameter key
-        - Environment variable
-        - Config-file key
-        - UI form field, button label, or preference key
-        - Public function / exported symbol whose name
-          appears in user-facing docs
-        - Persisted-data field that appears in
-          user-facing output
-
-      Surface elements are *names* the user encounters.
-      Internal helpers, private types, and unexported
-      implementation details are out of scope.
-
-      ## What the inventory looks like
-
-      For every surface element introduced, modified, or
-      removed by this feature, record:
-
-        - **Name** — the literal token the user sees
-          (`--foo`, `POST /bar`, `BAZ_ENV`, `pref.qux`).
-        - **Disposition** — `added`, `changed`, or
-          `removed`.
-        - **Layers it must traverse** — the sequence of
-          code locations where the value must be *read*,
-          not just declared. For a CLI flag this is
-          typically `parser → command handler → service
-          → projection → renderer`. List every layer the
-          value must be consumed at, including the test
-          layer. The implementer must land all of them;
-          the reviewer will trace each. Use file paths
-          relative to the target repo's root when you
-          can already name them; otherwise describe the
-          layer abstractly (e.g. "request handler",
-          "persistence layer") and the implementer will
-          fill in the specific path.
-        - **Symmetric peers** — if the same surface is
-          mirrored on another transport (CLI ↔ HTTP ↔
-          RPC ↔ UI), name each peer. Asymmetric peers
-          (one transport accepts the surface, another
-          rejects it) are almost always bugs unless the
-          contract explicitly says otherwise.
-        - **Removal twin** — for `removed` entries, the
-          old name being retired. The implementer must
-          ensure the old name appears nowhere in the
-          live runtime path after the change. (Tests
-          for older migration paths, changelog history,
-          and migration scripts can still reference it,
-          and the reviewer will not flag those.)
-
-      Render the inventory as a structured markdown list,
-      one block per surface element. An illustrative
-      shape (substitute the real layers for the target
-      project's structure):
-
-          - **Name**: `--example-flag`
-            **Disposition**: added
-            **Layers**:
-              - parser — produces a parsed flag value
-              - command handler — reads the parsed value
-                and passes it to the service
-              - service — accepts the filter and applies it
-              - integration test — exercises the flag
-                end-to-end from the CLI entry point
-            **Symmetric peers**: `GET /api/...?exampleFlag=...` (HTTP), `service.list { exampleFlag }` (RPC)
-            **Removal twin**: none
-
-      ## When the inventory is empty
-
-      For pure refactors with no user-visible surface
-      change, the correct answer is an explicitly empty
-      inventory. State in Notes:
-
-          No user-visible surfaces are introduced,
-          changed, or removed by this feature.
-
-      Do not produce a placeholder inventory just to
-      fill the section — the reviewer's
-      surface-completeness pass treats an explicit
-      "no surfaces" statement the same as zero entries.
-      Empty when truly empty, complete when not.
-
-      ## What goes into Notes
-
-      Paste the full inventory (or the explicit "no
-      surfaces" statement) into this task's Notes. It
-      will be copied verbatim into the generated plan's
-      `<<PLACEHOLDER_FEATURE_SURFACE_INVENTORY>>` marker
-      in `draft_plan` and into the human-facing summary's
-      `<<PLACEHOLDER_SURFACE_INVENTORY>>` marker in
-      `produce_summary`. The implementer reads it on
-      every fresh task attempt; the reviewer cross-checks
-      the diff against it in plan-coverage and
-      surface-completeness.
-
-      If you discover mid-task that a surface element is
-      ambiguous (does this flag appear on the CLI only,
-      or also on the HTTP API? Is this preference per-user
-      or global?), mark **this** task `blocked` with the
-      missing dimension and a targeted question — same
-      gate as `capture_feature`. The caller should answer
-      "where does this surface live?" before the
-      inventory is finalized; an under-decomposed
-      inventory produces under-implemented features.
+  - feature-plan/orient
+  - feature-plan/capture-feature
+  - feature-plan/survey-impact
+  - feature-plan/check-existing-code
+  - feature-plan/risks-and-tests
+  - feature-plan/contract
+  - feature-plan/surface-inventory
   - id: draft_plan
     title: Draft the plan assignment file
     body: |
@@ -763,7 +274,7 @@ tasks:
           read.
         - Keep a dedicated check-gate task citing the
           project's exact lint/build/test commands from
-          `orient`.
+          `feature-plan/orient`.
         - Keep a dedicated docs-drift task unless the
           feature genuinely touches no documentation.
         - Make contract changes explicit. The generated plan
@@ -781,8 +292,8 @@ tasks:
           has run, re-run the summary step so the two stay in sync.
 
       Fill in every `<<PLACEHOLDER>>` marker with concrete,
-      file-level detail from tasks `orient` through
-      `produce_surface_inventory`. Placeholders
+      file-level detail from tasks `feature-plan/orient` through
+      `feature-plan/surface-inventory`. Placeholders
       that remain are a draft-quality failure — they leak
       into the implementer's workspace and produce vague
       execution.
@@ -791,13 +302,13 @@ tasks:
       plan-coverage and surface-completeness passes:
         - `<<PLACEHOLDER_FEATURE_BRIEF>>` in the generated
           plan's first task — paste a 3-5 sentence summary
-          of the feature from your `capture_feature` notes (what it is,
+          of the feature from your `feature-plan/capture-feature` notes (what it is,
           why, in-scope, out-of-scope). The reviewer reads
           this via `implementation_run_id` to know what it is
           verifying.
         - `<<PLACEHOLDER_FEATURE_CONTRACT>>` in the same
           task — paste the entire contract artifact from
-          your `produce_contract_artifact` notes verbatim as
+          your `feature-plan/contract` notes verbatim as
           standard markdown sections. Do not wrap the whole
           contract in one outer fenced block; use fenced
           blocks only for code/schema/query snippets that
@@ -810,7 +321,7 @@ tasks:
         - `<<PLACEHOLDER_FEATURE_SURFACE_INVENTORY>>` in
           the same task — paste the surface inventory
           (or the explicit "no surfaces" statement) from
-          your `produce_surface_inventory` notes verbatim.
+          your `feature-plan/surface-inventory` notes verbatim.
           The implementer's `verify_surface_coverage` task
           and the reviewer's `review/surface-completeness`
           pass both consume this block as the canonical
@@ -820,7 +331,7 @@ tasks:
           but-unwired bugs.
         - `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in the same
           task — paste the explicit assumptions list you
-          captured in `capture_feature` as a bulleted list. The reviewer
+          captured in `feature-plan/capture-feature` as a bulleted list. The reviewer
           cross-checks each assumption against the final
           implementation; silent assumption breakage is
           graded HIGH.
@@ -994,32 +505,30 @@ tasks:
           short title (same one used in the draft filename and
           title).
         - `<<PLACEHOLDER_OVERVIEW>>` — one paragraph, plain
-          language. Source: `capture_feature` (what is it).
+          language. Source: `feature-plan/capture-feature` (what is it).
         - `<<PLACEHOLDER_MOTIVATION>>` — one or two sentences.
-          Source: `capture_feature` (why / what problem).
-        - `<<PLACEHOLDER_IN_SCOPE>>` — bullet list. Source:
-          `capture_feature`.
-        - `<<PLACEHOLDER_OUT_OF_SCOPE>>` — bullet list. Source:
-          `capture_feature`.
+          Source: `feature-plan/capture-feature` (why / what problem).
+        - `<<PLACEHOLDER_IN_SCOPE>>` — bullet list. Source: `feature-plan/capture-feature`.
+        - `<<PLACEHOLDER_OUT_OF_SCOPE>>` — bullet list. Source: `feature-plan/capture-feature`.
         - `<<PLACEHOLDER_CONTRACT>>` — paste the contract
-          artifact **verbatim** from `produce_contract_artifact`
+          artifact **verbatim** from `feature-plan/contract`
           Notes. Do not re-derive it; it must match the
           `<<PLACEHOLDER_FEATURE_CONTRACT>>` block you already
           pasted into the draft, character-for-character.
         - `<<PLACEHOLDER_SURFACE_INVENTORY>>` — paste the
           surface inventory **verbatim** from
-          `produce_surface_inventory` Notes. It must match
+          `feature-plan/surface-inventory` Notes. It must match
           the `<<PLACEHOLDER_FEATURE_SURFACE_INVENTORY>>`
           block in the draft, character-for-character. If
           the inventory was the explicit "no surfaces"
           statement, paste that line verbatim.
         - `<<PLACEHOLDER_SCHEMA>>` — for data/schema features,
           paste the before/after schema diff from
-          `produce_contract_artifact`. For non-schema features,
+          `feature-plan/contract`. For non-schema features,
           replace with `_No schema changes._`.
         - `<<PLACEHOLDER_IMPACT_TABLE>>` — markdown table with
           columns `File | Responsibility | Existing tests`.
-          Source: `survey_impact`.
+          Source: `feature-plan/survey-impact`.
         - `<<PLACEHOLDER_HIGHER_LEVEL_STEPS>>` — 5 to 10 bullets
           describing the shape of the work, not the task-level
           detail. Source: synthesize from the draft's task
@@ -1031,12 +540,12 @@ tasks:
           with the literal line `_No diagrams applicable._` —
           do not invent diagrams to fill the section.
         - `<<PLACEHOLDER_RISKS>>` — bullet list. Source:
-          `assess_risks_and_tests`.
+          `feature-plan/risks-and-tests`.
         - `<<PLACEHOLDER_TEST_STRATEGY>>` — short paragraph or
           bullet list describing new tests and where they live.
-          Source: `assess_risks_and_tests`.
+          Source: `feature-plan/risks-and-tests`.
         - `<<PLACEHOLDER_ASSUMPTIONS>>` — bullet list of the
-          non-contract assumptions captured in `capture_feature`.
+          non-contract assumptions captured in `feature-plan/capture-feature`.
           Must match `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in
           the draft.
 
@@ -1223,7 +732,7 @@ tasks:
         - **Implementer run id** from
           `create_initialized_implementer_run`.
         - **Feature summary** (one or two sentences from
-          `capture_feature`).
+          `feature-plan/capture-feature`).
         - A note that the caller should review the planning-run
           attachments first, then inspect the initialized
           implementer run, then promote that run with
@@ -1247,10 +756,10 @@ tasks:
         - A note that the caller environment must allow one
           nested `task-runner run`, because the generated plan
           runs a bundled `code-review` step.
-        - **Open assumptions** from `capture_feature` that the caller
+        - **Open assumptions** from `feature-plan/capture-feature` that the caller
           should confirm before kicking off execution.
-        - **Known risks or scope concerns** from `survey_impact`,
-          `check_existing_code`, and `assess_risks_and_tests`
+        - **Known risks or scope concerns** from `feature-plan/survey-impact`,
+          `feature-plan/check-existing-code`, and `feature-plan/risks-and-tests`
           that deserve a pre-execution sanity check.
 
       Keep this block tight. The caller will read it via
@@ -1265,7 +774,8 @@ executable `task-runner` assignment file — not the feature
 itself.
 
 The feature you are planning for was handed to you as the user
-message that started this run. Read it before you start `orient`.
+message that started this run. Read it before you start
+`feature-plan/orient`.
 Do not fabricate scope.
 
 Work on the repository at `{{cwd}}`. You may read any
@@ -1300,12 +810,12 @@ and dual-shape readers unless the caller explicitly asked for
 migration or backward-compatibility support. Default to hot-cut
 contract changes.
 
-You may delegate repo exploration (`survey_impact`) or
-duplication scanning (`check_existing_code`) to native
+You may delegate repo exploration (`feature-plan/survey-impact`) or
+duplication scanning (`feature-plan/check-existing-code`) to native
 subagents if that would parallelize your work. Do not
-delegate `capture_feature` (the ambiguity gate must live in
-your own context), `produce_contract_artifact` (the contract
-is your deliverable), `produce_surface_inventory` (the
+delegate `feature-plan/capture-feature` (the ambiguity gate must live in
+your own context), `feature-plan/contract` (the contract
+is your deliverable), `feature-plan/surface-inventory` (the
 inventory must be derived from the contract you wrote and
 will be reused by both implementer and reviewer),
 `draft_plan`, `review_draft`,

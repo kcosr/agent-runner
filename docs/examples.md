@@ -93,7 +93,7 @@ installation, wiring, or a new agent/backend combination.
 ### `plan-feature`
 
 - Path: `assignments/plan-feature/assignment.md`
-- `maxRetries: 4`, `lockedFields: [tasks]`
+- `maxRetries: 4`
 
 Meta-assignment that converts a free-form feature brief into an
 executable task-runner plan. The driver agent orients, captures the
@@ -101,15 +101,18 @@ feature, checks contract dimensions (with an ambiguity gate), surveys
 impact, scans for duplication, assesses risks, produces a contract
 artifact, drafts a plan from a template, runs a nested `plan-review`,
 applies fixes until approval, produces a human-facing summary, attaches
-both artifacts to the planning run, blocks on caller approval for
-delayed implementer creation, and emits generated implementation plans
-that end with a terminal `push_branch_and_create_pr` task.
+both artifacts to the planning run, initializes a separate implementer
+run, and emits generated implementation plans that end with a terminal
+`push_branch_and_create_pr` task.
 
 Notable feature uses:
 
-- **Ambiguity gate**: `capture_feature` blocks the run with targeted
-  questions when contract dimensions are unresolved.
-- **Locked task list** prevents silent deferrals.
+- **Shared planning tasks**: the initial planning pass uses named refs
+  under `tasks/feature-plan/` from `feature-plan/orient` through
+  `feature-plan/surface-inventory`; the draft/review/init pipeline stays
+  inline so the planner can fill placeholders.
+- **Locked generated task list** prevents silent deferrals in the
+  implementation assignment produced by the planner.
 - **Nested reviews** via `plan-review` invoked as a child `task-runner
   run`.
 - **Attachment coupling**: approved draft (`assignment-seed.md`) and
@@ -123,16 +126,37 @@ Notable feature uses:
   to `origin/main`, but callers can override it for pre-merge
   end-to-end tests that should create generated implementation worktrees
   from another ref.
-- **Approval-gated delayed creation**: the planning run prepares the
-  draft/summary/handoff first, then blocks on
-  `create_implementer_run_after_approval` until the caller resumes the
-  same run with approval.
-- **Backend-accurate handoff**: after delayed `init`, the caller
+- **Separate implementer run**: the planning run creates or refreshes an
+  initialized implementer run from the approved draft and leaves it for
+  the caller to inspect and promote with `run ready`.
+- **Backend-accurate handoff**: after `init`, the caller
   inspects `run brief <new-run-id>` and then executes the initialized
   implementer run with `run --resume-run <new-run-id>`.
 - **Terminal publish step**: generated implementation plans end with
   `push_branch_and_create_pr`, which records branch/push/PR evidence as
   part of the normal successful workflow.
+
+### `plan-implement-feature`
+
+- Path: `assignments/plan-implement-feature/assignment.md`
+- `maxRetries: 4`, `lockedFields: [tasks]`
+
+Single-run feature workflow for smaller changes. It composes the shared
+`tasks/feature-plan/*` and `tasks/feature-implement/*` named task
+definitions in one run: plan, render and attach `assignment-summary.md`,
+block for user approval, then implement in the same task state after
+resume.
+
+This flow deliberately skips the heavyweight handoff pieces:
+
+- It does not generate `assignment-seed.md`.
+- It does not run `plan-review`.
+- It does not create a separate initialized implementer run.
+
+The `assignment-summary.md` artifact uses the same
+`assignments/plan-feature/summary-template.md` template as
+`plan-feature`; the run's planning Notes remain the canonical execution
+contract for the implementation tasks.
 
 ### `plan-review`
 
@@ -199,7 +223,8 @@ subagents for parallelism.
 
 | Agent | Typical assignment | Notes |
 |-------|-------------------|-------|
-| `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review` and blocks for caller approval before delayed implementer creation. |
+| `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review` and creates an initialized implementer run for caller approval. |
+| `planner` or `implementer` | `plan-implement-feature` | Single-run plan, approval pause, implementation, review, and PR flow using shared feature tasks. |
 | `implementer` | generated plan assignment | Created by `plan-feature` after approval; inspect `run brief` and then execute with `run --resume-run`. |
 | `code-reviewer` | `plan-review`, `code-review`, or `code-review-direct` | Nested and direct review surfaces. |
 | `doc-reviewer` | `doc-review` | Review-only, writes no files. |
@@ -208,11 +233,12 @@ subagents for parallelism.
 
 ## Special features in use
 
-- **Ambiguity gate** — `plan-feature` `capture_feature` task.
-- **Approval-gated creation** — `plan-feature` keeps the planning run
-  blocked until the caller resumes it with approval to create the
-  implementer run.
-- **Backend-accurate execution handoff** — after delayed `init`, callers
+- **Ambiguity gate** — shared `feature-plan/capture-feature` task.
+- **Approval-gated single-run implementation** — `plan-implement-feature`
+  attaches `assignment-summary.md`, blocks in
+  `feature-plan/await-user-approval`, and continues implementation in the
+  same run after explicit approval.
+- **Backend-accurate execution handoff** — after `init`, callers
   inspect `run brief` and then execute the initialized implementer run
   with `run --resume-run` instead of assuming a passive-only workflow.
 - **Locked tasks** — `plan-feature` template locks the task list so
