@@ -8785,6 +8785,230 @@ describe("web app", () => {
     await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
   });
 
+  it("activates primary run action menu items for the menu run", async () => {
+    let startBody: { overrides?: { message?: string } } | undefined;
+    const fetchMock = installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "run-ready",
+            assignmentName: "Ready from menu",
+            status: "initialized",
+            totalAttemptCount: 0,
+            capabilities: {
+              canReady: true,
+              canResume: false,
+            },
+          }),
+          makeRun({
+            runId: "run-start",
+            assignmentName: "Start from menu",
+            status: "ready",
+            totalAttemptCount: 0,
+            capabilities: {
+              canReady: false,
+              canResume: true,
+            },
+          }),
+        ],
+        details: {
+          "run-ready": makeDetail({
+            runId: "run-ready",
+            assignment: {
+              name: "Ready from menu",
+              sourcePath: "/tmp/ready-from-menu.md",
+            },
+            status: "initialized",
+            totalAttemptCount: 0,
+            capabilities: {
+              canReady: true,
+              canResume: false,
+            },
+          }),
+          "run-start": makeDetail({
+            runId: "run-start",
+            assignment: {
+              name: "Start from menu",
+              sourcePath: "/tmp/start-from-menu.md",
+            },
+            status: "ready",
+            totalAttemptCount: 0,
+            capabilities: {
+              canReady: false,
+              canResume: true,
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: async (url, init) => {
+          if (url.endsWith("/api/runs/run-start/resume") && init?.method === "POST") {
+            startBody =
+              typeof init.body === "string"
+                ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+                : undefined;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    fireEvent.contextMenu(await findRunCard("Ready from menu"), { clientX: 48, clientY: 56 });
+    await user.click(within(getRunActionMenuElement()).getByText("Ready"));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-ready/ready",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(router.state.location.pathname).toBe("/");
+
+    fireEvent.contextMenu(await findRunCard("Start from menu"), { clientX: 48, clientY: 56 });
+    await user.click(within(getRunActionMenuElement()).getByText("Start"));
+    await waitFor(() => {
+      expect(startBody).toEqual({ overrides: {} });
+    });
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("resumes from an unselected run action menu without selecting the card", async () => {
+    let resumeRequestCount = 0;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "run-resume",
+            assignmentName: "Resume from menu",
+            status: "success",
+            capabilities: {
+              canReady: false,
+              canResume: true,
+            },
+          }),
+        ],
+        details: {
+          "run-resume": makeDetail({
+            runId: "run-resume",
+            assignment: {
+              name: "Resume from menu",
+              sourcePath: "/tmp/resume-from-menu.md",
+            },
+            status: "success",
+            capabilities: {
+              canReady: false,
+              canResume: true,
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: async (url, init) => {
+          if (url.endsWith("/api/runs/run-resume/resume") && init?.method === "POST") {
+            resumeRequestCount += 1;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    fireEvent.contextMenu(await findRunCard("Resume from menu"), { clientX: 48, clientY: 56 });
+    await user.click(within(getRunActionMenuElement()).getByText("Resume"));
+    await waitFor(() => expect(resumeRequestCount).toBe(1));
+    expect(router.state.location.pathname).toBe("/");
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+  });
+
+  it("uses menu Archive and Unarchive without selecting the card", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-archive",
+          assignmentName: "Archive from menu",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-unarchive",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignmentName: "Unarchive from menu",
+          capabilities: {
+            canArchive: false,
+            canDelete: true,
+            canReset: false,
+            canResume: false,
+            canUnarchive: true,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-archive": makeDetail({
+          runId: "run-archive",
+          assignment: {
+            name: "Archive from menu",
+            sourcePath: "/tmp/archive-from-menu.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+        "run-unarchive": makeDetail({
+          runId: "run-unarchive",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignment: {
+            name: "Unarchive from menu",
+            sourcePath: "/tmp/unarchive-from-menu.md",
+          },
+          capabilities: {
+            canArchive: false,
+            canDelete: true,
+            canReset: false,
+            canResume: false,
+            canUnarchive: true,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    fireEvent.contextMenu(await findRunCard("Archive from menu"), { clientX: 48, clientY: 56 });
+    await user.click(within(getRunActionMenuElement()).getByText("Archive"));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-archive/archive",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(router.state.location.pathname).toBe("/");
+
+    await user.click(await screen.findByRole("button", { name: /show archived runs/i }));
+    fireEvent.contextMenu(await findRunCard("Unarchive from menu"), { clientX: 48, clientY: 56 });
+    await user.click(within(getRunActionMenuElement()).getByText("Unarchive"));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-unarchive/unarchive",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(router.state.location.pathname).toBe("/");
+  });
+
   it("closes the run action menu on Escape without closing the selected run", async () => {
     installFetchMock({
       runs: [
@@ -8829,6 +9053,75 @@ describe("web app", () => {
     await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe("/runs/run-1");
     expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+  });
+
+  it("closes an open run action menu before Shift+A opens selected-run confirmation", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-selected",
+          assignmentName: "Selected cleanup",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-menu",
+          assignmentName: "Menu cleanup",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-selected": makeDetail({
+          runId: "run-selected",
+          assignment: {
+            name: "Selected cleanup",
+            sourcePath: "/tmp/selected-cleanup.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+        "run-menu": makeDetail({
+          runId: "run-menu",
+          assignment: {
+            name: "Menu cleanup",
+            sourcePath: "/tmp/menu-cleanup.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Selected cleanup"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-selected"));
+
+    fireEvent.contextMenu(await findRunCard("Menu cleanup"), { clientX: 48, clientY: 56 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    await user.keyboard("{Shift>}a{/Shift}");
+
+    expect(
+      await screen.findByRole("dialog", { name: "Archive and delete run?" }),
+    ).toBeInTheDocument();
+    expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument();
   });
 
   it("does not open the run action menu from mouse pointerdown", async () => {
@@ -8959,6 +9252,102 @@ describe("web app", () => {
     expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument();
   });
 
+  it("clears long-press click suppression when no synthetic click arrives", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Long press clears",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Long press clears",
+            sourcePath: "/tmp/long-press-clears.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    const card = await findRunCard("Long press clears");
+
+    dispatchPointerEvent(card, "pointerdown", {
+      button: 0,
+      clientX: 64,
+      clientY: 72,
+      pointerType: "touch",
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 540));
+    });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+
+    fireEvent.pointerDown(document.body, { clientX: 2, clientY: 2 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 940));
+    });
+    await user.click(card);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-1"));
+  });
+
+  it("closes the run action menu when the menu target leaves the run list", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Removed menu target",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Removed menu target",
+            sourcePath: "/tmp/removed-menu-target.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    await renderApp();
+    fireEvent.contextMenu(await findRunCard("Removed menu target"), { clientX: 40, clientY: 48 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitMessage({ type: "summary_removed", runId: "run-1" });
+
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument());
+  });
+
   it("requires confirmation before menu Archive + Delete runs archive then delete", async () => {
     const fetchMock = installFetchMock({
       runs: [
@@ -9021,6 +9410,132 @@ describe("web app", () => {
       "/api/runs/run-1/archive",
       "/api/runs/run-1",
     ]);
+  });
+
+  it("keeps the archive failure visible when menu Archive + Delete cannot delete", async () => {
+    const fetchMock = installFetchMock(
+      {
+        runs: [
+          makeRun({
+            assignmentName: "Cleanup delete failure",
+            capabilities: {
+              canArchive: true,
+              canReset: false,
+              canResume: false,
+            },
+            status: "success",
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            assignment: {
+              name: "Cleanup delete failure",
+              sourcePath: "/tmp/cleanup-delete-failure.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canReset: false,
+              canResume: false,
+            },
+            status: "success",
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1") && init?.method === "DELETE") {
+            return new Response(JSON.stringify({ error: { message: "delete failed" } }), {
+              status: 500,
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    fireEvent.contextMenu(await findRunCard("Cleanup delete failure"), {
+      clientX: 40,
+      clientY: 48,
+    });
+    await user.click(within(getRunActionMenuElement()).getByText("Archive + Delete"));
+    await user.click(screen.getByRole("button", { name: "Archive + Delete" }));
+
+    await waitFor(() =>
+      expect(fetchMutationUrls(fetchMock).slice(-2)).toEqual([
+        "/api/runs/run-1/archive",
+        "/api/runs/run-1",
+      ]),
+    );
+  });
+
+  it("re-checks destructive capabilities before submitting menu confirmation", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Capability changed cleanup",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Capability changed cleanup",
+            sourcePath: "/tmp/capability-changed-cleanup.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Capability changed cleanup"));
+    fireEvent.contextMenu(await findRunCard("Capability changed cleanup"), {
+      clientX: 40,
+      clientY: 48,
+    });
+    await user.click(within(getRunActionMenuElement()).getByText("Archive + Delete"));
+    expect(
+      await screen.findByRole("dialog", { name: "Archive and delete run?" }),
+    ).toBeInTheDocument();
+
+    const detailSource = findEventSource("/api/runs/run-1/events/detail");
+    detailSource.emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        assignment: {
+          name: "Capability changed cleanup",
+          sourcePath: "/tmp/capability-changed-cleanup.md",
+        },
+        capabilities: {
+          canArchive: false,
+          canReset: false,
+          canResume: false,
+        },
+        status: "success",
+      }),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Archive + Delete" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Archive and delete run?" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(fetchMutationUrls(fetchMock)).toEqual([]);
   });
 
   it("requires confirmation before menu Delete deletes an archived run", async () => {

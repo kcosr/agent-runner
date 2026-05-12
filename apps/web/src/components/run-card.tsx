@@ -39,6 +39,7 @@ const CARD_MOVE_DURATION_MS = 260;
 const CARD_HIGHLIGHT_DURATION_MS = 720;
 const CARD_MENU_LONG_PRESS_MS = 520;
 const CARD_MENU_LONG_PRESS_MOVE_TOLERANCE_PX = 8;
+const CARD_MENU_CLICK_SUPPRESS_MS = 900;
 const NOTE_PREVIEW_CLOSE_DELAY_MS = 140;
 const NOTE_CONTROL_REOPEN_SUPPRESS_MS = 900;
 const cardRectByRunId = new Map<string, CardRectSnapshot>();
@@ -104,6 +105,7 @@ export function RunCard({
   const longPressTimeoutRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const suppressNextClickRef = useRef(false);
+  const suppressNextClickTimeoutRef = useRef<number | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const preferredNoteEditorMode = usePreferredRunNoteEditorMode();
   const previewFirstNoteMode = preferredNoteEditorMode === "preview";
@@ -175,6 +177,26 @@ export function RunCard({
     notePreviewCloseTimeoutRef.current = null;
   }, []);
 
+  const clearSuppressNextClickTimeout = useCallback(() => {
+    if (suppressNextClickTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+    window.clearTimeout(suppressNextClickTimeoutRef.current);
+    suppressNextClickTimeoutRef.current = null;
+  }, []);
+
+  const suppressNextClick = useCallback(() => {
+    suppressNextClickRef.current = true;
+    clearSuppressNextClickTimeout();
+    if (typeof window === "undefined") {
+      return;
+    }
+    suppressNextClickTimeoutRef.current = window.setTimeout(() => {
+      suppressNextClickRef.current = false;
+      suppressNextClickTimeoutRef.current = null;
+    }, CARD_MENU_CLICK_SUPPRESS_MS);
+  }, [clearSuppressNextClickTimeout]);
+
   function openNotePreview() {
     if (
       !run.notePresent ||
@@ -202,6 +224,7 @@ export function RunCard({
   function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
     if (suppressNextClickRef.current) {
       suppressNextClickRef.current = false;
+      clearSuppressNextClickTimeout();
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -254,7 +277,7 @@ export function RunCard({
     longPressTimeoutRef.current = window.setTimeout(() => {
       longPressTimeoutRef.current = null;
       longPressStartRef.current = null;
-      suppressNextClickRef.current = true;
+      suppressNextClick();
       onRequestActionMenu(point);
     }, CARD_MENU_LONG_PRESS_MS);
   }
@@ -331,8 +354,9 @@ export function RunCard({
       window.removeEventListener("scroll", clearLongPressTimeout, true);
       window.removeEventListener("blur", clearLongPressTimeout);
       clearLongPressTimeout();
+      clearSuppressNextClickTimeout();
     };
-  }, [clearLongPressTimeout]);
+  }, [clearLongPressTimeout, clearSuppressNextClickTimeout]);
 
   useLayoutEffect(() => {
     if (

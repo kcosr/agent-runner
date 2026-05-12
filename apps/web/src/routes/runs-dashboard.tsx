@@ -38,7 +38,7 @@ interface DestructiveRunConfirmation {
 interface RunActionMenuState {
   items: RunActionMenuItem[];
   runId: string;
-  selectedRunIdOnOpen?: string;
+  selectedRunIdAtOpen?: string;
   x: number;
   y: number;
 }
@@ -278,6 +278,7 @@ export function RunsDashboardRoute() {
         }
         event.preventDefault();
         event.stopImmediatePropagation();
+        setRunActionMenu(null);
         setDestructiveConfirmation({ action, runId: selectedRun.runId });
         return;
       }
@@ -487,11 +488,15 @@ export function RunsDashboardRoute() {
     if (!runActionMenu) {
       return;
     }
-    if (state.selectedRunId === runActionMenu.selectedRunIdOnOpen) {
+    if (!findDashboardRun(state, runActionMenu.runId)) {
+      setRunActionMenu(null);
+      return;
+    }
+    if (state.selectedRunId === runActionMenu.selectedRunIdAtOpen) {
       return;
     }
     setRunActionMenu(null);
-  }, [runActionMenu, state.selectedRunId]);
+  }, [runActionMenu, state]);
 
   useEffect(() => {
     if (state.actionPending !== undefined) {
@@ -551,7 +556,7 @@ export function RunsDashboardRoute() {
     const nextMenu = {
       items,
       runId,
-      selectedRunIdOnOpen: currentState.selectedRunId,
+      selectedRunIdAtOpen: currentState.selectedRunId,
       x: Math.min(Math.max(8, clientX), Math.max(8, viewportWidth - width - 8)),
       y: Math.min(Math.max(8, clientY), Math.max(8, viewportHeight - height - 8)),
     };
@@ -567,27 +572,34 @@ export function RunsDashboardRoute() {
       }
       setRunActionMenu(null);
 
-      if (item.action === "archive") {
-        currentState.runActions.archive(menu.runId);
-        return;
+      switch (item.action) {
+        case "archive":
+          currentState.runActions.archive(menu.runId);
+          return;
+        case "unarchive":
+          currentState.runActions.unarchive(menu.runId);
+          return;
+        case "archive-delete":
+        case "delete":
+          setDestructiveConfirmation({ action: item.action, runId: menu.runId });
+          return;
+        case "ready":
+          void currentState.runActions.ready(menu.runId);
+          return;
+        case "start":
+          void currentState.runActions.resume(menu.runId);
+          return;
+        case "resume":
+          if (currentState.selectedRunId === menu.runId) {
+            currentState.openSelectedRunResumeDialog();
+            return;
+          }
+          void currentState.runActions.resume(menu.runId);
+          return;
       }
-      if (item.action === "unarchive") {
-        currentState.runActions.unarchive(menu.runId);
-        return;
-      }
-      if (item.action === "archive-delete" || item.action === "delete") {
-        setDestructiveConfirmation({ action: item.action, runId: menu.runId });
-        return;
-      }
-      if (currentState.selectedRunId !== menu.runId) {
-        currentState.openRun(menu.runId);
-        return;
-      }
-      if (item.action === "resume") {
-        currentState.openSelectedRunResumeDialog();
-        return;
-      }
-      void currentState.triggerSelectedRunPrimaryAction();
+
+      const exhaustiveAction: never = item.action;
+      throw new Error(`Unhandled run action menu item: ${exhaustiveAction}`);
     },
     [runActionMenu],
   );
