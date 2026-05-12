@@ -15,6 +15,7 @@ import type { DashboardViewMode } from "../lib/settings.js";
 import {
   isEditableEventTarget,
   resolveBoardNeighborRunId,
+  resolveListNeighborRunId,
   resolveRunsShortcutCommand,
 } from "../lib/shortcuts.js";
 import { RunChatView } from "./run-chat-panel.js";
@@ -85,6 +86,7 @@ function DashboardSurfaces({
 }
 
 interface DashboardPanelRendererProps {
+  onListSelectRun: (runId: string) => void;
   onRequestActionMenu: (runId: string, point: { clientX: number; clientY: number }) => void;
   state: RunsDashboardState;
 }
@@ -114,7 +116,7 @@ const DASHBOARD_PANEL_RENDERERS = {
       visibleRuns={state.visibleRuns}
     />
   ),
-  list: ({ onRequestActionMenu, state }: DashboardPanelRendererProps) => (
+  list: ({ onListSelectRun, onRequestActionMenu, state }: DashboardPanelRendererProps) => (
     <RunsListPanel
       actionPending={state.actionPending}
       hasActiveStructuredFilters={state.hasActiveStructuredFilters}
@@ -124,7 +126,7 @@ const DASHBOARD_PANEL_RENDERERS = {
       onListStatusFilterChange={state.setListStatusFilter}
       onRequestActionMenu={onRequestActionMenu}
       onResetFilters={state.resetBoardFilters}
-      onSelectRun={state.openRun}
+      onSelectRun={onListSelectRun}
       onSetPinned={state.runActions.setPinned}
       onStructuredFilterToggle={state.toggleStructuredFilter}
       runs={state.runs}
@@ -289,9 +291,16 @@ export function RunsDashboardRoute() {
     (column) => !state.collapsedColumnKeys.includes(column.key),
   );
   const latestNavigableBoardColumnsRef = useRef(navigableBoardColumns);
+  const listKeyboardSelectedRunIdRef = useRef<string | undefined>(state.selectedRunId);
 
   latestStateRef.current = state;
   latestNavigableBoardColumnsRef.current = navigableBoardColumns;
+
+  useEffect(() => {
+    if (state.viewMode !== "list") {
+      listKeyboardSelectedRunIdRef.current = state.selectedRunId;
+    }
+  }, [state.selectedRunId, state.viewMode]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -505,6 +514,28 @@ export function RunsDashboardRoute() {
         return;
       }
 
+      if (command === "list.moveUp" || command === "list.moveDown") {
+        const listRunIds = currentState.listRows.map((run) => run.runId);
+        const keyboardRunId = listKeyboardSelectedRunIdRef.current;
+        const currentListRunId =
+          keyboardRunId && listRunIds.includes(keyboardRunId)
+            ? keyboardRunId
+            : currentState.selectedRunId;
+        const nextRunId = resolveListNeighborRunId({
+          direction: command === "list.moveUp" ? "up" : "down",
+          listRunIds,
+          selectedRunId: currentListRunId,
+        });
+        if (!nextRunId || nextRunId === currentListRunId) {
+          return;
+        }
+
+        event.preventDefault();
+        listKeyboardSelectedRunIdRef.current = nextRunId;
+        currentState.openRun(nextRunId, { replace: true });
+        return;
+      }
+
       if (
         command === "board.moveUp" ||
         command === "board.moveDown" ||
@@ -695,13 +726,24 @@ export function RunsDashboardRoute() {
     </div>
   ));
   const renderDashboardPanel = DASHBOARD_PANEL_RENDERERS[state.viewMode];
+  const selectRunFromList = useCallback(
+    (runId: string) => {
+      listKeyboardSelectedRunIdRef.current = runId;
+      state.openRun(runId);
+    },
+    [state],
+  );
 
   return (
     <>
       <AppShell
         primary={
           <DashboardSurfaces
-            primary={renderDashboardPanel({ onRequestActionMenu: openRunActionMenu, state })}
+            primary={renderDashboardPanel({
+              onListSelectRun: selectRunFromList,
+              onRequestActionMenu: openRunActionMenu,
+              state,
+            })}
             detail={
               state.selectedRunId ? (
                 <RunDetailPanel

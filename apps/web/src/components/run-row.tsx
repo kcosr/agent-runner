@@ -1,4 +1,5 @@
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
+import { useEffect, useRef } from "react";
 import { formatScheduleState, formatTimestampWithRelative, truncateEnd } from "../lib/format.js";
 import type { DashboardSortField, DashboardStructuredFilters } from "../lib/settings.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
@@ -66,6 +67,7 @@ export function RunRow({
   onSetPinned: (pinned: boolean) => Promise<void>;
   onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
 }) {
+  const rowRef = useRef<HTMLElement | null>(null);
   const accessibleName = run.name ?? "Unnamed";
   const visibleName = truncateEnd(accessibleName, 72);
   const assignmentName = run.assignmentName ?? "Ad hoc run";
@@ -91,8 +93,19 @@ export function RunRow({
     });
   }
 
+  useEffect(() => {
+    if (!selected) {
+      return;
+    }
+    rowRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [selected]);
+
   return (
-    <article className={selected ? "run-row run-row--selected" : "run-row"} data-run-id={run.runId}>
+    <article
+      className={selected ? "run-row run-row--selected" : "run-row"}
+      data-run-id={run.runId}
+      ref={rowRef}
+    >
       <button
         aria-label={`Open run ${accessibleName}`}
         aria-pressed={selected}

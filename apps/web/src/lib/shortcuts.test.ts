@@ -3,6 +3,7 @@ import type { BoardColumn } from "../components/run-column.js";
 import {
   resolveBoardEntryRunId,
   resolveBoardNeighborRunId,
+  resolveListNeighborRunId,
   resolveRunsShortcutCommand,
 } from "./shortcuts.js";
 
@@ -102,6 +103,60 @@ describe("resolveBoardNeighborRunId", () => {
         selectedRunId: "run-completed-2",
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveListNeighborRunId", () => {
+  it("enters at the first visible list row when nothing is selected", () => {
+    expect(
+      resolveListNeighborRunId({
+        direction: "down",
+        listRunIds: ["run-1", "run-2"],
+      }),
+    ).toBe("run-1");
+  });
+
+  it("moves up and down through visible list rows", () => {
+    const listRunIds = ["run-1", "run-2", "run-3"];
+    expect(
+      resolveListNeighborRunId({
+        direction: "down",
+        listRunIds,
+        selectedRunId: "run-1",
+      }),
+    ).toBe("run-2");
+    expect(
+      resolveListNeighborRunId({
+        direction: "up",
+        listRunIds,
+        selectedRunId: "run-2",
+      }),
+    ).toBe("run-1");
+  });
+
+  it("returns null at list edges and re-enters when selected row is filtered out", () => {
+    const listRunIds = ["run-1", "run-2"];
+    expect(
+      resolveListNeighborRunId({
+        direction: "up",
+        listRunIds,
+        selectedRunId: "run-1",
+      }),
+    ).toBeNull();
+    expect(
+      resolveListNeighborRunId({
+        direction: "down",
+        listRunIds,
+        selectedRunId: "run-2",
+      }),
+    ).toBeNull();
+    expect(
+      resolveListNeighborRunId({
+        direction: "down",
+        listRunIds,
+        selectedRunId: "run-filtered-out",
+      }),
+    ).toBe("run-1");
   });
 });
 
@@ -1008,7 +1063,31 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBeNull();
   });
 
-  it("scopes board arrow navigation and hide-empty shortcuts to board mode", () => {
+  it("scopes horizontal board navigation and hide-empty shortcuts to board mode", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowUp",
+          metaKey: false,
+          shiftKey: false,
+        },
+        { ...context, viewMode: "list" },
+      ),
+    ).toBe("list.moveUp");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowDown",
+          metaKey: false,
+          shiftKey: false,
+        },
+        { ...context, viewMode: "list" },
+      ),
+    ).toBe("list.moveDown");
     expect(
       resolveRunsShortcutCommand(
         {

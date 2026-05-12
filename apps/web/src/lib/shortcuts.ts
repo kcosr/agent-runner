@@ -6,6 +6,8 @@ type RunsShortcutCommand =
   | "board.moveDown"
   | "board.moveLeft"
   | "board.moveRight"
+  | "list.moveUp"
+  | "list.moveDown"
   | "ui.toggleScheduledOnly"
   | "ui.togglePinnedOnly"
   | "ui.toggleNotesOnly"
@@ -57,6 +59,7 @@ interface RunsShortcutContext {
 }
 
 type BoardDirection = "up" | "down" | "left" | "right";
+type ListDirection = "up" | "down";
 
 type BoardFilterShortcutCommand = Extract<
   RunsShortcutCommand,
@@ -291,6 +294,29 @@ export function resolveBoardNeighborRunId(options: {
   return null;
 }
 
+export function resolveListNeighborRunId(options: {
+  direction: ListDirection;
+  listRunIds: string[];
+  selectedRunId?: string;
+}): string | null {
+  const { direction, listRunIds, selectedRunId } = options;
+  if (listRunIds.length === 0) {
+    return null;
+  }
+
+  if (!selectedRunId) {
+    return listRunIds[0] ?? null;
+  }
+
+  const currentIndex = listRunIds.indexOf(selectedRunId);
+  if (currentIndex === -1) {
+    return listRunIds[0] ?? null;
+  }
+
+  const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+  return listRunIds[nextIndex] ?? null;
+}
+
 export function resolveRunsShortcutCommand(
   event: ShortcutEventLike,
   context: RunsShortcutContext,
@@ -402,7 +428,13 @@ export function resolveRunsShortcutCommand(
     return null;
   }
 
-  if (context.viewMode !== "board") {
+  if (context.viewMode === "list") {
+    if (matchesShortcut(event, { key: "arrowup" })) {
+      return "list.moveUp";
+    }
+    if (matchesShortcut(event, { key: "arrowdown" })) {
+      return "list.moveDown";
+    }
     return resolveSelectedRunShortcut(event, context);
   }
 

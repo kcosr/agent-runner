@@ -1945,6 +1945,83 @@ describe("web app", () => {
     );
   });
 
+  it("navigates visible list rows with up and down arrows", async () => {
+    const runs = [
+      makeRun({
+        runId: "run-list-nav-oldest",
+        assignmentName: "List nav oldest",
+        name: "List nav oldest",
+        startedAt: "2026-04-13T05:00:00.000Z",
+        updatedAt: "2026-04-13T05:00:00.000Z",
+      }),
+      makeRun({
+        runId: "run-list-nav-middle",
+        assignmentName: "List nav middle",
+        name: "List nav middle",
+        startedAt: "2026-04-13T06:00:00.000Z",
+        updatedAt: "2026-04-13T06:00:00.000Z",
+      }),
+      makeRun({
+        runId: "run-list-nav-newest",
+        assignmentName: "List nav newest",
+        name: "List nav newest",
+        startedAt: "2026-04-13T07:00:00.000Z",
+        updatedAt: "2026-04-13T07:00:00.000Z",
+      }),
+    ];
+    installFetchMock({
+      runs,
+      details: Object.fromEntries(
+        runs.map((run) => [
+          run.runId,
+          makeDetail({
+            runId: run.runId,
+            assignment: {
+              name: run.assignmentName ?? run.runId,
+              sourcePath: `/tmp/${run.runId}.md`,
+            },
+            name: run.name,
+            startedAt: run.startedAt,
+            updatedAt: run.updatedAt,
+          }),
+        ]),
+      ),
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("List nav newest");
+    await user.click(screen.getByRole("button", { name: "List" }));
+    await screen.findByLabelText("Runs list");
+
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Open run List nav newest$/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(router.state.location.pathname).toBe("/runs/run-list-nav-newest");
+
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Open run List nav middle$/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(router.state.location.pathname).toBe("/runs/run-list-nav-middle");
+
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Open run List nav newest$/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(router.state.location.pathname).toBe("/runs/run-list-nav-newest");
+  });
+
   it("renders list status chips for every run status label", async () => {
     const statusRuns = [
       ["initialized", "Initialized"],
