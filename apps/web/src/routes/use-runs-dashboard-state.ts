@@ -1359,6 +1359,7 @@ export function useRunsDashboardState() {
       }
       navigateToRunDetail(runId, options);
     },
+    openSelectedRunResumeDialog: openResumeDialog,
     openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
       if (!selectedRunId) {
         return;
@@ -1393,10 +1394,17 @@ export function useRunsDashboardState() {
         await addDependencyMutation.mutateAsync({ runId, dependency });
       },
       archive: (runId: string) => archiveMutation.mutate(runId),
+      archiveThenDelete: async (runId: string) => {
+        await archiveMutation.mutateAsync(runId);
+        await deleteMutation.mutateAsync(runId);
+      },
       clearDependencies: async (runId: string) => {
         await clearDependenciesMutation.mutateAsync(runId);
       },
       delete: (runId: string) => deleteMutation.mutate(runId),
+      deleteConfirmed: async (runId: string) => {
+        await deleteMutation.mutateAsync(runId);
+      },
       ready: async (runId: string) => {
         await readyMutation.mutateAsync(runId);
       },

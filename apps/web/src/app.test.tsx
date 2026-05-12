@@ -9,7 +9,7 @@ import type {
   RunSessionSummary,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.js";
@@ -1504,6 +1504,18 @@ function fetchCallCount(
   predicate: (url: string) => boolean,
 ) {
   return fetchMock.mock.calls.filter(([url]) => predicate(String(url))).length;
+}
+
+function fetchMutationUrls(fetchMock: ReturnType<typeof installFetchMock>) {
+  return fetchMock.mock.calls
+    .filter(([, init]) => init?.method !== undefined && init.method !== "GET")
+    .map(([url]) => String(url));
+}
+
+function getRunActionMenuElement() {
+  const menu = document.querySelector(".run-action-menu");
+  expect(menu).toBeInTheDocument();
+  return menu as HTMLElement;
 }
 
 function getCloseDetailButton() {
@@ -8707,6 +8719,415 @@ describe("web app", () => {
     });
     expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/runs/run-1");
+  });
+
+  it("opens the run action menu on right-click after selecting the card", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Menu ready",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Menu ready",
+            sourcePath: "/tmp/menu-ready.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    await renderApp();
+    const card = await findRunCard("Menu ready");
+
+    expect(fireEvent.contextMenu(document.body, { clientX: 4, clientY: 4 })).toBe(true);
+    expect(fireEvent.contextMenu(card, { clientX: 48, clientY: 56 })).toBe(false);
+
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    const menu = getRunActionMenuElement();
+    expect(within(menu).getByText("Archive")).toBeInTheDocument();
+    expect(within(menu).getByText("Archive + Delete")).toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-1"));
+  });
+
+  it("opens the run action menu on touch long-press and suppresses empty menus", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Long press menu",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-empty",
+          assignmentName: "No menu actions",
+          capabilities: {
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Long press menu",
+            sourcePath: "/tmp/long-press-menu.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+        "run-empty": makeDetail({
+          runId: "run-empty",
+          assignment: {
+            name: "No menu actions",
+            sourcePath: "/tmp/no-menu-actions.md",
+          },
+          capabilities: {
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    await renderApp();
+    const menuCard = await findRunCard("Long press menu");
+
+    fireEvent.pointerDown(menuCard, {
+      button: 0,
+      clientX: 64,
+      clientY: 72,
+      pointerType: "touch",
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 540));
+    });
+
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    expect(router.state.location.pathname).toBe("/runs/run-1");
+
+    fireEvent.pointerDown(await findRunCard("No menu actions"), {
+      button: 0,
+      clientX: 70,
+      clientY: 80,
+      pointerType: "touch",
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 540));
+    });
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/run-empty"));
+    expect(document.querySelector(".run-action-menu")).not.toBeInTheDocument();
+  });
+
+  it("requires confirmation before menu Archive + Delete runs archive then delete", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Cleanup from menu",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Cleanup from menu",
+            sourcePath: "/tmp/cleanup-from-menu.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    fireEvent.contextMenu(await findRunCard("Cleanup from menu"), { clientX: 40, clientY: 48 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    await user.click(within(getRunActionMenuElement()).getByText("Archive + Delete"));
+    expect(screen.getByRole("button", { name: "Archive + Delete" })).toBeInTheDocument();
+
+    const callsBeforeCancel = fetchMutationUrls(fetchMock).length;
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(fetchMutationUrls(fetchMock)).toHaveLength(callsBeforeCancel);
+
+    fireEvent.contextMenu(await findRunCard("Cleanup from menu"), { clientX: 40, clientY: 48 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    await user.click(within(getRunActionMenuElement()).getByText("Archive + Delete"));
+    await user.click(screen.getByRole("button", { name: "Archive + Delete" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-1/archive",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-1",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+    expect(fetchMutationUrls(fetchMock).slice(-2)).toEqual([
+      "/api/runs/run-1/archive",
+      "/api/runs/run-1",
+    ]);
+  });
+
+  it("requires confirmation before menu Delete deletes an archived run", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Delete from menu",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          capabilities: {
+            canArchive: false,
+            canDelete: true,
+            canResume: false,
+            canUnarchive: true,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignment: {
+            name: "Delete from menu",
+            sourcePath: "/tmp/delete-from-menu.md",
+          },
+          capabilities: {
+            canArchive: false,
+            canDelete: true,
+            canResume: false,
+            canUnarchive: true,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await screen.findByRole("button", { name: /show archived runs/i }));
+
+    fireEvent.contextMenu(await findRunCard("Delete from menu"), { clientX: 42, clientY: 50 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    await user.click(within(getRunActionMenuElement()).getByText("Delete"));
+    const firstDialog = screen.getByRole("dialog", { name: "Delete run?" });
+    expect(within(firstDialog).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    const callsBeforeCancel = fetchMutationUrls(fetchMock).length;
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(fetchMutationUrls(fetchMock)).toHaveLength(callsBeforeCancel);
+
+    fireEvent.contextMenu(await findRunCard("Delete from menu"), { clientX: 42, clientY: 50 });
+    await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
+    await user.click(within(getRunActionMenuElement()).getByText("Delete"));
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Delete run?" })).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-archived",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+    expect(fetchMutationUrls(fetchMock).slice(-1)).toEqual(["/api/runs/run-archived"]);
+  });
+
+  it("uses Shift+A to confirm Archive + Delete or Delete for the selected run", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Shortcut cleanup",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Shortcut archived delete",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          capabilities: {
+            canArchive: false,
+            canDelete: true,
+            canResume: false,
+            canUnarchive: true,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Shortcut cleanup",
+            sourcePath: "/tmp/shortcut-cleanup.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignment: {
+            name: "Shortcut archived delete",
+            sourcePath: "/tmp/shortcut-archived-delete.md",
+          },
+          capabilities: {
+            canArchive: false,
+            canDelete: true,
+            canResume: false,
+            canUnarchive: true,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Shortcut cleanup"));
+
+    await user.keyboard("{Shift>}a{/Shift}");
+    expect(await screen.findByRole("button", { name: "Archive + Delete" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(fetchMutationUrls(fetchMock).filter((url) => url.includes("run-1"))).toEqual([]);
+
+    await user.keyboard("{Shift>}a{/Shift}");
+    await user.click(await screen.findByRole("button", { name: "Archive + Delete" }));
+    await waitFor(() =>
+      expect(fetchMutationUrls(fetchMock)).toEqual(["/api/runs/run-1/archive", "/api/runs/run-1"]),
+    );
+
+    await user.click(await screen.findByRole("button", { name: /show archived runs/i }));
+    await user.click(await findRunCard("Shortcut archived delete"));
+    await user.keyboard("{Shift>}a{/Shift}");
+    const deleteDialog = await screen.findByRole("dialog", { name: "Delete run?" });
+    expect(within(deleteDialog).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    await user.click(within(deleteDialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() =>
+      expect(fetchMutationUrls(fetchMock).slice(-1)).toEqual(["/api/runs/run-archived"]),
+    );
+  });
+
+  it("suppresses Shift+A while another selected-run action is pending", async () => {
+    let resolveArchive: (() => void) | undefined;
+    const fetchMock = installFetchMock(
+      {
+        runs: [
+          makeRun({
+            assignmentName: "Pending cleanup",
+            capabilities: {
+              canArchive: true,
+              canReset: false,
+              canResume: false,
+            },
+            status: "success",
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            assignment: {
+              name: "Pending cleanup",
+              sourcePath: "/tmp/pending-cleanup.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canReset: false,
+              canResume: false,
+            },
+            status: "success",
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1/archive") && init?.method === "POST") {
+            return new Promise<Response>((resolve) => {
+              resolveArchive = () =>
+                resolve(
+                  new Response(
+                    JSON.stringify({
+                      result: {
+                        archivedAt: "2026-04-13T06:00:00.000Z",
+                        changed: true,
+                        runId: "run-1",
+                        status: "success",
+                        updatedAt: "2026-04-13T05:00:00.000Z",
+                      },
+                    }),
+                    { status: 200 },
+                  ),
+                );
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Pending cleanup"));
+    await user.keyboard("a");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-1/archive",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
+    await user.keyboard("{Shift>}a{/Shift}");
+    expect(screen.queryByRole("button", { name: "Archive + Delete" })).not.toBeInTheDocument();
+
+    resolveArchive?.();
   });
 
   it("uses Ctrl+Shift shortcuts for board filters without replacing plain selected-run actions", async () => {

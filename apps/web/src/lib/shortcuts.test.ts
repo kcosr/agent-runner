@@ -107,6 +107,7 @@ describe("resolveBoardNeighborRunId", () => {
 
 describe("resolveRunsShortcutCommand", () => {
   const context = {
+    actionPending: false,
     activeBoardColumnKey: "running",
     boardColumns: makeBoardColumns(),
     drawerFullscreen: false,
@@ -302,6 +303,18 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("run.toggleArchived");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("run.destructiveCleanup");
   });
 
   it("supports the Cmd+Shift filter namespace while leaving plain letter shortcuts on run actions", () => {
@@ -353,6 +366,18 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("ui.toggleArchived");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("run.destructiveCleanup");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -599,6 +624,85 @@ describe("resolveRunsShortcutCommand", () => {
         attachmentContext,
       ),
     ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: true,
+        },
+        attachmentContext,
+      ),
+    ).toBeNull();
+  });
+
+  it("suppresses selected-run actions while an action is pending", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: true,
+        },
+        {
+          ...context,
+          actionPending: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          actionPending: true,
+        },
+      ),
+    ).toBeNull();
+  });
+
+  it("maps Shift+A in fullscreen through the same selected-run guard", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: true,
+        },
+        {
+          ...context,
+          drawerFullscreen: true,
+        },
+      ),
+    ).toBe("run.destructiveCleanup");
+  });
+
+  it("guards Shift+A for modal, resume, search, typing, and no selected run", () => {
+    const event = {
+      altKey: false,
+      ctrlKey: false,
+      key: "a",
+      metaKey: false,
+      shiftKey: true,
+    };
+
+    expect(resolveRunsShortcutCommand(event, { ...context, modalOpen: true })).toBeNull();
+    expect(resolveRunsShortcutCommand(event, { ...context, resumeDialogOpen: true })).toBeNull();
+    expect(resolveRunsShortcutCommand(event, { ...context, searchFocused: true })).toBeNull();
+    expect(resolveRunsShortcutCommand(event, { ...context, typingTarget: true })).toBeNull();
+    expect(resolveRunsShortcutCommand(event, { ...context, selectedRunId: undefined })).toBeNull();
   });
 
   it("blurs a focused search on Enter without triggering run actions", () => {

@@ -15,6 +15,7 @@ type RunsShortcutCommand =
   | "run.showDetail"
   | "run.showNotes"
   | "run.showTasks"
+  | "run.destructiveCleanup"
   | "run.toggleArchived"
   | "run.togglePinned"
   | "ui.toggleFilters"
@@ -38,6 +39,7 @@ interface ShortcutEventLike {
 }
 
 interface RunsShortcutContext {
+  actionPending: boolean;
   activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
   drawerFullscreen: boolean;
@@ -139,6 +141,7 @@ function canTriggerPrimaryAction(context: RunsShortcutContext): boolean {
     !context.searchFocused &&
     !context.modalOpen &&
     !context.resumeDialogOpen &&
+    !context.actionPending &&
     context.selectedDrawerView?.mode !== "attachment" &&
     Boolean(context.selectedRunId) &&
     context.selectedRunPrimaryActionAvailable
@@ -151,6 +154,7 @@ function canTriggerSelectedRunShortcut(context: RunsShortcutContext): boolean {
     !context.searchFocused &&
     !context.modalOpen &&
     !context.resumeDialogOpen &&
+    !context.actionPending &&
     context.selectedDrawerView?.mode !== "attachment" &&
     Boolean(context.selectedRunId)
   );
@@ -293,6 +297,12 @@ export function resolveRunsShortcutCommand(
     if (matchesShortcut(event, { key: "p" }) && canTriggerSelectedRunShortcut(context)) {
       return "run.togglePinned";
     }
+    if (
+      matchesShortcut(event, { key: "a", shiftKey: true }) &&
+      canTriggerSelectedRunShortcut(context)
+    ) {
+      return "run.destructiveCleanup";
+    }
     if (matchesShortcut(event, { key: "a" }) && canTriggerSelectedRunShortcut(context)) {
       return "run.toggleArchived";
     }
@@ -377,6 +387,12 @@ export function resolveRunsShortcutCommand(
   }
   if (matchesShortcut(event, { key: "p" }) && canTriggerSelectedRunShortcut(context)) {
     return "run.togglePinned";
+  }
+  if (
+    matchesShortcut(event, { key: "a", shiftKey: true }) &&
+    canTriggerSelectedRunShortcut(context)
+  ) {
+    return "run.destructiveCleanup";
   }
   if (matchesShortcut(event, { key: "a" }) && canTriggerSelectedRunShortcut(context)) {
     return "run.toggleArchived";

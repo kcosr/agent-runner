@@ -305,8 +305,9 @@ Every action button consults the run's `RunCapabilities`:
 | Task notes input | `taskMutation.canEditNotes` |
 | Add task button | `taskMutation.canAdd` |
 
-Destructive actions (delete, reset, abort) use inline confirmations
-rather than modal prompts.
+Detail-drawer destructive actions (delete, reset, abort) use inline
+confirmations. The selected-run `Shift+A` cleanup shortcut and run-card
+action menu use modal confirmation before archive/delete cleanup.
 
 ## Keyboard shortcuts
 
@@ -333,6 +334,7 @@ The dashboard's shortcut system is customizable from
 | `N` | Show the selected run's Notes tab, or focus its editor when Notes is open |
 | `T` | Show the selected run's Tasks tab |
 | `A` | Archive or restore the selected run |
+| `Shift+A` | Confirm archive/delete cleanup for the selected run |
 | `F` | Toggle the detail drawer fullscreen |
 
 Shortcuts are suppressed while typing in inputs or when a modal dialog
