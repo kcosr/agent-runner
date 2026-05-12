@@ -207,6 +207,9 @@
 
 ### Fixed
 
+- Daemon-managed Start/Resume now resolves unique short run ids across repo
+  buckets, so web, HTTP, WebSocket, and connected CLI resume the selected run
+  even when the daemon process cwd is in a different repo bucket.
 - Containerized Codex bootstrap-session validation and thread renaming now keep
   host-side Codex helper processes anchored in the run's original host cwd.
   ([#138](https://github.com/kcosr/task-runner/pull/138))

@@ -888,7 +888,7 @@ export async function serveDaemon(
       }
       if (matches.length > 1) {
         throw new ConflictError(
-          `run id "${target}" is ambiguous across repo buckets; use a workspace path instead (${matches.map((entry) => entry.workspaceDir).join(", ")})`,
+          `run id "${target}" is ambiguous across repo buckets; use a workspace path instead`,
         );
       }
       const [match] = matches;
@@ -1657,8 +1657,8 @@ export async function serveDaemon(
         summary: getProjectedSummary(entry.manifest.runId),
         detail: getProjectedDetail(entry.manifest.runId),
       });
-      await resumeManagedRun({
-        target: entry.manifest.runId,
+      await executeResumeManagedRun({
+        target: entry.workspaceDir,
         overrides,
       });
       started = true;
@@ -2524,7 +2524,7 @@ export async function serveDaemon(
       }),
     );
 
-  const resumeManagedRun = (request: Parameters<DaemonHandlers["resumeRun"]>[0]) =>
+  const executeResumeManagedRun = (request: Parameters<DaemonHandlers["resumeRun"]>[0]) =>
     executeManagedRun("resume", (emitEvent, abortSignal, emitAuditEnvelope) =>
       app.resumeRun({
         ...request,
@@ -2534,6 +2534,15 @@ export async function serveDaemon(
         emitAuditEnvelope,
       }),
     );
+
+  const resumeManagedRun = (request: Parameters<DaemonHandlers["resumeRun"]>[0]) => {
+    const resolved = resolveManifestTarget(request.target);
+    assertNoPendingScheduleStart(resolved.manifest.runId);
+    return executeResumeManagedRun({
+      ...request,
+      target: resolved.workspaceDir,
+    });
+  };
 
   drainQueuedResumeMessagesAfterFinish = async (
     runId: string,
@@ -2777,10 +2786,7 @@ export async function serveDaemon(
       startedAt,
     },
     startManagedRun,
-    resumeManagedRun: (request) => {
-      assertNoPendingScheduleStart(request.target);
-      return resumeManagedRun(request);
-    },
+    resumeManagedRun,
     abortRun,
   });
 
