@@ -148,7 +148,7 @@
 
 - Added run-card action menus in the web dashboard, plus a selected-run
   `Shift+A` cleanup shortcut that confirms existing archive/delete actions
-  before running them.
+  before running them. ([#140](https://github.com/kcosr/task-runner/pull/140))
 - Added managed-container `lifecycle.afterStart` for host or container setup
   after start/reuse and inspect, including late `{{container_name}}`,
   `{{container_id}}`, and `{{container_pid}}` interpolation.
