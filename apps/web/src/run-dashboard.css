@@ -853,7 +853,10 @@ pre {
 
 .run-row__progress-summary--active svg,
 .run-row-signal--active svg {
+  width: 11px;
+  height: 11px;
   color: var(--info-foreground);
+  flex-shrink: 0;
   animation: spin 1.6s linear infinite;
 }
 
