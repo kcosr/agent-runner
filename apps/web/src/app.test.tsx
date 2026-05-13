@@ -1893,7 +1893,11 @@ describe("web app", () => {
     ]);
     const runningRowSurface = await findRunRowSurface("Running list");
     expect(runningRowSurface.querySelector(".run-row__signals")).toBeNull();
-    expect(runningRowSurface.querySelector(".run-row__progress-summary--active")).toHaveTextContent(
+    expect(runningRowSurface.querySelector(".progress")).toBeNull();
+    expect(within(runningRowSurface).getByLabelText("1 of 4 tasks completed")).toHaveTextContent(
+      "1 / 4",
+    );
+    expect(runningRowSurface.querySelector(".run-row__active-task")).toHaveTextContent(
       "Draft running update",
     );
     expect(within(runningRowSurface).getByLabelText("2 attachments")).toBeInTheDocument();

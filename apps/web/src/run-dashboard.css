@@ -663,9 +663,7 @@ pre {
 
 .run-row {
   display: grid;
-  grid-template-columns:
-    minmax(17rem, 1.7fr) minmax(20rem, 1.55fr) minmax(12rem, 0.95fr)
-    minmax(10rem, 0.75fr) auto;
+  grid-template-columns: minmax(21rem, 1.7fr) minmax(20rem, 1.55fr) 4.75rem minmax(10rem, 0.75fr) auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -692,7 +690,7 @@ pre {
 
 .run-row__main {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 6.75rem minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -705,6 +703,12 @@ pre {
 
 .run-row__status {
   display: inline-flex;
+  min-width: 0;
+}
+
+.run-row__status .badge {
+  width: 100%;
+  justify-content: center;
 }
 
 .run-row__identity {
@@ -793,27 +797,8 @@ pre {
   white-space: nowrap;
 }
 
-.run-row__progress {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.run-row__progress-summary {
+.run-row__task-count {
   justify-self: end;
-  max-width: 100%;
-}
-
-.run-row__progress-summary--active {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  justify-self: start;
-  min-width: 0;
-  color: var(--foreground);
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: 1.3;
 }
 
 .run-row-signal {
@@ -851,16 +836,17 @@ pre {
   color: var(--foreground);
 }
 
-.run-row__progress-summary--active svg,
 .run-row-signal--active svg {
-  width: 11px;
-  height: 11px;
   color: var(--info-foreground);
-  flex-shrink: 0;
   animation: spin 1.6s linear infinite;
 }
 
-.run-row__active-task-text {
+.run-row__active-task {
+  grid-column: 1 / -1;
+  max-width: 100%;
+}
+
+.run-row__active-task .active-task__text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2060,7 +2046,7 @@ pre {
   }
   .run-row__main,
   .run-row__metadata,
-  .run-row__progress,
+  .run-row__task-count,
   .run-row__time {
     grid-column: 1 / -1;
   }
@@ -2068,9 +2054,12 @@ pre {
     grid-column: 2;
     grid-row: 1;
   }
+  .run-row__main {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
   .run-row__metadata .meta-filter-badge,
   .run-row-group-filter,
-  .run-row__progress-summary--active {
+  .run-row__active-task {
     max-width: 100%;
   }
   .run-row__time {

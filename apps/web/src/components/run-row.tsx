@@ -31,10 +31,6 @@ function runIdLabel(run: RunSummary): string {
   return run.runGroupId === run.runId ? run.runId : `${run.runGroupId}/${run.runId}`;
 }
 
-function progressPercent(run: RunSummary): number {
-  return run.tasksTotal === 0 ? 0 : Math.round((run.tasksCompleted / run.tasksTotal) * 100);
-}
-
 function timeFieldLabel(sortField: DashboardSortField): string {
   switch (sortField) {
     case "startedAt":
@@ -99,7 +95,6 @@ export function RunRow({
   const accessibleName = run.name ?? "Unnamed";
   const visibleName = truncateEnd(accessibleName, 72);
   const assignmentName = run.assignmentName ?? "Ad hoc run";
-  const progress = progressPercent(run);
   const timeLabel = timeFieldLabel(sortField);
   const rawTimeValue = timeFieldValue(run, sortField);
   const formattedTime = formatTimestampWithRelative(rawTimeValue);
@@ -355,23 +350,11 @@ export function RunRow({
         ) : null}
       </div>
 
-      <div className="run-row__progress">
-        {run.activeTask ? (
-          <span
-            className="run-row__progress-summary run-row__progress-summary--active"
-            title={run.activeTask.title}
-          >
-            <RunningIcon aria-hidden="true" />
-            <span className="run-row__active-task-text">{run.activeTask.title}</span>
-          </span>
-        ) : (
-          <span className="progress-text run-row__progress-summary">
-            {run.tasksCompleted} / {run.tasksTotal}
-          </span>
-        )}
-        <div aria-label="Task progress" className="progress">
-          <div className="progress-bar" style={{ width: `${progress}%` }} />
-        </div>
+      <div
+        aria-label={`${run.tasksCompleted} of ${run.tasksTotal} tasks completed`}
+        className="progress-text run-row__task-count"
+      >
+        {run.tasksCompleted} / {run.tasksTotal}
       </div>
 
       <div className="run-row__time">
@@ -409,6 +392,13 @@ export function RunRow({
           <MoreHorizontalIcon aria-hidden="true" />
         </button>
       </div>
+
+      {run.activeTask ? (
+        <div className="active-task run-row__active-task" title={run.activeTask.title}>
+          <RunningIcon aria-hidden="true" />
+          <span className="active-task__text">{run.activeTask.title}</span>
+        </div>
+      ) : null}
     </article>
   );
 }
