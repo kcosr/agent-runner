@@ -23,6 +23,8 @@ const RUN_EVENT_TYPES = [
   "run.backend_session_history_imported",
   "run.backend_session_history_synced",
   "run.backend_session_history_sync_failed",
+  "run.controller_detached",
+  "run.controller_reconciled",
   "run.hook_recorded",
   "run.attempt_recorded",
   "run.retrying",
@@ -81,6 +83,28 @@ export type BackendSessionUpdateReason =
   | "reset_clear";
 
 export type BackendSessionHistorySyncReason = "bootstrap" | "pre_resume" | "subscription";
+
+export type RunControllerTransportType = "stdio" | "ws" | "uds" | null;
+export type RunControllerReconciliationDecision =
+  | "marked_error"
+  | "adopted_active"
+  | "finalized_idle";
+export type RunControllerReconciliationReason =
+  | "stale_local_controller"
+  | "missing_backend_session"
+  | "unsupported_transport"
+  | "remote_active"
+  | "remote_idle"
+  | "remote_system_error"
+  | "remote_not_loaded"
+  | "remote_unreachable"
+  | "thread_read_failed"
+  | "history_unavailable"
+  | "history_sync_failed"
+  | "reattach_failed"
+  | "insufficient_idle_evidence"
+  | "completed_after_recovery";
+export type RunControllerRemoteStatus = "Active" | "Idle" | "SystemError" | "NotLoaded" | null;
 
 export type ScheduleDecisionReason =
   | "dependencies_unmet"
@@ -613,6 +637,52 @@ export function appendRunBackendSessionHistorySyncFailedEvent(params: {
       backend: params.manifest.backend,
       backendSessionId: params.manifest.backendSessionId,
       reason: params.reason,
+      error: params.error,
+    },
+  });
+}
+
+export function appendRunControllerDetachedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "backend" | "backendSessionId">;
+  context: RunEventWriteContext;
+  transportType: RunControllerTransportType;
+  reason: "daemon_shutdown";
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.controller_detached",
+    context: params.context,
+    fields: {
+      backend: params.manifest.backend,
+      backendSessionId: params.manifest.backendSessionId,
+      transportType: params.transportType,
+      reason: params.reason,
+    },
+  });
+}
+
+export function appendRunControllerReconciledEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId" | "backend" | "backendSessionId">;
+  context: RunEventWriteContext;
+  transportType: RunControllerTransportType;
+  decision: RunControllerReconciliationDecision;
+  reason: RunControllerReconciliationReason;
+  remoteStatus: RunControllerRemoteStatus;
+  error: string | null;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.controller_reconciled",
+    context: params.context,
+    fields: {
+      backend: params.manifest.backend,
+      backendSessionId: params.manifest.backendSessionId,
+      transportType: params.transportType,
+      decision: params.decision,
+      reason: params.reason,
+      remoteStatus: params.remoteStatus,
       error: params.error,
     },
   });

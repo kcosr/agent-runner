@@ -1028,15 +1028,25 @@ test("daemon RPC and HTTP queued resume message endpoints publish shared DTOs", 
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const run = await initRun(dir);
-  markRunRunning(run.workspaceDir);
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let releaseActiveRun;
   await withEnv(sharedRuntimeEnv(dir), async () => {
-    const server = await serveDaemon(listenUrl);
+    const server = await serveDaemon(listenUrl, {
+      async startRun({ emitEvent }) {
+        markRunRunning(run.workspaceDir);
+        emitRunStarted(emitEvent, run.runId, dir);
+        await new Promise((resolve) => {
+          releaseActiveRun = resolve;
+        });
+        return { runId: run.runId };
+      },
+    });
     const client = await DaemonClient.connect(listenUrl);
     try {
+      await client.call("runs.start", { cliVars: {}, overrides: {} });
       const rpcQueued = await client.call("runs.queueResumeMessage", {
         target: run.runId,
         message: "  queued over rpc  ",
@@ -1133,6 +1143,7 @@ test("daemon RPC and HTTP queued resume message endpoints publish shared DTOs", 
         },
       );
     } finally {
+      releaseActiveRun?.();
       await client.close();
       await server.close();
     }
@@ -6416,18 +6427,31 @@ test("daemon session sync ignores summary-only and running run subscriptions", a
   });
   const run = await initRun(dir, "sync-daemon-agent");
   patchManifest(run.workspaceDir, (manifest) => {
-    manifest.status = "running";
     manifest.backendSessionId = "sync-session";
   });
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
+  let releaseActiveRun;
   await withEnv(
     { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
-      const server = await serveDaemon(listenUrl);
+      const server = await serveDaemon(listenUrl, {
+        async startRun({ emitEvent }) {
+          markRunRunning(run.workspaceDir);
+          patchManifest(run.workspaceDir, (manifest) => {
+            manifest.backendSessionId = "sync-session";
+          });
+          emitRunStarted(emitEvent, run.runId, dir);
+          await new Promise((resolve) => {
+            releaseActiveRun = resolve;
+          });
+          return { runId: run.runId };
+        },
+      });
       const client = await DaemonClient.connect(listenUrl);
       try {
+        await client.call("runs.start", { cliVars: {}, overrides: {} });
         const summarySub = await client.subscribe({ channel: "run_summary" }, () => {});
         await sleep(350);
         assert.equal(readSyncState(statePath).resolveCalls, 0);
@@ -6441,6 +6465,7 @@ test("daemon session sync ignores summary-only and running run subscriptions", a
         assert.equal(readSyncState(statePath).resolveCalls, 0);
         await client.unsubscribe(detailSub);
       } finally {
+        releaseActiveRun?.();
         await client.close();
         await server.close();
       }

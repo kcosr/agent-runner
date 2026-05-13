@@ -218,6 +218,10 @@
   `timed out` when the subprocess is interrupted, taking precedence over
   stderr/stdout excerpts from the interrupted engine process.
   ([#145](https://github.com/kcosr/task-runner/pull/145))
+- Daemon startup and shutdown now reconcile active runs by controller
+  ownership: local/subprocess runs are still aborted, while Codex
+  websocket and UDS runs detach on graceful shutdown and can be
+  re-adopted or finalized from Codex thread state on daemon startup.
 
 ### Fixed
 

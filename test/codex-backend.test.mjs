@@ -6,12 +6,14 @@ import { join } from "node:path";
 import test from "node:test";
 import { WebSocketServer } from "ws";
 import {
+  adoptCodexActiveThread,
   buildCodexAppServerArgs,
   buildCodexThreadParams,
   buildCodexTurnStartPayload,
   codexBackend,
   normalizeCodexUdsPath,
   normalizeCodexWsUrl,
+  readCodexThread,
   resolveCodexBackendConfig,
   resolveCodexTransportConfig,
 } from "../packages/core/dist/backends/codex.js";
@@ -619,6 +621,138 @@ async function startCodexThreadStartCaptureServer() {
   };
 }
 
+async function startCodexRecoveryServer({ threadStatus = "Active", completeResume = true } = {}) {
+  const server = new WebSocketServer({ port: 0 });
+  const calls = [];
+  const waiters = new Map();
+  const threadId = "recovery-thread";
+  const turnId = "recovery-turn";
+
+  const markCall = (method) => {
+    for (const resolve of waiters.get(method) ?? []) {
+      resolve();
+    }
+    waiters.delete(method);
+  };
+
+  server.on("connection", (socket) => {
+    const send = (message) => {
+      socket.send(JSON.stringify(message));
+    };
+    const notify = (method, params) => {
+      send({ jsonrpc: "2.0", method, params });
+    };
+
+    socket.on("message", (data) => {
+      const message = JSON.parse(data.toString("utf8"));
+      calls.push(message);
+      markCall(message.method);
+      if (message.method === "initialize") {
+        send({ jsonrpc: "2.0", id: message.id, result: {} });
+        return;
+      }
+      if (message.method === "initialized") {
+        return;
+      }
+      if (message.method === "thread/read") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {
+            thread: {
+              id: message.params.threadId,
+              cwd: "/repo",
+              status: threadStatus,
+            },
+          },
+        });
+        return;
+      }
+      if (message.method === "thread/start") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { thread: { id: threadId } },
+        });
+        return;
+      }
+      if (message.method === "thread/resume") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { thread: { id: message.params.threadId } },
+        });
+        if (completeResume) {
+          setTimeout(() => {
+            notify("turn/started", {
+              threadId: message.params.threadId,
+              turn: { id: turnId, status: "inProgress" },
+            });
+            notify("item/agentMessage/delta", {
+              threadId: message.params.threadId,
+              turnId,
+              itemId: "recovery-message",
+              delta: "recovered output",
+            });
+            notify("item/completed", {
+              threadId: message.params.threadId,
+              turnId,
+              item: { type: "agentMessage", text: "recovered final" },
+            });
+            notify("turn/completed", {
+              threadId: message.params.threadId,
+              turn: { id: turnId, status: "completed" },
+            });
+          }, 10);
+        }
+        return;
+      }
+      if (message.method === "turn/start") {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { turn: { id: turnId } },
+        });
+        return;
+      }
+      if (message.method === "turn/interrupt") {
+        send({ jsonrpc: "2.0", id: message.id, result: {} });
+      }
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("failed to bind Codex recovery test server");
+  }
+
+  return {
+    url: `ws://127.0.0.1:${address.port}/`,
+    calls,
+    waitForMethod(method) {
+      if (calls.some((call) => call.method === method)) {
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        const entries = waiters.get(method) ?? [];
+        entries.push(resolve);
+        waiters.set(method, entries);
+      });
+    },
+    async close() {
+      for (const client of server.clients) {
+        client.terminate();
+      }
+      await new Promise((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    },
+  };
+}
+
 async function startCodexUdsServer(socketName = "codex.sock") {
   const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-uds-"));
   const socketPath = join(dir, socketName);
@@ -717,6 +851,94 @@ async function startCodexUdsServer(socketName = "codex.sock") {
 
 test("codexBackend ignores child thread turn completion while waiting for the parent turn", async () => {
   await invokeCodexTurnNoiseServer(await startCodexTurnNoiseServer());
+});
+
+test("readCodexThread reads active thread status without starting a turn", async () => {
+  const codexServer = await startCodexRecoveryServer({
+    threadStatus: { Active: { active_flags: ["WaitingOnUserInput"] } },
+  });
+
+  try {
+    const result = await readCodexThread({
+      sessionId: "thread-active",
+      cwd: "/repo",
+      processCwd: "/repo",
+      env: {},
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
+      },
+      resolvedBackendArgs: [],
+    });
+
+    assert.deepEqual(result, {
+      threadId: "thread-active",
+      status: "Active",
+      cwd: "/repo",
+    });
+    assert.deepEqual(
+      codexServer.calls.map((call) => call.method),
+      ["initialize", "initialized", "thread/read"],
+    );
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("codexBackend detaches websocket turns without interrupting the remote turn", async () => {
+  const codexServer = await startCodexRecoveryServer({ completeResume: false });
+  const detachController = new AbortController();
+
+  try {
+    const invoke = codexBackend.invoke({
+      ...baseCtx,
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
+      },
+      detachSignal: detachController.signal,
+    });
+    await codexServer.waitForMethod("turn/start");
+    detachController.abort();
+    const result = await invoke;
+
+    assert.equal(result.detached, true);
+    assert.equal(result.exitCode, null);
+    assert.equal(result.aborted, false);
+    assert.equal(result.sessionId, "recovery-thread");
+    assert.equal(
+      codexServer.calls.some((call) => call.method === "turn/interrupt"),
+      false,
+    );
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("adoptCodexActiveThread resumes an active thread without starting a new turn", async () => {
+  const codexServer = await startCodexRecoveryServer();
+
+  try {
+    const result = await adoptCodexActiveThread({
+      ...baseCtx,
+      resumeSessionId: "thread-active",
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
+      },
+    });
+
+    assert.equal(result.exitCode, 0, `${result.rawStderr}\n${result.rawStdout}`);
+    assert.equal(result.sessionId, "thread-active");
+    assert.equal(result.transcript, "recovered output\n\n---\n\nrecovered final");
+    assert.equal(
+      codexServer.calls.some((call) => call.method === "thread/resume"),
+      true,
+    );
+    assert.equal(
+      codexServer.calls.some((call) => call.method === "turn/start"),
+      false,
+    );
+  } finally {
+    await codexServer.close();
+  }
 });
 
 test("codexBackend ignores same-thread child turn notifications before parent turn id resolves", async () => {

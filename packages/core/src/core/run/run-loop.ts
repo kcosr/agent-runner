@@ -123,6 +123,15 @@ import { resolveFreshRunMaxRetries } from "./static-input-surface.js";
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
+export class RunDetachedError extends Error {
+  constructor(
+    readonly runId: string,
+    readonly workspaceDir: string,
+  ) {
+    super(`run ${runId} detached from this controller`);
+    this.name = "RunDetachedError";
+  }
+}
 import {
   type BackendSessionHistorySyncPreparation,
   type BackendSessionHistorySyncResult,
@@ -182,6 +191,7 @@ export interface RunOptions {
   bootstrapBackendSessionId?: string;
   execution?: RunExecution;
   abortSignal?: AbortSignal;
+  detachSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
   emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
@@ -2929,10 +2939,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         resumeSessionId: sessionId ?? undefined,
         name: name ?? undefined,
         abortSignal: opts.abortSignal,
+        detachSignal: opts.detachSignal,
         emit: emitEvent,
         onRawStdoutLine,
       });
       const attemptEndedAt = new Date().toISOString();
+
+      if (invokeResult.detached === true) {
+        throw new RunDetachedError(runId, workspaceDir);
+      }
 
       if (invokeResult.transcript) {
         attemptTranscripts.push(invokeResult.transcript);
@@ -3108,6 +3123,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, runId);
     }
   } catch (error) {
+    if (error instanceof RunDetachedError) {
+      throw error;
+    }
     thrownError = error;
     if (pendingAttempt) {
       try {
