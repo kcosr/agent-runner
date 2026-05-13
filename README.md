@@ -1,16 +1,19 @@
 # task-runner
 
-`task-runner` is a CLI that drives a coding agent through a structured
-checklist and keeps the run state durable. Each task has a stable id,
-a title, and a status the agent updates in place. After every turn the
-runner inspects state, retries with a programmatic nudge on partial
-completion, and exits with a structured success/failure record.
+`task-runner` runs a coding agent against a structured task list and
+keeps the run durable. You hand it an agent definition, an assignment
+(the work, including the task list), and a backend (`claude`, `codex`,
+`cursor`, `opencode`, or `pi`) — task-runner spawns the backend,
+sends the worker brief, observes task state after every turn, retries
+with a programmatic nudge on partial completion, and exits with a
+structured success/failure record.
 
-It is a sidecar for the interactive coding tool you already use
-(`claude`, `codex`, `cursor`, `opencode`, `pi`) rather than a
-replacement for it. Use it when you want task tracking, resumable runs,
-audited handoffs, and a clean exit code instead of parsing free-form
-chat output.
+Use it when you want a coding agent to grind through a checklist on
+its own and stop when the checklist is actually done — rather than
+when the agent thinks it is. Schedule it, resume it, depend one run
+on another, hand off artifacts as attachments, audit it after the
+fact. For workflows you'd rather drive yourself, the same
+state/brief/audit surface is available as a passive sidecar.
 
 > **New here?** Read [docs/concepts.md](docs/concepts.md) for the
 > mental model (agents, assignments, runs, briefs) before diving in.
@@ -34,30 +37,30 @@ hand-typed follow-up. When the agent gets it right, the run ends and
 the runner emits a structured record with the per-task final
 statuses and the agent's notes.
 
-You can run it two ways:
+The default is **active**: task-runner owns execution. It spawns the
+backend, sends the brief, observes task state after every turn,
+retries with a nudge on partial completion, and exits with a clean
+status code that an outer system (CI, a scheduler, another agent) can
+read directly instead of parsing chat output.
 
-- **Active backend mode** — task-runner spawns the backend, sends the
-  brief, observes task state after every turn, retries on partial
-  completion, and exits with a structured result.
-- **Passive / sidecar mode** — task-runner only owns state. You drive
-  the work from your existing interactive coding tool and let it
-  update task state through the task CLI. You still get briefs,
-  attachments, audit history, and durable runs.
+There is also a **passive / sidecar** option for when you'd rather
+drive the work yourself from an interactive coding tool. task-runner
+still owns task state, briefs, attachments, and audit; you update
+state through the task CLI as you go.
 
-It is also a useful orchestration primitive — an outer agent can
-compose an assignment, hand it to `task-runner`, and read the exit
-code (0/1/2/3/4/130) instead of parsing chat output. Assignments can
-declare deterministic hooks that block, re-invoke, mutate metadata, or
-stage attachments around attempts and task transitions.
+Assignments can declare deterministic hooks that run around attempts
+and task transitions — set up a worktree, run smoke tests, gate task
+completion on child runs — without leaving the assignment file.
 
 ## Features at a glance
 
-- Structured tasks with status + notes that workers update via the CLI
-- Active backends: `claude`, `codex`, `cursor`, `opencode`, `pi`, plus
-  custom backend modules
-- Passive backend for sidecar use with any other tool
-- Resumable runs with retry budget, `run audit` history, and
-  `run brief` worker handoff
+- Run an agent against a structured task list with per-turn state
+  inspection and partial-completion retries
+- Backends: `claude`, `codex`, `cursor`, `opencode`, `pi`, plus
+  custom backend modules; `passive` for sidecar-style runs you drive
+  yourself
+- Resumable runs with a retry budget, `run audit` history, and a
+  frozen `run brief` worker handoff
 - Schedules (one-time and cron), dependencies, attachments, and run
   groups
 - Local daemon (WebSocket JSON-RPC + HTTP/SSE) and bundled browser
@@ -67,11 +70,13 @@ stage attachments around attempts and task transitions.
 
 ## Scope
 
-task-runner is an orchestration and state-tracking layer, not an
-interactive coding environment. It does not replace Claude Code,
-Cursor, Codex, or any other tool you converse with an agent in. It
-runs alongside them. See [docs/scope.md](docs/scope.md) for the full
-product stance and a feature-triage heuristic.
+task-runner is an orchestration and state-tracking layer. It executes
+agent runs, holds their state, and surfaces audit + structured
+handoffs. It is not an interactive coding environment — when you want
+to chat with an agent in real time, you still use Claude Code,
+Cursor, Codex, or whatever you already prefer. See
+[docs/scope.md](docs/scope.md) for the full product stance and a
+feature-triage heuristic.
 
 ## Install
 
@@ -100,10 +105,15 @@ git clone https://github.com/kcosr/task-runner.git
 cd task-runner
 npm install
 npm run build
-npm link
+npm link -w task-runner
 ```
 
-This puts `task-runner` on your `PATH`. To run without linking:
+This puts `task-runner` on your `PATH`. The `-w task-runner` flag is
+required because the published CLI lives in the `task-runner`
+workspace under `apps/cli/` — a bare `npm link` from the repo root
+would link the private workspace root instead.
+
+If you'd rather not link globally, run from the repo root:
 
 ```bash
 npm run task-runner -- <args>
@@ -166,27 +176,26 @@ Per-run cleanup is safer than wiping the state root: use
 These examples assume `task-runner` is on your `PATH`. If you skipped
 `npm link`, prefix every command with `npm run task-runner --`.
 
-### Try it in 60 seconds (no backend required)
+### Verify the install
 
 ```bash
-# 1. Verify the install.
 task-runner status
-
-# 2. Initialize a passive smoke run (no backend; you drive task state).
-task-runner init --backend passive --assignment ./assignments/test/assignment.md
-# Note the run id printed (e.g. `run=3mackw`).
-
-# 3. See the brief task-runner would hand to a worker.
-task-runner run brief <run-id>
-
-# 4. See the task list and manually mark a task done.
-task-runner task list <run-id>
-task-runner task set <run-id> <task-id> --status completed
 ```
+
+Prints config dir, state dir, and daemon connection (if any). If you
+haven't installed a backend CLI yet, the **No-backend smoke check**
+recipe below lets you exercise the surfaces with `--backend passive`.
 
 ### Run an active backend
 
-After installing one of the backend CLIs from Requirements above:
+With the bundled templates installed (see [Install the bundled
+templates](#install-the-bundled-templates)):
+
+```bash
+task-runner run --agent implementer --assignment repo-orientation
+```
+
+Or from a repo clone using direct paths:
 
 ```bash
 task-runner run \
@@ -194,15 +203,11 @@ task-runner run \
   --assignment ./assignments/repo-orientation/assignment.md
 ```
 
-Or with bundled templates installed (see [Install the bundled
-templates](#install-the-bundled-templates)):
-
-```bash
-task-runner run --agent implementer --assignment repo-orientation
-```
-
-task-runner prints the run id and the workspace path on stderr. Save
-the id and use it for inspection:
+task-runner spawns the agent's backend (`codex` for `implementer`),
+sends the brief, watches task state on each turn, retries with a nudge
+on partial completion, and exits when the checklist is done (or after
+the retry budget). The run id and workspace path print on stderr —
+save the id for inspection:
 
 ```bash
 task-runner run status <run-id>      # current state
@@ -221,11 +226,26 @@ task-runner serve
 The web UI talks to the same local daemon. Connected CLI commands
 (`--connect <ws-url>` or `TASK_RUNNER_CONNECT`) appear in the UI live.
 
+### No-backend smoke check
+
+If you don't have one of the backend CLIs installed yet, you can still
+exercise task-runner's state surfaces with a passive run:
+
+```bash
+# Initialize a passive smoke run (no backend; you drive task state).
+task-runner init --backend passive --assignment ./assignments/test/assignment.md
+# Note the run id printed (e.g. `run=3mackw`).
+
+task-runner run brief <run-id>
+task-runner task list <run-id>
+task-runner task set <run-id> <task-id> --status completed
+```
+
 ### Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `task-runner: command not found` | Not on `PATH`. | `npm link` again, or use `npm run task-runner -- <args>`. |
+| `task-runner: command not found` | Not on `PATH`. | Re-run `npm link -w task-runner` (note the `-w`), or use `npm run task-runner -- <args>`. |
 | `Backend 'claude' not available` (or codex/cursor/...) | Backend CLI not installed or not on `PATH`. | Install the backend's CLI and verify it runs standalone. Or use `--backend passive` for a no-backend run. |
 | `EADDRINUSE` on `task-runner serve` | A daemon is already listening. | Run `task-runner status` to see the URL. |
 | `--agent implementer` errors with "not found" | Bundled templates not copied into the config dir. | Run the copy step in [Install the bundled templates](#install-the-bundled-templates), or use the direct path. |

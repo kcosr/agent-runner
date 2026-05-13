@@ -10,8 +10,12 @@ git clone https://github.com/kcosr/task-runner.git
 cd task-runner
 npm install
 npm run build
-npm link    # puts `task-runner` on your PATH
+npm link -w task-runner    # puts `task-runner` on your PATH
 ```
+
+The `-w task-runner` flag targets the `apps/cli/` workspace where the
+binary lives; a bare `npm link` from the repo root would link the
+private workspace root instead.
 
 Then copy the bundled templates into your config dir if you want to
 use them by name — see "Install the bundled templates" in the
