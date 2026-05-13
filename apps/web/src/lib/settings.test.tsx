@@ -87,7 +87,6 @@ function SettingsProbe() {
             activeBoardColumnKey: "running",
             drawerViewsByRunId: {
               "run-1": {
-                mode: "detail",
                 detailSection: "events",
               },
             },

@@ -23,7 +23,6 @@ export function AttachmentPreviewPanel({
   actionPending,
   active,
   attachment,
-  attachmentId,
   attachmentLookupError,
   attachmentLookupPending,
   fullscreen,
@@ -38,7 +37,6 @@ export function AttachmentPreviewPanel({
   actionPending?: RunActionPending;
   active: boolean;
   attachment?: RunAttachment | AttachmentListEntry;
-  attachmentId?: string;
   attachmentLookupError?: string;
   attachmentLookupPending?: boolean;
   fullscreen: boolean;
@@ -58,6 +56,7 @@ export function AttachmentPreviewPanel({
   useHorizontalWheelGuard(panelRef);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const imagePreviewUrlRef = useRef<string | null>(null);
+  const attachmentId = attachment?.id;
   const previewable = attachment ? isPreviewableAttachment(attachment) : false;
   const previewMediaType =
     attachment && previewable ? normalizeAttachmentMimeType(attachment.mimeType) : null;

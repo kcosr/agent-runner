@@ -211,11 +211,14 @@
   sessions and Cursor deterministic `store.db` sessions.
   ([#135](https://github.com/kcosr/task-runner/pull/135))
 
-### Fixed
+### Changed
 
 - Managed-container engine command failures now report `aborted` or
-  `timed out` when the subprocess is interrupted, even if the engine wrote
-  stdout before it stopped.
+  `timed out` when the subprocess is interrupted, taking precedence over
+  stderr/stdout excerpts from the interrupted engine process.
+
+### Fixed
+
 - Codex backend sessions now inject task-runner lineage and recursion
   guard env into thread config for shell tools, so websocket and UDS
   sessions preserve lineage without forwarding arbitrary process or

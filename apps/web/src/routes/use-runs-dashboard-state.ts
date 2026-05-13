@@ -767,12 +767,15 @@ export function useRunsDashboardState() {
     void navigate({ to: "/" });
   };
 
-  function setActiveRightSurface(activeRightSurface: DashboardRightSurface) {
-    if (viewState.activeRightSurface === activeRightSurface) {
-      return;
-    }
-    updateViewState({ activeRightSurface });
-  }
+  const setActiveRightSurface = useCallback(
+    (activeRightSurface: DashboardRightSurface) => {
+      if (viewState.activeRightSurface === activeRightSurface) {
+        return;
+      }
+      updateViewState({ activeRightSurface });
+    },
+    [updateViewState, viewState.activeRightSurface],
+  );
 
   const archiveMutation = useMutation({
     mutationFn: (runId: string) => api.archiveRun(runId),
@@ -1215,6 +1218,21 @@ export function useRunsDashboardState() {
     },
     [updateViewState],
   );
+  const setSelectedRunAttachmentPreview = useCallback(
+    (attachmentOwnerRunId: string, attachmentId: string, options: { activateSurface: boolean }) => {
+      if (!selectedRunId) {
+        return;
+      }
+      setAttachmentPreviewSelections((current) => ({
+        ...current,
+        [selectedRunId]: { attachmentId, attachmentOwnerRunId },
+      }));
+      if (options.activateSurface) {
+        setActiveRightSurface("attachments");
+      }
+    },
+    [selectedRunId, setActiveRightSurface],
+  );
 
   function closeResumeDialog() {
     if (actionPending === "resume") {
@@ -1388,25 +1406,14 @@ export function useRunsDashboardState() {
       navigateToRunDetail(runId, options);
     },
     openSelectedRunResumeDialog: openResumeDialog,
-    openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
-      if (!selectedRunId) {
-        return;
-      }
-      setAttachmentPreviewSelections((current) => ({
-        ...current,
-        [selectedRunId]: { attachmentId, attachmentOwnerRunId },
-      }));
-      setActiveRightSurface("attachments");
-    },
-    replaceSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
-      if (!selectedRunId) {
-        return;
-      }
-      setAttachmentPreviewSelections((current) => ({
-        ...current,
-        [selectedRunId]: { attachmentId, attachmentOwnerRunId },
-      }));
-    },
+    openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) =>
+      setSelectedRunAttachmentPreview(attachmentOwnerRunId, attachmentId, {
+        activateSurface: true,
+      }),
+    replaceSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) =>
+      setSelectedRunAttachmentPreview(attachmentOwnerRunId, attachmentId, {
+        activateSurface: false,
+      }),
     preferences,
     filterOptions,
     hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
@@ -1553,7 +1560,6 @@ export function useRunsDashboardState() {
         return;
       }
       setSelectedRunDrawerView(selectedRunId, {
-        mode: "detail",
         detailSection,
       });
     },

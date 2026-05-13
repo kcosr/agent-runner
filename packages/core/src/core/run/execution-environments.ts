@@ -623,7 +623,7 @@ function boundedExcerpt(value: string): string {
   return trimmed.length > 500 ? `${trimmed.slice(0, 500)}...` : trimmed;
 }
 
-function processFailureDetail(result: Awaited<ReturnType<typeof runProcess>>): string {
+export function processFailureDetail(result: Awaited<ReturnType<typeof runProcess>>): string {
   if (result.timedOut) {
     return "timed out";
   }

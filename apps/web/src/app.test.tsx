@@ -2534,7 +2534,7 @@ describe("web app", () => {
       within(tablist)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Attachments", "Chat", "Detail", "Notes", "Tasks"]);
+    ).toEqual(["Chat", "Detail", "Notes", "Tasks", "Attachments"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
     expect(notesTab).toHaveAttribute("aria-selected", "false");
@@ -13887,6 +13887,77 @@ describe("web app", () => {
     expect(await screen.findByText("beta body")).toBeInTheDocument();
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toBeInTheDocument();
+  });
+
+  it("selects the next attachment when the previewed attachment is removed off the preview tab", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({ id: "att-alpha", name: "alpha.txt" }),
+              makeAttachment({ id: "att-beta", name: "beta.txt" }),
+              makeAttachment({ id: "att-gamma", name: "gamma.txt" }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-alpha\/content$/.test(url)) {
+            return new Response("alpha body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-beta\/content$/.test(url)) {
+            return new Response("beta body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-gamma\/content$/.test(url)) {
+            return new Response("gamma body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(screen.getByRole("button", { name: /^Preview beta\.txt$/ }));
+    expect(await screen.findByRole("heading", { name: "beta.txt" })).toBeInTheDocument();
+    expect(await screen.findByText("beta body")).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Detail",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: /^Remove beta\.txt$/ }));
+    await user.click(screen.getByRole("button", { name: /^Confirm remove beta\.txt$/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Preview beta\.txt$/ })).not.toBeInTheDocument(),
+    );
+
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Attachments",
+      }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "gamma.txt" })).toBeInTheDocument();
+    expect(await screen.findByText("gamma body")).toBeInTheDocument();
   });
 
   it("keeps image preview failures on the existing inline error copy", async () => {

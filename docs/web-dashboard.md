@@ -52,8 +52,8 @@ normal run detail/status DTOs do not expose the run's frozen
 
 ## Views
 
-- `/` — Runs dashboard with Board/List plus Attachments, Chat, Detail,
-  Notes, and Tasks selected-run surfaces.
+- `/` — Runs dashboard with Board/List plus Chat, Detail, Notes, Tasks,
+  and Attachments selected-run surfaces.
 - `/runs/:runId` — Same dashboard with a specific run selected for the
   selected-run surfaces.
 - `/settings/general` — General preferences.
@@ -65,26 +65,26 @@ A multi-surface workspace:
 
 - **Left** — search, grouped Filters control, and preference toggles.
 - **Center** — Board or List, switchable from the toolbar.
-- **Right** — one selected-run panel with Attachments, Chat, Detail,
-  Notes, and Tasks tabs.
+- **Right** — one selected-run panel with Chat, Detail, Notes, Tasks,
+  and Attachments tabs.
 
 The center surface defaults to Board. The toolbar view-mode toggle switches
 between Board and List, and the durable mode choice persists in
 `task-runner:web:dashboard-view-state.viewMode`. Selecting a run opens one
 resizable selected-run panel. Its header owns the run identity plus action
-toolbar, and the tabs below the toolbar switch between Attachments, Chat,
-Detail, Notes, and Tasks. Chat does not create a separate chat route or backend chat
-contract; it follows the selected run, derives messages from `RunDetail`
-plus timeline history, and streams live output through the existing
-timeline stream.
+toolbar, and the tabs below the toolbar switch between Chat, Detail,
+Notes, Tasks, and Attachments. Chat does not create a separate chat route
+or backend chat contract; it follows the selected run, derives messages
+from `RunDetail` plus timeline history, and streams live output through
+the existing timeline stream.
 
 Closing the selected-run panel navigates back to `/` and clears the
-selected run. Attachments, Chat, Detail, Notes, and Tasks tab choice
+selected run. Chat, Detail, Notes, Tasks, and Attachments tab choice
 persists as the active right surface.
 
 Dashboard view state persists the durable surface layout fields:
 center-surface view mode, collapsed board columns, selected-run panel width,
-fullscreen state, and the active Attachments/Chat/Detail/Notes/Tasks tab.
+fullscreen state, and the active Chat/Detail/Notes/Tasks/Attachments tab.
 Search text, per-run drawer tabs, the active board column, and the active
 list status chip remain transient.
 

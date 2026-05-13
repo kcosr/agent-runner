@@ -92,11 +92,11 @@ interface RuntimeVarDraftRow {
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
 const SELECTED_RUN_SURFACE_TABS: readonly SelectedRunSurfaceTab[] = [
-  { label: "Attachments", shortcut: "A", surface: "attachments" },
   { label: "Chat", shortcut: "C", surface: "chat" },
   { label: "Detail", shortcut: "D", surface: "detail" },
   { label: "Notes", shortcut: "N", surface: "notes" },
   { label: "Tasks", shortcut: "T", surface: "tasks" },
+  { label: "Attachments", shortcut: "A", surface: "attachments" },
 ];
 
 function dependencyCandidateTitle(run: RunSummary) {
@@ -427,6 +427,95 @@ function attachmentEntryMatches(entry: AttachmentRowEntry, selection: Attachment
   );
 }
 
+function findAttachmentEntryIndex(
+  entries: readonly AttachmentRowEntry[],
+  selection?: AttachmentPreviewSelection,
+) {
+  return selection ? entries.findIndex((entry) => attachmentEntryMatches(entry, selection)) : -1;
+}
+
+function selectAttachmentFallbackEntry({
+  entries,
+  previousEntries,
+  selectedIndex,
+  selection,
+}: {
+  entries: readonly AttachmentRowEntry[];
+  previousEntries: readonly AttachmentRowEntry[];
+  selectedIndex: number;
+  selection?: AttachmentPreviewSelection;
+}) {
+  if (selectedIndex >= 0) {
+    return entries[selectedIndex];
+  }
+  if (!selection) {
+    return entries[0];
+  }
+
+  const previousIndex = previousEntries.findIndex((entry) =>
+    attachmentEntryMatches(entry, selection),
+  );
+  return previousIndex >= 0
+    ? (entries[previousIndex] ?? entries[previousIndex - 1] ?? entries[0])
+    : entries[0];
+}
+
+function useAttachmentSelectionFallback({
+  active,
+  combinedAttachments,
+  selection,
+  onReplaceAttachmentPreview,
+}: {
+  active: boolean;
+  combinedAttachments: readonly AttachmentRowEntry[];
+  selection?: AttachmentPreviewSelection;
+  onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
+}) {
+  const previousAttachmentEntriesRef = useRef<readonly AttachmentRowEntry[]>([]);
+  const selectedAttachmentIndex = findAttachmentEntryIndex(combinedAttachments, selection);
+  const selectedAttachmentEntry = selectAttachmentFallbackEntry({
+    entries: combinedAttachments,
+    previousEntries: previousAttachmentEntriesRef.current,
+    selectedIndex: selectedAttachmentIndex,
+    selection,
+  });
+  const effectiveAttachmentIndex = selectedAttachmentEntry
+    ? combinedAttachments.findIndex((entry) => entry === selectedAttachmentEntry)
+    : -1;
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    if (combinedAttachments.length === 0) {
+      previousAttachmentEntriesRef.current = [];
+      return;
+    }
+    if (selection && selectedAttachmentIndex >= 0) {
+      previousAttachmentEntriesRef.current = combinedAttachments;
+      return;
+    }
+    if (selectedAttachmentEntry) {
+      onReplaceAttachmentPreview(
+        selectedAttachmentEntry.ownerRunId,
+        selectedAttachmentEntry.attachment.id,
+      );
+    }
+  }, [
+    active,
+    combinedAttachments,
+    onReplaceAttachmentPreview,
+    selectedAttachmentEntry,
+    selectedAttachmentIndex,
+    selection,
+  ]);
+
+  return {
+    effectiveAttachmentIndex,
+    selectedAttachmentEntry,
+  };
+}
+
 function InlineConfirmActions({
   cancelLabel,
   cancelTitle,
@@ -561,7 +650,6 @@ export function RunDetailDrawer({
   const drawerBodyRef = useRef<HTMLDivElement | null>(null);
   const sectionTabsRef = useRef<HTMLElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
-  const previousAttachmentEntriesRef = useRef<AttachmentRowEntry[]>([]);
   const timelineResponseAtBottomRef = useRef(false);
   const latestAttemptRef = useRef<number | null>(null);
   const liveGapEnteredRef = useRef(false);
@@ -676,18 +764,12 @@ export function RunDetailDrawer({
     ],
     [groupAttachments, run.attachments, run.runId],
   );
-  const selectedAttachmentIndex = attachmentPreviewSelection
-    ? combinedAttachments.findIndex((entry) =>
-        attachmentEntryMatches(entry, attachmentPreviewSelection),
-      )
-    : -1;
-  const selectedAttachmentEntry =
-    selectedAttachmentIndex >= 0
-      ? combinedAttachments[selectedAttachmentIndex]
-      : combinedAttachments[0];
-  const effectiveAttachmentIndex = selectedAttachmentEntry
-    ? Math.max(selectedAttachmentIndex, 0)
-    : -1;
+  const { effectiveAttachmentIndex, selectedAttachmentEntry } = useAttachmentSelectionFallback({
+    active: activeSurface === "attachments",
+    combinedAttachments,
+    onReplaceAttachmentPreview,
+    selection: attachmentPreviewSelection,
+  });
   const previousPreviewEntry =
     effectiveAttachmentIndex > 0 ? combinedAttachments[effectiveAttachmentIndex - 1] : undefined;
   const nextPreviewEntry =
@@ -1227,45 +1309,6 @@ export function RunDetailDrawer({
   }, [confirmingAttachmentId, run.attachments]);
 
   useEffect(() => {
-    if (activeSurface !== "attachments") {
-      previousAttachmentEntriesRef.current = combinedAttachments;
-      return;
-    }
-    if (combinedAttachments.length === 0) {
-      previousAttachmentEntriesRef.current = combinedAttachments;
-      return;
-    }
-    if (attachmentPreviewSelection && selectedAttachmentIndex >= 0) {
-      previousAttachmentEntriesRef.current = combinedAttachments;
-      return;
-    }
-
-    let fallbackEntry = combinedAttachments[0];
-    if (attachmentPreviewSelection) {
-      const previousIndex = previousAttachmentEntriesRef.current.findIndex((entry) =>
-        attachmentEntryMatches(entry, attachmentPreviewSelection),
-      );
-      if (previousIndex >= 0) {
-        fallbackEntry =
-          combinedAttachments[previousIndex] ??
-          combinedAttachments[previousIndex - 1] ??
-          combinedAttachments[0];
-      }
-    }
-
-    if (fallbackEntry) {
-      onReplaceAttachmentPreview(fallbackEntry.ownerRunId, fallbackEntry.attachment.id);
-    }
-    previousAttachmentEntriesRef.current = combinedAttachments;
-  }, [
-    activeSurface,
-    attachmentPreviewSelection,
-    combinedAttachments,
-    onReplaceAttachmentPreview,
-    selectedAttachmentIndex,
-  ]);
-
-  useEffect(() => {
     if (!run.capabilities.canReset) {
       setConfirmingReset(false);
     }
@@ -1785,7 +1828,6 @@ export function RunDetailDrawer({
             actionPending={actionPending}
             active={activeSurface === "attachments"}
             attachment={selectedAttachmentEntry?.attachment}
-            attachmentId={selectedAttachmentEntry?.attachment.id}
             attachmentLookupError={
               groupAttachmentsQuery.isError && selectedAttachmentEntry === undefined
                 ? groupAttachmentsQuery.error.message

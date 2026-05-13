@@ -48,7 +48,6 @@ export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
 export type DrawerDetailSection = "attachments" | "dependencies" | "audit" | "events" | "data";
 
 export interface RunDrawerView {
-  mode: "detail";
   detailSection: DrawerDetailSection;
 }
 
@@ -72,7 +71,6 @@ export interface DashboardViewState {
 }
 
 export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
-  mode: "detail",
   detailSection: "attachments",
 };
 
