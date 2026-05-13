@@ -225,6 +225,7 @@
   guard env into thread config for shell tools, so websocket and UDS
   sessions preserve lineage without forwarding arbitrary process or
   transport env.
+  ([#144](https://github.com/kcosr/task-runner/pull/144))
 - Pinning or archiving a run no longer changes its `updatedAt` timestamp, while
   content and lifecycle changes such as notes, names, task state, dependencies,
   and schedules continue to refresh `updatedAt`.
