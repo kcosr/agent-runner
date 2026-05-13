@@ -213,10 +213,11 @@
 - Pinning or archiving a run no longer changes its `updatedAt` timestamp.
 - Mobile dashboard list rows now use the board card layout and preserve
   full-card tap, right-click, and long-press action targeting.
-- Dashboard list rows now fold note, schedule, dependency, attachment, and
+- Dashboard list rows now fold schedule, dependency, attachment, and
   queued-message indicators into the metadata column, replace the progress bar
-  with a compact task count, and render active tasks on a final row instead of
-  reserving a mostly-empty signal column.
+  with a compact task count, expose notes as a row action, and render active
+  tasks beneath the metadata badges instead of reserving a mostly-empty signal
+  column.
 - Daemon-managed Start/Resume now resolves unique short run ids across repo
   buckets, so web, HTTP, WebSocket, and connected CLI resume the selected run
   even when the daemon process cwd is in a different repo bucket.

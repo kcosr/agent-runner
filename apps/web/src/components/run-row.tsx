@@ -7,7 +7,12 @@ import {
   useEffect,
   useRef,
 } from "react";
-import { formatScheduleState, formatTimestampWithRelative, truncateEnd } from "../lib/format.js";
+import {
+  formatRelativeTimestamp,
+  formatScheduleState,
+  formatTimestampWithRelative,
+  truncateEnd,
+} from "../lib/format.js";
 import type { DashboardSortField, DashboardStructuredFilters } from "../lib/settings.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import {
@@ -73,6 +78,7 @@ export function RunRow({
   sortField,
   structuredFilters,
   onRequestActionMenu,
+  onOpenNote,
   onSelect,
   onSetPinned,
   onStructuredFilterToggle,
@@ -83,6 +89,7 @@ export function RunRow({
   sortField: DashboardSortField;
   structuredFilters: DashboardStructuredFilters;
   onRequestActionMenu: (point: { clientX: number; clientY: number }) => void;
+  onOpenNote: () => void;
   onSelect: () => void;
   onSetPinned: (pinned: boolean) => Promise<void>;
   onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
@@ -97,7 +104,10 @@ export function RunRow({
   const assignmentName = run.assignmentName ?? "Ad hoc run";
   const timeLabel = timeFieldLabel(sortField);
   const rawTimeValue = timeFieldValue(run, sortField);
-  const formattedTime = formatTimestampWithRelative(rawTimeValue);
+  const formattedTime =
+    sortField === "updatedAt"
+      ? formatRelativeTimestamp(rawTimeValue) || "Not available"
+      : formatTimestampWithRelative(rawTimeValue);
   const timeMuted = rawTimeValue === null;
   const dependencySignal =
     run.dependencyState.total > 0
@@ -264,89 +274,96 @@ export function RunRow({
       </button>
 
       <div className="run-row__metadata" aria-label={`Metadata for ${accessibleName}`}>
-        <button
-          aria-label={`Filter by repo ${run.repo}`}
-          className="repo-badge meta-filter-badge meta-filter-badge--repo"
-          data-active-filter={structuredFilters.repo === run.repo ? "true" : undefined}
-          onClick={() => onStructuredFilterToggle("repo", run.repo)}
-          type="button"
-        >
-          {run.repo}
-        </button>
-        <button
-          aria-label={`Filter by agent ${run.agentName}`}
-          className="meta-item meta-filter-badge meta-filter-badge--agent"
-          data-active-filter={structuredFilters.agent === run.agentName ? "true" : undefined}
-          onClick={() => onStructuredFilterToggle("agent", run.agentName)}
-          type="button"
-        >
-          {run.agentName}
-        </button>
-        <button
-          aria-label={`Filter by backend ${run.backend}`}
-          className="backend-badge meta-filter-badge meta-filter-badge--backend"
-          data-active-filter={structuredFilters.backend === run.backend ? "true" : undefined}
-          onClick={() => onStructuredFilterToggle("backend", run.backend)}
-          type="button"
-        >
-          {run.backend}
-        </button>
-        <button
-          aria-label={`Filter by run group ${run.runGroupId}`}
-          className="run-row-group-filter"
-          data-active-filter={structuredFilters.runGroupId === run.runGroupId ? "true" : undefined}
-          onClick={() => onStructuredFilterToggle("runGroupId", run.runGroupId)}
-          title={`Filter by run group ${run.runGroupId}`}
-          type="button"
-        >
-          <GroupIcon aria-hidden="true" />
-          <span>{run.runGroupId}</span>
-        </button>
-        {run.notePresent ? (
-          <span aria-label="Note present" className="run-row-signal run-row-signal--neutral">
-            <NotepadTextIcon aria-hidden="true" />
-          </span>
-        ) : null}
-        {run.schedule !== null ? (
-          <span
-            aria-label={`Scheduled run: ${formatScheduleState(run.scheduleState)}`}
-            className={
-              run.scheduleState === "due"
-                ? "run-row-signal run-row-signal--warning"
-                : run.scheduleState === "paused"
-                  ? "run-row-signal run-row-signal--muted"
-                  : "run-row-signal run-row-signal--neutral"
+        <div className="run-row__metadata-badges">
+          <button
+            aria-label={`Filter by repo ${run.repo}`}
+            className="repo-badge meta-filter-badge meta-filter-badge--repo"
+            data-active-filter={structuredFilters.repo === run.repo ? "true" : undefined}
+            onClick={() => onStructuredFilterToggle("repo", run.repo)}
+            type="button"
+          >
+            {run.repo}
+          </button>
+          <button
+            aria-label={`Filter by agent ${run.agentName}`}
+            className="meta-item meta-filter-badge meta-filter-badge--agent"
+            data-active-filter={structuredFilters.agent === run.agentName ? "true" : undefined}
+            onClick={() => onStructuredFilterToggle("agent", run.agentName)}
+            type="button"
+          >
+            {run.agentName}
+          </button>
+          <button
+            aria-label={`Filter by backend ${run.backend}`}
+            className="backend-badge meta-filter-badge meta-filter-badge--backend"
+            data-active-filter={structuredFilters.backend === run.backend ? "true" : undefined}
+            onClick={() => onStructuredFilterToggle("backend", run.backend)}
+            type="button"
+          >
+            {run.backend}
+          </button>
+          <button
+            aria-label={`Filter by run group ${run.runGroupId}`}
+            className="run-row-group-filter"
+            data-active-filter={
+              structuredFilters.runGroupId === run.runGroupId ? "true" : undefined
             }
+            onClick={() => onStructuredFilterToggle("runGroupId", run.runGroupId)}
+            title={`Filter by run group ${run.runGroupId}`}
+            type="button"
           >
-            <ClockIcon aria-hidden="true" />
-          </span>
-        ) : null}
-        {dependencySignal ? (
-          <span
-            aria-label={`${run.dependencyState.satisfied} of ${run.dependencyState.total} dependencies satisfied`}
-            className={dependencySignalClass}
-          >
-            <DependencyIcon aria-hidden="true" />
-            {dependencySignal}
-          </span>
-        ) : null}
-        {run.attachmentCount > 0 ? (
-          <span
-            aria-label={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
-            className="run-row-signal run-row-signal--neutral"
-          >
-            <AttachmentIcon aria-hidden="true" />
-            {run.attachmentCount}
-          </span>
-        ) : null}
-        {run.queuedResumeMessageCount > 0 ? (
-          <span
-            aria-label={`${run.queuedResumeMessageCount} queued message${run.queuedResumeMessageCount === 1 ? "" : "s"}`}
-            className="run-row-signal run-row-signal--neutral"
-          >
-            <MessageIcon aria-hidden="true" />
-            {run.queuedResumeMessageCount}
-          </span>
+            <GroupIcon aria-hidden="true" />
+            <span>{run.runGroupId}</span>
+          </button>
+          {run.schedule !== null ? (
+            <span
+              aria-label={`Scheduled run: ${formatScheduleState(run.scheduleState)}`}
+              className={
+                run.scheduleState === "due"
+                  ? "run-row-signal run-row-signal--warning"
+                  : run.scheduleState === "paused"
+                    ? "run-row-signal run-row-signal--muted"
+                    : "run-row-signal run-row-signal--neutral"
+              }
+            >
+              <ClockIcon aria-hidden="true" />
+            </span>
+          ) : null}
+          {dependencySignal ? (
+            <span
+              aria-label={`${run.dependencyState.satisfied} of ${run.dependencyState.total} dependencies satisfied`}
+              className={dependencySignalClass}
+            >
+              <DependencyIcon aria-hidden="true" />
+              {dependencySignal}
+            </span>
+          ) : null}
+          {run.attachmentCount > 0 ? (
+            <span
+              aria-label={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
+              className="run-row-signal run-row-signal--neutral"
+            >
+              <AttachmentIcon aria-hidden="true" />
+              {run.attachmentCount}
+            </span>
+          ) : null}
+          {run.queuedResumeMessageCount > 0 ? (
+            <span
+              aria-label={`${run.queuedResumeMessageCount} queued message${run.queuedResumeMessageCount === 1 ? "" : "s"}`}
+              className="run-row-signal run-row-signal--neutral"
+            >
+              <MessageIcon aria-hidden="true" />
+              {run.queuedResumeMessageCount}
+            </span>
+          ) : null}
+        </div>
+        {run.activeTask ? (
+          <div className="run-row__metadata-progress">
+            <span className="active-task run-row__active-task" title={run.activeTask.title}>
+              <RunningIcon aria-hidden="true" />
+              <span className="active-task__text">{run.activeTask.title}</span>
+            </span>
+          </div>
         ) : null}
       </div>
 
@@ -370,6 +387,21 @@ export function RunRow({
 
       <div className="run-row__actions">
         <button
+          aria-label={
+            run.notePresent
+              ? `Preview or edit note for run ${run.runId}`
+              : `Add note for run ${run.runId}`
+          }
+          className={
+            run.notePresent ? "icon-btn card-action card-action--active" : "icon-btn card-action"
+          }
+          onClick={onOpenNote}
+          title={run.notePresent ? "Preview or edit note" : "Add note"}
+          type="button"
+        >
+          <NotepadTextIcon aria-hidden="true" />
+        </button>
+        <button
           aria-label={run.pinned ? `Unpin run ${run.runId}` : `Pin run ${run.runId}`}
           aria-pressed={run.pinned}
           className={
@@ -392,13 +424,6 @@ export function RunRow({
           <MoreHorizontalIcon aria-hidden="true" />
         </button>
       </div>
-
-      {run.activeTask ? (
-        <div className="active-task run-row__active-task" title={run.activeTask.title}>
-          <RunningIcon aria-hidden="true" />
-          <span className="active-task__text">{run.activeTask.title}</span>
-        </div>
-      ) : null}
     </article>
   );
 }

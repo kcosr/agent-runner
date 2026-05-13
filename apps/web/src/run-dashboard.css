@@ -663,7 +663,7 @@ pre {
 
 .run-row {
   display: grid;
-  grid-template-columns: minmax(21rem, 1.7fr) minmax(20rem, 1.55fr) 4.75rem minmax(10rem, 0.75fr) auto;
+  grid-template-columns: minmax(21rem, 1.7fr) minmax(20rem, 1.55fr) 3.75rem minmax(10rem, 0.75fr) auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -737,7 +737,6 @@ pre {
   white-space: nowrap;
 }
 
-.run-row__metadata,
 .run-row__actions {
   display: flex;
   align-items: center;
@@ -746,7 +745,26 @@ pre {
 }
 
 .run-row__metadata {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.run-row__metadata-badges,
+.run-row__metadata-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-row__metadata-badges {
   flex-wrap: wrap;
+}
+
+.run-row__metadata-progress {
+  max-width: 100%;
 }
 
 .run-row__metadata .meta-filter-badge {
@@ -838,7 +856,6 @@ pre {
 }
 
 .run-row__active-task {
-  grid-column: 1 / -1;
   max-width: 100%;
 }
 

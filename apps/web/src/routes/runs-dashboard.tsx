@@ -87,6 +87,7 @@ function DashboardSurfaces({
 
 interface DashboardPanelRendererProps {
   onListSelectRun: (runId: string) => void;
+  onOpenRunNote: (runId: string) => void;
   onRequestActionMenu: (runId: string, point: { clientX: number; clientY: number }) => void;
   state: RunsDashboardState;
 }
@@ -116,7 +117,12 @@ const DASHBOARD_PANEL_RENDERERS = {
       visibleRuns={state.visibleRuns}
     />
   ),
-  list: ({ onListSelectRun, onRequestActionMenu, state }: DashboardPanelRendererProps) => (
+  list: ({
+    onListSelectRun,
+    onOpenRunNote,
+    onRequestActionMenu,
+    state,
+  }: DashboardPanelRendererProps) => (
     <RunsListPanel
       actionPending={state.actionPending}
       hasActiveStructuredFilters={state.hasActiveStructuredFilters}
@@ -124,6 +130,7 @@ const DASHBOARD_PANEL_RENDERERS = {
       listStatusCounts={state.listStatusCounts}
       listStatusFilter={state.listStatusFilter}
       onListStatusFilterChange={state.setListStatusFilter}
+      onOpenNote={onOpenRunNote}
       onRequestActionMenu={onRequestActionMenu}
       onResetFilters={state.resetBoardFilters}
       onSelectRun={onListSelectRun}
@@ -734,6 +741,15 @@ export function RunsDashboardRoute() {
     },
     [state],
   );
+  const openRunNoteFromList = useCallback(
+    (runId: string) => {
+      listKeyboardSelectedRunIdRef.current = runId;
+      state.openRun(runId);
+      state.setActiveRightSurface("notes");
+      setNoteEditRequestVersion((current) => current + 1);
+    },
+    [state],
+  );
 
   return (
     <>
@@ -742,6 +758,7 @@ export function RunsDashboardRoute() {
           <DashboardSurfaces
             primary={renderDashboardPanel({
               onListSelectRun: selectRunFromList,
+              onOpenRunNote: openRunNoteFromList,
               onRequestActionMenu: openRunActionMenu,
               state,
             })}

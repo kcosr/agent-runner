@@ -64,6 +64,7 @@ export function RunsListPanel({
   listStatusCounts,
   listStatusFilter,
   onListStatusFilterChange,
+  onOpenNote,
   onRequestActionMenu,
   onResetFilters,
   onSelectRun,
@@ -84,6 +85,7 @@ export function RunsListPanel({
   listStatusCounts: DashboardListStatusCount[];
   listStatusFilter: DashboardListStatusFilter | null;
   onListStatusFilterChange: (status: DashboardListStatusFilter | null) => void;
+  onOpenNote: (runId: string) => void;
   onRequestActionMenu: (runId: string, point: { clientX: number; clientY: number }) => void;
   onResetFilters: () => void;
   onSelectRun: (runId: string) => void;
@@ -250,6 +252,7 @@ export function RunsListPanel({
               <RunRow
                 actionPending={actionPending}
                 key={run.runId}
+                onOpenNote={() => onOpenNote(run.runId)}
                 onRequestActionMenu={(point) => onRequestActionMenu(run.runId, point)}
                 onSelect={() => onSelectRun(run.runId)}
                 onSetPinned={(pinned) => onSetPinned(run.runId, pinned)}

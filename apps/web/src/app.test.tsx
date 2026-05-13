@@ -1900,8 +1900,16 @@ describe("web app", () => {
     expect(runningRowSurface.querySelector(".run-row__active-task")).toHaveTextContent(
       "Draft running update",
     );
+    expect(within(runningRowSurface).queryByLabelText("Note present")).toBeNull();
     expect(within(runningRowSurface).getByLabelText("2 attachments")).toBeInTheDocument();
     expect(within(runningRowSurface).getByLabelText("1 queued message")).toBeInTheDocument();
+    await user.click(
+      within(runningRowSurface).getByRole("button", {
+        name: "Preview or edit note for run run-list-running",
+      }),
+    );
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Notes" })).toHaveAttribute("aria-selected", "true");
     expect(within(await findRunRow("Completed list")).queryByLabelText("Pinned")).toBeNull();
     expect(screen.getByRole("button", { name: "All statuses, 4 runs" })).toHaveAttribute(
       "aria-pressed",

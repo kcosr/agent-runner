@@ -14,7 +14,7 @@ export function formatTimestamp(value: string | null): string {
   }).format(date);
 }
 
-function formatRelativeTimestamp(value: string | null): string {
+export function formatRelativeTimestamp(value: string | null): string {
   if (!value) {
     return "";
   }
