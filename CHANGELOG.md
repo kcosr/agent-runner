@@ -152,6 +152,7 @@
 - Added a top-level web dashboard Attachments tab that previews selected-run
   and run-group attachments inline under the selected-run header, while
   keeping upload/download/delete management in Detail -> Attachments.
+  ([#145](https://github.com/kcosr/task-runner/pull/145))
 - Added the `plan-implement-feature` assignment for single-run feature
   planning, approval, implementation, review, and PR handoff, plus shared
   `feature-plan/*` and `feature-implement/*` task definitions.
@@ -216,6 +217,7 @@
 - Managed-container engine command failures now report `aborted` or
   `timed out` when the subprocess is interrupted, taking precedence over
   stderr/stdout excerpts from the interrupted engine process.
+  ([#145](https://github.com/kcosr/task-runner/pull/145))
 
 ### Fixed
 
@@ -505,6 +507,7 @@
 - Changed web dashboard selected-run shortcuts so `A` opens Attachments,
   `Shift+A` toggles archive/unarchive, and `Shift+D` opens destructive
   archive/delete cleanup confirmation.
+  ([#145](https://github.com/kcosr/task-runner/pull/145))
 - Workspace lifecycle markers now live under
   `${TASK_RUNNER_STATE_DIR}/workspace-state/` instead of suffixed sibling
   directories next to mounted workspaces.

@@ -254,12 +254,6 @@ export function AttachmentPreviewPanel({
       <header className="drawer-head drawer-head--preview attachment-preview-panel__head">
         <div className="attachment-preview-head">
           <div className="attachment-preview-title-row">
-            {runId ? <span className="attachment-preview-run-id">{runId}</span> : null}
-            {runId ? (
-              <span aria-hidden="true" className="attachment-preview-title-separator">
-                /
-              </span>
-            ) : null}
             <h3 className="attachment-preview-title">{attachment?.name ?? "Attachment preview"}</h3>
           </div>
           {attachment ? (

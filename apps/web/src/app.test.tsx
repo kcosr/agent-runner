@@ -14343,8 +14343,11 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /^Preview peer-notes\.md$/ }));
     expect(await screen.findByText("group attachment body")).toBeInTheDocument();
     expect(
-      within(screen.getByLabelText("Attachment preview")).getByText("run-2"),
+      within(screen.getByLabelText("Attachment preview")).getByRole("heading", {
+        name: "peer-notes.md",
+      }),
     ).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Attachment preview")).queryByText("run-2")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /^Download$/ }));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
