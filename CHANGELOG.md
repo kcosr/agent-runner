@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+### Added
+
+- `CONTRIBUTING.md` covering install, repo layout, coding conventions,
+  pre-commit checks, and the PR/release flow.
+- README section for installing the bundled `agents/`, `assignments/`,
+  and `tasks/` template directories into `${TASK_RUNNER_CONFIG_DIR}`,
+  plus a parallel "Bundled definitions" section in
+  `docs/configuration.md`.
+- README section for installing/uninstalling `task-runner` from the
+  source repo and a top-of-README troubleshooting table.
+- `docs/concepts.md` now includes a glossary (caller, backend, worker,
+  brief, session, attempt) and a mermaid run-lifecycle state diagram.
+
+### Changed
+
+- Rewrote the README opening, install, and quickstart sections for a
+  cleaner initial-release onboarding flow. Active and passive run
+  modes are introduced before the feature dump; the former "Quickstart"
+  advanced subsections (launchers, environments, custom backends,
+  hooked assignments, daemon-over-SSH) are now collected under a
+  "Recipes" section.
+- Documented `--parent-run`, `--launcher`, `--environment`, and
+  `--run-id` flags on `init` in `docs/cli.md`.
+- README env-var table now lists `TASK_RUNNER_DAEMON_AUTH_ENABLED` and
+  `TASK_RUNNER_DAEMON_TOKEN`.
+
+### Fixed
+
+- `docs/examples.md` now reflects current bundled-agent settings:
+  `implementer` model `gpt-5.5`, `code-reviewer` model
+  `claude-opus-4-7` with effort `xhigh`, `planner` model and timeouts.
+- README and `docs/concepts.md` no longer list `cursor-agent` as a
+  backend id; the backend id is `cursor` and the binary is
+  `cursor-agent`.
+- `docs/concepts.md` Backends list now includes `opencode`.
+- Standardized "task-runner" lowercase project name in
+  `docs/configuration.md` and `docs/agents-and-assignments.md`
+  (previously had stray "Task Runner" titlecase references).
+
 ### Breaking Changes
 
 - Manifest schema version is now `24`. Managed container lifecycle state now

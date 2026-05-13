@@ -1,23 +1,19 @@
 # task-runner
 
-`task-runner` drives agents through structured task lists and keeps run
-state in a manifest-canonical workspace. It supports embedded CLI
-execution, active backend invocation, passive sidecar operation, a local
-daemon, a browser dashboard, resumable runs, attachments, dependencies,
-scheduled runs, launcher prefixes for subprocess backends, a first-class
-container execution environment layer, a first-class
-`run brief` surface for handing a run to a worker, and `task-runner run
-audit` for reading durable run audit history. Live runs can also hold
-queued resume messages as daemon-owned pending user intent for the next
-runnable resume opportunity.
+`task-runner` is a CLI that drives a coding agent through a structured
+checklist and keeps the run state durable. Each task has a stable id,
+a title, and a status the agent updates in place. After every turn the
+runner inspects state, retries with a programmatic nudge on partial
+completion, and exits with a structured success/failure record.
 
-- Task state is canonical in `run.json`.
-- `run-events.jsonl` is a per-run append-only audit trail with monotonic
-  cursors for current runs; it is durable history, not canonical state.
-- Workers use the task CLI, not workspace files.
-- `task-runner run brief <run-id>` is the canonical worker handoff.
-- `task-runner status` reports the current system/environment context.
-- Run-targeted read surfaces live under `task-runner run`.
+It is a sidecar for the interactive coding tool you already use
+(`claude`, `codex`, `cursor`, `opencode`, `pi`) rather than a
+replacement for it. Use it when you want task tracking, resumable runs,
+audited handoffs, and a clean exit code instead of parsing free-form
+chat output.
+
+> **New here?** Read [docs/concepts.md](docs/concepts.md) for the
+> mental model (agents, assignments, runs, briefs) before diving in.
 
 ## Why
 
@@ -38,95 +34,159 @@ hand-typed follow-up. When the agent gets it right, the run ends and
 the runner emits a structured record with the per-task final
 statuses and the agent's notes.
 
-When you need to debug how a run got from one lifecycle/task state to
-another, runs created by current code include `run-events.jsonl`: a
-compact append-only audit trail for major lifecycle and task-mutation
-events. Older workspaces may still carry uncursored schema v1 rows and
-should be upgraded with `scripts/migrate-run-events-v2.mjs` before you
-rely on the audit surface. `run.json` remains the source of truth, while
-`task-runner run audit <run-id>` and the daemon `/api/runs/:runId/audit`
-surface the persisted audit history for humans and clients.
+You can run it two ways:
 
-It is also a useful primitive for orchestration — an outer agent can
-compose an assignment, hand it to `task-runner`, and get back a
-structured success/failure without parsing free-form chat output.
+- **Active backend mode** — task-runner spawns the backend, sends the
+  brief, observes task state after every turn, retries on partial
+  completion, and exits with a structured result.
+- **Passive / sidecar mode** — task-runner only owns state. You drive
+  the work from your existing interactive coding tool and let it
+  update task state through the task CLI. You still get briefs,
+  attachments, audit history, and durable runs.
 
-You can use `task-runner` in two main modes:
+It is also a useful orchestration primitive — an outer agent can
+compose an assignment, hand it to `task-runner`, and read the exit
+code (0/1/2/3/4/130) instead of parsing chat output. Assignments can
+declare deterministic hooks that block, re-invoke, mutate metadata, or
+stage attachments around attempts and task transitions.
 
-- **Passive / sidecar mode** — initialize or inspect runs, then drive the
-  work from your existing interactive coding tool while updating task
-  state through the task CLI. This is useful when you want task
-  tracking, briefs, attachments, and durable run state without handing
-  execution over to task-runner.
-- **Active backend mode** — execute the run through a supported backend
-  (`claude`, `codex`, `cursor-agent`, `opencode`, `pi`). In this mode task-runner
-  performs the run/retry loop itself and validates whether tasks were
-  actually marked complete before the run is treated as done.
-  Backend-native capabilities like skills, subagents, MCP servers, and
-  custom slash commands continue to work; task-runner controls when and
-  how the backend is invoked, not what it does once running.
+## Features at a glance
 
-Today the built-in validation is task-state based: did the worker
-actually complete the checklist it was given? Assignments can also
-declare deterministic hooks that run at prepare time, around attempts,
-or during task transitions to block, re-invoke, mutate run metadata, or
-stage attachments before the run continues.
+- Structured tasks with status + notes that workers update via the CLI
+- Active backends: `claude`, `codex`, `cursor`, `opencode`, `pi`, plus
+  custom backend modules
+- Passive backend for sidecar use with any other tool
+- Resumable runs with retry budget, `run audit` history, and
+  `run brief` worker handoff
+- Schedules (one-time and cron), dependencies, attachments, and run
+  groups
+- Local daemon (WebSocket JSON-RPC + HTTP/SSE) and bundled browser
+  dashboard at `task-runner serve`
+- Launchers for subprocess backends and first-class container
+  execution environments
 
-## Scope and direction
+## Scope
 
-task-runner is an orchestration and state-tracking layer for agent runs,
-not an interactive coding environment. Upstream design and ideation
-happen elsewhere; task-runner takes a plan (or the requirements to
-produce one), runs it, and surfaces durable state, audit, and structured
-handoffs at each user gate. In practice it is used either as a sidecar
-for your existing interactive coding agents, or as a runner for
-prepared/background tasks that need a durable checklist and audit trail.
-
-See [`docs/scope.md`](docs/scope.md) for the full product stance,
-including a triage heuristic for evaluating feature requests against
-scope.
+task-runner is an orchestration and state-tracking layer, not an
+interactive coding environment. It does not replace Claude Code,
+Cursor, Codex, or any other tool you converse with an agent in. It
+runs alongside them. See [docs/scope.md](docs/scope.md) for the full
+product stance and a feature-triage heuristic.
 
 ## Install
 
-Requirements:
+### Requirements
 
+- Linux or macOS (Windows: use WSL2; some launcher and Codex UDS
+  features require Unix domain sockets)
 - Node.js 20.19+ or 22.12+
-- a supported backend when you want live execution:
-  - `claude`
-  - `codex` (or a Codex app-server)
-  - `cursor-agent`
-  - `opencode`
-  - `pi`
+- For active execution, at least one of the supported backend CLIs
+  installed and authenticated:
+  - `claude` (Anthropic Claude Code)
+  - `codex` (OpenAI Codex CLI, or a running Codex app-server)
+  - `cursor-agent` (Cursor headless agent — backend id `cursor`)
+  - `opencode` (OpenCode CLI)
+  - `pi` (Pi CLI)
 
-### Option 1: local build / linked development install
+See [docs/backends.md](docs/backends.md) for per-backend install and
+auth notes. For a no-backend smoke test, use `--backend passive`.
 
-Build from the repo root:
+### Install from source
+
+task-runner is not yet published on npm. Install from a clone:
 
 ```bash
+git clone https://github.com/kcosr/task-runner.git
+cd task-runner
 npm install
 npm run build
 npm link
 ```
 
-The built CLI entrypoint is `node apps/cli/dist/cli.js`. The workspace
-also exposes:
+This puts `task-runner` on your `PATH`. To run without linking:
 
 ```bash
 npm run task-runner -- <args>
 ```
 
-### Option 2: package-style invocation
+A published `npx task-runner` path is on the [roadmap](#roadmap).
 
-Once task-runner is published as a package, the intended no-install path
-is:
+### Install the bundled templates
+
+task-runner ships a starter library of agent definitions, assignment
+definitions, and shared task definitions under `agents/`,
+`assignments/`, and `tasks/`. Copying them into your config directory
+lets you refer to them by name (`--agent implementer`) instead of by
+path (`--agent ./agents/implementer/agent.md`).
 
 ```bash
-npx task-runner <args>
+CONFIG_DIR="${TASK_RUNNER_CONFIG_DIR:-$HOME/.config/task-runner}"
+mkdir -p "$CONFIG_DIR"
+cp -R agents assignments tasks "$CONFIG_DIR"/
 ```
+
+Copy all three directories together — bundled assignments reference
+shared task definitions under `tasks/` (`review/architecture`,
+`feature-plan/orient`, etc.), and those refs only resolve when the
+matching `tasks/` directory is present.
+
+After this step, list what's available:
+
+```bash
+task-runner list agents
+task-runner list assignments
+task-runner list tasks
+```
+
+To inspect one definition:
+
+```bash
+task-runner show agent implementer
+task-runner show assignment repo-orientation
+```
+
+If you skip this step, use direct paths from inside the repo:
+`--agent ./agents/<name>/agent.md`,
+`--assignment ./assignments/<name>/assignment.md`.
+
+### Uninstall / clean up
+
+```bash
+npm unlink task-runner               # remove the linked CLI
+rm -rf ~/.config/task-runner         # remove definitions
+rm -rf ~/.local/state/task-runner    # remove all run state
+```
+
+Per-run cleanup is safer than wiping the state root: use
+`task-runner run archive <run-id>` to retire one, then
+`task-runner run delete <run-id>` to remove it.
 
 ## Quickstart
 
-### Fresh run
+These examples assume `task-runner` is on your `PATH`. If you skipped
+`npm link`, prefix every command with `npm run task-runner --`.
+
+### Try it in 60 seconds (no backend required)
+
+```bash
+# 1. Verify the install.
+task-runner status
+
+# 2. Initialize a passive smoke run (no backend; you drive task state).
+task-runner init --backend passive --assignment ./assignments/test/assignment.md
+# Note the run id printed (e.g. `run=3mackw`).
+
+# 3. See the brief task-runner would hand to a worker.
+task-runner run brief <run-id>
+
+# 4. See the task list and manually mark a task done.
+task-runner task list <run-id>
+task-runner task set <run-id> <task-id> --status completed
+```
+
+### Run an active backend
+
+After installing one of the backend CLIs from Requirements above:
 
 ```bash
 task-runner run \
@@ -134,87 +194,150 @@ task-runner run \
   --assignment ./assignments/repo-orientation/assignment.md
 ```
 
-### Inspect a run
+Or with bundled templates installed (see [Install the bundled
+templates](#install-the-bundled-templates)):
 
 ```bash
-task-runner status
-task-runner run status <run-id>
-task-runner run brief <run-id>
-task-runner run audit <run-id>
-task-runner task list <run-id>
-task-runner task show <run-id> <task-id>
+task-runner run --agent implementer --assignment repo-orientation
 ```
 
-### Prepare a run without executing it
+task-runner prints the run id and the workspace path on stderr. Save
+the id and use it for inspection:
 
 ```bash
-task-runner init \
-  --agent ./agents/implementer/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md
+task-runner run status <run-id>      # current state
+task-runner run brief <run-id>       # the worker handoff
+task-runner run audit <run-id>       # persisted event history
+task-runner task list <run-id>       # tasks and their statuses
+```
 
-task-runner run reconfigure <run-id> \
-  --var target=next \
-  --message-file ./handoff.md
+### Browser dashboard
+
+```bash
+task-runner serve
+# Open the printed HTTP URL.
+```
+
+The web UI talks to the same local daemon. Connected CLI commands
+(`--connect <ws-url>` or `TASK_RUNNER_CONNECT`) appear in the UI live.
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `task-runner: command not found` | Not on `PATH`. | `npm link` again, or use `npm run task-runner -- <args>`. |
+| `Backend 'claude' not available` (or codex/cursor/...) | Backend CLI not installed or not on `PATH`. | Install the backend's CLI and verify it runs standalone. Or use `--backend passive` for a no-backend run. |
+| `EADDRINUSE` on `task-runner serve` | A daemon is already listening. | Run `task-runner status` to see the URL. |
+| `--agent implementer` errors with "not found" | Bundled templates not copied into the config dir. | Run the copy step in [Install the bundled templates](#install-the-bundled-templates), or use the direct path. |
+| `npx task-runner ...` errors | Not yet published. | Use the source install above. |
+
+See [docs/cli.md](docs/cli.md) for the full command reference.
+
+## Documentation
+
+Start with [docs/concepts.md](docs/concepts.md) for the mental model.
+The rest are focused topic pages:
+
+| Doc | Topic |
+|---|---|
+| [docs/concepts.md](docs/concepts.md) | Mental model — agents, assignments, runs, briefs |
+| [docs/agents-and-assignments.md](docs/agents-and-assignments.md) | Definition format, locked fields, prompt composition |
+| [docs/tasks.md](docs/tasks.md) | Task model, status values, task CLI, mutation rules |
+| [docs/runs.md](docs/runs.md) | Workspace layout, manifest, lifecycle, capabilities |
+| [docs/variables.md](docs/variables.md) | Typed vars, resolution, interpolation, redaction |
+| [docs/resume.md](docs/resume.md) | Resume rules, ready-start, retry nudges |
+| [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
+| [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
+| [docs/backends.md](docs/backends.md) | Built-in and custom backends |
+| [docs/container-lifecycle.md](docs/container-lifecycle.md) | Container execution environment and lifecycle design |
+| [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
+| [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
+| [docs/daemon.md](docs/daemon.md) | Control plane, HTTP/SSE, JSON-RPC |
+| [docs/web-dashboard.md](docs/web-dashboard.md) | Bundled browser UI |
+| [docs/design.md](docs/design.md) | Canonical design, schema, lifecycle rules |
+| [docs/examples.md](docs/examples.md) | Bundled agents and assignments tour |
+| [docs/scope.md](docs/scope.md) | Product scope and feature-triage heuristic |
+
+## Recipes
+
+Common workflows, each linked to the detail doc that covers them in
+full.
+
+### Prepare a run, edit it, then start it
+
+`init` creates an `initialized` run without invoking the backend.
+`reconfigure` patches vars or the message before the run starts. `run
+ready` promotes the run, and `run --resume-run` starts it.
+
+```bash
+task-runner init --agent implementer --assignment repo-orientation
+
+# Optional: tweak the prepared run before starting.
+task-runner run reconfigure <run-id> --var target=next
 
 task-runner run ready <run-id>
 task-runner run --resume-run <run-id>
 ```
 
-`run reconfigure` is only for unarchived `initialized` runs. It patches
-runtime vars and/or the initial message, rerenders the brief and reset
-seed all-or-nothing, and preserves frozen identity/runtime fields such
-as agent, assignment, launcher, hooks, tasks, cwd, selected
-`backendConfig`, plus selected backend extra args.
+`run reconfigure` is for unarchived `initialized` runs only. See
+[docs/resume.md](docs/resume.md).
 
-### Queue a message for a live run
+### Drive a passive run (no backend invocation)
+
+Passive runs let your existing interactive coding tool do the work
+while task-runner owns task state and audit.
 
 ```bash
-task-runner run queue-message <run-id-or-path> "Check the logs before continuing"
-task-runner run queued-messages <run-id-or-path>
-task-runner run remove-queued-message <run-id-or-path> <message-id>
+task-runner init --backend passive --assignment plan-feature \
+  --name "Web dashboard" "Design the dashboard work"
+
+task-runner run brief <run-id>     # hand this to your tool
+task-runner task set <run-id> <task-id> --status in_progress
+task-runner task append-notes <run-id> <task-id> --text "Observed ..."
+task-runner run set-backend-session <run-id> <session-id>
+task-runner task set <run-id> <task-id> --status completed
 ```
 
-Queued resume messages are persisted on the run. Connected CLI mutations
-route through the daemon with `--connect`, so the web dashboard and other
-daemon clients see the updated queued-message count immediately. The web
-Chat composer uses `Queue` for live runs and keeps `Send` for non-live
-resumable runs.
+### Queue a follow-up message for a live run
+
+```bash
+task-runner run queue-message <run-id> "Check the logs before continuing"
+task-runner run queued-messages <run-id>
+task-runner run remove-queued-message <run-id> <message-id>
+```
+
+Queued messages persist on the run. The web Chat composer uses
+`Queue` for live runs and `Send` for non-live resumable runs.
 
 ### Schedule a run
 
 ```bash
-task-runner init \
-  --agent ./agents/implementer/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md \
+task-runner init --agent implementer --assignment repo-orientation \
   --schedule-delay 30m
-
 task-runner run ready <run-id>
 ```
 
-Scheduled runs remain in `ready` until their schedule is due. One-time
-schedules use `--schedule-at <iso>` or `--schedule-delay <duration>`;
-recurring schedules use `--schedule-cron <expr>` with optional
-`--schedule-timezone <iana>`, `--schedule-mode reuse|reset|clone`, and
-`--schedule-continue-on-failure`.
+One-time schedules use `--schedule-at <iso>` or `--schedule-delay
+<duration>`. Recurring schedules use `--schedule-cron <expr>` with
+optional `--schedule-timezone <iana>`, `--schedule-mode
+reuse|reset|clone`, and `--schedule-continue-on-failure`.
 
-Existing runs can be changed with:
+Mutate schedules on an existing run:
 
 ```bash
 task-runner run schedule <run-id> --cron "0 9 * * *" --timezone UTC --mode clone
 task-runner run schedule disable <run-id>
 task-runner run schedule enable <run-id>
-task-runner run schedule clear <run-id>
+task-runner run schedule clear <run-id>   # one-time only; disable for recurring
 ```
-
-`run schedule clear` is for one-time schedules only; disable recurring
-schedules when they should stop firing. Manual start is still allowed:
-starting a one-time scheduled run consumes the schedule, while starting a
-recurring run before its `runAt` leaves the next recurrence intact.
 
 ### Launcher-backed subprocess runs
 
+A launcher prepends a command (e.g. `ssh`, `docker exec`, `flatpak
+run`) to the backend invocation.
+
 ```yaml
-# ~/.config/task-runner/launchers/ssh-docker.yaml
+# ${TASK_RUNNER_CONFIG_DIR}/launchers/ssh-docker.yaml
 schemaVersion: 1
 name: ssh-docker
 command: ssh
@@ -222,7 +345,7 @@ args: [worker, docker, exec, agent]
 ```
 
 ```yaml
-# ~/.config/task-runner/agents/remote/agent.md
+# ${TASK_RUNNER_CONFIG_DIR}/agents/remote/agent.md
 ---
 schemaVersion: 1
 name: remote
@@ -238,17 +361,16 @@ task-runner list launchers
 task-runner show launcher ssh-docker
 ```
 
-Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
-`opencode`, `pi`, and Codex stdio). Passive runs and Codex websocket/UDS runs keep
-the built-in `direct` launcher.
+Launchers apply only to subprocess-backed execution (`claude`,
+`cursor`, `opencode`, `pi`, and Codex stdio). Passive runs and Codex
+websocket/UDS runs keep the built-in `direct` launcher. For
+containers, prefer first-class execution environments (next recipe)
+over launcher wrappers.
 
-Launcher command and args are runtime-interpolated before they are frozen
-into the manifest. For containers, prefer first-class execution
-environments over launcher wrappers so task-runner can validate, audit,
-reuse, and clean up the container:
+### Container execution environment
 
 ```yaml
-# ~/.config/task-runner/environments/agent-dev.yaml
+# ${TASK_RUNNER_CONFIG_DIR}/environments/agent-dev.yaml
 schemaVersion: 1
 name: agent-dev
 kind: container
@@ -257,10 +379,6 @@ engine: podman
 image: agent-dev:latest
 lifetime: group
 cwd: "{{workspace_host_path}}"
-vars:
-  repo_source:
-    sources: [cli, web]
-    required: true
 workspace:
   scope: group
   hostRoot: "{{state_dir}}/workspaces"
@@ -274,92 +392,16 @@ lifecycle:
 sessionMounts: backend
 ```
 
-Managed environments can create host workspace directories, mount them
-into the container, rewrite cwd to the container path, and keep a
-group-scoped container alive until no initialized, ready, or running run
-in the group still references it. `sessionMounts: backend` adds a
-same-path mount for the selected backend's session store so host-side
-session sync can read the backend history. `lifecycle.onWorkspaceCreate`
-runs setup once per host workspace before backend cwd validation, and
-`lifecycle.afterStart` can run container or host setup immediately after
-the managed container is inspected. Environment `vars` are merged with assignment vars for the
-selected run and frozen into the normal runtime var map.
-
-Agents may also author backend-owned argv tokens:
-
-```yaml
-backendArgs:
-  claude:
-    extraArgs: ["--profile", "default"]
-  codex:
-    extraArgs: ["--model", "gpt-5.4"]
-```
-
-The selected backend's args are frozen into local `run.json` at run
-creation; status APIs do not expose them. Codex stdio receives the args
-when launching `app-server`, while Codex websocket/UDS transports connect
-to an already-running server and ignore them.
-
-### Custom backend modules
-
-Named custom backends live under:
-
-```text
-${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)
-```
-
-The module must default-export a backend object whose `id` exactly matches
-the directory name. Built-in names (`claude`, `codex`, `cursor`, `opencode`,
-`pi`, `passive`) are reserved. Custom backend code is trusted local code: it is
-loaded into the task-runner process without sandboxing, cached for the
-process lifetime, and daemon changes require a daemon restart. Install any
-custom backend dependencies under the config directory, for example
-`cd ~/.config/task-runner && npm install <package>`.
-
-Custom backends receive the resolved run `cwd` in `ctx.cwd`; native
-backends are responsible for applying that cwd to any subprocess, RPC, or
-SDK they call. Authored `backendConfig.<backend-name>` is backend-owned
-JSON-like data, kept separate from `backendArgs.<backend-name>.extraArgs`,
-and only the selected backend's resolved config is frozen into the run
-manifest.
-
-### Passive / externally driven run
-
-```bash
-task-runner init \
-  --backend passive \
-  --assignment plan-feature \
-  --name "Web dashboard" \
-  "Design the dashboard work"
-
-task-runner run brief <run-id>
-task-runner task set <run-id> <task-id> --status in_progress
-task-runner task append-notes <run-id> <task-id> --text "Observed ..."
-task-runner run set-backend-session <run-id> <session-id>
-task-runner task set <run-id> <task-id> --status completed
-```
-
-### Browser dashboard
-
-```bash
-task-runner serve
-# Open the printed HTTP base URL in a browser.
-```
-
-`task-runner serve` starts the local daemon. The web UI talks to that
-same daemon and is not a standalone app. The runs board supports
-exact-match filters for repo, agent, backend, and run group, and run
-cards expose a run-group chip that scopes the board to that group.
-Scheduled runs show a compact clock indicator on cards, and the detail
-drawer exposes the next run time plus enable/disable controls and
-one-time schedule clearing. The dashboard also includes a dedicated
-full-screen `New Run` flow at `/runs/new` that resolves the static run
-input surface from the daemon before enabling `Initialize` and `Start
-now`. In Chat, live runs queue submitted messages instead of starting a
-resume immediately; queued messages appear in an expandable panel with
-remove controls, and run cards show the queued-message count.
+Managed environments create host workspace directories, mount them
+into the container, rewrite cwd, and keep a group-scoped container
+alive until the group is done. See
+[docs/container-lifecycle.md](docs/container-lifecycle.md) for the
+full lifecycle and var model.
 
 ### Hooked assignment
+
+Hooks run deterministically around attempts and task transitions
+(e.g. set up a worktree, run smoke tests, gate task completion):
 
 ```yaml
 ---
@@ -368,26 +410,14 @@ name: repo-work
 hooks:
   beforeAttempt:
     - builtin: git-worktree
-      when:
-        sessionIndex: [0]
-        attemptIndexInSession: [0]
+      when: { sessionIndex: [0], attemptIndexInSession: [0] }
       with:
         repo: "{{cwd}}"
         from: main
         branch: review-worktree
         path: "{{cwd}}/.worktrees/review-worktree"
     - builtin: command
-      when:
-        sessionIndex: [0]
-        attemptIndexInSession: [0]
-      with:
-        mode: status
-        command: bash
-        args:
-          ["-lc", "git fetch origin --prune && git merge --ff-only origin/main"]
-    - builtin: command
-      when:
-        sessionIndex: [0]
+      when: { sessionIndex: [0] }
       with:
         mode: status
         command: npm
@@ -396,20 +426,8 @@ hooks:
 Work on the repo.
 ```
 
-Named hooks resolve from `${TASK_RUNNER_CONFIG_DIR}/hooks/<hook-name>/hook.(ts|mts|js|mjs)`.
-Assignment-local path hooks resolve relative to the authored
-`assignment.md`. Raw `.ts` / `.mts` hooks load directly through the core
-runtime's `jiti` loader, so hook authors do not need to precompile them.
-
-When a run launches a descendant `task-runner` process, the child run
-automatically freezes `parentRunId`. Author descendant assignments with
-`sources: [parent]` for values like `worktree_path` or a validated
-`worktree_base_ref` instead of manually repeating `--var` flags.
-
-Task-completion guards that depend on spawned child runs can stay fully
-declarative. For example, this blocks `peer_review` from being marked
-`completed` until every direct child run reaches `success`; with
-`requireAny: false`, the task may still complete if no child run exists:
+Hooks can also gate task completion on children. This blocks
+`peer_review` until every direct child run reaches `success`:
 
 ```yaml
 tasks:
@@ -417,64 +435,53 @@ tasks:
     title: Peer review
     hooks:
       - builtin: require-children-success
-        with:
-          requireAny: false
+        with: { requireAny: false }
 ```
 
-The same targeting also works at the assignment root with native
-`taskTransition.when.taskId` / `when.taskIds` filters.
+Named hooks resolve from
+`${TASK_RUNNER_CONFIG_DIR}/hooks/<hook-name>/hook.(ts|mts|js|mjs)`.
+Assignment-local path hooks resolve relative to the authored
+`assignment.md`. See [docs/agents-and-assignments.md](docs/agents-and-assignments.md).
 
-CLI commands can either:
+### Custom backend module
 
-- run **embedded** against the shared filesystem state, or
-- route through the daemon with `--connect <ws-url>` (or
-  `TASK_RUNNER_CONNECT`).
+Named custom backends live under:
 
-Connected CLI commands can also tunnel through SSH with
-`--connect-host <host>` / `TASK_RUNNER_CONNECT_HOST`. The CLI then keeps
-the logical `--connect` URL for user-facing output while forwarding the
-actual daemon traffic through an invocation-scoped loopback port
-(`--connect-local-port` / `TASK_RUNNER_CONNECT_LOCAL_PORT` overrides the
-default port reuse). Anything more advanced than that belongs in your
-SSH config, not in `task-runner`.
+```text
+${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)
+```
 
-Both modes operate on the same persisted runs. The important difference
-is that connected mode lets the daemon observe and broadcast changes in
-real time, which is how the browser UI stays live as commands mutate
-runs. If you want the web dashboard to reflect CLI changes immediately,
-issue those CLI commands through `--connect`.
+The module must default-export a backend object whose `id` matches
+the directory name. Built-in names (`claude`, `codex`, `cursor`,
+`opencode`, `pi`, `passive`) are reserved. Custom backend code is
+trusted local code — install its dependencies under the config dir:
 
-For Codex runs, embedded mode resolves transport from authored
-`backendConfig.codex.transport`, then the current process
-`TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL`, then stdio.
-Connected mode does not forward caller-local Codex transport env vars or
-arbitrary env vars; the daemon resolves Codex transport from its own
-current process env after authored/request `backendConfig`.
-Connected mode only synthesizes structured daemon request fields for
-these caller-local inputs:
+```bash
+cd "${TASK_RUNNER_CONFIG_DIR:-$HOME/.config/task-runner}"
+npm install <package>
+```
 
-- `--parent-run <run-id>` or local `TASK_RUNNER_PARENT_RUN_ID` becomes
-  request `parentRunId` for fresh `run` / `init`
-- `--group-id <group-id>` or local `TASK_RUNNER_RUN_GROUP_ID` becomes
-  request `runGroupId` for fresh `run` / new `init`
+See [docs/backends.md](docs/backends.md).
 
-The Codex UDS transport shape is `{ type: "uds", path:
-"/absolute/socket/path" }`; it is WebSocket-over-UDS for Codex
-app-server, not raw UDS bytes. `TASK_RUNNER_CODEX_UDS_PATH` must be an
-absolute socket path and `TASK_RUNNER_CODEX_WS_URL` must be an absolute
-`ws://` or `wss://` URL. If both env vars are set and no higher-precedence
-transport was authored or explicitly overridden, task-runner fails fast
-instead of guessing. Resume reuses the frozen manifest transport. These
-env vars remain Codex-specific inputs, not generic daemon env passthrough.
+### Run through the daemon (or over SSH)
 
-Named launcher lookup follows the same freeze-first model. Fresh runs
-resolve and interpolate the final launcher once, store it on the manifest
-and reset seed, and reuse it on resume/reset. In connected mode the daemon
-is authoritative for named launcher resolution because it owns the config
-root. Changing a run's group later updates `runGroupId`, but it does not
-rewrite already frozen cwd, launcher, brief, or task text.
-Reinitializing an existing initialized run preserves its frozen run group;
-use `task-runner run set-group` or `clear-group` to mutate membership.
+CLI commands can run **embedded** (direct filesystem access) or
+**connected** to the daemon (`--connect <ws-url>` or
+`TASK_RUNNER_CONNECT`). Connected mode broadcasts changes to other
+clients (the browser UI updates live). Use it when you want the
+dashboard to reflect CLI changes immediately.
+
+To reach a remote daemon through SSH:
+
+```bash
+export TASK_RUNNER_CONNECT=ws://remote-host:4773/
+export TASK_RUNNER_CONNECT_HOST=remote-host
+task-runner list runs
+```
+
+The CLI opens an invocation-scoped local forward and tunnels
+WebSocket/HTTP traffic through it. Anything fancier belongs in your
+SSH config. See [docs/daemon.md](docs/daemon.md).
 
 ## Command index
 
@@ -525,30 +532,6 @@ Key rules:
   attachments owned by every run in the target run's group. Use
   `--scope run` for the target run only.
 
-## Documentation
-
-Start with [docs/concepts.md](docs/concepts.md) for the mental model.
-The rest are focused topic pages:
-
-| Doc | Topic |
-|---|---|
-| [docs/concepts.md](docs/concepts.md) | Mental model — agents, assignments, runs, briefs |
-| [docs/agents-and-assignments.md](docs/agents-and-assignments.md) | Definition format, locked fields, prompt composition |
-| [docs/tasks.md](docs/tasks.md) | Task model, status values, task CLI, mutation rules |
-| [docs/runs.md](docs/runs.md) | Workspace layout, manifest, lifecycle, capabilities |
-| [docs/variables.md](docs/variables.md) | Typed vars, resolution, interpolation, redaction |
-| [docs/resume.md](docs/resume.md) | Resume rules, ready-start, retry nudges |
-| [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
-| [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
-| [docs/backends.md](docs/backends.md) | Built-in and custom backends |
-| [docs/container-lifecycle.md](docs/container-lifecycle.md) | Container execution environment and lifecycle design |
-| [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
-| [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
-| [docs/daemon.md](docs/daemon.md) | Control plane, HTTP/SSE, JSON-RPC |
-| [docs/web-dashboard.md](docs/web-dashboard.md) | Bundled browser UI |
-| [docs/design.md](docs/design.md) | Canonical design, schema, lifecycle rules |
-| [docs/examples.md](docs/examples.md) | Bundled agents and assignments |
-
 ## Exit codes
 
 | Code | Meaning |
@@ -560,6 +543,10 @@ The rest are focused topic pages:
 | `4` | Backend or runtime failure |
 | `130` | User cancellation / confirmed interrupt |
 
+Exit code `2` is also the canonical "no-go" signal for review-style
+assignments — `plan-review` and `code-review` mark their `approval`
+task `blocked` to deliberately fail the run when the reviewer rejects.
+
 ## Environment variables
 
 | Variable | Effect |
@@ -568,6 +555,8 @@ The rest are focused topic pages:
 | `TASK_RUNNER_STATE_DIR` | Run workspaces root |
 | `TASK_RUNNER_CONNECT` | Route client commands through a daemon |
 | `TASK_RUNNER_LISTEN` | Daemon listen URL |
+| `TASK_RUNNER_DAEMON_AUTH_ENABLED` | Enable shared-token guard for the daemon control plane (`true`/`1`/`yes`/`on`) |
+| `TASK_RUNNER_DAEMON_TOKEN` | Bearer token for daemon auth; set the same value in `serve` and connected CLI environments |
 | `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks |
 | `TASK_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
 | `TASK_RUNNER_RUN_ID` | Active run id provided to backend wrapper processes |

@@ -104,6 +104,8 @@ Flags:
 - `--name <name>` — set the persisted display name.
 - `--group-id <group-id>` — set the explicit run group for a fresh run.
   Forbidden on resume and ready-start.
+- `--parent-run <run-id>` — set the lineage parent for a fresh run.
+  Overrides `TASK_RUNNER_PARENT_RUN_ID`. Forbidden on resume.
 - `--var <key>=<value>` — repeatable. Split on the first `=`. Forbidden
   on resume.
   Descendant runs usually should prefer assignment `sources: [parent]`
@@ -148,15 +150,23 @@ runs or to inspect a run before executing it.
 task-runner init \
   --agent <name|path> \
   --assignment <name|path> \
-  [--cwd <path>] [--backend <id>] [--model <id>] [--effort <level>] \
-  [--unrestricted] [--name <name>] [--group-id <group-id>] [--var key=value ...] \
+  [--cwd <path>] [--backend <id>] [--launcher <name>] [--environment <name|path>] \
+  [--model <id>] [--effort <level>] \
+  [--unrestricted] [--name <name>] [--group-id <group-id>] [--parent-run <run-id>] \
+  [--var key=value ...] \
   [--add-task <title> ...] [--backend-session-id <id>] \
   [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>] \
   [--schedule-timezone <iana>] [--schedule-mode reuse|reset|clone] \
   [--schedule-continue-on-failure] \
+  [--run-id <id|path>] \
   [--message-file <path>] \
   [<message tokens...>]
 ```
+
+`--run-id <id|path>` overwrites an existing `initialized` run in place
+(re-renders the brief and reset seed). The frozen run group is
+preserved across reinit; mutate it with `run set-group` /
+`clear-group` instead.
 
 `init` does not dump the worker brief to stdout — fetch it with
 `task-runner run brief <run-id>`.

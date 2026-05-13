@@ -16,7 +16,8 @@ trusted local code, not sandboxed plugin packages.
 ### `generic`
 
 - Path: `agents/generic/agent.md`
-- Backend: `codex` (model `gpt-5.5`, `effort: high`, `unrestricted: true`)
+- Backend: `codex` (model `gpt-5.5`, `effort: high`, `timeoutSec: 14400`,
+  `unrestricted: true`)
 
 No role instructions. Use this agent when the assignment should own the
 full workflow prompt and the agent should only provide runtime settings.
@@ -24,7 +25,8 @@ full workflow prompt and the agent should only provide runtime settings.
 ### `implementer`
 
 - Path: `agents/implementer/agent.md`
-- Backend: `codex` (model `gpt-5.4`, `effort: high`, `unrestricted: true`)
+- Backend: `codex` (model `gpt-5.5`, `effort: high`, `timeoutSec: 14400`,
+  `unrestricted: true`)
 
 Senior staff engineer persona. Reads code deeply, cites file paths and
 line numbers, follows repo conventions, and prefers first-attempt
@@ -34,7 +36,8 @@ and marks infeasible tasks as `blocked` rather than silently adapting.
 ### `planner`
 
 - Path: `agents/planner/agent.md`
-- Backend: `codex` (`unrestricted: true`)
+- Backend: `codex` (model `gpt-5.5`, `effort: high`, `timeoutSec: 14400`,
+  `unrestricted: true`)
 
 Gathers feature requirements, identifies ambiguity along contract
 dimensions (CLI, API, schema, UI, refactoring), scans for reusable code,
@@ -44,8 +47,8 @@ validation steps. Designed to drive the `plan-feature` assignment.
 ### `code-reviewer`
 
 - Path: `agents/code-reviewer/agent.md`
-- Backend: `claude` (model `claude-opus-4-6`, `effort: high`,
-  `unrestricted: true`)
+- Backend: `claude` (model `claude-opus-4-7`, `effort: xhigh`,
+  `timeoutSec: 14400`, `unrestricted: true`)
 
 Review-only persona. Produces severity-tagged findings
 (`[SEVERITY] file:line — title`) with observation, rationale, and

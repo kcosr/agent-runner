@@ -686,8 +686,9 @@ init time and then reused on resume:
 
 UDS transport uses WebSocket-over-UDS for Codex app-server, not raw UDS
 bytes, and `path` must be absolute. If both UDS and WS env vars are set
-with no higher-precedence transport, Task Runner fails fast. Resume does
-not re-read these env vars because the transport is already frozen.
+with no higher-precedence transport, task-runner fails fast. Resume
+does not re-read these env vars because the transport is already
+frozen.
 
 Once frozen into the manifest, later env drift does not change the run's
 Codex transport.

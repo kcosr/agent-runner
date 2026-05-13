@@ -5,6 +5,29 @@ the run state in a manifest-canonical workspace. This page gives a tour of the
 core concepts. Each concept has its own detailed doc — follow the links when
 you need specifics.
 
+> Once you have the mental model, the full schema and lifecycle
+> reference lives in [design.md](design.md).
+
+## Glossary
+
+A few terms appear across every doc:
+
+- **caller** — the human or outer script that invokes the `task-runner`
+  CLI.
+- **backend** — the runtime that actually executes the worker
+  (`claude`, `codex`, `cursor`, `opencode`, `pi`, `passive`, or a
+  custom backend module).
+- **worker** — the agent (whether driven by task-runner or by you in
+  passive mode) doing the work and updating task state through the
+  task CLI.
+- **brief** (the *worker brief*) — the composed prompt task-runner
+  freezes onto the run and re-sends to the backend on every attempt.
+  Inspect it with `task-runner run brief <run-id>`.
+- **session** vs **attempt** — a *session* is one execution window
+  (one fresh start or one resume). An *attempt* is one backend
+  invocation inside a session; sessions can hold multiple attempts
+  bounded by `maxAttemptsPerSession`.
+
 ## The model in one paragraph
 
 An **agent** supplies backend, model, and role instructions. An **assignment**
@@ -59,6 +82,28 @@ Lifecycle states:
 - `ready` — approved for execution, awaiting first start
 - `running` — actively executing
 - `success` | `blocked` | `exhausted` | `aborted` | `error` — terminal states
+
+```mermaid
+stateDiagram-v2
+    [*] --> initialized: init
+    [*] --> running: run (fresh)
+    initialized --> ready: run ready
+    initialized --> running: run --resume-run
+    ready --> running: scheduled / manual start
+    running --> success: all tasks completed
+    running --> blocked: any task blocked
+    running --> exhausted: retries exhausted
+    running --> error: backend failure
+    running --> aborted: user / Ctrl+C
+    success --> initialized: run reset
+    blocked --> initialized: run reset
+    exhausted --> initialized: run reset
+    error --> initialized: run reset
+    aborted --> initialized: run reset
+    success --> running: run --resume-run
+    blocked --> running: run --resume-run
+    exhausted --> running: run --resume-run
+```
 
 A run is the durable lifecycle record. Each backend execution window is a
 session: the fresh execution creates session `0`, and each resume creates
@@ -120,14 +165,18 @@ See [variables.md](variables.md).
 
 A backend is the runtime that actually executes the worker:
 
-- `claude`
-- `codex` (stdio, WebSocket app-server, or WebSocket-over-UDS app-server)
-- `cursor` (`cursor-agent`)
-- `pi`
-- `passive` — no backend invocation; the run is driven externally through
-  the task CLI
+- `claude` — Anthropic Claude Code CLI
+- `codex` — OpenAI Codex (stdio, WebSocket app-server, or
+  WebSocket-over-UDS app-server)
+- `cursor` — Cursor headless agent (uses the `cursor-agent` binary)
+- `opencode` — OpenCode CLI
+- `pi` — Pi CLI
+- `passive` — no backend invocation; the run is driven externally
+  through the task CLI
 
-See [backends.md](backends.md).
+Custom backend modules live under
+`${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/` and are trusted
+local code loaded without sandboxing. See [backends.md](backends.md).
 
 ## Attachments and dependencies
 

@@ -48,17 +48,42 @@ Assignment `tasks:` entries may mix inline objects, named task refs such
 as `review/reuse`, and explicit path refs. Bare strings resolve only
 from `${TASK_RUNNER_CONFIG_DIR}/tasks`; strings are treated as paths
 only when they are absolute or begin with `./` or `../`.
-The bundled repo also ships shared review task definitions under
-`tasks/review/`, planning task definitions under `tasks/feature-plan/`,
-and implementation task definitions under `tasks/feature-implement/`.
-Bundled assignments reference those files with named refs such as
+
+### Bundled definitions
+
+The `task-runner` repo ships a starter library of agents, assignments,
+and shared task definitions under `agents/`, `assignments/`, and
+`tasks/`. Copy them into your config directory to refer to them by name
+(`--agent implementer`) instead of by path
+(`--agent ./agents/implementer/agent.md`):
+
+```bash
+CONFIG_DIR="${TASK_RUNNER_CONFIG_DIR:-$HOME/.config/task-runner}"
+mkdir -p "$CONFIG_DIR"
+cp -R agents assignments tasks "$CONFIG_DIR"/
+```
+
+Always copy all three directories together. Bundled assignments
+reference shared task definitions via named refs such as
 `review/architecture`, `feature-plan/orient`, and
-`feature-implement/check-gate`, resolved from
-`${TASK_RUNNER_CONFIG_DIR}/tasks`. Some files in those directories are
-currently reused by multiple bundled assignments, while others are
-named refs owned by a single bundled workflow. If you copy bundled
-assignments into another config directory, copy the referenced task
-directories with them so those named refs continue to resolve.
+`feature-implement/check-gate`; those refs resolve from
+`${TASK_RUNNER_CONFIG_DIR}/tasks`, so the matching directory must be
+present.
+
+After copying, verify resolution:
+
+```bash
+task-runner list agents
+task-runner list assignments
+task-runner list tasks
+task-runner show agent implementer
+```
+
+You can also pick and choose — copying only `agents/implementer/` into
+the config dir is fine if you don't need the bundled assignments. The
+constraint is only that an assignment using `review/X` or
+`feature-plan/Y` named refs needs the corresponding `tasks/review/X.md`
+or `tasks/feature-plan/Y.md` file to be present.
 
 ### State directory
 
@@ -163,7 +188,7 @@ Resume reuses the frozen manifest transport. Malformed UDS values are
 rejected unless they are absolute socket paths; malformed websocket values
 are rejected unless they are absolute `ws://` or `wss://` URLs. If both
 env vars are set and no higher-precedence transport is authored or
-explicitly overridden, Task Runner fails fast instead of guessing.
+explicitly overridden, task-runner fails fast instead of guessing.
 
 The authored Codex transport union is exactly `{ type: "stdio" }`,
 `{ type: "ws", url: "<absolute ws:// or wss:// URL>" }`, or
@@ -173,9 +198,9 @@ UDS bytes.
 
 `TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1` is an opt-in local debugging
 knob. It writes raw backend stdout to `attempts/NN.stdout.log` sidecars
-as Task Runner observes it. Sidecars are local debug artifacts: Task
-Runner does not read them for timeline, history, API, daemon, or web
-surfaces. Attempt JSON schemaVersion 3 omits stdout; stderr remains in
+as task-runner observes it. Sidecars are local debug artifacts:
+task-runner does not read them for timeline, history, API, daemon, or
+web surfaces. Attempt JSON schemaVersion 3 omits stdout; stderr remains in
 `attempts/NN.json` because timeline and history project it as attempt notices. The removed
 `TASK_RUNNER_FULL_ATTEMPT_LOGS` variable no longer enables capture.
 
