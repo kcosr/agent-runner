@@ -142,7 +142,8 @@ layouts default to **Preview** mode first.
 Above the board, a **jump strip** exposes only the currently rendered
 non-empty columns and scrolls them into view when the board overflows
 horizontally. Jumpbar behavior is board-only; switching to List hides the
-jump strip and disables board movement shortcuts until Board is active again.
+jump strip and disables board column movement shortcuts until Board is active
+again.
 
 Motion animations highlight insertions and reorders. Empty columns can
 be auto-hidden.
@@ -150,9 +151,9 @@ be auto-hidden.
 ### List
 
 The list view shows the same filtered `RunSummary` collection as the board
-as compact rows sorted globally by the active sort field and direction. It
-does not bucket rows by status, and pinned runs stay represented by a row
-signal and pin action rather than a separate pinned-first bucket.
+as compact rows sorted by the active sort field and direction, with pinned
+runs kept at the top before the same sort is applied within pinned and
+unpinned groups. It does not bucket rows by status.
 
 Status chips above the rows show `All` plus only statuses that currently
 have at least one visible run. The status labels are `Initialized`, `Ready`,
@@ -161,10 +162,12 @@ Choosing a status filters the list rows; choosing `All` clears only that
 status chip. Search and structured filters compose with the selected status
 chip, and reset actions clear the same dashboard filters used by the board.
 
-Each compact row opens the selected-run panel, exposes repo/agent/backend
-and run-group filter shortcuts, shows task progress and row signals for
-pin, notes, schedule, dependencies, attachments, queued messages, and active
-task, and uses the same pin and overflow action menu as board cards.
+Each desktop compact row opens the selected-run panel, exposes
+repo/agent/backend and run-group filter shortcuts, shows a compact task count,
+keeps schedule, dependency, attachment, queued-message, and active-task
+indicators in the metadata area, and exposes note, pin, and overflow actions.
+On mobile, List uses the same board card layout and full-card tap,
+right-click, and long-press behavior as Board.
 
 ### Detail drawer
 
@@ -349,7 +352,8 @@ The dashboard's shortcut system is customizable from
 | `Esc` (drawer open) | Close drawer |
 | `Esc` (attachment preview) | Back to attachments |
 | `Enter` | Primary action for the selected card (Resume, etc.) |
-| `↑` / `↓` / `←` / `→` | Move the board selection |
+| `↑` / `↓` | Move selection through visible list rows, or through board cards in Board mode |
+| `←` / `→` | Move the board selection between columns |
 | `Ctrl+Shift+F` | Toggle Filters panel |
 | `Ctrl+Shift+P` | Toggle pinned-only filter |
 | `Ctrl+Shift+N` | Toggle notes-only filter |

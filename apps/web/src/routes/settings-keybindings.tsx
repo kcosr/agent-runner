@@ -24,7 +24,8 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       "Available while the dashboard is visible. Fullscreen drawers keep selected-run shortcuts active while suppressing board, search, and filter shortcuts.",
     shortcuts: [
       {
-        description: "Move selection between runs on the board.",
+        description:
+          "Move selection between board cards, or up and down through visible list rows.",
         keys: ["Arrow Up", "Arrow Down", "Arrow Left", "Arrow Right"],
         title: "Navigate runs",
       },

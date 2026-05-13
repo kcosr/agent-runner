@@ -210,7 +210,9 @@
 
 ### Fixed
 
-- Pinning or archiving a run no longer changes its `updatedAt` timestamp.
+- Pinning or archiving a run no longer changes its `updatedAt` timestamp, while
+  content and lifecycle changes such as notes, names, task state, dependencies,
+  and schedules continue to refresh `updatedAt`.
 - Mobile dashboard list rows now use the board card layout and preserve
   full-card tap, right-click, and long-press action targeting.
 - Dashboard list rows now fold schedule, dependency, attachment, and
@@ -218,6 +220,8 @@
   with a compact task count, expose notes as a row action, and render active
   tasks beneath the metadata badges instead of reserving a mostly-empty signal
   column.
+- Dashboard list sorting now keeps pinned runs at the top, then applies the
+  selected sort field and direction within pinned and unpinned groups.
 - Daemon-managed Start/Resume now resolves unique short run ids across repo
   buckets, so web, HTTP, WebSocket, and connected CLI resume the selected run
   even when the daemon process cwd is in a different repo bucket.
