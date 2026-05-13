@@ -213,6 +213,7 @@
   ([#135](https://github.com/kcosr/task-runner/pull/135))
 - Added `run.controller_detached` and `run.controller_reconciled` audit
   events for daemon shutdown detach and startup reconciliation decisions.
+  ([#146](https://github.com/kcosr/task-runner/pull/146))
 
 ### Changed
 
@@ -224,6 +225,7 @@
   ownership: local/subprocess runs are still aborted, while Codex
   websocket and UDS runs detach on graceful shutdown and can be
   re-adopted or finalized from Codex thread state on daemon startup.
+  ([#146](https://github.com/kcosr/task-runner/pull/146))
 
 ### Fixed
 
