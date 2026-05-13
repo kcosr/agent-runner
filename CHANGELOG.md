@@ -146,6 +146,9 @@
 
 ### Added
 
+- Added a bundled `generic` Codex agent with empty role instructions for
+  assignment-owned workflow prompts.
+  ([#147](https://github.com/kcosr/task-runner/pull/147))
 - Added a web dashboard Board/List view-mode toggle. The new List view shows
   globally sorted compact run rows with status chips while preserving the
   existing Board workflow and persisted view-mode choice.
@@ -217,6 +220,10 @@
 
 ### Changed
 
+- Updated `plan-implement-feature` to recommend the `generic` agent and to
+  carry the hybrid planning/implementation role discipline in the assignment
+  instructions without duplicating the concrete task list.
+  ([#147](https://github.com/kcosr/task-runner/pull/147))
 - Managed-container engine command failures now report `aborted` or
   `timed out` when the subprocess is interrupted, taking precedence over
   stderr/stdout excerpts from the interrupted engine process.

@@ -13,6 +13,14 @@ trusted local code, not sandboxed plugin packages.
 
 ## Bundled agents
 
+### `generic`
+
+- Path: `agents/generic/agent.md`
+- Backend: `codex` (model `gpt-5.5`, `effort: high`, `unrestricted: true`)
+
+No role instructions. Use this agent when the assignment should own the
+full workflow prompt and the agent should only provide runtime settings.
+
 ### `implementer`
 
 - Path: `agents/implementer/agent.md`
@@ -224,7 +232,7 @@ subagents for parallelism.
 | Agent | Typical assignment | Notes |
 |-------|-------------------|-------|
 | `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review` and creates an initialized implementer run for caller approval. |
-| `planner` or `implementer` | `plan-implement-feature` | Single-run plan, approval pause, implementation, review, and PR flow using shared feature tasks. |
+| `generic` | `plan-implement-feature` | Single-run plan, approval pause, implementation, review, and PR flow using assignment-owned hybrid instructions and shared feature tasks. |
 | `implementer` | generated plan assignment | Created by `plan-feature` after approval; inspect `run brief` and then execute with `run --resume-run`. |
 | `code-reviewer` | `plan-review`, `code-review`, or `code-review-direct` | Nested and direct review surfaces. |
 | `doc-reviewer` | `doc-review` | Review-only, writes no files. |

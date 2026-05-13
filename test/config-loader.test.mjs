@@ -114,6 +114,9 @@ const BUILTIN_CODE_REVIEW_PATH = resolvePath(
 const BUILTIN_CODE_REVIEW_DIRECT_PATH = resolvePath(
   new URL("../assignments/code-review-direct/assignment.md", import.meta.url).pathname,
 );
+const BUILTIN_GENERIC_AGENT_PATH = resolvePath(
+  new URL("../agents/generic/agent.md", import.meta.url).pathname,
+);
 const BUILTIN_IMPLEMENTER_AGENT_PATH = resolvePath(
   new URL("../agents/implementer/agent.md", import.meta.url).pathname,
 );
@@ -1909,6 +1912,7 @@ test("built-in plan-implement-feature assignment composes shared tasks for a sin
     assert.match(mergeGate.body ?? "", /waiting for explicit caller approval/i);
 
     assert.match(loaded.config.callerInstructions ?? "", /plan-implement-feature/);
+    assert.match(loaded.config.callerInstructions ?? "", /--agent generic/);
     assert.match(loaded.config.callerInstructions ?? "", /assignment-summary\.md/);
     assert.match(loaded.config.callerInstructions ?? "", /does not generate `assignment-seed\.md`/);
     assert.match(loaded.config.callerInstructions ?? "", /does not run\s+`plan-review`/);
@@ -1919,6 +1923,7 @@ test("built-in plan-implement-feature assignment composes shared tasks for a sin
     assert.doesNotMatch(loaded.config.callerInstructions ?? "", /assignment-seed\.md`.*attach/s);
     assert.doesNotMatch(loaded.config.callerInstructions ?? "", /--assignment plan-review/);
     assert.doesNotMatch(loaded.config.callerInstructions ?? "", /--agent implementer/);
+    assert.doesNotMatch(loaded.config.callerInstructions ?? "", /--agent planner/);
   }));
 
 test("built-in code-review assignment fits single-run feature implementation reviews", () =>
@@ -1995,6 +2000,16 @@ test("built-in implementer agent points reviewers at the run record, not workspa
   const loaded = loadAgentConfig(BUILTIN_IMPLEMENTER_AGENT_PATH);
   assert.match(loaded.instructions, /reading the run record after the fact/i);
   assert.doesNotMatch(loaded.instructions, /workspace `assignment\.md`/i);
+});
+
+test("built-in generic agent provides runtime settings without role instructions", () => {
+  const loaded = loadAgentConfig(BUILTIN_GENERIC_AGENT_PATH);
+  assert.equal(loaded.config.name, "generic");
+  assert.equal(loaded.config.backend, "codex");
+  assert.equal(loaded.config.model, "gpt-5.5");
+  assert.equal(loaded.config.effort, "high");
+  assert.equal(loaded.config.unrestricted, true);
+  assert.equal(loaded.instructions, "");
 });
 
 test("loadAssignmentConfig throws AssignmentNotFoundError for missing assignment and lists config-root path", () =>

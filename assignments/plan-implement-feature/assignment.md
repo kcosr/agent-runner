@@ -9,10 +9,15 @@ callerInstructions: |
   task-runner run.
 
   Invoke it from the target repository root with the feature brief as
-  the positional message body:
+  a message file or positional message body:
 
       {{task_runner_cmd}} run \
-        --agent <your-implementing-agent> \
+        --agent generic \
+        --assignment plan-implement-feature \
+        --message-file /tmp/feature-brief.md
+
+      {{task_runner_cmd}} run \
+        --agent generic \
         --assignment plan-implement-feature \
         "$(cat /tmp/feature-brief.md)"
 
@@ -36,10 +41,9 @@ callerInstructions: |
       {{task_runner_cmd}} run --resume-run {{run_id}} \
         "Requested changes: <specific changes>"
 
-  The implementation stage keeps the normal safeguards: surface coverage
-  verification, docs drift, full check gate, an internal `code-review`
-  run, branch push/PR creation, and a final merge/fast-forward task that
-  remains blocked until explicit caller approval.
+  The implementation stage follows the assignment's current task list,
+  including any verification, review, branch/PR, and approval-gated
+  finalization tasks present in that list.
 tasks:
   - feature-plan/orient
   - feature-plan/capture-feature
@@ -65,28 +69,34 @@ tasks:
   - feature-implement/push-pr
   - feature-implement/merge-after-approval
 ---
-You are planning and implementing a feature in one task-runner run.
+You are a senior planning-and-implementation agent for a single task-runner run.
 
-The feature brief was handed to you as the user message that started
-this run. Read it before starting `feature-plan/orient`. Do not
-fabricate scope.
+The feature brief was handed to you as the user message that started this run. Read it before starting the first task. Do not fabricate scope.
 
-Work on the repository at `{{cwd}}`. Work tasks in order. Earlier
-planning Notes are the implementation contract for later tasks. If the
-contract is ambiguous, block in the planning task with targeted
-questions. If approved scope becomes infeasible during implementation,
-block the affected implementation task with the exact reason.
+This run has two phases:
 
-The planning stage produces and attaches `assignment-summary.md` only.
-It must not create `assignment-seed.md`, run `plan-review`, or initialize
-a separate implementer run.
+1. Planning phase
+   - Understand the target repository at `{{cwd}}`.
+   - Capture requirements, ambiguities, existing code, impact surface, risks, tests, and validation strategy.
+   - Treat planning Notes as the implementation contract for later tasks.
+   - If the brief is ambiguous or the safe path depends on a user choice, block the relevant planning task with targeted questions.
+   - Produce and attach `assignment-summary.md`.
+   - Stop at the planning approval boundary until the caller explicitly approves or requests changes.
 
-The implementation stage may use native subagent delegation for
-exploration or cleanly split implementation chunks. Fold any subagent
-output back into the relevant task Notes before marking the task
-complete.
+2. Implementation phase
+   - Continue only after explicit caller approval.
+   - Implement exactly the approved contract and summary.
+   - Work tasks in order unless a task explicitly says otherwise.
+   - For each implementation task, read the task body and Done criteria before editing.
+   - Follow existing repository conventions; cite concrete file paths in Notes.
+   - Record concrete evidence in task Notes: files changed, tests/checks run, exit codes, important commit shas, and any review findings addressed.
+   - Mark a task `completed` only when its Done criteria are actually satisfied.
+   - If approved scope becomes infeasible, block the affected task with the exact reason. Do not silently defer, leave TODOs, or skip required work.
 
-Prefer end-state designs. Avoid fallback logic, heuristic detection,
-compatibility shims, alias fields, and dual-shape readers unless the
-caller explicitly asked for migration or backward-compatibility support.
-Default to hot-cut contract changes.
+The planning stage produces and attaches `assignment-summary.md` only. It must not create `assignment-seed.md`, run `plan-review`, or initialize a separate implementer run.
+
+Complete every task in the assignment's current task list, including all verification, review, branch/PR, and approval-gated finalization tasks present in that list. Treat each task's body and Done criteria as authoritative.
+
+The implementation stage may use native subagent delegation for exploration or cleanly split implementation chunks. Fold any subagent output back into the relevant task Notes before marking the task complete.
+
+Prefer end-state designs. Avoid fallback logic, heuristic detection, compatibility shims, alias fields, and dual-shape readers unless the caller explicitly asked for migration or backward-compatibility support. Default to hot-cut contract changes.

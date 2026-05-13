@@ -8,6 +8,7 @@ import { resolveStaticInputSurface } from "../packages/core/dist/core/run/static
 import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
+const GENERIC_AGENT_PATH = new URL("../agents/generic/agent.md", import.meta.url).pathname;
 const PLANNER_AGENT_PATH = new URL("../agents/planner/agent.md", import.meta.url).pathname;
 const CODE_REVIEWER_AGENT_PATH = new URL("../agents/code-reviewer/agent.md", import.meta.url)
   .pathname;
@@ -118,9 +119,9 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
     assert.ok(!surface.assignmentInputs.some((field) => field.key === "repo_root"));
   }));
 
-test("static input surface: built-in planner + plan-implement-feature has no assignment vars", () =>
+test("static input surface: built-in generic + plan-implement-feature has no assignment vars", () =>
   withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
-    const loadedAgent = loadAgentConfig(PLANNER_AGENT_PATH, REPO_ROOT);
+    const loadedAgent = loadAgentConfig(GENERIC_AGENT_PATH, REPO_ROOT);
     const loadedAssignment = loadAssignmentConfig(
       PLAN_IMPLEMENT_FEATURE_ASSIGNMENT_PATH,
       REPO_ROOT,
