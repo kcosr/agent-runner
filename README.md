@@ -595,7 +595,7 @@ and full details.
 
 Agents (under `agents/`):
 
-- `planner`, `implementer`, `code-reviewer`, `doc-reviewer`, `test`
+- `generic`, `planner`, `implementer`, `code-reviewer`, `doc-reviewer`, `test`
 
 Assignments (under `assignments/`):
 
