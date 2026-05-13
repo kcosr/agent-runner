@@ -690,7 +690,7 @@ pre {
 
 .run-row__main {
   display: grid;
-  grid-template-columns: 6.75rem minmax(0, 1fr);
+  grid-template-columns: 5.75rem minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -703,12 +703,8 @@ pre {
 
 .run-row__status {
   display: inline-flex;
+  justify-content: flex-start;
   min-width: 0;
-}
-
-.run-row__status .badge {
-  width: 100%;
-  justify-content: center;
 }
 
 .run-row__identity {
