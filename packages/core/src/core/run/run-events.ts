@@ -88,6 +88,7 @@ export type RunControllerTransportType = "stdio" | "ws" | "uds" | null;
 export type RunControllerReconciliationDecision =
   | "marked_error"
   | "adopted_active"
+  | "adopted_aborted"
   | "finalized_idle";
 export type RunControllerReconciliationReason =
   | "stale_local_controller"
@@ -103,6 +104,7 @@ export type RunControllerReconciliationReason =
   | "history_sync_failed"
   | "reattach_failed"
   | "insufficient_idle_evidence"
+  | "aborted_after_recovery"
   | "completed_after_recovery";
 export type RunControllerRemoteStatus = "Active" | "Idle" | "SystemError" | "NotLoaded" | null;
 

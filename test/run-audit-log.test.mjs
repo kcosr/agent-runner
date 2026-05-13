@@ -20,7 +20,12 @@ import {
   removeQueuedResumeMessage,
 } from "../packages/core/dist/core/commands/service.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
-import { readRunAuditHistory } from "../packages/core/dist/core/run/run-events.js";
+import {
+  appendRunControllerDetachedEvent,
+  appendRunControllerReconciledEvent,
+  readRunAuditHistory,
+  systemRunEventContext,
+} from "../packages/core/dist/core/run/run-events.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
   completeAllTasksFromPrompt,
@@ -1067,6 +1072,62 @@ test("daemon-context task commands append one task event with daemon host metada
   assert.equal(taskUpdates[0].source, "task_command");
   assert.equal(taskUpdates[0].hostMode, "daemon");
   assert.equal(taskUpdates[0].controllerInstanceId, "daemon-task-test");
+});
+
+test("controller recovery audit events round-trip and render compact CLI details", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+  patchManifest(init.workspaceDir, (manifest) => {
+    manifest.backend = "codex";
+    manifest.backendSessionId = "thread-recovery";
+  });
+  const manifest = withSharedRuntimeEnv(dir, () => resolveResumeTarget(init.runId).manifest);
+  const context = systemRunEventContext({
+    hostMode: "daemon",
+    controllerInstanceId: "daemon-recovery-test",
+  });
+
+  appendRunControllerDetachedEvent({
+    manifest,
+    context,
+    transportType: "ws",
+    reason: "daemon_shutdown",
+  });
+  appendRunControllerReconciledEvent({
+    manifest,
+    context,
+    transportType: "ws",
+    decision: "adopted_aborted",
+    reason: "aborted_after_recovery",
+    remoteStatus: "Active",
+    error: null,
+  });
+
+  const records = readAuditRecords(init.workspaceDir).slice(-2);
+  assert.deepEqual(
+    records.map((record) => record.eventType),
+    ["run.controller_detached", "run.controller_reconciled"],
+  );
+  assert.equal(records[0].transportType, "ws");
+  assert.equal(records[0].reason, "daemon_shutdown");
+  assert.equal(records[1].decision, "adopted_aborted");
+  assert.equal(records[1].reason, "aborted_after_recovery");
+
+  const text = runCli(["run", "audit", init.runId], { cwd: dir });
+  assert.match(text, /run\.controller_detached/);
+  assert.match(text, /transportType="ws"/);
+  assert.match(text, /reason="daemon_shutdown"/);
+  assert.match(text, /run\.controller_reconciled/);
+  assert.match(text, /decision="adopted_aborted"/);
+  assert.match(text, /remoteStatus="Active"/);
 });
 
 test("run audit CLI renders empty, text, json, and not-found responses", async () => {

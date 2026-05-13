@@ -338,6 +338,8 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
   history before finalization; `SystemError`, `NotLoaded`, and
   unreachable app-servers become terminal task-runner errors with audit
   detail.
+- Recovery decisions are recorded on the affected run as
+  `run.controller_detached` and `run.controller_reconciled` audit events.
 - Uses JSON-RPC 2.0 with a thread/turn model:
   `thread/start`, `thread/resume`, `thread/read`, `turn/start`,
   `thread/name/set`.

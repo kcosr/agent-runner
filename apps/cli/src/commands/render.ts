@@ -524,6 +524,23 @@ function formatRunAuditEventLine(event: RunAuditHistory["events"][number]["event
         ["previous", event.fields.previousBackendSessionId],
         ["next", event.fields.nextBackendSessionId],
       ])}`;
+    case "run.controller_detached":
+      return `${event.type}${formatAuditDetails([
+        ["backend", event.fields.backend],
+        ["backendSessionId", event.fields.backendSessionId],
+        ["transportType", event.fields.transportType],
+        ["reason", event.fields.reason],
+      ])}`;
+    case "run.controller_reconciled":
+      return `${event.type}${formatAuditDetails([
+        ["backend", event.fields.backend],
+        ["backendSessionId", event.fields.backendSessionId],
+        ["transportType", event.fields.transportType],
+        ["decision", event.fields.decision],
+        ["reason", event.fields.reason],
+        ["remoteStatus", event.fields.remoteStatus],
+        ["error", event.fields.error],
+      ])}`;
     case "run.hook_recorded":
       return `${event.type}${formatAuditDetails([
         ["phase", event.fields.phase],

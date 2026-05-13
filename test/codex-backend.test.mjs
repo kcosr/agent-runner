@@ -682,12 +682,12 @@ async function startCodexRecoveryServer({ threadStatus = "Active", completeResum
           id: message.id,
           result: { thread: { id: message.params.threadId } },
         });
-        if (completeResume) {
-          setTimeout(() => {
-            notify("turn/started", {
-              threadId: message.params.threadId,
-              turn: { id: turnId, status: "inProgress" },
-            });
+        setTimeout(() => {
+          notify("turn/started", {
+            threadId: message.params.threadId,
+            turn: { id: turnId, status: "inProgress" },
+          });
+          if (completeResume) {
             notify("item/agentMessage/delta", {
               threadId: message.params.threadId,
               turnId,
@@ -703,8 +703,8 @@ async function startCodexRecoveryServer({ threadStatus = "Active", completeResum
               threadId: message.params.threadId,
               turn: { id: turnId, status: "completed" },
             });
-          }, 10);
-        }
+          }
+        }, 10);
         return;
       }
       if (message.method === "turn/start") {
@@ -930,6 +930,34 @@ test("adoptCodexActiveThread resumes an active thread without starting a new tur
     assert.equal(result.transcript, "recovered output\n\n---\n\nrecovered final");
     assert.equal(
       codexServer.calls.some((call) => call.method === "thread/resume"),
+      true,
+    );
+    assert.equal(
+      codexServer.calls.some((call) => call.method === "turn/start"),
+      false,
+    );
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("adoptCodexActiveThread times out wedged recovered turns", async () => {
+  const codexServer = await startCodexRecoveryServer({ completeResume: false });
+
+  try {
+    const result = await adoptCodexActiveThread({
+      ...baseCtx,
+      timeoutSec: 0.01,
+      resumeSessionId: "thread-active",
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
+      },
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.timedOut, true);
+    assert.equal(
+      codexServer.calls.some((call) => call.method === "turn/interrupt"),
       true,
     );
     assert.equal(

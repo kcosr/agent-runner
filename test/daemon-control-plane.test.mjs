@@ -2724,6 +2724,43 @@ test("daemon projects active run detail as live while it owns the run", async ()
   }
 });
 
+test("daemon projects startup-cleaned terminal runs as non-abortable", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  markRunRunning(run.workspaceDir);
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.endedAt = null;
+    manifest.exitCode = null;
+    manifest.execution = {
+      hostMode: "daemon",
+      controller: { kind: "daemon", daemonInstanceId: "previous-daemon" },
+    };
+  });
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  try {
+    await withEnv(sharedRuntimeEnv(dir), async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const detail = await client.call("runs.get", { target: run.runId });
+        assert.equal(detail.run.status, "error");
+        assert.equal(detail.run.isLive, false);
+        assert.equal(detail.run.capabilities.canAbort, false);
+        assert.equal(detail.run.capabilities.abortReason, "already_terminal");
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("daemon HTTP projections preserve hook summary and detail fields", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;

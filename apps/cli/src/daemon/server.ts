@@ -53,6 +53,7 @@ import {
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import {
+  CodexThreadReadProtocolError,
   type CodexThreadStatus,
   adoptCodexActiveThread,
   readCodexThread,
@@ -118,6 +119,9 @@ import {
 } from "@task-runner/core/core/run/manifest.js";
 import { hasRunnableTasks } from "@task-runner/core/core/run/resume-policy.js";
 import {
+  type RunControllerReconciliationDecision,
+  type RunControllerReconciliationReason,
+  type RunControllerTransportType,
   type ScheduleDecisionReason,
   appendRunBackendSessionHistorySyncFailedEvent,
   appendRunBackendSessionHistorySyncedEvent,
@@ -2104,23 +2108,9 @@ export async function serveDaemon(
 
   const emitControllerReconciled = (params: {
     manifest: RunManifest;
-    transportType: "stdio" | "ws" | "uds" | null;
-    decision: "marked_error" | "adopted_active" | "finalized_idle";
-    reason:
-      | "stale_local_controller"
-      | "missing_backend_session"
-      | "unsupported_transport"
-      | "remote_active"
-      | "remote_idle"
-      | "remote_system_error"
-      | "remote_not_loaded"
-      | "remote_unreachable"
-      | "thread_read_failed"
-      | "history_unavailable"
-      | "history_sync_failed"
-      | "reattach_failed"
-      | "insufficient_idle_evidence"
-      | "completed_after_recovery";
+    transportType: RunControllerTransportType;
+    decision: RunControllerReconciliationDecision;
+    reason: RunControllerReconciliationReason;
     remoteStatus: CodexThreadStatus | null;
     error: string | null;
   }): void => {
@@ -2141,22 +2131,9 @@ export async function serveDaemon(
     manifest: RunManifest;
     status: "success" | "blocked" | "aborted" | "error";
     exitCode: 0 | 2 | 4 | 130;
-    transportType: "stdio" | "ws" | "uds" | null;
-    decision: "marked_error" | "finalized_idle";
-    reason:
-      | "stale_local_controller"
-      | "missing_backend_session"
-      | "unsupported_transport"
-      | "remote_idle"
-      | "remote_system_error"
-      | "remote_not_loaded"
-      | "remote_unreachable"
-      | "thread_read_failed"
-      | "history_unavailable"
-      | "history_sync_failed"
-      | "reattach_failed"
-      | "insufficient_idle_evidence"
-      | "completed_after_recovery";
+    transportType: RunControllerTransportType;
+    decision: Exclude<RunControllerReconciliationDecision, "adopted_active">;
+    reason: Exclude<RunControllerReconciliationReason, "remote_active">;
     remoteStatus: CodexThreadStatus | null;
     error: string | null;
   }): Promise<RunManifest> => {
@@ -2252,7 +2229,7 @@ export async function serveDaemon(
     abortSignal: AbortSignal,
     detachSignal: AbortSignal,
   ): Parameters<typeof adoptCodexActiveThread>[0] => ({
-    prompt: manifest.brief,
+    prompt: "",
     cwd: runBackendCwd(manifest),
     processCwd: manifest.cwd,
     env: {
@@ -2280,6 +2257,7 @@ export async function serveDaemon(
     remoteStatus: CodexThreadStatus,
     adoptedExitCode?: number | null,
     adoptedAborted?: boolean,
+    adoptedTimedOut?: boolean,
   ): Promise<void> => {
     let synced: RunManifest;
     try {
@@ -2304,35 +2282,31 @@ export async function serveDaemon(
         status: "aborted",
         exitCode: 130,
         transportType,
-        decision: "finalized_idle",
-        reason: "completed_after_recovery",
+        decision: "adopted_aborted",
+        reason: "aborted_after_recovery",
         remoteStatus,
         error: null,
       });
       return;
     }
     const inferred = terminalStatusFromTasksAfterRecovery(synced);
+    const adoptionFailed =
+      adoptedExitCode !== undefined && adoptedExitCode !== null && adoptedExitCode !== 0;
     await finalizeRunningRunForControllerRecovery({
       manifest: synced,
-      status:
-        adoptedExitCode !== undefined && adoptedExitCode !== null && adoptedExitCode !== 0
-          ? "error"
-          : inferred.status,
-      exitCode:
-        adoptedExitCode !== undefined && adoptedExitCode !== null && adoptedExitCode !== 0
-          ? 4
-          : inferred.exitCode,
+      status: adoptionFailed ? "error" : inferred.status,
+      exitCode: adoptionFailed ? 4 : inferred.exitCode,
       transportType,
-      decision: inferred.status === "error" ? "marked_error" : "finalized_idle",
-      reason:
-        adoptedExitCode !== undefined && adoptedExitCode !== null && adoptedExitCode !== 0
-          ? "reattach_failed"
-          : (inferred.reason as "insufficient_idle_evidence" | "completed_after_recovery"),
+      decision: adoptionFailed || inferred.status === "error" ? "marked_error" : "finalized_idle",
+      reason: adoptionFailed
+        ? "reattach_failed"
+        : (inferred.reason as "insufficient_idle_evidence" | "completed_after_recovery"),
       remoteStatus,
-      error:
-        adoptedExitCode !== undefined && adoptedExitCode !== null && adoptedExitCode !== 0
-          ? `recovered Codex turn exited with code ${adoptedExitCode}`
-          : null,
+      error: adoptionFailed
+        ? adoptedTimedOut === true
+          ? `recovered Codex turn timed out after ${synced.timeoutSec} seconds`
+          : `recovered Codex turn exited with code ${adoptedExitCode}`
+        : null,
     });
   };
 
@@ -2376,6 +2350,7 @@ export async function serveDaemon(
           "Active",
           result.exitCode,
           result.aborted,
+          result.timedOut,
         );
       })
       .catch(async (error) => {
@@ -2485,7 +2460,10 @@ export async function serveDaemon(
         exitCode: 4,
         transportType,
         decision: "marked_error",
-        reason: "remote_unreachable",
+        reason:
+          error instanceof CodexThreadReadProtocolError
+            ? "thread_read_failed"
+            : "remote_unreachable",
         remoteStatus: null,
         error: formatDaemonError(error),
       });

@@ -211,6 +211,8 @@
 - Added backend-owned session history import and sync for Pi JSONL
   sessions and Cursor deterministic `store.db` sessions.
   ([#135](https://github.com/kcosr/task-runner/pull/135))
+- Added `run.controller_detached` and `run.controller_reconciled` audit
+  events for daemon shutdown detach and startup reconciliation decisions.
 
 ### Changed
 

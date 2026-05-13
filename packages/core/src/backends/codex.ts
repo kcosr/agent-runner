@@ -1055,15 +1055,26 @@ function parseCodexThreadStatus(value: unknown): CodexThreadStatus | null {
   return parseCodexThreadStatus(keys[0]);
 }
 
+export class CodexThreadReadProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexThreadReadProtocolError";
+  }
+}
+
 function parseCodexThreadReadResult(sessionId: string, result: unknown): CodexThreadReadResult {
   if (!isRecord(result) || !isRecord(result.thread)) {
-    throw new Error(`codex thread/read for "${sessionId}" returned an unexpected response shape`);
+    throw new CodexThreadReadProtocolError(
+      `codex thread/read for "${sessionId}" returned an unexpected response shape`,
+    );
   }
   const thread = result.thread;
   const threadId = typeof thread.id === "string" ? thread.id : sessionId;
   const status = parseCodexThreadStatus(thread.status);
   if (status === null) {
-    throw new Error(`codex thread/read for "${sessionId}" returned an unknown thread status`);
+    throw new CodexThreadReadProtocolError(
+      `codex thread/read for "${sessionId}" returned an unknown thread status`,
+    );
   }
   return {
     threadId,
@@ -1147,6 +1158,7 @@ export async function adoptCodexActiveThread(
   let client: CodexClient | undefined;
   let diagnostics = "";
   let aborted = false;
+  let timedOut = false;
   const state = makeAccumulatorState(ctx, { adoptFirstTurnStarted: true });
 
   const emitBackendNotice = (text: string): void => {
@@ -1155,6 +1167,7 @@ export async function adoptCodexActiveThread(
   };
 
   try {
+    state.threadId = ctx.resumeSessionId;
     transport = await openTransport(ctx);
     transport.onStderr((text) => {
       ctx.emit?.({ type: "backend_notice", text });
@@ -1180,8 +1193,6 @@ export async function adoptCodexActiveThread(
     );
     if (isRecord(result) && isRecord(result.thread) && typeof result.thread.id === "string") {
       state.threadId = result.thread.id;
-    } else {
-      state.threadId = ctx.resumeSessionId;
     }
 
     const turnCompletedPromise = new Promise<void>((resolve) => {
@@ -1190,11 +1201,18 @@ export async function adoptCodexActiveThread(
         resolve();
       }
     });
+    const turnTimeoutMs = ctx.timeoutSec * 1000;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const turnDeadline = new Promise<"timeout">((resolve) => {
+      timeoutHandle = setTimeout(() => resolve("timeout"), turnTimeoutMs);
+    });
     const race = await Promise.race([
       turnCompletedPromise.then(() => "done" as const),
+      turnDeadline,
       waitForSignal(ctx.abortSignal, "abort"),
       waitForSignal(ctx.detachSignal, "detach"),
     ]);
+    if (timeoutHandle) clearTimeout(timeoutHandle);
 
     if (race === "detach") {
       return {
@@ -1208,6 +1226,11 @@ export async function adoptCodexActiveThread(
         rawStdout: rawStdoutChunks.join("\n"),
         rawStderr: `${client.stderr}${diagnostics}`,
       };
+    }
+
+    if (race === "timeout") {
+      timedOut = true;
+      await interruptTurnWithRetry(client, state);
     }
 
     if (race === "abort") {
@@ -1240,11 +1263,11 @@ export async function adoptCodexActiveThread(
   if (fallbackDelta) {
     ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
   }
-  const exitCode = aborted ? 1 : state.turnStatus === "completed" ? 0 : 1;
+  const exitCode = aborted ? 1 : !timedOut && state.turnStatus === "completed" ? 0 : 1;
   return {
     exitCode,
     signal: null,
-    timedOut: false,
+    timedOut,
     aborted,
     sessionId: state.threadId ?? ctx.resumeSessionId,
     transcript,

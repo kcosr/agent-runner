@@ -159,22 +159,26 @@ async function startCodexThreadStatusServer({ status, completeResume = false }) 
           id: message.id,
           result: { thread: { id: message.params.threadId } },
         });
-        if (completeResume) {
-          setTimeout(() => {
-            notify("turn/started", {
-              threadId: message.params.threadId,
-              turn: { id: "turn-recovered", status: "inProgress" },
-            });
+        setTimeout(() => {
+          notify("turn/started", {
+            threadId: message.params.threadId,
+            turn: { id: "turn-recovered", status: "inProgress" },
+          });
+          if (completeResume) {
             notify("turn/completed", {
               threadId: message.params.threadId,
               turn: { id: "turn-recovered", status: "completed" },
             });
-          }, 10);
-        }
+          }
+        }, 10);
         return;
       }
       if (message.method === "turn/interrupt") {
         send({ jsonrpc: "2.0", id: message.id, result: {} });
+        notify("turn/completed", {
+          threadId: message.params.threadId,
+          turn: { id: message.params.turnId, status: "interrupted" },
+        });
       }
     });
   });
@@ -300,6 +304,104 @@ test("daemon startup adopts active Codex websocket runs and graceful close detac
   }
 });
 
+test("daemon startup finalizes completed adopted Codex websocket runs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", "codex");
+  writeAssignment(dir);
+  const codexServer = await startCodexThreadStatusServer({
+    status: { Active: { active_flags: [] } },
+    completeResume: true,
+  });
+  const run = await initRun(dir, "codex-agent");
+  markRunning(run.workspaceDir, {
+    backendSessionId: "thread-completes",
+    backendConfig: { transport: { type: "ws", url: codexServer.url } },
+    cwd: "/repo",
+  });
+  patchManifest(run.workspaceDir, (manifest) => {
+    manifest.finalTasks.t1.status = "completed";
+    manifest.tasksCompleted = 1;
+  });
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  try {
+    await withEnv(sharedRuntimeEnv(dir), async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const manifest = await waitFor(() => {
+          const candidate = readManifest(run.workspaceDir);
+          return candidate.status === "success" ? candidate : null;
+        }, "completed adopted Codex run was not finalized");
+        assert.equal(manifest.exitCode, 0);
+        assert.equal(
+          codexServer.calls.some((call) => call.method === "turn/start"),
+          false,
+        );
+        const reconciled = auditEvents(run.workspaceDir, run.runId)
+          .filter((event) => event.type === "run.controller_reconciled")
+          .at(-1);
+        assert.equal(reconciled?.fields.decision, "finalized_idle");
+        assert.equal(reconciled?.fields.reason, "completed_after_recovery");
+      } finally {
+        await server.close();
+      }
+    });
+  } finally {
+    await codexServer.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("daemon aborts startup-adopted Codex websocket runs with turn interrupt", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", "codex");
+  writeAssignment(dir);
+  const codexServer = await startCodexThreadStatusServer({
+    status: { Active: { active_flags: [] } },
+  });
+  const run = await initRun(dir, "codex-agent");
+  markRunning(run.workspaceDir, {
+    backendSessionId: "thread-abort",
+    backendConfig: { transport: { type: "ws", url: codexServer.url } },
+    cwd: "/repo",
+  });
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  try {
+    await withEnv(sharedRuntimeEnv(dir), async () => {
+      const server = await serveDaemon(listenUrl);
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        await codexServer.waitForMethod("thread/resume");
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await client.call("runs.abort", { target: run.runId });
+        const manifest = await waitFor(() => {
+          const candidate = readManifest(run.workspaceDir);
+          return candidate.status === "aborted" ? candidate : null;
+        }, "startup-adopted Codex run was not aborted");
+        assert.equal(manifest.exitCode, 130);
+        assert.equal(
+          codexServer.calls.some((call) => call.method === "turn/interrupt"),
+          true,
+        );
+        const reconciled = auditEvents(run.workspaceDir, run.runId)
+          .filter((event) => event.type === "run.controller_reconciled")
+          .at(-1);
+        assert.equal(reconciled?.fields.decision, "adopted_aborted");
+        assert.equal(reconciled?.fields.reason, "aborted_after_recovery");
+      } finally {
+        await client.close().catch(() => undefined);
+        await server.close();
+      }
+    });
+  } finally {
+    await codexServer.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 for (const [remoteStatus, expectedReason] of [
   ["Idle", "insufficient_idle_evidence"],
   ["SystemError", "remote_system_error"],
@@ -341,6 +443,41 @@ for (const [remoteStatus, expectedReason] of [
     }
   });
 }
+
+test("daemon startup marks malformed Codex thread/read responses as thread_read_failed", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", "codex");
+  writeAssignment(dir);
+  const codexServer = await startCodexThreadStatusServer({ status: "UnexpectedStatus" });
+  const run = await initRun(dir, "codex-agent");
+  markRunning(run.workspaceDir, {
+    backendSessionId: "thread-bad-status",
+    backendConfig: { transport: { type: "ws", url: codexServer.url } },
+    cwd: "/repo",
+  });
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  try {
+    await withEnv(sharedRuntimeEnv(dir), async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const manifest = readManifest(run.workspaceDir);
+        assert.equal(manifest.status, "error");
+        assert.equal(manifest.exitCode, 4);
+        const reconciled = auditEvents(run.workspaceDir, run.runId).find(
+          (event) => event.type === "run.controller_reconciled",
+        );
+        assert.equal(reconciled?.fields.reason, "thread_read_failed");
+      } finally {
+        await server.close();
+      }
+    });
+  } finally {
+    await codexServer.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("daemon startup marks unreachable Codex websocket runs as error", async () => {
   const dir = tempDir();
