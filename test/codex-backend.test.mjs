@@ -27,6 +27,10 @@ const baseCtx = {
   timeoutSec: 60,
 };
 
+function codexActiveThreadStatus(activeFlags = []) {
+  return { type: "active", activeFlags };
+}
+
 function writeFakeCodexBin(baseDir) {
   const path = join(baseDir, "fake-codex.mjs");
   writeFileSync(
@@ -621,7 +625,10 @@ async function startCodexThreadStartCaptureServer() {
   };
 }
 
-async function startCodexRecoveryServer({ threadStatus = "Active", completeResume = true } = {}) {
+async function startCodexRecoveryServer({
+  threadStatus = codexActiveThreadStatus(),
+  completeResume = true,
+} = {}) {
   const server = new WebSocketServer({ port: 0 });
   const calls = [];
   const waiters = new Map();
@@ -855,7 +862,7 @@ test("codexBackend ignores child thread turn completion while waiting for the pa
 
 test("readCodexThread reads active thread status without starting a turn", async () => {
   const codexServer = await startCodexRecoveryServer({
-    threadStatus: { Active: { active_flags: ["WaitingOnUserInput"] } },
+    threadStatus: codexActiveThreadStatus(["waitingOnUserInput"]),
   });
 
   try {

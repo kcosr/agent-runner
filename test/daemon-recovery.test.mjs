@@ -23,6 +23,13 @@ tasks:
 Recovery assignment.
 `;
 
+const CODEX_THREAD_STATUS = {
+  active: { type: "active", activeFlags: [] },
+  idle: { type: "idle" },
+  systemError: { type: "systemError" },
+  notLoaded: { type: "notLoaded" },
+};
+
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-daemon-recovery-"));
 }
@@ -259,7 +266,7 @@ test("daemon startup adopts active Codex websocket runs and graceful close detac
   writeAgent(dir, "codex-agent", "codex");
   writeAssignment(dir);
   const codexServer = await startCodexThreadStatusServer({
-    status: { Active: { active_flags: [] } },
+    status: CODEX_THREAD_STATUS.active,
   });
   const run = await initRun(dir, "codex-agent");
   markRunning(run.workspaceDir, {
@@ -316,7 +323,7 @@ test("daemon startup finalizes completed adopted Codex websocket runs", async ()
   writeAgent(dir, "codex-agent", "codex");
   writeAssignment(dir);
   const codexServer = await startCodexThreadStatusServer({
-    status: { Active: { active_flags: [] } },
+    status: CODEX_THREAD_STATUS.active,
     completeResume: true,
   });
   const run = await initRun(dir, "codex-agent");
@@ -365,7 +372,7 @@ test("daemon aborts startup-adopted Codex websocket runs with turn interrupt", a
   writeAgent(dir, "codex-agent", "codex");
   writeAssignment(dir);
   const codexServer = await startCodexThreadStatusServer({
-    status: { Active: { active_flags: [] } },
+    status: CODEX_THREAD_STATUS.active,
   });
   const run = await initRun(dir, "codex-agent");
   markRunning(run.workspaceDir, {
@@ -409,16 +416,16 @@ test("daemon aborts startup-adopted Codex websocket runs with turn interrupt", a
   }
 });
 
-for (const [remoteStatus, expectedReason] of [
-  ["Idle", "insufficient_idle_evidence"],
-  ["SystemError", "remote_system_error"],
-  ["NotLoaded", "remote_not_loaded"],
+for (const [remoteStatus, status, expectedReason] of [
+  ["Idle", CODEX_THREAD_STATUS.idle, "insufficient_idle_evidence"],
+  ["SystemError", CODEX_THREAD_STATUS.systemError, "remote_system_error"],
+  ["NotLoaded", CODEX_THREAD_STATUS.notLoaded, "remote_not_loaded"],
 ]) {
   test(`daemon startup marks Codex ${remoteStatus} running runs as error`, async () => {
     const dir = tempDir();
     writeAgent(dir, "codex-agent", "codex");
     writeAssignment(dir);
-    const codexServer = await startCodexThreadStatusServer({ status: remoteStatus });
+    const codexServer = await startCodexThreadStatusServer({ status });
     const run = await initRun(dir, "codex-agent");
     markRunning(run.workspaceDir, {
       backendSessionId: `thread-${remoteStatus}`,
@@ -491,7 +498,7 @@ test("daemon startup times out Codex thread/read that never replies", async () =
   writeAgent(dir, "codex-agent", "codex");
   writeAssignment(dir);
   const codexServer = await startCodexThreadStatusServer({
-    status: { Active: { active_flags: [] } },
+    status: CODEX_THREAD_STATUS.active,
     respondToRead: false,
   });
   const run = await initRun(dir, "codex-agent");

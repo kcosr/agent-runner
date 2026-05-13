@@ -1042,17 +1042,22 @@ async function openInitializedCodexClient(ctx: BackendInvokeContext): Promise<{
 }
 
 function parseCodexThreadStatus(value: unknown): CodexThreadStatus | null {
-  if (value === "Active" || value === "Idle" || value === "SystemError" || value === "NotLoaded") {
-    return value;
-  }
   if (!isRecord(value)) {
     return null;
   }
-  const keys = Object.keys(value);
-  if (keys.length !== 1) {
-    return null;
+
+  switch (value.type) {
+    case "active":
+      return "Active";
+    case "idle":
+      return "Idle";
+    case "systemError":
+      return "SystemError";
+    case "notLoaded":
+      return "NotLoaded";
+    default:
+      return null;
   }
-  return parseCodexThreadStatus(keys[0]);
 }
 
 export class CodexThreadReadProtocolError extends Error {
