@@ -3,14 +3,18 @@ import { useNavigate } from "@tanstack/react-router";
 import type { AttachmentListEntry } from "@task-runner/core/contracts/attachments.js";
 import type { RunDependencyRef, RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties, ReactNode } from "react";
-import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
 import { ResumeRunDialog } from "../components/resume-run-dialog.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import type { ReconfigureRunPatch } from "../lib/api-client.js";
 import { isNotFoundError, isUnauthorizedError } from "../lib/api-client.js";
 import type { RunAuditState } from "../lib/run-audit.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { DashboardRightSurface, DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
+import type {
+  AttachmentPreviewSelection,
+  DashboardRightSurface,
+  DrawerDetailSection,
+  RunDrawerView,
+} from "../lib/settings.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 export function RunDetailPanel({
@@ -22,9 +26,9 @@ export function RunDetailPanel({
   drawerFullscreen,
   drawerWidth,
   drawerView,
+  attachmentPreviewSelection,
   noteEditRequestVersion,
   runs,
-  onBackToAttachments,
   onAbort,
   onArchive,
   onClearDependencies,
@@ -75,9 +79,9 @@ export function RunDetailPanel({
   drawerFullscreen: boolean;
   drawerWidth: number;
   drawerView?: RunDrawerView;
+  attachmentPreviewSelection?: AttachmentPreviewSelection;
   noteEditRequestVersion: number;
   runs: RunSummary[];
-  onBackToAttachments: () => void;
   onAbort: (runId: string) => void;
   onArchive: (runId: string) => void;
   onClearDependencies: (runId: string) => Promise<void>;
@@ -181,20 +185,6 @@ export function RunDetailPanel({
   }
 
   const selectedRun = selectedRunQuery.data;
-  const groupAttachments =
-    selectedRunGroupAttachmentsQuery.data?.filter(
-      (attachment) => attachment.ownerRunId !== selectedRun.runId,
-    ) ?? [];
-  const attachmentEntries = [
-    ...selectedRun.attachments.map((candidate) => ({
-      attachment: candidate,
-      ownerRunId: selectedRun.runId,
-    })),
-    ...groupAttachments.map((candidate) => ({
-      attachment: candidate,
-      ownerRunId: candidate.ownerRunId,
-    })),
-  ];
   const resumeDialog = resumeDialogOpen ? (
     <ResumeRunDialog
       actionError={actionError}
@@ -209,71 +199,6 @@ export function RunDetailPanel({
     />
   ) : null;
 
-  if (drawerView?.mode === "attachment") {
-    const currentAttachmentIndex = attachmentEntries.findIndex(
-      ({ attachment, ownerRunId }) =>
-        attachment.id === drawerView.attachmentId && ownerRunId === drawerView.attachmentOwnerRunId,
-    );
-    const previousAttachment =
-      currentAttachmentIndex > 0 ? attachmentEntries[currentAttachmentIndex - 1] : undefined;
-    const nextAttachment =
-      currentAttachmentIndex >= 0 ? attachmentEntries[currentAttachmentIndex + 1] : undefined;
-    const attachment =
-      drawerView.attachmentOwnerRunId === selectedRun.runId
-        ? selectedRun.attachments.find((candidate) => candidate.id === drawerView.attachmentId)
-        : selectedRunGroupAttachmentsQuery.data?.find(
-            (candidate) =>
-              candidate.id === drawerView.attachmentId &&
-              candidate.ownerRunId === drawerView.attachmentOwnerRunId,
-          );
-    return (
-      <>
-        <AttachmentPreviewDrawer
-          actionPending={actionPending}
-          attachment={attachment}
-          attachmentId={drawerView.attachmentId}
-          attachmentLookupError={
-            drawerView.attachmentOwnerRunId === selectedRun.runId
-              ? undefined
-              : selectedRunGroupAttachmentsQuery.error?.message
-          }
-          attachmentLookupPending={
-            drawerView.attachmentOwnerRunId !== selectedRun.runId &&
-            selectedRunGroupAttachmentsQuery.isPending
-          }
-          onBack={onBackToAttachments}
-          onClose={onClose}
-          onDownload={(attachmentId, name) =>
-            onDownloadAttachment(drawerView.attachmentOwnerRunId, attachmentId, name)
-          }
-          onNextAttachment={
-            nextAttachment
-              ? () =>
-                  onReplaceAttachmentPreview(
-                    nextAttachment.ownerRunId,
-                    nextAttachment.attachment.id,
-                  )
-              : undefined
-          }
-          onPreviousAttachment={
-            previousAttachment
-              ? () =>
-                  onReplaceAttachmentPreview(
-                    previousAttachment.ownerRunId,
-                    previousAttachment.attachment.id,
-                  )
-              : undefined
-          }
-          nextAttachmentName={nextAttachment?.attachment.name}
-          previousAttachmentName={previousAttachment?.attachment.name}
-          resumeDialogOpen={resumeDialogOpen}
-          runId={drawerView.attachmentOwnerRunId}
-        />
-        {resumeDialog}
-      </>
-    );
-  }
-
   const activeDetailSection = drawerView?.detailSection ?? "attachments";
 
   return (
@@ -281,6 +206,7 @@ export function RunDetailPanel({
       <RunDetailDrawer
         activeSection={activeDetailSection}
         activeSurface={activeRightSurface}
+        attachmentPreviewSelection={attachmentPreviewSelection}
         chatSurface={chatSurface}
         dependencyCandidateRuns={runs}
         noteEditRequestVersion={noteEditRequestVersion}
@@ -299,6 +225,7 @@ export function RunDetailPanel({
           onDownloadAttachment(ownerRunId, attachmentId, name)
         }
         onOpenAttachmentPreview={onOpenAttachmentPreview}
+        onReplaceAttachmentPreview={onReplaceAttachmentPreview}
         onSelectRun={onSelectRun}
         onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}
         onClearSchedule={() => onClearSchedule(selectedRun.runId)}

@@ -3142,8 +3142,25 @@ body {
   align-items: center;
 }
 
-.attachment-preview-back {
+.drawer-panel--attachment-preview {
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.attachment-preview-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.attachment-preview-panel__head {
   flex: 0 0 auto;
+}
+
+.attachment-preview-panel__body {
+  min-height: 0;
+  overflow: auto;
 }
 
 .attachment-preview-nav {

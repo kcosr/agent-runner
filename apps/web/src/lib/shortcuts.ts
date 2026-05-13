@@ -1,5 +1,5 @@
 import type { BoardColumn } from "../components/run-column.js";
-import type { DashboardViewMode, RunDrawerView } from "./settings.js";
+import type { DashboardViewMode } from "./settings.js";
 
 type RunsShortcutCommand =
   | "board.moveUp"
@@ -13,6 +13,7 @@ type RunsShortcutCommand =
   | "ui.toggleNotesOnly"
   | "ui.toggleArchived"
   | "ui.toggleHideEmptyColumns"
+  | "run.showAttachments"
   | "run.showChat"
   | "run.showDetail"
   | "run.showNotes"
@@ -26,7 +27,6 @@ type RunsShortcutCommand =
   | "ui.blurSearch"
   | "ui.clearStructuredFilters"
   | "run.close"
-  | "run.closeAttachmentPreview"
   | "run.primaryAction"
   | "ui.clearSearch"
   | "ui.focusSearch";
@@ -52,7 +52,6 @@ interface RunsShortcutContext {
   resumeDialogOpen: boolean;
   searchFocused: boolean;
   searchValue: string;
-  selectedDrawerView?: RunDrawerView;
   selectedRunId?: string;
   typingTarget: boolean;
   viewMode: DashboardViewMode;
@@ -151,7 +150,6 @@ function canTriggerPrimaryAction(context: RunsShortcutContext): boolean {
     !context.modalOpen &&
     !context.resumeDialogOpen &&
     !context.actionPending &&
-    context.selectedDrawerView?.mode !== "attachment" &&
     Boolean(context.selectedRunId) &&
     context.selectedRunPrimaryActionAvailable
   );
@@ -164,7 +162,6 @@ function canTriggerSelectedRunShortcut(context: RunsShortcutContext): boolean {
     !context.modalOpen &&
     !context.resumeDialogOpen &&
     !context.actionPending &&
-    context.selectedDrawerView?.mode !== "attachment" &&
     Boolean(context.selectedRunId)
   );
 }
@@ -183,12 +180,15 @@ function resolveSelectedRunShortcut(
     return "run.togglePinned";
   }
   if (
-    matchesShortcut(event, { key: "a", shiftKey: true }) &&
+    matchesShortcut(event, { key: "d", shiftKey: true }) &&
     canTriggerSelectedRunShortcut(context)
   ) {
     return "run.destructiveCleanup";
   }
-  if (matchesShortcut(event, { key: "a" }) && canTriggerSelectedRunShortcut(context)) {
+  if (
+    matchesShortcut(event, { key: "a", shiftKey: true }) &&
+    canTriggerSelectedRunShortcut(context)
+  ) {
     return "run.toggleArchived";
   }
   return null;
@@ -199,7 +199,7 @@ function resolveRunSurfaceShortcut(
   context: RunsShortcutContext,
 ): Extract<
   RunsShortcutCommand,
-  "run.showChat" | "run.showDetail" | "run.showNotes" | "run.showTasks"
+  "run.showAttachments" | "run.showChat" | "run.showDetail" | "run.showNotes" | "run.showTasks"
 > | null {
   if (
     context.typingTarget ||
@@ -210,6 +210,9 @@ function resolveRunSurfaceShortcut(
     return null;
   }
 
+  if (matchesShortcut(event, { key: "a" })) {
+    return "run.showAttachments";
+  }
   if (matchesShortcut(event, { key: "c" })) {
     return "run.showChat";
   }
@@ -349,20 +352,10 @@ export function resolveRunsShortcutCommand(
     if (selectedRunCommand) {
       return selectedRunCommand;
     }
-    if (context.selectedDrawerView?.mode === "attachment") {
-      return null;
-    }
     return null;
   }
 
   if (context.modalOpen) {
-    return null;
-  }
-
-  if (
-    context.selectedDrawerView?.mode === "attachment" &&
-    normalizeEventKey(event.key) !== "escape"
-  ) {
     return null;
   }
 
@@ -392,12 +385,7 @@ export function resolveRunsShortcutCommand(
     return null;
   }
 
-  if (
-    matchesBareLetter(event, "v") &&
-    !context.typingTarget &&
-    !context.searchFocused &&
-    context.selectedDrawerView?.mode !== "attachment"
-  ) {
+  if (matchesBareLetter(event, "v") && !context.typingTarget && !context.searchFocused) {
     return "ui.cycleViewMode";
   }
 
@@ -407,9 +395,6 @@ export function resolveRunsShortcutCommand(
     }
     if (context.searchFocused) {
       return "ui.blurSearch";
-    }
-    if (context.selectedDrawerView?.mode === "attachment") {
-      return "run.closeAttachmentPreview";
     }
     if (context.selectedRunId) {
       return "run.close";

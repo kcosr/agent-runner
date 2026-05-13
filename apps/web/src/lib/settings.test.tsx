@@ -89,8 +89,6 @@ function SettingsProbe() {
               "run-1": {
                 mode: "detail",
                 detailSection: "events",
-                attachmentId: null,
-                attachmentOwnerRunId: null,
               },
             },
           })

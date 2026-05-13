@@ -172,7 +172,6 @@ describe("resolveRunsShortcutCommand", () => {
     searchFocused: false,
     searchValue: "",
     selectedRunPrimaryActionAvailable: true,
-    selectedDrawerView: undefined,
     selectedRunId: "run-running-1",
     typingTarget: false,
     viewMode: "board",
@@ -316,6 +315,18 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showAttachments");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
           key: "n",
           metaKey: false,
           shiftKey: false,
@@ -378,7 +389,7 @@ describe("resolveRunsShortcutCommand", () => {
           ctrlKey: false,
           key: "a",
           metaKey: false,
-          shiftKey: false,
+          shiftKey: true,
         },
         context,
       ),
@@ -388,7 +399,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "a",
+          key: "d",
           metaKey: false,
           shiftKey: true,
         },
@@ -457,7 +468,7 @@ describe("resolveRunsShortcutCommand", () => {
         },
         context,
       ),
-    ).toBe("run.destructiveCleanup");
+    ).toBe("run.toggleArchived");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -541,7 +552,7 @@ describe("resolveRunsShortcutCommand", () => {
         },
         context,
       ),
-    ).toBe("run.toggleArchived");
+    ).toBe("run.showAttachments");
   });
 
   it("prioritizes search clearing before route close on Escape", () => {
@@ -597,17 +608,19 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBe("ui.clearStructuredFilters");
   });
 
-  it("keeps surface navigation but suppresses selected-run actions while viewing an attachment", () => {
-    const attachmentContext = {
-      ...context,
-      selectedDrawerView: {
-        attachmentId: "attachment-1",
-        attachmentOwnerRunId: "run-running-1",
-        detailSection: "attachments",
-        mode: "attachment",
-      },
-    } as const;
-
+  it("keeps surface navigation and selected-run actions available on the attachments tab", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showAttachments");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -617,7 +630,7 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        attachmentContext,
+        context,
       ),
     ).toBe("run.showChat");
     expect(
@@ -629,7 +642,7 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        attachmentContext,
+        context,
       ),
     ).toBe("run.showDetail");
     expect(
@@ -641,7 +654,7 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        attachmentContext,
+        context,
       ),
     ).toBe("run.showNotes");
     expect(
@@ -653,7 +666,7 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        attachmentContext,
+        context,
       ),
     ).toBe("run.showTasks");
     expect(
@@ -665,9 +678,21 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        attachmentContext,
+        context,
       ),
-    ).toBe("run.closeAttachmentPreview");
+    ).toBe("run.close");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showAttachments");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -677,9 +702,9 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        attachmentContext,
+        context,
       ),
-    ).toBeNull();
+    ).toBe("run.primaryAction");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -689,9 +714,9 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        attachmentContext,
+        context,
       ),
-    ).toBeNull();
+    ).toBe("run.togglePinned");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -701,21 +726,21 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        attachmentContext,
+        context,
       ),
-    ).toBeNull();
+    ).toBe("run.showAttachments");
     expect(
       resolveRunsShortcutCommand(
         {
           altKey: false,
           ctrlKey: false,
-          key: "a",
+          key: "d",
           metaKey: false,
           shiftKey: true,
         },
-        attachmentContext,
+        context,
       ),
-    ).toBeNull();
+    ).toBe("run.destructiveCleanup");
   });
 
   it("suppresses selected-run actions while an action is pending", () => {
@@ -739,7 +764,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "a",
+          key: "p",
           metaKey: false,
           shiftKey: false,
         },
@@ -751,13 +776,13 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBeNull();
   });
 
-  it("maps Shift+A in fullscreen through the same selected-run guard", () => {
+  it("maps Shift+D in fullscreen through the same selected-run guard", () => {
     expect(
       resolveRunsShortcutCommand(
         {
           altKey: false,
           ctrlKey: false,
-          key: "a",
+          key: "d",
           metaKey: false,
           shiftKey: true,
         },
@@ -769,11 +794,11 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBe("run.destructiveCleanup");
   });
 
-  it("guards Shift+A for modal, resume, search, typing, and no selected run", () => {
+  it("guards Shift+D for modal, resume, search, typing, and no selected run", () => {
     const event = {
       altKey: false,
       ctrlKey: false,
-      key: "a",
+      key: "d",
       metaKey: false,
       shiftKey: true,
     };
@@ -1233,6 +1258,18 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBe("run.showAttachments");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
           key: "n",
           metaKey: false,
           shiftKey: false,
@@ -1259,7 +1296,7 @@ describe("resolveRunsShortcutCommand", () => {
           ctrlKey: false,
           key: "a",
           metaKey: false,
-          shiftKey: false,
+          shiftKey: true,
         },
         fullscreenContext,
       ),
