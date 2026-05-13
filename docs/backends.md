@@ -45,15 +45,18 @@ wrapper scripts:
 
 | Variable | Value |
 |----------|-------|
+| `TASK_RUNNER_CALL_DEPTH` | recursion guard depth for nested task-runner invocations |
+| `TASK_RUNNER_MAX_CALL_DEPTH` | recursion guard cap for nested task-runner invocations |
+| `TASK_RUNNER_PARENT_RUN_ID` | active manifest run id, used as the parent for nested task-runner runs |
 | `TASK_RUNNER_RUN_ID` | active manifest run id |
 | `TASK_RUNNER_RUN_GROUP_ID` | active manifest run group id |
 | `TASK_RUNNER_CWD` | active backend attempt cwd |
 
 These values override same-named variables inherited from the parent
-process. `TASK_RUNNER_RUN_GROUP_ID` keeps its existing role as the default
-group source for nested task-runner runs. Runtime vars, backend config,
-messages, model, effort, and resolved backend args are not exported as env
-vars.
+process. `TASK_RUNNER_PARENT_RUN_ID` and `TASK_RUNNER_RUN_GROUP_ID`
+keep their existing roles as the default lineage and group sources for
+nested task-runner runs. Runtime vars, backend config, messages, model,
+effort, and resolved backend args are not exported as env vars.
 
 Launchers are subprocess-only. They wrap the spawned backend command for
 `claude`, `cursor`, `opencode`, `pi`, and Codex stdio. They do not apply
@@ -313,6 +316,11 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
 - The connected CLI does not forward caller-local Codex transport env.
   Daemon-owned runs resolve Codex env from the daemon process. Resume
   reuses the frozen manifest transport.
+- Codex `thread/start` and `thread/resume` also receive the fixed
+  task-runner runtime env overlay above through
+  `shell_environment_policy.set.*` config overrides. This lets shell
+  tools inside Codex websocket and UDS sessions preserve task-runner
+  lineage and recursion guard state without forwarding arbitrary env.
 - Codex stdio honors the resolved launcher prefix; Codex websocket and
   UDS keep `direct` because there is no local subprocess to wrap.
 - Codex websocket and UDS connect to an already-running app-server, so

@@ -137,6 +137,67 @@ test("buildCodexThreadParams: unrestricted sets approvalPolicy and sandbox", () 
   );
 });
 
+test("buildCodexThreadParams: projects task-runner lineage env into config", () => {
+  assert.deepEqual(
+    buildCodexThreadParams({
+      ...baseCtx,
+      env: {
+        TASK_RUNNER_CALL_DEPTH: "1",
+        TASK_RUNNER_MAX_CALL_DEPTH: "2",
+        TASK_RUNNER_PARENT_RUN_ID: "parent-run",
+        TASK_RUNNER_RUN_GROUP_ID: "group-1",
+        TASK_RUNNER_RUN_ID: "current-run",
+        TASK_RUNNER_CWD: "/repo",
+        TASK_RUNNER_CODEX_WS_URL: "ws://should-not-forward.example/socket",
+        SECRET_TOKEN: "should-not-forward",
+        EMPTY_LINEAGE: "",
+      },
+    }),
+    {
+      cwd: "/repo",
+      config: {
+        "shell_environment_policy.set.TASK_RUNNER_CALL_DEPTH": "1",
+        "shell_environment_policy.set.TASK_RUNNER_MAX_CALL_DEPTH": "2",
+        "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "parent-run",
+        "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
+        "shell_environment_policy.set.TASK_RUNNER_RUN_ID": "current-run",
+        "shell_environment_policy.set.TASK_RUNNER_CWD": "/repo",
+      },
+    },
+  );
+});
+
+test("buildCodexThreadParams: resume preserves extra config and lets lineage win", () => {
+  assert.deepEqual(
+    buildCodexThreadParams(
+      {
+        ...baseCtx,
+        env: {
+          TASK_RUNNER_PARENT_RUN_ID: "current-run",
+          TASK_RUNNER_RUN_GROUP_ID: "group-1",
+          TASK_RUNNER_CWD: "   ",
+        },
+      },
+      {
+        threadId: "thread-123",
+        config: {
+          model_provider: "local",
+          "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "stale-parent",
+        },
+      },
+    ),
+    {
+      cwd: "/repo",
+      threadId: "thread-123",
+      config: {
+        model_provider: "local",
+        "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "current-run",
+        "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
+      },
+    },
+  );
+});
+
 test("buildCodexTurnStartPayload: unrestricted restates danger-full-access policy", () => {
   assert.deepEqual(buildCodexTurnStartPayload("thr_123", "Write /home/kevin/out.txt", true), {
     threadId: "thr_123",
@@ -466,6 +527,83 @@ async function startMalformedJsonCodexServer() {
   };
 }
 
+async function startCodexThreadStartCaptureServer() {
+  const server = new WebSocketServer({ port: 0 });
+  const capturedThreadStartParams = [];
+  const threadId = "captured-thread";
+  const turnId = "captured-turn";
+
+  server.on("connection", (socket) => {
+    const notify = (method, params) => {
+      socket.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+    };
+
+    socket.on("message", (data) => {
+      const message = JSON.parse(data.toString("utf8"));
+      if (message.method === "initialize") {
+        socket.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }));
+        return;
+      }
+      if (message.method === "initialized") {
+        return;
+      }
+      if (message.method === "thread/start") {
+        capturedThreadStartParams.push(message.params);
+        socket.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { thread: { id: threadId } },
+          }),
+        );
+        return;
+      }
+      if (message.method === "turn/start") {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { turn: { id: turnId } },
+          }),
+        );
+        setTimeout(() => {
+          notify("item/agentMessage/delta", {
+            threadId,
+            turnId,
+            itemId: "captured-message",
+            delta: "captured output",
+          });
+          notify("turn/completed", {
+            threadId,
+            turn: { id: turnId, status: "completed" },
+          });
+        }, 10);
+      }
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("failed to bind Codex thread/start capture test server");
+  }
+
+  return {
+    url: `ws://127.0.0.1:${address.port}/`,
+    capturedThreadStartParams,
+    async close() {
+      for (const client of server.clients) {
+        client.terminate();
+      }
+      await new Promise((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    },
+  };
+}
+
 async function startCodexUdsServer(socketName = "codex.sock") {
   const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-uds-"));
   const socketPath = join(dir, socketName);
@@ -590,6 +728,45 @@ test("codexBackend rejects pending calls when a transport frame is malformed JSO
     assert.equal(result.sessionId, null);
     assert.match(result.rawStderr, /malformed JSON-RPC/);
     assert.match(result.rawStderr, /Unexpected token|Expected property name/);
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("codexBackend sends lineage config over websocket thread/start", async () => {
+  const codexServer = await startCodexThreadStartCaptureServer();
+
+  try {
+    const result = await codexBackend.invoke({
+      ...baseCtx,
+      env: {
+        TASK_RUNNER_CALL_DEPTH: "1",
+        TASK_RUNNER_MAX_CALL_DEPTH: "2",
+        TASK_RUNNER_PARENT_RUN_ID: "parent-run",
+        TASK_RUNNER_RUN_GROUP_ID: "group-1",
+        TASK_RUNNER_RUN_ID: "current-run",
+        TASK_RUNNER_CWD: "/repo",
+        TASK_RUNNER_CODEX_WS_URL: "ws://should-not-forward.example/socket",
+        SECRET_TOKEN: "should-not-forward",
+      },
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
+      },
+    });
+
+    assert.equal(result.exitCode, 0, `${result.rawStderr}\n${result.rawStdout}`);
+    assert.equal(codexServer.capturedThreadStartParams.length, 1);
+    assert.deepEqual(codexServer.capturedThreadStartParams[0], {
+      cwd: "/repo",
+      config: {
+        "shell_environment_policy.set.TASK_RUNNER_CALL_DEPTH": "1",
+        "shell_environment_policy.set.TASK_RUNNER_MAX_CALL_DEPTH": "2",
+        "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "parent-run",
+        "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
+        "shell_environment_policy.set.TASK_RUNNER_RUN_ID": "current-run",
+        "shell_environment_policy.set.TASK_RUNNER_CWD": "/repo",
+      },
+    });
   } finally {
     await codexServer.close();
   }

@@ -77,6 +77,8 @@ import {
 import { buildNudgeMessage } from "./nudge.js";
 import {
   type RecursionState,
+  TASK_RUNNER_CWD_ENV,
+  TASK_RUNNER_RUN_ID_ENV,
   buildChildRecursionEnv,
   checkRecursionDepth,
   readParentRunIdFromEnv,
@@ -427,8 +429,6 @@ function buildResumeSessionManifest(
 }
 
 const MAX_TITLE_LENGTH = 200;
-const TASK_RUNNER_RUN_ID_ENV = "TASK_RUNNER_RUN_ID";
-const TASK_RUNNER_CWD_ENV = "TASK_RUNNER_CWD";
 
 function validateAddedTaskTitle(title: string, index: number): void {
   const trimmed = title.trim();

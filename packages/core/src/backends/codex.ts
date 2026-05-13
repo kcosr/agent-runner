@@ -20,6 +20,14 @@ import type {
   ValidateSessionResult,
 } from "../core/backends/types.js";
 import { isAbsoluteUdsSocketPath, isWsOrWssUrl } from "../core/backends/types.js";
+import {
+  TASK_RUNNER_CALL_DEPTH_ENV,
+  TASK_RUNNER_CWD_ENV,
+  TASK_RUNNER_MAX_CALL_DEPTH_ENV,
+  TASK_RUNNER_PARENT_RUN_ID_ENV,
+  TASK_RUNNER_RUN_GROUP_ID_ENV,
+  TASK_RUNNER_RUN_ID_ENV,
+} from "../core/run/recursion-guard.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { buildSpawnCommand } from "../util/spawn.js";
 import {
@@ -999,14 +1007,43 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
   );
 }
 
+const CODEX_LINEAGE_ENV_CONFIG_KEYS = [
+  TASK_RUNNER_CALL_DEPTH_ENV,
+  TASK_RUNNER_MAX_CALL_DEPTH_ENV,
+  TASK_RUNNER_PARENT_RUN_ID_ENV,
+  TASK_RUNNER_RUN_GROUP_ID_ENV,
+  TASK_RUNNER_RUN_ID_ENV,
+  TASK_RUNNER_CWD_ENV,
+] as const;
+
+function buildCodexLineageConfigOverrides(env: Record<string, string>): Record<string, string> {
+  const config: Record<string, string> = {};
+  for (const key of CODEX_LINEAGE_ENV_CONFIG_KEYS) {
+    const value = env[key]?.trim();
+    if (value) {
+      config[`shell_environment_policy.set.${key}`] = value;
+    }
+  }
+  return config;
+}
+
 export function buildCodexThreadParams(
   ctx: BackendInvokeContext,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
+  const extraConfig = isRecord(extra.config) ? extra.config : {};
+  const lineageConfig = buildCodexLineageConfigOverrides(ctx.env);
+  const config = {
+    ...extraConfig,
+    ...lineageConfig,
+  };
   const params: Record<string, unknown> = {
     cwd: ctx.cwd,
     ...extra,
   };
+  if (Object.keys(config).length > 0) {
+    params.config = config;
+  }
   if (ctx.model) {
     params.model = normalizeCodexModel(ctx.model);
   }

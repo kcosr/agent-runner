@@ -164,6 +164,11 @@ Connected-mode runtime selection stays explicit:
   `TASK_RUNNER_CODEX_WS_URL` are not forwarded; daemon-owned Codex runs
   resolve transport from authored/request `backendConfig` and then the
   daemon process env
+- task-runner-owned lineage/runtime values such as
+  `TASK_RUNNER_PARENT_RUN_ID`, `TASK_RUNNER_RUN_GROUP_ID`, and recursion
+  guard depth are injected into Codex thread config for backend shell
+  tools; this fixed allowlist is separate from caller-local env
+  forwarding
 - resume requests reuse the frozen manifest `backendConfig`
 - if the client passes `--launcher <name>`, the daemon resolves that
   named launcher against its own config root and freezes the result into
