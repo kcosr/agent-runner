@@ -83,9 +83,14 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       },
       {
         description:
-          "Trigger the selected run's primary action when one is available, including while detail or attachment preview is fullscreen; modal dialogs handle Escape before fullscreen or drawer state changes.",
+          "Trigger the selected run's primary action when one is available, including while the selected-run panel is fullscreen; modal dialogs handle Escape before fullscreen or drawer state changes.",
         keys: ["Enter"],
         title: "Run primary action",
+      },
+      {
+        description: "Show the selected run's Attachments tab.",
+        keys: ["A"],
+        title: "Switch to Attachments",
       },
       {
         description: "Show the selected run's Chat tab, or focus its composer when Chat is open.",
@@ -114,24 +119,23 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       },
       {
         description: "Archive the selected run, or restore it when already archived.",
-        keys: ["A"],
+        keys: ["Shift", "A"],
         title: "Toggle archive",
       },
       {
         description:
           "Open destructive cleanup confirmation for the selected run when archive/delete is available.",
-        keys: ["Shift", "A"],
+        keys: ["Shift", "D"],
         title: "Confirm cleanup",
       },
       {
-        description:
-          "Toggle the selected detail drawer or attachment preview between normal and fullscreen widths.",
+        description: "Toggle the selected-run panel between normal and fullscreen widths.",
         keys: ["F"],
         title: "Toggle drawer fullscreen",
       },
       {
         description:
-          "Blur the focused Chat composer, or clear the focused search when it has text and blur it on a second press. When the drawer is fullscreen, exit fullscreen first. Otherwise close attachment preview or selected run detail.",
+          "Blur the focused Chat composer, or clear the focused search when it has text and blur it on a second press. When the drawer is fullscreen, exit fullscreen first. Otherwise close the selected-run panel.",
         keys: ["Escape"],
         title: "Back or close",
       },

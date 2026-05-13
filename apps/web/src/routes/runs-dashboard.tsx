@@ -335,7 +335,6 @@ export function RunsDashboardRoute() {
         searchFocused: document.activeElement === searchInputRef.current,
         searchValue: currentState.viewState.search,
         selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
-        selectedDrawerView: currentState.selectedDrawerView,
         selectedRunId: currentState.selectedRunId,
         typingTarget,
         actionPending: currentState.actionPending !== undefined,
@@ -419,12 +418,6 @@ export function RunsDashboardRoute() {
         return;
       }
 
-      if (command === "run.closeAttachmentPreview") {
-        event.preventDefault();
-        currentState.returnSelectedRunToAttachments();
-        return;
-      }
-
       if (command === "run.close") {
         event.preventDefault();
         currentState.closeRun();
@@ -437,50 +430,40 @@ export function RunsDashboardRoute() {
         return;
       }
 
-      const closeAttachmentPreviewForSurfaceShortcut = () => {
-        if (currentState.selectedDrawerView?.mode === "attachment") {
-          currentState.returnSelectedRunToAttachments();
-        }
-      };
+      if (command === "run.showAttachments") {
+        event.preventDefault();
+        currentState.setActiveRightSurface("attachments");
+        return;
+      }
 
       if (command === "run.showChat") {
         event.preventDefault();
-        if (
-          currentState.activeRightSurface === "chat" &&
-          currentState.selectedDrawerView?.mode !== "attachment"
-        ) {
+        if (currentState.activeRightSurface === "chat") {
           document.getElementById("run-chat-message")?.focus();
           return;
         }
-        closeAttachmentPreviewForSurfaceShortcut();
         currentState.setActiveRightSurface("chat");
         return;
       }
 
       if (command === "run.showDetail") {
         event.preventDefault();
-        closeAttachmentPreviewForSurfaceShortcut();
         currentState.setActiveRightSurface("detail");
         return;
       }
 
       if (command === "run.showNotes") {
         event.preventDefault();
-        if (
-          currentState.activeRightSurface === "notes" &&
-          currentState.selectedDrawerView?.mode !== "attachment"
-        ) {
+        if (currentState.activeRightSurface === "notes") {
           setNoteEditRequestVersion((current) => current + 1);
           return;
         }
-        closeAttachmentPreviewForSurfaceShortcut();
         currentState.setActiveRightSurface("notes");
         return;
       }
 
       if (command === "run.showTasks") {
         event.preventDefault();
-        closeAttachmentPreviewForSurfaceShortcut();
         currentState.setActiveRightSurface("tasks");
         return;
       }
@@ -788,9 +771,9 @@ export function RunsDashboardRoute() {
                   drawerFullscreen={state.viewState.drawerFullscreen}
                   drawerWidth={state.viewState.drawerWidth}
                   drawerView={state.selectedDrawerView}
+                  attachmentPreviewSelection={state.selectedAttachmentPreview}
                   noteEditRequestVersion={noteEditRequestVersion}
                   runs={state.runs}
-                  onBackToAttachments={state.returnSelectedRunToAttachments}
                   onAbort={state.runActions.abort}
                   onArchive={state.runActions.archive}
                   onClearDependencies={state.runActions.clearDependencies}

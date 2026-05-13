@@ -47,21 +47,16 @@ export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
 
 export type DrawerDetailSection = "attachments" | "dependencies" | "audit" | "events" | "data";
 
-export type RunDrawerView =
-  | {
-      mode: "detail";
-      detailSection: DrawerDetailSection;
-      attachmentId: null;
-      attachmentOwnerRunId: null;
-    }
-  | {
-      mode: "attachment";
-      detailSection: "attachments";
-      attachmentId: string;
-      attachmentOwnerRunId: string;
-    };
+export interface RunDrawerView {
+  detailSection: DrawerDetailSection;
+}
 
-export type DashboardRightSurface = "detail" | "chat" | "notes" | "tasks";
+export interface AttachmentPreviewSelection {
+  attachmentId: string;
+  attachmentOwnerRunId: string;
+}
+
+export type DashboardRightSurface = "attachments" | "chat" | "detail" | "notes" | "tasks";
 export type DashboardViewMode = "board" | "list";
 
 export interface DashboardViewState {
@@ -76,10 +71,7 @@ export interface DashboardViewState {
 }
 
 export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
-  mode: "detail",
   detailSection: "attachments",
-  attachmentId: null,
-  attachmentOwnerRunId: null,
 };
 
 export const DRAWER_WIDTH_MIN = 360;
@@ -284,6 +276,7 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
         ? clampDrawerWidth(record.drawerWidth)
         : DEFAULT_DASHBOARD_VIEW_STATE.drawerWidth,
     activeRightSurface:
+      record.activeRightSurface === "attachments" ||
       record.activeRightSurface === "detail" ||
       record.activeRightSurface === "chat" ||
       record.activeRightSurface === "notes" ||

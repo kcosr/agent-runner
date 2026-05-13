@@ -52,7 +52,8 @@ normal run detail/status DTOs do not expose the run's frozen
 
 ## Views
 
-- `/` — Runs dashboard with Board/List, Chat, Detail, Notes, and Tasks surfaces.
+- `/` — Runs dashboard with Board/List plus Chat, Detail, Notes, Tasks,
+  and Attachments selected-run surfaces.
 - `/runs/:runId` — Same dashboard with a specific run selected for the
   selected-run surfaces.
 - `/settings/general` — General preferences.
@@ -64,27 +65,28 @@ A multi-surface workspace:
 
 - **Left** — search, grouped Filters control, and preference toggles.
 - **Center** — Board or List, switchable from the toolbar.
-- **Right** — one selected-run panel with Chat, Detail, Notes, and Tasks tabs.
+- **Right** — one selected-run panel with Chat, Detail, Notes, Tasks,
+  and Attachments tabs.
 
 The center surface defaults to Board. The toolbar view-mode toggle switches
 between Board and List, and the durable mode choice persists in
 `task-runner:web:dashboard-view-state.viewMode`. Selecting a run opens one
 resizable selected-run panel. Its header owns the run identity plus action
-toolbar, and the tabs below the toolbar switch between Chat, Detail, Notes,
-and Tasks. Chat does not create a separate chat route or backend chat
-contract; it follows the selected run, derives messages from `RunDetail`
-plus timeline history, and streams live output through the existing
-timeline stream.
+toolbar, and the tabs below the toolbar switch between Chat, Detail,
+Notes, Tasks, and Attachments. Chat does not create a separate chat route
+or backend chat contract; it follows the selected run, derives messages
+from `RunDetail` plus timeline history, and streams live output through
+the existing timeline stream.
 
 Closing the selected-run panel navigates back to `/` and clears the
-selected run. Chat, Detail, Notes, and Tasks tab choice persists as the active right
-surface.
+selected run. Chat, Detail, Notes, Tasks, and Attachments tab choice
+persists as the active right surface.
 
 Dashboard view state persists the durable surface layout fields:
 center-surface view mode, collapsed board columns, selected-run panel width,
-fullscreen state, and the active Chat/Detail/Notes/Tasks tab. Search text,
-per-run drawer tabs, the active board column, and the active list status chip
-remain transient.
+fullscreen state, and the active Chat/Detail/Notes/Tasks/Attachments tab.
+Search text, per-run drawer tabs, the active board column, and the active
+list status chip remain transient.
 
 On desktop layouts, the selected-run panel renders inline to the right of
 the center surface. On narrow mobile layouts, the selected-run panel becomes
@@ -197,15 +199,21 @@ The drawer surfaces:
   editor. `N` opens the surface; pressing `N` again focuses the editor.
 - Tasks surface: expandable task rows with inline notes and status editing,
   gated by `taskMutation` capabilities.
-- Attachments tab: one combined group-scoped list. Rows show
-  `ownerRunId`; selected-run attachments can be uploaded, previewed,
-  downloaded, and deleted, while attachments owned by other runs in the
-  group are read-only but still support preview and download. In-app
-  preview is available for `text/markdown` and `text/plain`
-  attachments; fenced `mermaid` blocks render inline (with an inline
-  error if a diagram fails to load). The attachment preview drawer is
-  itself resizable (edge drag or keyboard handle) and supports the same
-  full-width toggle as the detail drawer. See [attachments.md](attachments.md).
+- Attachments surface: preview-only view of the selected run's
+  group-scoped attachments. It shows one attachment at a time under the
+  selected-run header and tabs, supports previous/next controls, and
+  shows `No attachments available.` when the selected run's group has no
+  attachments. Opening a preview from Chat or from Detail -> Attachments
+  switches to this surface without changing the selected-run route.
+- Detail -> Attachments section: one combined group-scoped list. Rows
+  show `ownerRunId`; selected-run attachments can be uploaded,
+  previewed, downloaded, and deleted, while attachments owned by other
+  runs in the group are read-only but still support preview and download.
+  In-app preview is available for `text/markdown`, `text/plain`,
+  `image/png`, `image/jpeg`, `image/gif`, `image/webp`, and
+  `image/svg+xml` attachments; fenced `mermaid` blocks render inline
+  (with an inline error if a diagram fails to load). See
+  [attachments.md](attachments.md).
 - Dependencies tab: upstream and downstream run and group dependency
   details (`RunDependencyDetail` / `RunDependentDetail`).
 - Data tab: read-only `Vars` and `Hook state` subtabs exposing
@@ -260,10 +268,9 @@ and diagnostics stay out of Chat.
 When selected-run attachments were added during an attempt window, Chat
 synthesizes artifact cards at the end of that assistant response from the
 current `RunDetail.attachments` list and timeline attempt timestamps.
-Previewable cards open the existing attachment preview drawer, and every
-card can use the existing browser download flow. Removing an attachment from
-the selected run removes its synthesized Chat card on the next detail
-projection.
+Previewable cards open the top-level Attachments surface, and every card
+can use the existing browser download flow. Removing an attachment from the
+selected run removes its synthesized Chat card on the next detail projection.
 
 The composer is fixed at the bottom of the Chat panel for a selected
 run. For resumable non-live runs, it sends only non-empty trimmed
@@ -333,7 +340,7 @@ Every action button consults the run's `RunCapabilities`:
 | Add task button | `taskMutation.canAdd` |
 
 Detail-drawer destructive actions (delete, reset, abort) use inline
-confirmations. The selected-run `Shift+A` cleanup shortcut and run-card
+confirmations. The selected-run `Shift+D` cleanup shortcut and run-card
 action menu use modal confirmation before archive/delete cleanup. Open
 the run-card action menu by right-clicking a run card on desktop or
 long-pressing a run card on touch devices; there is no visible overflow
@@ -350,7 +357,6 @@ The dashboard's shortcut system is customizable from
 | `Esc` (in search) | Clear search and blur |
 | `Esc` (in chat composer) | Blur the composer without closing the drawer |
 | `Esc` (drawer open) | Close drawer |
-| `Esc` (attachment preview) | Back to attachments |
 | `Enter` | Primary action for the selected card (Resume, etc.) |
 | `↑` / `↓` | Move selection through visible list rows, or through board cards in Board mode |
 | `←` / `→` | Move the board selection between columns |
@@ -361,23 +367,26 @@ The dashboard's shortcut system is customizable from
 | `Ctrl+Shift+E` | Toggle hide-empty-columns |
 | `V` | Cycle the center surface between Board and List |
 | `P` | Pin or unpin the selected run |
+| `A` | Show the selected run's Attachments tab |
 | `C` | Show the selected run's Chat tab, or focus its composer when Chat is open |
 | `D` | Show the selected run's Detail tab |
 | `N` | Show the selected run's Notes tab, or focus its editor when Notes is open |
 | `T` | Show the selected run's Tasks tab |
-| `A` | Archive or restore the selected run |
-| `Shift+A` | Confirm archive/delete cleanup for the selected run |
+| `Shift+A` | Archive or restore the selected run |
+| `Shift+D` | Confirm archive/delete cleanup for the selected run |
 | `F` | Toggle the detail drawer fullscreen |
+| `←` / `→` (fullscreen attachment preview) | Previous or next attachment |
 
 Shortcuts are suppressed while typing in inputs or when a modal dialog
 is open. Native modal dialogs, including Resume and the run-note editor,
 handle Escape/back dismissal before dashboard shortcuts.
 
 When the detail drawer is fullscreen, selected-run shortcuts including
-`Enter`, `N`, `P`, `A`, `Shift+A`, and `C`/`D`/`N`/`T` remain active. Board movement,
-search, and filter shortcuts remain suppressed in fullscreen drawer
-mode. Attachment preview keeps only surface navigation, fullscreen
-toggle, and Escape shortcuts active so hidden header actions do not fire.
+`Enter`, `P`, `A`, `Shift+A`, `Shift+D`, and `C`/`D`/`N`/`T` remain
+active. Board movement, search, and filter shortcuts remain suppressed in
+fullscreen drawer mode. Attachment preview left/right navigation is active
+only while the drawer is fullscreen; otherwise the Attachments surface uses
+the visible previous/next controls.
 If the primary action opens the Resume dialog, the dialog appears above
 the fullscreen drawer or preview surface. While the Resume or run-note
 dialog is open, the first `Esc` closes the dialog; later presses follow

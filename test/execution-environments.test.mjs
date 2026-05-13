@@ -7,6 +7,7 @@ import {
   buildEnvironmentLauncher,
   cleanupExecutionEnvironment,
   prepareExecutionEnvironment,
+  processFailureDetail,
   resolveFreshExecutionEnvironment,
 } from "../packages/core/dist/core/run/execution-environments.js";
 import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
@@ -205,6 +206,29 @@ test("buildEnvironmentLauncher wraps backend commands in a container exec launch
       name: null,
       source: "inline",
     },
+  );
+});
+
+test("processFailureDetail prioritizes interruption state over process output", () => {
+  assert.equal(
+    processFailureDetail({
+      aborted: false,
+      exitCode: 1,
+      stderrText: "engine wrote stderr before timeout",
+      stdoutText: "engine wrote stdout before timeout",
+      timedOut: true,
+    }),
+    "timed out",
+  );
+  assert.equal(
+    processFailureDetail({
+      aborted: true,
+      exitCode: null,
+      stderrText: "",
+      stdoutText: "engine wrote stdout before abort",
+      timedOut: false,
+    }),
+    "aborted",
   );
 });
 

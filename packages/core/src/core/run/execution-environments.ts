@@ -623,15 +623,17 @@ function boundedExcerpt(value: string): string {
   return trimmed.length > 500 ? `${trimmed.slice(0, 500)}...` : trimmed;
 }
 
-function processFailureDetail(result: Awaited<ReturnType<typeof runProcess>>): string {
+export function processFailureDetail(result: Awaited<ReturnType<typeof runProcess>>): string {
+  if (result.timedOut) {
+    return "timed out";
+  }
+  if (result.aborted) {
+    return "aborted";
+  }
   return (
     boundedExcerpt(result.stderrText) ||
     boundedExcerpt(result.stdoutText) ||
-    (result.timedOut
-      ? "timed out"
-      : result.aborted
-        ? "aborted"
-        : `exited with code ${result.exitCode ?? "null"}`)
+    `exited with code ${result.exitCode ?? "null"}`
   );
 }
 

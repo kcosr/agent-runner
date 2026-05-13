@@ -135,15 +135,27 @@ limits above still apply to committed attachments.
 
 ## Web dashboard
 
-The detail drawer's Attachments panel shows one combined list for the
-selected run's group, matching `attachment list --scope group`.
+The selected-run panel has two attachment surfaces:
+
+- The top-level Attachments tab is a preview surface. It uses the same
+  selected-run plus run-group attachment order as the detail list, shows
+  one attachment at a time, and supports previous/next navigation. If no
+  attachments are available, it shows `No attachments available.`.
+- Detail -> Attachments remains the management list. It shows one
+  combined list for the selected run's group, matching
+  `attachment list --scope group`.
 
 - Attachments owned by the selected run support upload, download,
-  in-app preview for `text/markdown` and `text/plain` (fenced
-  `mermaid` blocks render inline), and delete.
+  in-app preview, and delete.
 - Attachments owned by other runs in the group are read-only. They still
   support preview and download, and each row shows the source
   `ownerRunId`.
+- In-app preview supports `text/markdown`, `text/plain`, `image/png`,
+  `image/jpeg`, `image/gif`, `image/webp`, and `image/svg+xml`.
+  Markdown fenced `mermaid` blocks render inline.
+- Preview actions from Chat artifact cards and Detail -> Attachments rows
+  switch to the top-level Attachments tab without changing the selected-run
+  route.
 
 ## Common patterns
 

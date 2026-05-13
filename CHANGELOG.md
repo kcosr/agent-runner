@@ -149,12 +149,16 @@
 - Added a web dashboard Board/List view-mode toggle. The new List view shows
   globally sorted compact run rows with status chips while preserving the
   existing Board workflow and persisted view-mode choice.
+- Added a top-level web dashboard Attachments tab that previews selected-run
+  and run-group attachments inline under the selected-run header, while
+  keeping upload/download/delete management in Detail -> Attachments.
+  ([#145](https://github.com/kcosr/task-runner/pull/145))
 - Added the `plan-implement-feature` assignment for single-run feature
   planning, approval, implementation, review, and PR handoff, plus shared
   `feature-plan/*` and `feature-implement/*` task definitions.
   ([#141](https://github.com/kcosr/task-runner/pull/141))
 - Added run-card action menus in the web dashboard, plus a selected-run
-  `Shift+A` cleanup shortcut that confirms existing archive/delete actions
+  `Shift+D` cleanup shortcut that confirms existing archive/delete actions
   before running them. ([#140](https://github.com/kcosr/task-runner/pull/140))
 - Added managed-container `lifecycle.afterStart` for host or container setup
   after start/reuse and inspect, including late `{{container_name}}`,
@@ -207,6 +211,13 @@
 - Added backend-owned session history import and sync for Pi JSONL
   sessions and Cursor deterministic `store.db` sessions.
   ([#135](https://github.com/kcosr/task-runner/pull/135))
+
+### Changed
+
+- Managed-container engine command failures now report `aborted` or
+  `timed out` when the subprocess is interrupted, taking precedence over
+  stderr/stdout excerpts from the interrupted engine process.
+  ([#145](https://github.com/kcosr/task-runner/pull/145))
 
 ### Fixed
 
@@ -493,6 +504,10 @@
 
 ### Changed
 
+- Changed web dashboard selected-run shortcuts so `A` opens Attachments,
+  `Shift+A` toggles archive/unarchive, and `Shift+D` opens destructive
+  archive/delete cleanup confirmation.
+  ([#145](https://github.com/kcosr/task-runner/pull/145))
 - Workspace lifecycle markers now live under
   `${TASK_RUNNER_STATE_DIR}/workspace-state/` instead of suffixed sibling
   directories next to mounted workspaces.
@@ -715,8 +730,9 @@
   `HookConfigError` into a shared hook errors module.
   ([#102](https://github.com/kcosr/task-runner/pull/102))
 - Dashboard `Enter` now triggers the selected run's primary action from
-  fullscreen detail and attachment preview drawers, with the Resume dialog
-  layered above fullscreen drawer surfaces.
+  the fullscreen selected-run panel, including the Attachments preview
+  surface, with the Resume dialog layered above fullscreen drawer
+  surfaces.
   ([#103](https://github.com/kcosr/task-runner/pull/103))
 - Cleaned high-confidence unused exports/types and declared direct `zod`
   dependencies for the CLI and web workspaces.

@@ -59,7 +59,7 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   viewMode: "board" | "list";
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  activeRightSurface: "detail" | "chat" | "notes" | "tasks";
+  activeRightSurface: "attachments" | "chat" | "detail" | "notes" | "tasks";
   drawerFullscreen: boolean;
 } = {
   viewMode: "board",
@@ -1564,12 +1564,6 @@ function getCloseDetailButton() {
   if (closeButton) {
     return closeButton;
   }
-  const attachmentPreviewCloseButton = screen.queryAllByRole("button", {
-    name: /close attachment preview/i,
-  })[0];
-  if (attachmentPreviewCloseButton) {
-    return attachmentPreviewCloseButton;
-  }
   const fallbackCloseButton = screen.queryAllByRole("button", { name: /close detail/i })[0];
   if (!fallbackCloseButton) {
     throw new Error("expected a close-panel button");
@@ -2521,7 +2515,7 @@ describe("web app", () => {
     });
   });
 
-  it("switches the active selected-run surface from the Chat, Detail, Notes, and Tasks tabs", async () => {
+  it("switches the active selected-run surface from the Attachments, Chat, Detail, Notes, and Tasks tabs", async () => {
     setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock({
       runs: [makeRun()],
@@ -2540,7 +2534,7 @@ describe("web app", () => {
       within(tablist)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Chat", "Detail", "Notes", "Tasks"]);
+    ).toEqual(["Chat", "Detail", "Notes", "Tasks", "Attachments"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
     expect(notesTab).toHaveAttribute("aria-selected", "false");
@@ -3167,7 +3161,7 @@ describe("web app", () => {
     expect(within(chat).queryByText("System (PENDING)")).not.toBeInTheDocument();
   });
 
-  it("opens the existing attachment preview drawer from previewable Chat artifact cards", async () => {
+  it("opens the top-level attachment preview tab from previewable Chat artifact cards", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     installFetchMock({
       runs: [makeRun({ attachmentCount: 1 })],
@@ -3217,7 +3211,7 @@ describe("web app", () => {
 
     await user.click(within(chat).getByRole("button", { name: "Preview attachment report.md" }));
 
-    expect(router.state.location.pathname).toBe("/runs/run-1/attachments/run-1/att-report");
+    expect(router.state.location.pathname).toBe("/runs/run-1");
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
     expect(await screen.findByText("attachment body")).toBeInTheDocument();
   });
@@ -3289,7 +3283,12 @@ describe("web app", () => {
         within(chat).getByRole("button", { name: "Download attachment archive.zip" }),
       );
       await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
-      expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+      expect(
+        within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+          name: "Chat",
+        }),
+      ).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByLabelText("Attachment preview")).not.toBeVisible();
 
       await user.click(within(chat).getByRole("button", { name: "Download report.md" }));
       await user.click(within(chat).getByRole("button", { name: "Download archive.zip" }));
@@ -9220,7 +9219,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Archive ready"));
 
     const callsBeforeArchive = fetchMock.mock.calls.length;
-    await user.keyboard("a");
+    await user.keyboard("{Shift>}a{/Shift}");
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -9579,7 +9578,7 @@ describe("web app", () => {
     expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
   });
 
-  it("closes an open run action menu before Shift+A opens selected-run confirmation", async () => {
+  it("closes an open run action menu before Shift+D opens selected-run confirmation", async () => {
     installFetchMock({
       runs: [
         makeRun({
@@ -9640,7 +9639,7 @@ describe("web app", () => {
 
     fireEvent.contextMenu(await findRunCard("Menu cleanup"), { clientX: 48, clientY: 56 });
     await waitFor(() => expect(document.querySelector(".run-action-menu")).toBeInTheDocument());
-    await user.keyboard("{Shift>}a{/Shift}");
+    await user.keyboard("{Shift>}d{/Shift}");
 
     expect(
       await screen.findByRole("dialog", { name: "Archive and delete run?" }),
@@ -10131,7 +10130,7 @@ describe("web app", () => {
     expect(fetchMutationUrls(fetchMock).slice(-1)).toEqual(["/api/runs/run-archived"]);
   });
 
-  it("leaves Shift+A unhandled when the selected run cannot archive or delete", async () => {
+  it("leaves Shift+D unhandled when the selected run cannot archive or delete", async () => {
     const fetchMock = installFetchMock({
       runs: [
         makeRun({
@@ -10165,7 +10164,7 @@ describe("web app", () => {
     const event = new KeyboardEvent("keydown", {
       bubbles: true,
       cancelable: true,
-      key: "A",
+      key: "D",
       shiftKey: true,
     });
     window.dispatchEvent(event);
@@ -10176,7 +10175,7 @@ describe("web app", () => {
     expect(fetchMutationUrls(fetchMock)).toEqual([]);
   });
 
-  it("uses Shift+A to confirm Archive + Delete or Delete for the selected run", async () => {
+  it("uses Shift+D to confirm Archive + Delete or Delete for the selected run", async () => {
     const fetchMock = installFetchMock({
       runs: [
         makeRun({
@@ -10236,12 +10235,12 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Shortcut cleanup"));
 
-    await user.keyboard("{Shift>}a{/Shift}");
+    await user.keyboard("{Shift>}d{/Shift}");
     expect(await screen.findByRole("button", { name: "Archive + Delete" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(fetchMutationUrls(fetchMock).filter((url) => url.includes("run-1"))).toEqual([]);
 
-    await user.keyboard("{Shift>}a{/Shift}");
+    await user.keyboard("{Shift>}d{/Shift}");
     await user.click(await screen.findByRole("button", { name: "Archive + Delete" }));
     await waitFor(() =>
       expect(fetchMutationUrls(fetchMock)).toEqual(["/api/runs/run-1/archive", "/api/runs/run-1"]),
@@ -10249,7 +10248,7 @@ describe("web app", () => {
 
     await user.click(await screen.findByRole("button", { name: /show archived runs/i }));
     await user.click(await findRunCard("Shortcut archived delete"));
-    await user.keyboard("{Shift>}a{/Shift}");
+    await user.keyboard("{Shift>}d{/Shift}");
     const deleteDialog = await screen.findByRole("dialog", { name: "Delete run?" });
     expect(within(deleteDialog).getByRole("button", { name: "Delete" })).toBeInTheDocument();
     await user.click(within(deleteDialog).getByRole("button", { name: "Delete" }));
@@ -10259,7 +10258,7 @@ describe("web app", () => {
     );
   });
 
-  it("suppresses Shift+A while another selected-run action is pending", async () => {
+  it("suppresses Shift+D while another selected-run action is pending", async () => {
     let resolveArchive: (() => void) | undefined;
     const fetchMock = installFetchMock(
       {
@@ -10318,7 +10317,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Pending cleanup"));
-    await user.keyboard("a");
+    await user.keyboard("{Shift>}a{/Shift}");
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/runs/run-1/archive",
@@ -10326,7 +10325,7 @@ describe("web app", () => {
       ),
     );
 
-    await user.keyboard("{Shift>}a{/Shift}");
+    await user.keyboard("{Shift>}d{/Shift}");
     expect(screen.queryByRole("button", { name: "Archive + Delete" })).not.toBeInTheDocument();
 
     resolveArchive?.();
@@ -13368,17 +13367,18 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Second run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    const secondRunTablist = await screen.findByRole("tablist", { name: "Run surface" });
     await user.click(
-      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+      within(secondRunTablist).getByRole("tab", {
         name: "Tasks",
       }),
     );
     expect(
       await screen.findByRole("button", { name: /shared task/i, expanded: false }),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Attachment preview")).not.toBeVisible();
     await user.click(
-      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+      within(secondRunTablist).getByRole("tab", {
         name: "Detail",
       }),
     );
@@ -13392,9 +13392,13 @@ describe("web app", () => {
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
     expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /back to attachments/i }));
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Detail",
+      }),
+    );
     expect(await screen.findByRole("button", { name: /^Upload$/ })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Attachment preview")).not.toBeVisible();
   });
 
   it("keeps one SSE subscription while switching selected runs", async () => {
@@ -13662,9 +13666,7 @@ describe("web app", () => {
       expect.stringMatching(/^mermaid-/),
       "graph TD\nStart-->Finish",
     );
-    await user.click(screen.getByRole("button", { name: /back to attachments/i }));
-
-    await user.click(screen.getByRole("button", { name: /^Preview build\.log$/ }));
+    await user.click(screen.getByRole("button", { name: "Next attachment: build.log" }));
     const preview = await screen.findByLabelText("Attachment preview content");
     expect(preview.querySelector("pre code")?.textContent).toBe("line one\nline two");
     expect(preview.querySelector("pre code")).not.toBeNull();
@@ -13749,14 +13751,14 @@ describe("web app", () => {
     expect(pngPreview).toHaveAttribute("src", "blob:png-preview");
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:svg-preview"));
 
-    await user.click(screen.getByRole("button", { name: "Close attachment preview" }));
+    await user.click(getCloseDetailButton());
     await waitFor(() =>
       expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument(),
     );
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:png-preview"));
   });
 
-  it("opens preview from attachment row metadata clicks and browser back returns to attachments", async () => {
+  it("opens preview from attachment row metadata clicks without changing the selected-run route", async () => {
     installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -13796,20 +13798,14 @@ describe("web app", () => {
 
     const preview = await screen.findByLabelText("Attachment preview content");
     expect(preview.querySelector("pre code")?.textContent).toBe("line one\nline two");
-    expect(router.state.location.pathname).toBe("/runs/run-1/attachments/run-1/att-log");
-
-    window.history.back();
-
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/runs/run-1");
-      expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
-      expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
-    });
-    expect(screen.getByRole("button", { name: /^Upload$/ })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/runs/run-1");
+    expect(screen.getByRole("tab", { name: "Attachments" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   it("navigates attachment previews with buttons and fullscreen arrow keys", async () => {
-    let resumeRequestCount = 0;
     installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -13857,9 +13853,6 @@ describe("web app", () => {
               headers: { "content-type": "text/plain; charset=utf-8" },
             });
           }
-          if (/\/api\/runs\/run-1\/resume$/.test(url)) {
-            resumeRequestCount += 1;
-          }
           return undefined;
         },
       },
@@ -13879,12 +13872,9 @@ describe("web app", () => {
     expect(await screen.findByText("beta body")).toBeInTheDocument();
     screen.getByLabelText("Attachment preview").focus();
 
-    await user.keyboard("{Enter}");
-    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
+    await user.keyboard("{ArrowRight}");
     expect(screen.getByText("beta body")).toBeInTheDocument();
-    expect(resumeRequestCount).toBe(0);
-    expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(screen.queryByText("gamma body")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toBeInTheDocument();
@@ -13895,15 +13885,79 @@ describe("web app", () => {
 
     await user.keyboard("{ArrowLeft}");
     expect(await screen.findByText("beta body")).toBeInTheDocument();
-    screen.getByLabelText("Attachment preview").focus();
-
-    await user.keyboard("{Enter}");
-    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
-    expect(screen.getByText("beta body")).toBeInTheDocument();
-    expect(resumeRequestCount).toBe(0);
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toBeInTheDocument();
+  });
+
+  it("selects the next attachment when the previewed attachment is removed off the preview tab", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({ id: "att-alpha", name: "alpha.txt" }),
+              makeAttachment({ id: "att-beta", name: "beta.txt" }),
+              makeAttachment({ id: "att-gamma", name: "gamma.txt" }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-alpha\/content$/.test(url)) {
+            return new Response("alpha body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-beta\/content$/.test(url)) {
+            return new Response("beta body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-gamma\/content$/.test(url)) {
+            return new Response("gamma body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(screen.getByRole("button", { name: /^Preview beta\.txt$/ }));
+    expect(await screen.findByRole("heading", { name: "beta.txt" })).toBeInTheDocument();
+    expect(await screen.findByText("beta body")).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Detail",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: /^Remove beta\.txt$/ }));
+    await user.click(screen.getByRole("button", { name: /^Confirm remove beta\.txt$/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^Preview beta\.txt$/ })).not.toBeInTheDocument(),
+    );
+
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Attachments",
+      }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "gamma.txt" })).toBeInTheDocument();
+    expect(await screen.findByText("gamma body")).toBeInTheDocument();
   });
 
   it("keeps image preview failures on the existing inline error copy", async () => {
@@ -13959,6 +14013,76 @@ describe("web app", () => {
     expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 
+  it("uses A to open the top-level attachment preview tab with an empty state", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\?scope=group$/.test(url)) {
+            return new Response(JSON.stringify({ attachments: [] }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.keyboard("a");
+
+    expect(screen.getByRole("tab", { name: "Attachments" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(await screen.findByText("No attachments available.")).toBeInTheDocument();
+  });
+
+  it("shows unavailable preview copy for unsupported top-level attachments", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
+    installFetchMock({
+      runs: [makeRun({ runId: "run-1", name: "Attachment run", attachmentCount: 1 })],
+      details: {
+        "run-1": makeDetail({
+          runId: "run-1",
+          name: "Attachment run",
+          attachments: [
+            makeAttachment({
+              id: "att-pdf",
+              name: "report.pdf",
+              mimeType: "application/pdf",
+            }),
+          ],
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Attachments",
+      }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "report.pdf" })).toBeInTheDocument();
+    expect(screen.getByText("Attachment preview unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Download the attachment to view it.")).toBeInTheDocument();
+  });
+
   it("keeps attachment preview loading and unavailable states inline", async () => {
     let resolvePreview: ((response: Response | PromiseLike<Response>) => void) | undefined;
 
@@ -14007,26 +14131,11 @@ describe("web app", () => {
     );
     expect(await screen.findByText("Loading complete")).toBeInTheDocument();
 
-    await router.navigate({
-      params: {
-        attachmentId: "att-missing",
-        attachmentOwnerRunId: "run-1",
-        runId: "run-1",
-      },
-      to: "/runs/$runId/attachments/$attachmentOwnerRunId/$attachmentId",
-    });
-
-    expect(await screen.findByLabelText("Attachment preview error")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "The selected attachment is no longer available in this run. Use Back to return to the attachments list.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /back to attachments/i })).toBeInTheDocument();
     expect(getCloseDetailButton()).toBeInTheDocument();
   });
 
   it("keeps preview errors inline and isolates row preview clicks from attachment actions", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -14076,29 +14185,29 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
 
     await user.click(screen.getByRole("button", { name: /^Download report\.pdf$/ }));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
-    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Remove notes\.md$/ }));
     expect(screen.getByRole("button", { name: /^Confirm remove notes\.md$/ })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Cancel remove notes\.md$/ }));
-    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
 
     expect(screen.queryByRole("button", { name: /^Preview report\.pdf$/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
     expect(await screen.findByText("Attachment preview failed to load")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /back to attachments/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Attachments" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
 
     anchorClick.mockRestore();
   });
 
   it("uploads, downloads, and removes attachments from the detail drawer", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock({
       runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
       details: {
@@ -14124,20 +14233,18 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
 
     await user.upload(
       screen.getByLabelText("Upload attachment file"),
       new File(["hello"], "notes.md", { type: "text/markdown" }),
     );
 
-    expect(await screen.findByText("notes.md")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Download notes\.md$/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Download notes\.md$/ }));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
     expect(anchorClick).toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: /^Remove notes\.md$/ }));
-    expect(screen.getByText("notes.md")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Confirm remove notes\.md$/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Cancel remove notes\.md$/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Confirm remove notes\.md$/ }));
@@ -14148,6 +14255,7 @@ describe("web app", () => {
   });
 
   it("shows group attachments with a source run id and uses ownerRunId for cross-run preview/download", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
     const fetchMock = installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -14208,18 +14316,19 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
 
     expect(screen.queryByRole("tab", { name: "Run" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Group" })).not.toBeInTheDocument();
-    expect(screen.getByText("run-notes.md")).toBeInTheDocument();
-    expect(await screen.findByText("peer-notes.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Preview run-notes\.md$/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /^Preview peer-notes\.md$/ }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Upload attachment file")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /^Remove peer-notes\.md$/ }),
     ).not.toBeInTheDocument();
 
-    const peerRow = screen.getByText("peer-notes.md").closest("li");
+    const peerRow = screen.getByRole("button", { name: /^Preview peer-notes\.md$/ }).closest("li");
     expect(peerRow).not.toBeNull();
     expect(
       within(peerRow as HTMLLIElement).getByRole("button", { name: "Open source run run-2" }),
@@ -14233,7 +14342,12 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: /^Preview peer-notes\.md$/ }));
     expect(await screen.findByText("group attachment body")).toBeInTheDocument();
-    expect(screen.getByText("run-2")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("Attachment preview")).getByRole("heading", {
+        name: "peer-notes.md",
+      }),
+    ).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Attachment preview")).queryByText("run-2")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /^Download$/ }));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
@@ -14243,6 +14357,7 @@ describe("web app", () => {
   });
 
   it("switches to the source run when clicking a group attachment run id", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock(
       {
         runs: [
@@ -14294,8 +14409,9 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: "Open source run run-2" }));
 
     expect(await screen.findByText("Peer run")).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
-    expect(screen.getByText("peer-notes.md")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /^Preview peer-notes\.md$/ }),
+    ).toBeInTheDocument();
   });
 
   it("navigates from the sidebar into the New Run route and hides the board", async () => {

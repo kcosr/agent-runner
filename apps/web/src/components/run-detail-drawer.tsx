@@ -19,6 +19,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -38,6 +39,7 @@ import type { RunAuditState } from "../lib/run-audit.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import {
+  type AttachmentPreviewSelection,
   type DashboardRightSurface,
   type DrawerDetailSection,
   toggleDashboardStructuredFilter,
@@ -47,6 +49,7 @@ import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
+import { AttachmentPreviewPanel } from "./attachment-preview-drawer.js";
 import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import {
   ArchiveIcon,
@@ -93,6 +96,7 @@ const SELECTED_RUN_SURFACE_TABS: readonly SelectedRunSurfaceTab[] = [
   { label: "Detail", shortcut: "D", surface: "detail" },
   { label: "Notes", shortcut: "N", surface: "notes" },
   { label: "Tasks", shortcut: "T", surface: "tasks" },
+  { label: "Attachments", shortcut: "A", surface: "attachments" },
 ];
 
 function dependencyCandidateTitle(run: RunSummary) {
@@ -416,6 +420,102 @@ interface AttachmentRowEntry {
   source: "run" | "group";
 }
 
+function attachmentEntryMatches(entry: AttachmentRowEntry, selection: AttachmentPreviewSelection) {
+  return (
+    entry.ownerRunId === selection.attachmentOwnerRunId &&
+    entry.attachment.id === selection.attachmentId
+  );
+}
+
+function findAttachmentEntryIndex(
+  entries: readonly AttachmentRowEntry[],
+  selection?: AttachmentPreviewSelection,
+) {
+  return selection ? entries.findIndex((entry) => attachmentEntryMatches(entry, selection)) : -1;
+}
+
+function selectAttachmentFallbackEntry({
+  entries,
+  previousEntries,
+  selectedIndex,
+  selection,
+}: {
+  entries: readonly AttachmentRowEntry[];
+  previousEntries: readonly AttachmentRowEntry[];
+  selectedIndex: number;
+  selection?: AttachmentPreviewSelection;
+}) {
+  if (selectedIndex >= 0) {
+    return entries[selectedIndex];
+  }
+  if (!selection) {
+    return entries[0];
+  }
+
+  const previousIndex = previousEntries.findIndex((entry) =>
+    attachmentEntryMatches(entry, selection),
+  );
+  return previousIndex >= 0
+    ? (entries[previousIndex] ?? entries[previousIndex - 1] ?? entries[0])
+    : entries[0];
+}
+
+function useAttachmentSelectionFallback({
+  active,
+  combinedAttachments,
+  selection,
+  onReplaceAttachmentPreview,
+}: {
+  active: boolean;
+  combinedAttachments: readonly AttachmentRowEntry[];
+  selection?: AttachmentPreviewSelection;
+  onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
+}) {
+  const previousAttachmentEntriesRef = useRef<readonly AttachmentRowEntry[]>([]);
+  const selectedAttachmentIndex = findAttachmentEntryIndex(combinedAttachments, selection);
+  const selectedAttachmentEntry = selectAttachmentFallbackEntry({
+    entries: combinedAttachments,
+    previousEntries: previousAttachmentEntriesRef.current,
+    selectedIndex: selectedAttachmentIndex,
+    selection,
+  });
+  const effectiveAttachmentIndex = selectedAttachmentEntry
+    ? combinedAttachments.findIndex((entry) => entry === selectedAttachmentEntry)
+    : -1;
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    if (combinedAttachments.length === 0) {
+      previousAttachmentEntriesRef.current = [];
+      return;
+    }
+    if (selection && selectedAttachmentIndex >= 0) {
+      previousAttachmentEntriesRef.current = combinedAttachments;
+      return;
+    }
+    if (selectedAttachmentEntry) {
+      onReplaceAttachmentPreview(
+        selectedAttachmentEntry.ownerRunId,
+        selectedAttachmentEntry.attachment.id,
+      );
+    }
+  }, [
+    active,
+    combinedAttachments,
+    onReplaceAttachmentPreview,
+    selectedAttachmentEntry,
+    selectedAttachmentIndex,
+    selection,
+  ]);
+
+  return {
+    effectiveAttachmentIndex,
+    selectedAttachmentEntry,
+  };
+}
+
 function InlineConfirmActions({
   cancelLabel,
   cancelTitle,
@@ -462,6 +562,7 @@ function InlineConfirmActions({
 export function RunDetailDrawer({
   activeSection,
   activeSurface,
+  attachmentPreviewSelection,
   chatSurface,
   dependencyCandidateRuns,
   noteEditRequestVersion,
@@ -477,6 +578,7 @@ export function RunDetailDrawer({
   groupAttachmentsQuery,
   onDownloadAttachment,
   onOpenAttachmentPreview,
+  onReplaceAttachmentPreview,
   onSelectRun,
   onClearBackendSession,
   onRemoveDependency,
@@ -503,6 +605,7 @@ export function RunDetailDrawer({
 }: {
   activeSection: DrawerDetailSection;
   activeSurface: DashboardRightSurface;
+  attachmentPreviewSelection?: AttachmentPreviewSelection;
   chatSurface: ReactNode;
   dependencyCandidateRuns: RunSummary[];
   noteEditRequestVersion: number;
@@ -518,6 +621,7 @@ export function RunDetailDrawer({
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   onDownloadAttachment: (ownerRunId: string, attachmentId: string, name: string) => Promise<void>;
   onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
+  onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
   onClearBackendSession: () => Promise<void>;
   onRemoveDependency: (dependency: RunDependencyRef) => Promise<void>;
@@ -636,24 +740,40 @@ export function RunDetailDrawer({
     (dependency) => dependency.satisfied,
   ).length;
   const totalAttachmentSize = run.attachments.reduce((sum, attachment) => sum + attachment.size, 0);
-  const groupAttachments =
-    groupAttachmentsQuery.data?.filter((attachment) => attachment.ownerRunId !== run.runId) ?? [];
+  const groupAttachments = useMemo(
+    () =>
+      groupAttachmentsQuery.data?.filter((attachment) => attachment.ownerRunId !== run.runId) ?? [],
+    [groupAttachmentsQuery.data, run.runId],
+  );
   const groupAttachmentSize = groupAttachments.reduce(
     (sum, attachment) => sum + attachment.size,
     0,
   );
-  const combinedAttachments: AttachmentRowEntry[] = [
-    ...run.attachments.map((attachment) => ({
-      attachment,
-      ownerRunId: run.runId,
-      source: "run" as const,
-    })),
-    ...groupAttachments.map((attachment) => ({
-      attachment,
-      ownerRunId: attachment.ownerRunId,
-      source: "group" as const,
-    })),
-  ];
+  const combinedAttachments: AttachmentRowEntry[] = useMemo(
+    () => [
+      ...run.attachments.map((attachment) => ({
+        attachment,
+        ownerRunId: run.runId,
+        source: "run" as const,
+      })),
+      ...groupAttachments.map((attachment) => ({
+        attachment,
+        ownerRunId: attachment.ownerRunId,
+        source: "group" as const,
+      })),
+    ],
+    [groupAttachments, run.attachments, run.runId],
+  );
+  const { effectiveAttachmentIndex, selectedAttachmentEntry } = useAttachmentSelectionFallback({
+    active: activeSurface === "attachments",
+    combinedAttachments,
+    onReplaceAttachmentPreview,
+    selection: attachmentPreviewSelection,
+  });
+  const previousPreviewEntry =
+    effectiveAttachmentIndex > 0 ? combinedAttachments[effectiveAttachmentIndex - 1] : undefined;
+  const nextPreviewEntry =
+    effectiveAttachmentIndex >= 0 ? combinedAttachments[effectiveAttachmentIndex + 1] : undefined;
   const combinedAttachmentSize = totalAttachmentSize + groupAttachmentSize;
   const configuredDependencyKeys = new Set(run.dependencies.map(dependencyDetailKey));
   const eligibleDependencyCandidates = dependencyCandidateRuns.filter(
@@ -1701,6 +1821,50 @@ export function RunDetailDrawer({
               {tab.label}
             </button>
           ))}
+        </div>
+
+        <div className="drawer-body" hidden={activeSurface !== "attachments"}>
+          <AttachmentPreviewPanel
+            actionPending={actionPending}
+            active={activeSurface === "attachments"}
+            attachment={selectedAttachmentEntry?.attachment}
+            attachmentLookupError={
+              groupAttachmentsQuery.isError && selectedAttachmentEntry === undefined
+                ? groupAttachmentsQuery.error.message
+                : undefined
+            }
+            attachmentLookupPending={
+              combinedAttachments.length === 0 && groupAttachmentsQuery.isPending
+            }
+            fullscreen={isFullscreen && activeSurface === "attachments"}
+            nextAttachmentName={nextPreviewEntry?.attachment.name}
+            onDownload={(attachmentId, name) =>
+              selectedAttachmentEntry
+                ? onDownloadAttachment(selectedAttachmentEntry.ownerRunId, attachmentId, name)
+                : Promise.resolve()
+            }
+            onNextAttachment={
+              nextPreviewEntry
+                ? () =>
+                    onReplaceAttachmentPreview(
+                      nextPreviewEntry.ownerRunId,
+                      nextPreviewEntry.attachment.id,
+                    )
+                : undefined
+            }
+            onPreviousAttachment={
+              previousPreviewEntry
+                ? () =>
+                    onReplaceAttachmentPreview(
+                      previousPreviewEntry.ownerRunId,
+                      previousPreviewEntry.attachment.id,
+                    )
+                : undefined
+            }
+            previousAttachmentName={previousPreviewEntry?.attachment.name}
+            resumeDialogOpen={resumeDialogOpen}
+            runId={selectedAttachmentEntry?.ownerRunId}
+          />
         </div>
 
         <div className="drawer-body drawer-body--chat" hidden={activeSurface !== "chat"}>

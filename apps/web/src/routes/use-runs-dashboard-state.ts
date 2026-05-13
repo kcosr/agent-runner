@@ -30,6 +30,7 @@ import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
+  type AttachmentPreviewSelection,
   DEFAULT_DRAWER_VIEW,
   type DashboardRightSurface,
   type DashboardStructuredFilters,
@@ -133,27 +134,6 @@ function useSettledDetailRunId(selectedRunId?: string) {
   return {
     detailRunId,
     detailSettling: detailRunId !== selectedRunId,
-  };
-}
-
-function attachmentsDetailDrawerView(): RunDrawerView {
-  return {
-    mode: "detail",
-    detailSection: "attachments",
-    attachmentId: null,
-    attachmentOwnerRunId: null,
-  };
-}
-
-function attachmentPreviewDrawerView(
-  attachmentOwnerRunId: string,
-  attachmentId: string,
-): RunDrawerView {
-  return {
-    mode: "attachment",
-    detailSection: "attachments",
-    attachmentId,
-    attachmentOwnerRunId,
   };
 }
 
@@ -454,10 +434,6 @@ export function useRunsDashboardState() {
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
-  const previewAttachmentOwnerRunId =
-    "attachmentOwnerRunId" in runRouteParams ? runRouteParams.attachmentOwnerRunId : undefined;
-  const previewAttachmentId =
-    "attachmentId" in runRouteParams ? runRouteParams.attachmentId : undefined;
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
   const [detailStreamStale, setDetailStreamStale] = useState(false);
@@ -466,6 +442,9 @@ export function useRunsDashboardState() {
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const [listStatusFilter, setListStatusFilter] = useState<DashboardListStatusFilter | null>(null);
+  const [attachmentPreviewSelections, setAttachmentPreviewSelections] = useState<
+    Record<string, AttachmentPreviewSelection>
+  >({});
   const [historyActivation, setHistoryActivation] = useState<HistoryActivationState>({
     audit: false,
     timeline: false,
@@ -514,26 +493,15 @@ export function useRunsDashboardState() {
     selectedRunId !== undefined
       ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
       : undefined;
-  const routeAttachmentPreviewView =
-    selectedRunId && previewAttachmentOwnerRunId && previewAttachmentId
-      ? attachmentPreviewDrawerView(previewAttachmentOwnerRunId, previewAttachmentId)
-      : undefined;
-  const selectedDrawerView =
-    routeAttachmentPreviewView ??
-    (selectedStoredDrawerView?.mode === "attachment"
-      ? attachmentsDetailDrawerView()
-      : selectedStoredDrawerView);
+  const selectedDrawerView = selectedStoredDrawerView;
+  const selectedAttachmentPreview =
+    selectedRunId !== undefined ? attachmentPreviewSelections[selectedRunId] : undefined;
   const selectedViewMatchesDetailRun = detailRunId !== undefined && detailRunId === selectedRunId;
   const timelineActive =
-    selectedViewMatchesDetailRun &&
-    selectedDrawerView?.mode === "detail" &&
-    selectedDrawerView.detailSection === "events";
+    selectedViewMatchesDetailRun && selectedDrawerView?.detailSection === "events";
   const chatTimelineActive =
     selectedViewMatchesDetailRun && viewState.activeRightSurface === "chat";
-  const auditActive =
-    selectedViewMatchesDetailRun &&
-    selectedDrawerView?.mode === "detail" &&
-    selectedDrawerView.detailSection === "audit";
+  const auditActive = selectedViewMatchesDetailRun && selectedDrawerView?.detailSection === "audit";
   const historyActivationMatchesDetailRun = historyActivation.runId === detailRunId;
   const timelineEnabled =
     chatTimelineActive ||
@@ -799,12 +767,15 @@ export function useRunsDashboardState() {
     void navigate({ to: "/" });
   };
 
-  function setActiveRightSurface(activeRightSurface: DashboardRightSurface) {
-    if (viewState.activeRightSurface === activeRightSurface) {
-      return;
-    }
-    updateViewState({ activeRightSurface });
-  }
+  const setActiveRightSurface = useCallback(
+    (activeRightSurface: DashboardRightSurface) => {
+      if (viewState.activeRightSurface === activeRightSurface) {
+        return;
+      }
+      updateViewState({ activeRightSurface });
+    },
+    [updateViewState, viewState.activeRightSurface],
+  );
 
   const archiveMutation = useMutation({
     mutationFn: (runId: string) => api.archiveRun(runId),
@@ -1247,6 +1218,21 @@ export function useRunsDashboardState() {
     },
     [updateViewState],
   );
+  const setSelectedRunAttachmentPreview = useCallback(
+    (attachmentOwnerRunId: string, attachmentId: string, options: { activateSurface: boolean }) => {
+      if (!selectedRunId) {
+        return;
+      }
+      setAttachmentPreviewSelections((current) => ({
+        ...current,
+        [selectedRunId]: { attachmentId, attachmentOwnerRunId },
+      }));
+      if (options.activateSurface) {
+        setActiveRightSurface("attachments");
+      }
+    },
+    [selectedRunId, setActiveRightSurface],
+  );
 
   function closeResumeDialog() {
     if (actionPending === "resume") {
@@ -1376,54 +1362,6 @@ export function useRunsDashboardState() {
     });
   }
 
-  function navigateToAttachmentPreview(
-    runId: string,
-    attachmentOwnerRunId: string,
-    attachmentId: string,
-    options?: RunNavigationOptions,
-  ) {
-    void navigate({
-      params: {
-        attachmentId,
-        attachmentOwnerRunId,
-        runId,
-      },
-      replace: options?.replace,
-      to: "/runs/$runId/attachments/$attachmentOwnerRunId/$attachmentId",
-    });
-  }
-
-  useEffect(() => {
-    if (!selectedRunId) {
-      return;
-    }
-
-    if (previewAttachmentOwnerRunId && previewAttachmentId) {
-      if (
-        selectedStoredDrawerView?.mode === "attachment" &&
-        selectedStoredDrawerView.attachmentId === previewAttachmentId &&
-        selectedStoredDrawerView.attachmentOwnerRunId === previewAttachmentOwnerRunId
-      ) {
-        return;
-      }
-      setSelectedRunDrawerView(
-        selectedRunId,
-        attachmentPreviewDrawerView(previewAttachmentOwnerRunId, previewAttachmentId),
-      );
-      return;
-    }
-
-    if (selectedStoredDrawerView?.mode === "attachment") {
-      setSelectedRunDrawerView(selectedRunId, attachmentsDetailDrawerView());
-    }
-  }, [
-    previewAttachmentId,
-    previewAttachmentOwnerRunId,
-    selectedRunId,
-    selectedStoredDrawerView,
-    setSelectedRunDrawerView,
-  ]);
-
   return {
     actionError,
     activeBoardColumnKey: viewState.activeBoardColumnKey,
@@ -1465,37 +1403,17 @@ export function useRunsDashboardState() {
     notices,
     openRun: (runId: string, options?: RunNavigationOptions) => {
       setActionError(undefined);
-      const drawerView = viewState.drawerViewsByRunId[runId];
-      if (drawerView?.mode === "attachment") {
-        navigateToAttachmentPreview(
-          runId,
-          drawerView.attachmentOwnerRunId,
-          drawerView.attachmentId,
-          options,
-        );
-        return;
-      }
       navigateToRunDetail(runId, options);
     },
     openSelectedRunResumeDialog: openResumeDialog,
-    openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
-      if (!selectedRunId) {
-        return;
-      }
-      const drawerView = attachmentPreviewDrawerView(attachmentOwnerRunId, attachmentId);
-      setSelectedRunDrawerView(selectedRunId, drawerView);
-      navigateToAttachmentPreview(selectedRunId, attachmentOwnerRunId, attachmentId);
-    },
-    replaceSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
-      if (!selectedRunId) {
-        return;
-      }
-      const drawerView = attachmentPreviewDrawerView(attachmentOwnerRunId, attachmentId);
-      setSelectedRunDrawerView(selectedRunId, drawerView);
-      navigateToAttachmentPreview(selectedRunId, attachmentOwnerRunId, attachmentId, {
-        replace: true,
-      });
-    },
+    openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) =>
+      setSelectedRunAttachmentPreview(attachmentOwnerRunId, attachmentId, {
+        activateSurface: true,
+      }),
+    replaceSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) =>
+      setSelectedRunAttachmentPreview(attachmentOwnerRunId, attachmentId, {
+        activateSurface: false,
+      }),
     preferences,
     filterOptions,
     hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
@@ -1587,6 +1505,7 @@ export function useRunsDashboardState() {
     runsQuery,
     detailSettling,
     selectedRunId,
+    selectedAttachmentPreview,
     selectedDrawerView,
     selectedRunGroupAttachmentsQuery,
     selectedRunPrimaryActionAvailable,
@@ -1599,13 +1518,6 @@ export function useRunsDashboardState() {
     timelineState,
     triggerRunPrimaryAction,
     triggerSelectedRunPrimaryAction,
-    returnSelectedRunToAttachments: () => {
-      if (!selectedRunId) {
-        return;
-      }
-      setSelectedRunDrawerView(selectedRunId, attachmentsDetailDrawerView());
-      navigateToRunDetail(selectedRunId, { replace: true });
-    },
     resetBoardFilters: () => {
       setListStatusFilter(null);
       updateViewState({ search: "" });
@@ -1648,10 +1560,7 @@ export function useRunsDashboardState() {
         return;
       }
       setSelectedRunDrawerView(selectedRunId, {
-        mode: "detail",
         detailSection,
-        attachmentId: null,
-        attachmentOwnerRunId: null,
       });
     },
     toggleStructuredFilter: (key: keyof DashboardStructuredFilters, value: string) => {
