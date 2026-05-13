@@ -210,9 +210,10 @@
 
 ### Fixed
 
-- Codex websocket and UDS backend sessions now inject task-runner
-  lineage and recursion guard env into Codex thread config for shell
-  tools, without forwarding arbitrary process or transport env.
+- Codex backend sessions now inject task-runner lineage and recursion
+  guard env into thread config for shell tools, so websocket and UDS
+  sessions preserve lineage without forwarding arbitrary process or
+  transport env.
 - Pinning or archiving a run no longer changes its `updatedAt` timestamp, while
   content and lifecycle changes such as notes, names, task state, dependencies,
   and schedules continue to refresh `updatedAt`.

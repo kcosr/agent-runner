@@ -1,15 +1,23 @@
 /**
- * Recursion depth guard.
+ * Backend runtime lineage and recursion guard env.
  *
  * Prevents runaway agent-spawning-agent loops where one task-runner
  * invocation calls a backend that itself shells out to another
  * `task-runner run`. Without a guard, a misbehaving agent could spin
  * up an unbounded chain of backend processes.
  *
- * Mechanism: two env vars travel through every child invocation.
+ * Recursion guard mechanism: two env vars travel through every child
+ * invocation.
  *
  *   TASK_RUNNER_CALL_DEPTH       — current depth (0 at the outermost call)
  *   TASK_RUNNER_MAX_CALL_DEPTH   — hard cap, default 1
+ *
+ * Backend runtime lineage also travels through child invocations.
+ *
+ *   TASK_RUNNER_PARENT_RUN_ID    — lineage parent for nested runs
+ *   TASK_RUNNER_RUN_GROUP_ID     — run group for nested runs
+ *   TASK_RUNNER_RUN_ID           — active manifest run id
+ *   TASK_RUNNER_CWD              — active backend attempt cwd
  *
  * On entry, `runAgent` reads the current depth from its own env. If
  * `currentDepth >= maxDepth` it throws `RecursionDepthError` before

@@ -530,7 +530,8 @@ async function startMalformedJsonCodexServer() {
 async function startCodexThreadStartCaptureServer() {
   const server = new WebSocketServer({ port: 0 });
   const capturedThreadStartParams = [];
-  const threadId = "captured-thread";
+  const capturedThreadResumeParams = [];
+  const startedThreadId = "captured-thread";
   const turnId = "captured-turn";
 
   server.on("connection", (socket) => {
@@ -553,7 +554,18 @@ async function startCodexThreadStartCaptureServer() {
           JSON.stringify({
             jsonrpc: "2.0",
             id: message.id,
-            result: { thread: { id: threadId } },
+            result: { thread: { id: startedThreadId } },
+          }),
+        );
+        return;
+      }
+      if (message.method === "thread/resume") {
+        capturedThreadResumeParams.push(message.params);
+        socket.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { thread: { id: message.params.threadId } },
           }),
         );
         return;
@@ -567,6 +579,8 @@ async function startCodexThreadStartCaptureServer() {
           }),
         );
         setTimeout(() => {
+          const threadId =
+            typeof message.params.threadId === "string" ? message.params.threadId : startedThreadId;
           notify("item/agentMessage/delta", {
             threadId,
             turnId,
@@ -590,6 +604,7 @@ async function startCodexThreadStartCaptureServer() {
   return {
     url: `ws://127.0.0.1:${address.port}/`,
     capturedThreadStartParams,
+    capturedThreadResumeParams,
     async close() {
       for (const client of server.clients) {
         client.terminate();
@@ -761,6 +776,41 @@ test("codexBackend sends lineage config over websocket thread/start", async () =
       config: {
         "shell_environment_policy.set.TASK_RUNNER_CALL_DEPTH": "1",
         "shell_environment_policy.set.TASK_RUNNER_MAX_CALL_DEPTH": "2",
+        "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "parent-run",
+        "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
+        "shell_environment_policy.set.TASK_RUNNER_RUN_ID": "current-run",
+        "shell_environment_policy.set.TASK_RUNNER_CWD": "/repo",
+      },
+    });
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("codexBackend sends lineage config over websocket thread/resume", async () => {
+  const codexServer = await startCodexThreadStartCaptureServer();
+
+  try {
+    const result = await codexBackend.invoke({
+      ...baseCtx,
+      env: {
+        TASK_RUNNER_PARENT_RUN_ID: "parent-run",
+        TASK_RUNNER_RUN_GROUP_ID: "group-1",
+        TASK_RUNNER_RUN_ID: "current-run",
+        TASK_RUNNER_CWD: "/repo",
+      },
+      resumeSessionId: "thread-123",
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
+      },
+    });
+
+    assert.equal(result.exitCode, 0, `${result.rawStderr}\n${result.rawStdout}`);
+    assert.equal(codexServer.capturedThreadResumeParams.length, 1);
+    assert.deepEqual(codexServer.capturedThreadResumeParams[0], {
+      cwd: "/repo",
+      threadId: "thread-123",
+      config: {
         "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "parent-run",
         "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
         "shell_environment_policy.set.TASK_RUNNER_RUN_ID": "current-run",
