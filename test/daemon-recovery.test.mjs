@@ -115,7 +115,11 @@ async function waitFor(condition, message, timeoutMs = 3_000) {
   throw new Error(message);
 }
 
-async function startCodexThreadStatusServer({ status, completeResume = false }) {
+async function startCodexThreadStatusServer({
+  status,
+  completeResume = false,
+  respondToRead = true,
+}) {
   const server = new WebSocketServer({ port: 0 });
   const calls = [];
   const waiters = new Map();
@@ -140,6 +144,9 @@ async function startCodexThreadStatusServer({ status, completeResume = false }) 
       }
       if (message.method === "initialized") return;
       if (message.method === "thread/read") {
+        if (!respondToRead) {
+          return;
+        }
         send({
           jsonrpc: "2.0",
           id: message.id,
@@ -469,6 +476,46 @@ test("daemon startup marks malformed Codex thread/read responses as thread_read_
           (event) => event.type === "run.controller_reconciled",
         );
         assert.equal(reconciled?.fields.reason, "thread_read_failed");
+      } finally {
+        await server.close();
+      }
+    });
+  } finally {
+    await codexServer.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("daemon startup times out Codex thread/read that never replies", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", "codex");
+  writeAssignment(dir);
+  const codexServer = await startCodexThreadStatusServer({
+    status: { Active: { active_flags: [] } },
+    respondToRead: false,
+  });
+  const run = await initRun(dir, "codex-agent");
+  markRunning(run.workspaceDir, {
+    backendSessionId: "thread-hung-read",
+    backendConfig: { transport: { type: "ws", url: codexServer.url } },
+    cwd: "/repo",
+    timeoutSec: 0.01,
+  });
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  try {
+    await withEnv(sharedRuntimeEnv(dir), async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const manifest = readManifest(run.workspaceDir);
+        assert.equal(manifest.status, "error");
+        assert.equal(manifest.exitCode, 4);
+        const reconciled = auditEvents(run.workspaceDir, run.runId).find(
+          (event) => event.type === "run.controller_reconciled",
+        );
+        assert.equal(reconciled?.fields.reason, "remote_unreachable");
+        assert.match(reconciled?.fields.error, /timed out/);
       } finally {
         await server.close();
       }

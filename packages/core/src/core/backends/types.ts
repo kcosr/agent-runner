@@ -170,6 +170,7 @@ export interface ValidateSessionContext {
   env?: Record<string, string>;
   backendConfig?: unknown;
   resolvedBackendArgs: ResolvedBackendArgs;
+  timeoutSec?: number;
 }
 
 export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };

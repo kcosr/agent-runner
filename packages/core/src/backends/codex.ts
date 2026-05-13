@@ -1093,24 +1093,39 @@ function backendInvokeContextFromSessionValidation(
     env: ctx.env ?? (process.env as Record<string, string>),
     backendConfig: ctx.backendConfig,
     resolvedBackendArgs: ctx.resolvedBackendArgs,
-    timeoutSec: 60,
+    timeoutSec: ctx.timeoutSec ?? 60,
   };
 }
 
 export async function readCodexThread(ctx: ValidateSessionContext): Promise<CodexThreadReadResult> {
   let transport: Transport | undefined;
   let client: CodexClient | undefined;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeoutMs = (ctx.timeoutSec ?? 60) * 1000;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      void closeCodexConnection(client, transport);
+      reject(new Error(`codex thread/read for "${ctx.sessionId}" timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
   try {
-    const connection = await openInitializedCodexClient(
-      backendInvokeContextFromSessionValidation(ctx),
-    );
+    const connection = await Promise.race([
+      openInitializedCodexClient(backendInvokeContextFromSessionValidation(ctx)),
+      timeout,
+    ]);
     transport = connection.transport;
     client = connection.client;
-    const result = await client.call<unknown>("thread/read", {
-      threadId: ctx.sessionId,
-    });
+    const result = await Promise.race([
+      client.call<unknown>("thread/read", {
+        threadId: ctx.sessionId,
+      }),
+      timeout,
+    ]);
     return parseCodexThreadReadResult(ctx.sessionId, result);
   } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
     await closeCodexConnection(client, transport);
   }
 }
@@ -1150,6 +1165,36 @@ function waitForSignal(
   });
 }
 
+function recoveryControlResult(
+  outcome: "abort" | "detach",
+  state: AccumulatorState,
+  rawStdoutChunks: string[],
+  rawStderr: string,
+): BackendInvokeResult {
+  return {
+    exitCode: outcome === "abort" ? 1 : null,
+    signal: null,
+    timedOut: false,
+    aborted: outcome === "abort",
+    detached: outcome === "detach" ? true : undefined,
+    sessionId: state.threadId,
+    transcript: null,
+    rawStdout: rawStdoutChunks.join("\n"),
+    rawStderr,
+  };
+}
+
+async function raceWithRecoveryControl<T>(
+  operation: Promise<T>,
+  ctx: BackendInvokeContext,
+): Promise<{ outcome: "value"; value: T } | { outcome: "abort" | "detach" }> {
+  return await Promise.race([
+    operation.then((value) => ({ outcome: "value" as const, value })),
+    waitForSignal(ctx.abortSignal, "abort").then((outcome) => ({ outcome })),
+    waitForSignal(ctx.detachSignal, "detach").then((outcome) => ({ outcome })),
+  ]);
+}
+
 export async function adoptCodexActiveThread(
   ctx: BackendInvokeContext & { resumeSessionId: string },
 ): Promise<BackendInvokeResult> {
@@ -1187,10 +1232,22 @@ export async function adoptCodexActiveThread(
     });
     client.sendNotification("initialized");
 
-    const result = await client.call<unknown>(
-      "thread/resume",
-      buildCodexThreadParams(ctx, { threadId: ctx.resumeSessionId }),
+    const resume = await raceWithRecoveryControl(
+      client.call<unknown>(
+        "thread/resume",
+        buildCodexThreadParams(ctx, { threadId: ctx.resumeSessionId }),
+      ),
+      ctx,
     );
+    if (resume.outcome !== "value") {
+      return recoveryControlResult(
+        resume.outcome,
+        state,
+        rawStdoutChunks,
+        `${client.stderr}${diagnostics}`,
+      );
+    }
+    const result = resume.value;
     if (isRecord(result) && isRecord(result.thread) && typeof result.thread.id === "string") {
       state.threadId = result.thread.id;
     }

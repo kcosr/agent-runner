@@ -2451,6 +2451,7 @@ export async function serveDaemon(
         env: process.env as Record<string, string>,
         backendConfig: manifest.backendConfig,
         resolvedBackendArgs: manifest.resolvedBackendArgs,
+        timeoutSec: manifest.timeoutSec,
       });
       threadStatus = thread.status;
     } catch (error) {
