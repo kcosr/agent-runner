@@ -307,18 +307,6 @@ export function RunRow({
           <GroupIcon aria-hidden="true" />
           <span>{run.runGroupId}</span>
         </button>
-      </div>
-
-      <div className="run-row__progress">
-        <span className="progress-text">
-          {run.tasksCompleted} / {run.tasksTotal}
-        </span>
-        <div aria-label="Task progress" className="progress">
-          <div className="progress-bar" style={{ width: `${progress}%` }} />
-        </div>
-      </div>
-
-      <div className="run-row__signals" aria-label={`Signals for ${accessibleName}`}>
         {run.notePresent ? (
           <span aria-label="Note present" className="run-row-signal run-row-signal--neutral">
             <NotepadTextIcon aria-hidden="true" />
@@ -365,12 +353,25 @@ export function RunRow({
             {run.queuedResumeMessageCount}
           </span>
         ) : null}
+      </div>
+
+      <div className="run-row__progress">
         {run.activeTask ? (
-          <span className="run-row-signal run-row-signal--active" title={run.activeTask.title}>
+          <span
+            className="run-row__progress-summary run-row__progress-summary--active"
+            title={run.activeTask.title}
+          >
             <RunningIcon aria-hidden="true" />
-            <span className="run-row-signal__text">{run.activeTask.title}</span>
+            <span className="run-row__active-task-text">{run.activeTask.title}</span>
           </span>
-        ) : null}
+        ) : (
+          <span className="progress-text run-row__progress-summary">
+            {run.tasksCompleted} / {run.tasksTotal}
+          </span>
+        )}
+        <div aria-label="Task progress" className="progress">
+          <div className="progress-bar" style={{ width: `${progress}%` }} />
+        </div>
       </div>
 
       <div className="run-row__time">

@@ -1800,6 +1800,7 @@ describe("web app", () => {
         attachmentCount: 2,
         queuedResumeMessageCount: 1,
         notePresent: true,
+        activeTask: { id: "running-task", title: "Draft running update" },
       }),
       makeRun({
         runId: "run-list-completed",
@@ -1890,6 +1891,13 @@ describe("web app", () => {
       expect.stringContaining("Running list"),
       expect.stringContaining("Blocked list"),
     ]);
+    const runningRowSurface = await findRunRowSurface("Running list");
+    expect(runningRowSurface.querySelector(".run-row__signals")).toBeNull();
+    expect(runningRowSurface.querySelector(".run-row__progress-summary--active")).toHaveTextContent(
+      "Draft running update",
+    );
+    expect(within(runningRowSurface).getByLabelText("2 attachments")).toBeInTheDocument();
+    expect(within(runningRowSurface).getByLabelText("1 queued message")).toBeInTheDocument();
     expect(within(await findRunRow("Completed list")).queryByLabelText("Pinned")).toBeNull();
     expect(screen.getByRole("button", { name: "All statuses, 4 runs" })).toHaveAttribute(
       "aria-pressed",
