@@ -663,7 +663,7 @@ pre {
 
 .run-row {
   display: grid;
-  grid-template-columns: minmax(21rem, 1.7fr) minmax(20rem, 1.55fr) 3.75rem minmax(10rem, 0.75fr) auto;
+  grid-template-columns: minmax(21rem, 1.7fr) minmax(20rem, 1.55fr) 3.75rem minmax(7rem, 0.5fr) auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
