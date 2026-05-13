@@ -211,6 +211,9 @@
 - Added backend-owned session history import and sync for Pi JSONL
   sessions and Cursor deterministic `store.db` sessions.
   ([#135](https://github.com/kcosr/task-runner/pull/135))
+- Added `run.controller_detached` and `run.controller_reconciled` audit
+  events for daemon shutdown detach and startup reconciliation decisions.
+  ([#146](https://github.com/kcosr/task-runner/pull/146))
 
 ### Changed
 
@@ -218,6 +221,11 @@
   `timed out` when the subprocess is interrupted, taking precedence over
   stderr/stdout excerpts from the interrupted engine process.
   ([#145](https://github.com/kcosr/task-runner/pull/145))
+- Daemon startup and shutdown now reconcile active runs by controller
+  ownership: local/subprocess runs are still aborted, while Codex
+  websocket and UDS runs detach on graceful shutdown and can be
+  re-adopted or finalized from Codex thread state on daemon startup.
+  ([#146](https://github.com/kcosr/task-runner/pull/146))
 
 ### Fixed
 

@@ -525,6 +525,7 @@ interface AccumulatorState {
   turnStatus: "in_progress" | "completed" | "failed" | "interrupted" | "unknown";
   turnError: string | null;
   turnCompleted: boolean;
+  adoptFirstTurnStarted: boolean;
   onText: (text: string) => void;
   resolveCompleted: (() => void) | null;
 }
@@ -727,6 +728,13 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
       return;
     }
     case "turn/started": {
+      if (state.adoptFirstTurnStarted) {
+        const threadId = notificationThreadId(params);
+        const turnId = notificationTurnId(params);
+        if (state.threadId !== null && threadId === state.threadId && turnId !== null) {
+          setTurnId(state, turnId);
+        }
+      }
       if (!acceptCurrentTurnNotification(state, params)) return;
       return;
     }
@@ -832,6 +840,14 @@ function cloneCodexTransportConfig(transport: CodexTransportConfig): CodexTransp
 
 export interface CodexBackendConfig {
   transport: CodexTransportConfig;
+}
+
+export type CodexThreadStatus = "Active" | "Idle" | "SystemError" | "NotLoaded";
+
+export interface CodexThreadReadResult {
+  threadId: string;
+  status: CodexThreadStatus;
+  cwd: string | null;
 }
 
 export function normalizeCodexWsUrl(url: string): string {
@@ -1005,6 +1021,321 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
     ctx.launcher,
     ctx.onRawStdoutLine,
   );
+}
+
+async function openInitializedCodexClient(ctx: BackendInvokeContext): Promise<{
+  transport: Transport;
+  client: CodexClient;
+}> {
+  const transport = await openTransport(ctx);
+  const client = createClient(transport);
+  await client.call("initialize", {
+    clientInfo: {
+      name: "task-runner",
+      title: "task-runner",
+      version: "0.1.0",
+    },
+    capabilities: { experimentalApi: true },
+  });
+  client.sendNotification("initialized");
+  return { transport, client };
+}
+
+function parseCodexThreadStatus(value: unknown): CodexThreadStatus | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  switch (value.type) {
+    case "active":
+      return "Active";
+    case "idle":
+      return "Idle";
+    case "systemError":
+      return "SystemError";
+    case "notLoaded":
+      return "NotLoaded";
+    default:
+      return null;
+  }
+}
+
+export class CodexThreadReadProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodexThreadReadProtocolError";
+  }
+}
+
+function parseCodexThreadReadResult(sessionId: string, result: unknown): CodexThreadReadResult {
+  if (!isRecord(result) || !isRecord(result.thread)) {
+    throw new CodexThreadReadProtocolError(
+      `codex thread/read for "${sessionId}" returned an unexpected response shape`,
+    );
+  }
+  const thread = result.thread;
+  const threadId = typeof thread.id === "string" ? thread.id : sessionId;
+  const status = parseCodexThreadStatus(thread.status);
+  if (status === null) {
+    throw new CodexThreadReadProtocolError(
+      `codex thread/read for "${sessionId}" returned an unknown thread status`,
+    );
+  }
+  return {
+    threadId,
+    status,
+    cwd: typeof thread.cwd === "string" ? thread.cwd : null,
+  };
+}
+
+function backendInvokeContextFromSessionValidation(
+  ctx: ValidateSessionContext,
+): BackendInvokeContext {
+  return {
+    prompt: "",
+    cwd: ctx.cwd,
+    processCwd: ctx.processCwd,
+    env: ctx.env ?? (process.env as Record<string, string>),
+    backendConfig: ctx.backendConfig,
+    resolvedBackendArgs: ctx.resolvedBackendArgs,
+    timeoutSec: ctx.timeoutSec ?? 60,
+  };
+}
+
+export async function readCodexThread(ctx: ValidateSessionContext): Promise<CodexThreadReadResult> {
+  let transport: Transport | undefined;
+  let client: CodexClient | undefined;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeoutMs = (ctx.timeoutSec ?? 60) * 1000;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      void closeCodexConnection(client, transport);
+      reject(new Error(`codex thread/read for "${ctx.sessionId}" timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  try {
+    const connection = await Promise.race([
+      openInitializedCodexClient(backendInvokeContextFromSessionValidation(ctx)),
+      timeout,
+    ]);
+    transport = connection.transport;
+    client = connection.client;
+    const result = await Promise.race([
+      client.call<unknown>("thread/read", {
+        threadId: ctx.sessionId,
+      }),
+      timeout,
+    ]);
+    return parseCodexThreadReadResult(ctx.sessionId, result);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+    await closeCodexConnection(client, transport);
+  }
+}
+
+function makeAccumulatorState(
+  ctx: BackendInvokeContext,
+  options: { adoptFirstTurnStarted?: boolean } = {},
+): AccumulatorState {
+  return {
+    threadId: null,
+    turnId: null,
+    turnIdWaiters: [],
+    turnCompletionWaiters: [],
+    streamedText: "",
+    completedText: "",
+    lastStreamItemId: null,
+    turnStatus: "in_progress",
+    turnError: null,
+    turnCompleted: false,
+    adoptFirstTurnStarted: options.adoptFirstTurnStarted ?? false,
+    onText: (text) => ctx.emit?.({ type: "agent_message_delta", text }),
+    resolveCompleted: null,
+  };
+}
+
+function waitForSignal(
+  signal: AbortSignal | undefined,
+  result: "abort" | "detach",
+): Promise<"abort" | "detach"> {
+  return new Promise((resolve) => {
+    if (!signal) return;
+    if (signal.aborted) {
+      resolve(result);
+      return;
+    }
+    signal.addEventListener("abort", () => resolve(result), { once: true });
+  });
+}
+
+function recoveryControlResult(
+  outcome: "abort" | "detach",
+  state: AccumulatorState,
+  rawStdoutChunks: string[],
+  rawStderr: string,
+): BackendInvokeResult {
+  return {
+    exitCode: outcome === "abort" ? 1 : null,
+    signal: null,
+    timedOut: false,
+    aborted: outcome === "abort",
+    detached: outcome === "detach" ? true : undefined,
+    sessionId: state.threadId,
+    transcript: null,
+    rawStdout: rawStdoutChunks.join("\n"),
+    rawStderr,
+  };
+}
+
+async function raceWithRecoveryControl<T>(
+  operation: Promise<T>,
+  ctx: BackendInvokeContext,
+): Promise<{ outcome: "value"; value: T } | { outcome: "abort" | "detach" }> {
+  return await Promise.race([
+    operation.then((value) => ({ outcome: "value" as const, value })),
+    waitForSignal(ctx.abortSignal, "abort").then((outcome) => ({ outcome })),
+    waitForSignal(ctx.detachSignal, "detach").then((outcome) => ({ outcome })),
+  ]);
+}
+
+export async function adoptCodexActiveThread(
+  ctx: BackendInvokeContext & { resumeSessionId: string },
+): Promise<BackendInvokeResult> {
+  const rawStdoutChunks: string[] = [];
+  let transport: Transport | undefined;
+  let client: CodexClient | undefined;
+  let diagnostics = "";
+  let aborted = false;
+  let timedOut = false;
+  const state = makeAccumulatorState(ctx, { adoptFirstTurnStarted: true });
+
+  const emitBackendNotice = (text: string): void => {
+    diagnostics += text;
+    ctx.emit?.({ type: "backend_notice", text });
+  };
+
+  try {
+    state.threadId = ctx.resumeSessionId;
+    transport = await openTransport(ctx);
+    transport.onStderr((text) => {
+      ctx.emit?.({ type: "backend_notice", text });
+    });
+    client = createClient(transport, {
+      onRawIncoming: (line) => rawStdoutChunks.push(`> ${line}`),
+      onRawOutgoing: (line) => rawStdoutChunks.push(`< ${line}`),
+    });
+    client.notify((method, params) => handleNotification(state, method, params));
+    await client.call("initialize", {
+      clientInfo: {
+        name: "task-runner",
+        title: "task-runner",
+        version: "0.1.0",
+      },
+      capabilities: { experimentalApi: true },
+    });
+    client.sendNotification("initialized");
+
+    const resume = await raceWithRecoveryControl(
+      client.call<unknown>(
+        "thread/resume",
+        buildCodexThreadParams(ctx, { threadId: ctx.resumeSessionId }),
+      ),
+      ctx,
+    );
+    if (resume.outcome !== "value") {
+      return recoveryControlResult(
+        resume.outcome,
+        state,
+        rawStdoutChunks,
+        `${client.stderr}${diagnostics}`,
+      );
+    }
+    const result = resume.value;
+    if (isRecord(result) && isRecord(result.thread) && typeof result.thread.id === "string") {
+      state.threadId = result.thread.id;
+    }
+
+    const turnCompletedPromise = new Promise<void>((resolve) => {
+      state.resolveCompleted = resolve;
+      if (state.turnCompleted) {
+        resolve();
+      }
+    });
+    const turnTimeoutMs = ctx.timeoutSec * 1000;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const turnDeadline = new Promise<"timeout">((resolve) => {
+      timeoutHandle = setTimeout(() => resolve("timeout"), turnTimeoutMs);
+    });
+    const race = await Promise.race([
+      turnCompletedPromise.then(() => "done" as const),
+      turnDeadline,
+      waitForSignal(ctx.abortSignal, "abort"),
+      waitForSignal(ctx.detachSignal, "detach"),
+    ]);
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+
+    if (race === "detach") {
+      return {
+        exitCode: null,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        detached: true,
+        sessionId: state.threadId,
+        transcript: null,
+        rawStdout: rawStdoutChunks.join("\n"),
+        rawStderr: `${client.stderr}${diagnostics}`,
+      };
+    }
+
+    if (race === "timeout") {
+      timedOut = true;
+      await interruptTurnWithRetry(client, state);
+    }
+
+    if (race === "abort") {
+      const interrupt = await confirmInterrupt(client, state);
+      if (interrupt.confirmed) {
+        aborted = true;
+      } else {
+        emitBackendNotice("codex: startup-recovered turn interrupt was not confirmed.\n");
+      }
+    }
+  } catch (err) {
+    const message = (err as Error).message;
+    emitBackendNotice(`${message}\n`);
+    return {
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      aborted,
+      sessionId: state.threadId ?? ctx.resumeSessionId,
+      transcript: null,
+      rawStdout: rawStdoutChunks.join("\n"),
+      rawStderr: `${client?.stderr ?? ""}${diagnostics}`,
+    };
+  } finally {
+    await client?.close().catch(() => {});
+  }
+
+  const transcript = composePersistedTranscript(state.streamedText, state.completedText);
+  const fallbackDelta = silentTranscriptFallback(state.streamedText, transcript);
+  if (fallbackDelta) {
+    ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
+  }
+  const exitCode = aborted ? 1 : !timedOut && state.turnStatus === "completed" ? 0 : 1;
+  return {
+    exitCode,
+    signal: null,
+    timedOut,
+    aborted,
+    sessionId: state.threadId ?? ctx.resumeSessionId,
+    transcript,
+    rawStdout: rawStdoutChunks.join("\n"),
+    rawStderr: `${client?.stderr ?? ""}${diagnostics}`,
+  };
 }
 
 const CODEX_LINEAGE_ENV_CONFIG_KEYS = [
@@ -1287,43 +1618,9 @@ async function readCodexSessionHistory(
  * worse than a hard error.
  */
 async function validateCodexSession(ctx: ValidateSessionContext): Promise<ValidateSessionResult> {
-  let transport: Transport | undefined;
-  let client: CodexClient | undefined;
   try {
-    transport = await openTransport({
-      // Only cwd/processCwd/env are read by openTransport. The rest of
-      // BackendInvokeContext is unused for the validation handshake.
-      prompt: "",
-      cwd: ctx.cwd,
-      processCwd: ctx.processCwd,
-      env: ctx.env ?? (process.env as Record<string, string>),
-      backendConfig: ctx.backendConfig,
-      resolvedBackendArgs: ctx.resolvedBackendArgs,
-      timeoutSec: 60,
-    });
-    client = createClient(transport);
-
-    await client.call("initialize", {
-      clientInfo: {
-        name: "task-runner",
-        title: "task-runner",
-        version: "0.1.0",
-      },
-      capabilities: { experimentalApi: true },
-    });
-    client.sendNotification("initialized");
-
-    const result = await client.call<unknown>("thread/read", {
-      threadId: ctx.sessionId,
-    });
-
-    if (!isRecord(result) || !isRecord(result.thread)) {
-      return {
-        valid: false,
-        reason: `codex thread/read for "${ctx.sessionId}" returned an unexpected response shape`,
-      };
-    }
-    const threadCwd = typeof result.thread.cwd === "string" ? result.thread.cwd : null;
+    const thread = await readCodexThread(ctx);
+    const threadCwd = thread.cwd;
     if (threadCwd !== null && threadCwd !== ctx.cwd) {
       return {
         valid: false,
@@ -1336,8 +1633,6 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
       valid: false,
       reason: `codex thread "${ctx.sessionId}" not found: ${(err as Error).message}`,
     };
-  } finally {
-    await closeCodexConnection(client, transport);
   }
 }
 
@@ -1418,20 +1713,7 @@ export const codexBackend: Backend = {
       ctx.emit?.({ type: "backend_notice", text });
     };
 
-    const state: AccumulatorState = {
-      threadId: null,
-      turnId: null,
-      turnIdWaiters: [],
-      turnCompletionWaiters: [],
-      streamedText: "",
-      completedText: "",
-      lastStreamItemId: null,
-      turnStatus: "in_progress",
-      turnError: null,
-      turnCompleted: false,
-      onText: (text) => ctx.emit?.({ type: "agent_message_delta", text }),
-      resolveCompleted: null,
-    };
+    const state = makeAccumulatorState(ctx);
 
     try {
       transport = await openTransport(ctx);
@@ -1535,6 +1817,22 @@ export const codexBackend: Backend = {
         abortListener = () => resolve("abort");
         ctx.abortSignal.addEventListener("abort", abortListener, { once: true });
       });
+      let detachListener: (() => void) | undefined;
+      const transportConfig = resolveCodexTransportConfig(ctx);
+      const turnDetach = new Promise<"detach">((resolve) => {
+        if (
+          !ctx.detachSignal ||
+          (transportConfig.type !== "ws" && transportConfig.type !== "uds")
+        ) {
+          return;
+        }
+        if (ctx.detachSignal.aborted) {
+          resolve("detach");
+          return;
+        }
+        detachListener = () => resolve("detach");
+        ctx.detachSignal.addEventListener("abort", detachListener, { once: true });
+      });
 
       // Fire turn/start and wait for either completion, timeout, or abort.
       const turnStartPromise = client
@@ -1549,11 +1847,29 @@ export const codexBackend: Backend = {
         Promise.all([turnStartPromise, turnCompletedPromise]).then(() => "done" as const),
         turnDeadline,
         turnAbort,
+        turnDetach,
       ]);
 
       if (timeoutHandle) clearTimeout(timeoutHandle);
       if (abortListener && ctx.abortSignal) {
         ctx.abortSignal.removeEventListener("abort", abortListener);
+      }
+      if (detachListener && ctx.detachSignal) {
+        ctx.detachSignal.removeEventListener("abort", detachListener);
+      }
+
+      if (race === "detach") {
+        return {
+          exitCode: null,
+          signal: null,
+          timedOut: false,
+          aborted: false,
+          detached: true,
+          sessionId: state.threadId,
+          transcript: null,
+          rawStdout: rawStdoutChunks.join("\n"),
+          rawStderr: `${client.stderr}${diagnostics}`,
+        };
       }
 
       if (race === "timeout") {

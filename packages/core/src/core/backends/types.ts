@@ -146,6 +146,7 @@ export interface BackendInvokeContext {
   resumeSessionId?: string;
   name?: string;
   abortSignal?: AbortSignal;
+  detachSignal?: AbortSignal;
   emit?: (event: BackendEvent) => void;
   onRawStdoutLine?: (line: string) => void;
 }
@@ -159,6 +160,7 @@ export interface BackendInvokeResult {
   transcript: string | null;
   rawStdout: string;
   rawStderr: string;
+  detached?: boolean;
 }
 
 export interface ValidateSessionContext {
@@ -168,6 +170,7 @@ export interface ValidateSessionContext {
   env?: Record<string, string>;
   backendConfig?: unknown;
   resolvedBackendArgs: ResolvedBackendArgs;
+  timeoutSec?: number;
 }
 
 export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };

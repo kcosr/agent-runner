@@ -73,6 +73,21 @@ process.stdout.write(JSON.stringify({
   return path;
 }
 
+function writeBlockingClaude(baseDir) {
+  const path = join(baseDir, "blocking-claude.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+const finish = (code) => process.exit(code);
+process.on("SIGTERM", () => finish(143));
+process.on("SIGINT", () => finish(130));
+setTimeout(() => finish(0), 60_000);
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
 function writeFakeClaudeSessionFile(baseDir, cwd, sessionId) {
   const encodedCwd = cwd.replace(/[/.]/g, "-");
   const path = join(baseDir, ".claude", "projects", encodedCwd, `${sessionId}.jsonl`);
@@ -430,42 +445,41 @@ test("run queued resume message commands support connected daemon mutations", as
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
-  const outcome = await initRun(dir);
-  patchManifest(outcome.workspaceDir, (manifest) => {
-    manifest.status = "running";
-  });
+  const command = writeBlockingClaude(dir);
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const daemon = await startCliDaemon(dir, listenUrl);
   try {
+    const started = JSON.parse(
+      runCli(
+        [
+          "run",
+          "--agent",
+          "run-mgmt-agent",
+          "--assignment",
+          "run-mgmt-work",
+          "--connect",
+          listenUrl,
+          "--detach",
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir, env: { TASK_RUNNER_CLAUDE_BIN: command } },
+      ),
+    );
+    const runId = started.runId;
     const queuedText = runCli(
-      [
-        "run",
-        "queue-message",
-        outcome.workspaceDir,
-        "Remote queued message",
-        "--connect",
-        listenUrl,
-      ],
+      ["run", "queue-message", runId, "Remote queued message", "--connect", listenUrl],
       { cwd: dir },
     );
     const queuedId = queuedText.match(/queued message (qmsg[^ ]+) for run/)?.[1];
     assert.ok(queuedId, queuedText);
 
     const listedJson = JSON.parse(
-      runCli(
-        [
-          "run",
-          "queued-messages",
-          outcome.workspaceDir,
-          "--connect",
-          listenUrl,
-          "--output-format",
-          "json",
-        ],
-        { cwd: dir },
-      ),
+      runCli(["run", "queued-messages", runId, "--connect", listenUrl, "--output-format", "json"], {
+        cwd: dir,
+      }),
     );
     assert.deepEqual(
       listedJson.queuedResumeMessages.map((message) => message.text),
@@ -477,7 +491,7 @@ test("run queued resume message commands support connected daemon mutations", as
         [
           "run",
           "remove-queued-message",
-          outcome.workspaceDir,
+          runId,
           queuedId,
           "--connect",
           listenUrl,
@@ -488,7 +502,7 @@ test("run queued resume message commands support connected daemon mutations", as
       ),
     );
     assert.deepEqual(removedJson, {
-      runId: outcome.runId,
+      runId,
       removedMessageId: queuedId,
       queuedResumeMessageCount: 0,
     });

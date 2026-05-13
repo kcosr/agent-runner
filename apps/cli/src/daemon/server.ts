@@ -52,6 +52,13 @@ import {
   validateRunEnvironment,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+import {
+  CodexThreadReadProtocolError,
+  type CodexThreadStatus,
+  adoptCodexActiveThread,
+  readCodexThread,
+  resolveCodexTransportConfig,
+} from "@task-runner/core/backends/codex.js";
 import { loadCustomBackends, resolveBackend } from "@task-runner/core/backends/registry.js";
 import { isPathArg } from "@task-runner/core/config/runtime-paths.js";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
@@ -80,6 +87,7 @@ import {
   toRunDetail,
   toRunSummary,
 } from "@task-runner/core/contracts/runs.js";
+import type { EffortLevel } from "@task-runner/core/core/backends/types.js";
 import {
   ConflictError,
   refreshRunSnapshotAfterTaskStateSettles,
@@ -106,13 +114,20 @@ import {
   listRunManifests,
   readManifest,
   resolveResumeTarget,
+  runBackendCwd,
   writeManifest,
 } from "@task-runner/core/core/run/manifest.js";
 import { hasRunnableTasks } from "@task-runner/core/core/run/resume-policy.js";
 import {
+  type RunControllerReconciliationDecision,
+  type RunControllerReconciliationReason,
+  type RunControllerTransportType,
   type ScheduleDecisionReason,
   appendRunBackendSessionHistorySyncFailedEvent,
   appendRunBackendSessionHistorySyncedEvent,
+  appendRunControllerDetachedEvent,
+  appendRunControllerReconciledEvent,
+  appendRunFinishedEvent,
   appendRunScheduleAdvancedEvent,
   appendRunScheduleDisabledEvent,
   appendRunScheduleDueEvent,
@@ -121,7 +136,7 @@ import {
   appendRunScheduleSkippedEvent,
   systemRunEventContext,
 } from "@task-runner/core/core/run/run-events.js";
-import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
+import { RunDetachedError, type RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import {
   ScheduleValidationError,
   advanceRecurringSchedule,
@@ -130,6 +145,7 @@ import {
 import {
   tryWithTaskStateLockAsync,
   withTaskStateLock,
+  withTaskStateLockAsync,
 } from "@task-runner/core/core/run/workspace-state.js";
 import {
   debugPerfEnabled,
@@ -215,6 +231,7 @@ interface AuditSubscriptionRecord {
 
 interface ActiveRunRecord {
   abortController: AbortController;
+  detachController: AbortController;
   done: Promise<void>;
   detail: RunDetail | null;
   auditBuffer: RunAuditEnvelope[];
@@ -297,6 +314,69 @@ function daemonMutationContext(daemonInstanceId: string) {
 
 function formatDaemonError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function taskCounts(manifest: RunManifest): { completed: number; total: number } {
+  const tasks = Object.values(manifest.finalTasks);
+  return {
+    completed: tasks.filter((task) => task.status === "completed").length,
+    total: tasks.length,
+  };
+}
+
+function terminalStatusFromTasksAfterRecovery(manifest: RunManifest): {
+  status: "success" | "blocked" | "error";
+  exitCode: 0 | 2 | 4;
+  reason: string;
+} {
+  const tasks = Object.values(manifest.finalTasks);
+  if (tasks.length > 0 && tasks.every((task) => task.status === "completed")) {
+    return { status: "success", exitCode: 0, reason: "completed_after_recovery" };
+  }
+  if (
+    tasks.length > 0 &&
+    tasks.some((task) => task.status === "blocked") &&
+    tasks.every((task) => task.status === "completed" || task.status === "blocked")
+  ) {
+    return { status: "blocked", exitCode: 2, reason: "completed_after_recovery" };
+  }
+  if (
+    tasks.length === 0 &&
+    manifest.backendSessionId !== null &&
+    manifest.attemptRecords.some(
+      (attempt) =>
+        attempt.provenance.kind === "backend_session" &&
+        attempt.provenance.backendSessionId === manifest.backendSessionId,
+    )
+  ) {
+    return { status: "success", exitCode: 0, reason: "completed_after_recovery" };
+  }
+  return { status: "error", exitCode: 4, reason: "insufficient_idle_evidence" };
+}
+
+function codexTransportType(manifest: RunManifest): "stdio" | "ws" | "uds" | null {
+  if (manifest.backend !== "codex") {
+    return null;
+  }
+  return resolveCodexTransportConfig({ backendConfig: manifest.backendConfig }).type;
+}
+
+function activeRunIsRemoteDetachable(detail: RunDetail | null): boolean {
+  return (
+    detail?.backend === "codex" &&
+    detail.backendSessionId !== null &&
+    detail.status === "running" &&
+    detail.execution.hostMode === "daemon" &&
+    (() => {
+      try {
+        const manifest = readManifest(detail.workspaceDir);
+        const transportType = codexTransportType(manifest);
+        return transportType === "ws" || transportType === "uds";
+      } catch {
+        return false;
+      }
+    })()
+  );
 }
 
 class SessionSyncManager {
@@ -748,6 +828,7 @@ export async function serveDaemon(
   const pendingScheduleEvaluationTargets = new Set<string>();
   const runCreatedProjectionTimers = new Set<ReturnType<typeof setTimeout>>();
   let manifestIndexInitialized = false;
+  let dependencyAutoStartSweepsEnabled = false;
   let fullScheduleEvaluationPending = false;
   let scheduleEvaluationQueued = false;
   let scheduleEvaluationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -861,7 +942,9 @@ export async function serveDaemon(
       rememberManifestIndexEntry(entry);
     }
     manifestIndexInitialized = true;
-    queueReadyDependencyAutoStartSweep?.();
+    if (dependencyAutoStartSweepsEnabled) {
+      queueReadyDependencyAutoStartSweep?.();
+    }
   };
 
   const ensureManifestIndex = (): void => {
@@ -1230,6 +1313,7 @@ export async function serveDaemon(
 
   const createActiveRunRecord = (
     abortController: AbortController,
+    detachController: AbortController,
     done: Promise<void>,
     runId: string,
   ): ActiveRunRecord => {
@@ -1238,6 +1322,7 @@ export async function serveDaemon(
     clearRecentAuditBuffer(runId);
     return {
       abortController,
+      detachController,
       done,
       detail: getProjectedDetail(runId),
       auditBuffer: [...seededAuditBuffer],
@@ -2019,6 +2104,409 @@ export async function serveDaemon(
     env: process.env,
   });
 
+  const reconciliationAuditContext = () => systemRunEventContext(mutationAuditContext);
+
+  const emitControllerReconciled = (params: {
+    manifest: RunManifest;
+    transportType: RunControllerTransportType;
+    decision: RunControllerReconciliationDecision;
+    reason: RunControllerReconciliationReason;
+    remoteStatus: CodexThreadStatus | null;
+    error: string | null;
+  }): void => {
+    publishAudit(
+      appendRunControllerReconciledEvent({
+        manifest: params.manifest,
+        context: reconciliationAuditContext(),
+        transportType: params.transportType,
+        decision: params.decision,
+        reason: params.reason,
+        remoteStatus: params.remoteStatus,
+        error: params.error,
+      }),
+    );
+  };
+
+  const finalizeRunningRunForControllerRecovery = async (params: {
+    manifest: RunManifest;
+    status: "success" | "blocked" | "aborted" | "error";
+    exitCode: 0 | 2 | 4 | 130;
+    transportType: RunControllerTransportType;
+    decision: Exclude<RunControllerReconciliationDecision, "adopted_active">;
+    reason: Exclude<RunControllerReconciliationReason, "remote_active">;
+    remoteStatus: CodexThreadStatus | null;
+    error: string | null;
+  }): Promise<RunManifest> => {
+    const finalized = await withTaskStateLockAsync(params.manifest.workspaceDir, async () => {
+      const latest = resolveResumeTarget(params.manifest.workspaceDir).manifest;
+      if (latest.status !== "running") {
+        return latest;
+      }
+      const endedAt = new Date().toISOString();
+      const counts = taskCounts(latest);
+      latest.tasksCompleted = counts.completed;
+      latest.tasksTotal = counts.total;
+      latest.status = params.status;
+      latest.exitCode = params.exitCode;
+      latest.endedAt = endedAt;
+      const openSession = [...latest.sessions]
+        .reverse()
+        .find((session) => session.endedAt === null);
+      if (openSession) {
+        openSession.status = params.status;
+        openSession.exitCode = params.exitCode;
+        openSession.endedAt = endedAt;
+        openSession.backendSessionIdAtEnd = latest.backendSessionId;
+      }
+      writeManifest(latest.workspaceDir, latest);
+      emitControllerReconciled({
+        manifest: latest,
+        transportType: params.transportType,
+        decision: params.decision,
+        reason: params.reason,
+        remoteStatus: params.remoteStatus,
+        error: params.error,
+      });
+      publishAudit(
+        appendRunFinishedEvent({
+          manifest: latest,
+          context: reconciliationAuditContext(),
+          terminalStatus: params.status,
+          exitCode: params.exitCode,
+          tasksCompleted: latest.tasksCompleted,
+          tasksTotal: latest.tasksTotal,
+          sessionIndex: openSession?.sessionIndex,
+        }),
+      );
+      return latest;
+    });
+    refreshManifestIndexEntry(finalized.runId);
+    return finalized;
+  };
+
+  const syncCodexHistoryForStartup = async (manifest: RunManifest): Promise<RunManifest> => {
+    const backend = resolveBackend(manifest.backend);
+    const prepared = await prepareBackendSessionHistorySync({
+      manifest: structuredClone(manifest),
+      backend,
+      mode: "sync",
+      env: process.env as Record<string, string>,
+    });
+    if (prepared.status !== "ready") {
+      return manifest;
+    }
+    await withTaskStateLockAsync(manifest.workspaceDir, async () => {
+      const latest = resolveResumeTarget(manifest.workspaceDir).manifest;
+      if (latest.status !== "running") {
+        return;
+      }
+      const result = applyPreparedBackendSessionHistorySync({
+        backend,
+        manifest: latest,
+        mode: "sync",
+        prepared,
+      });
+      if (result.status === "synced") {
+        writeManifest(latest.workspaceDir, latest);
+        publishAudit(
+          appendRunBackendSessionHistorySyncedEvent({
+            manifest: latest,
+            context: reconciliationAuditContext(),
+            reason: "subscription",
+            importedTurnCount: result.importedTurnCount,
+            openTurnCount: result.openTurnCount,
+            addedAttemptNumbers: result.addedAttemptNumbers,
+          }),
+        );
+      }
+    });
+    return resolveResumeTarget(manifest.workspaceDir).manifest;
+  };
+
+  const buildCodexRecoveryInvokeContext = (
+    manifest: RunManifest,
+    backendSessionId: string,
+    abortSignal: AbortSignal,
+    detachSignal: AbortSignal,
+  ): Parameters<typeof adoptCodexActiveThread>[0] => ({
+    prompt: "",
+    cwd: runBackendCwd(manifest),
+    processCwd: manifest.cwd,
+    env: {
+      ...(process.env as Record<string, string>),
+      TASK_RUNNER_RUN_ID: manifest.runId,
+      TASK_RUNNER_RUN_GROUP_ID: manifest.runGroupId,
+      TASK_RUNNER_CWD: runBackendCwd(manifest),
+    },
+    model: manifest.model ?? undefined,
+    effort: (manifest.effort as EffortLevel | null) ?? undefined,
+    backendConfig: structuredClone(manifest.backendConfig),
+    resolvedBackendArgs: [...manifest.resolvedBackendArgs],
+    unrestricted: manifest.unrestricted,
+    timeoutSec: manifest.timeoutSec,
+    resumeSessionId: backendSessionId,
+    name: manifest.name ?? undefined,
+    abortSignal,
+    detachSignal,
+    emit: (event: RunEvent) => publishTimeline(manifest.runId, event),
+  });
+
+  const finalizeCodexRecoveredRun = async (
+    manifest: RunManifest,
+    transportType: "ws" | "uds",
+    remoteStatus: CodexThreadStatus,
+    adoptedExitCode?: number | null,
+    adoptedAborted?: boolean,
+    adoptedTimedOut?: boolean,
+  ): Promise<void> => {
+    let synced: RunManifest;
+    try {
+      synced = await syncCodexHistoryForStartup(manifest);
+    } catch (error) {
+      const latest = resolveResumeTarget(manifest.workspaceDir).manifest;
+      await finalizeRunningRunForControllerRecovery({
+        manifest: latest,
+        status: "error",
+        exitCode: 4,
+        transportType,
+        decision: "marked_error",
+        reason: "history_sync_failed",
+        remoteStatus,
+        error: formatDaemonError(error),
+      });
+      return;
+    }
+    if (adoptedAborted === true) {
+      await finalizeRunningRunForControllerRecovery({
+        manifest: synced,
+        status: "aborted",
+        exitCode: 130,
+        transportType,
+        decision: "adopted_aborted",
+        reason: "aborted_after_recovery",
+        remoteStatus,
+        error: null,
+      });
+      return;
+    }
+    const inferred = terminalStatusFromTasksAfterRecovery(synced);
+    const adoptionFailed =
+      adoptedExitCode !== undefined && adoptedExitCode !== null && adoptedExitCode !== 0;
+    await finalizeRunningRunForControllerRecovery({
+      manifest: synced,
+      status: adoptionFailed ? "error" : inferred.status,
+      exitCode: adoptionFailed ? 4 : inferred.exitCode,
+      transportType,
+      decision: adoptionFailed || inferred.status === "error" ? "marked_error" : "finalized_idle",
+      reason: adoptionFailed
+        ? "reattach_failed"
+        : (inferred.reason as "insufficient_idle_evidence" | "completed_after_recovery"),
+      remoteStatus,
+      error: adoptionFailed
+        ? adoptedTimedOut === true
+          ? `recovered Codex turn timed out after ${synced.timeoutSec} seconds`
+          : `recovered Codex turn exited with code ${adoptedExitCode}`
+        : null,
+    });
+  };
+
+  const adoptStartupCodexRun = (
+    manifest: RunManifest & { backendSessionId: string },
+    transportType: "ws" | "uds",
+  ): void => {
+    const abortController = new AbortController();
+    const detachController = new AbortController();
+    let resolveDone: (() => void) | undefined;
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve;
+    });
+    activeRuns.set(
+      manifest.runId,
+      createActiveRunRecord(abortController, detachController, done, manifest.runId),
+    );
+    emitControllerReconciled({
+      manifest,
+      transportType,
+      decision: "adopted_active",
+      reason: "remote_active",
+      remoteStatus: "Active",
+      error: null,
+    });
+    void adoptCodexActiveThread(
+      buildCodexRecoveryInvokeContext(
+        manifest,
+        manifest.backendSessionId,
+        abortController.signal,
+        detachController.signal,
+      ),
+    )
+      .then(async (result) => {
+        if (result.detached === true) {
+          return;
+        }
+        await finalizeCodexRecoveredRun(
+          resolveResumeTarget(manifest.workspaceDir).manifest,
+          transportType,
+          "Active",
+          result.exitCode,
+          result.aborted,
+          result.timedOut,
+        );
+      })
+      .catch(async (error) => {
+        await finalizeRunningRunForControllerRecovery({
+          manifest: resolveResumeTarget(manifest.workspaceDir).manifest,
+          status: "error",
+          exitCode: 4,
+          transportType,
+          decision: "marked_error",
+          reason: "reattach_failed",
+          remoteStatus: "Active",
+          error: formatDaemonError(error),
+        });
+      })
+      .finally(() => {
+        const active = activeRuns.get(manifest.runId);
+        if (active?.auditBuffer.length) {
+          rememberRecentAuditBuffer(manifest.runId, active.auditBuffer);
+        }
+        if (active?.timelineBuffer.length) {
+          rememberRecentTimelineBuffer(manifest.runId, active.timelineBuffer);
+        }
+        activeRuns.delete(manifest.runId);
+        lastTimelineCursorByRun.delete(manifest.runId);
+        publishMutationResult(manifest.runId);
+        resolveDone?.();
+      });
+  };
+
+  const reconcileStartupRunningRun = async (entry: ListedRunManifest): Promise<void> => {
+    const manifest = entry.manifest;
+    if (manifest.status !== "running") {
+      return;
+    }
+    let transportType: "stdio" | "ws" | "uds" | null = null;
+    try {
+      transportType = codexTransportType(manifest);
+    } catch (error) {
+      await finalizeRunningRunForControllerRecovery({
+        manifest,
+        status: "error",
+        exitCode: 4,
+        transportType: null,
+        decision: "marked_error",
+        reason: "unsupported_transport",
+        remoteStatus: null,
+        error: formatDaemonError(error),
+      });
+      return;
+    }
+    if (manifest.backend !== "codex") {
+      await finalizeRunningRunForControllerRecovery({
+        manifest,
+        status: "error",
+        exitCode: 4,
+        transportType: null,
+        decision: "marked_error",
+        reason: "stale_local_controller",
+        remoteStatus: null,
+        error: null,
+      });
+      return;
+    }
+    const backendSessionId = manifest.backendSessionId;
+    if (backendSessionId === null) {
+      await finalizeRunningRunForControllerRecovery({
+        manifest,
+        status: "error",
+        exitCode: 4,
+        transportType,
+        decision: "marked_error",
+        reason: "missing_backend_session",
+        remoteStatus: null,
+        error: null,
+      });
+      return;
+    }
+    if (transportType !== "ws" && transportType !== "uds") {
+      await finalizeRunningRunForControllerRecovery({
+        manifest,
+        status: "error",
+        exitCode: 4,
+        transportType,
+        decision: "marked_error",
+        reason: "unsupported_transport",
+        remoteStatus: null,
+        error: null,
+      });
+      return;
+    }
+
+    let threadStatus: CodexThreadStatus;
+    try {
+      const thread = await readCodexThread({
+        sessionId: backendSessionId,
+        cwd: runBackendCwd(manifest),
+        processCwd: manifest.cwd,
+        env: process.env as Record<string, string>,
+        backendConfig: manifest.backendConfig,
+        resolvedBackendArgs: manifest.resolvedBackendArgs,
+        timeoutSec: manifest.timeoutSec,
+      });
+      threadStatus = thread.status;
+    } catch (error) {
+      await finalizeRunningRunForControllerRecovery({
+        manifest,
+        status: "error",
+        exitCode: 4,
+        transportType,
+        decision: "marked_error",
+        reason:
+          error instanceof CodexThreadReadProtocolError
+            ? "thread_read_failed"
+            : "remote_unreachable",
+        remoteStatus: null,
+        error: formatDaemonError(error),
+      });
+      return;
+    }
+
+    if (threadStatus === "Active") {
+      adoptStartupCodexRun({ ...manifest, backendSessionId }, transportType);
+      return;
+    }
+    if (threadStatus === "Idle") {
+      await finalizeCodexRecoveredRun(manifest, transportType, "Idle");
+      return;
+    }
+    await finalizeRunningRunForControllerRecovery({
+      manifest,
+      status: "error",
+      exitCode: 4,
+      transportType,
+      decision: "marked_error",
+      reason: threadStatus === "SystemError" ? "remote_system_error" : "remote_not_loaded",
+      remoteStatus: threadStatus,
+      error: null,
+    });
+  };
+
+  const reconcileStartupRunningRuns = async (): Promise<void> => {
+    const runningEntries = Array.from(manifestEntriesByRunId.values()).filter(
+      (entry) => entry.manifest.status === "running",
+    );
+    for (const entry of runningEntries) {
+      try {
+        await reconcileStartupRunningRun(entry);
+      } catch (error) {
+        console.error(
+          `task-runner daemon: startup reconciliation failed for run ${entry.manifest.runId}: ${formatDaemonError(error)}`,
+        );
+      }
+    }
+    rebuildManifestIndex();
+  };
+
   const publishRunDeletion = (runId: string): void => {
     const dependents = dependentRunIds(runId);
     clearScheduleTimer(runId);
@@ -2379,6 +2867,7 @@ export async function serveDaemon(
     startManagedRun: (
       emitEvent: (event: RunEvent) => void,
       abortSignal: AbortSignal,
+      detachSignal: AbortSignal,
       emitAuditEnvelope: (envelope: RunAuditEnvelope) => void,
     ) => Promise<{ runId: string }>,
   ): Promise<{ runId: string }> => {
@@ -2392,6 +2881,7 @@ export async function serveDaemon(
       finish(fields);
     };
     const abortController = new AbortController();
+    const detachController = new AbortController();
     let runId: string | undefined;
     let resolveRunId: ((value: string) => void) | undefined;
     let rejectRunId: ((reason: unknown) => void) | undefined;
@@ -2408,7 +2898,10 @@ export async function serveDaemon(
       (event) => {
         if ((event.type === "run_started" || event.type === "run_initialized") && !runId) {
           runId = event.runId;
-          activeRuns.set(runId, createActiveRunRecord(abortController, done, runId));
+          activeRuns.set(
+            runId,
+            createActiveRunRecord(abortController, detachController, done, runId),
+          );
           resolveRunId?.(runId);
         }
         const resolvedRunId =
@@ -2432,6 +2925,7 @@ export async function serveDaemon(
         }
       },
       abortController.signal,
+      detachController.signal,
       (envelope) => {
         publishAudit(envelope);
         if (envelope.event.type === "run.created") {
@@ -2442,7 +2936,10 @@ export async function serveDaemon(
       .then((outcome) => {
         if (!runId) {
           runId = outcome.runId;
-          activeRuns.set(runId, createActiveRunRecord(abortController, done, runId));
+          activeRuns.set(
+            runId,
+            createActiveRunRecord(abortController, detachController, done, runId),
+          );
           resolveRunId?.(runId);
         }
       })
@@ -2454,6 +2951,9 @@ export async function serveDaemon(
         });
         if (!runId) {
           rejectRunId?.(err);
+          return;
+        }
+        if (err instanceof RunDetachedError) {
           return;
         }
         const event: RunTimelineEvent = {
@@ -2514,22 +3014,24 @@ export async function serveDaemon(
   };
 
   const startManagedRun = (request: Parameters<DaemonHandlers["startRun"]>[0]) =>
-    executeManagedRun("start", (emitEvent, abortSignal, emitAuditEnvelope) =>
+    executeManagedRun("start", (emitEvent, abortSignal, detachSignal, emitAuditEnvelope) =>
       app.startRun({
         ...request,
         execution: daemonExecution(daemonInstanceId),
         abortSignal,
+        detachSignal,
         emitEvent,
         emitAuditEnvelope,
       }),
     );
 
   const executeResumeManagedRun = (request: Parameters<DaemonHandlers["resumeRun"]>[0]) =>
-    executeManagedRun("resume", (emitEvent, abortSignal, emitAuditEnvelope) =>
+    executeManagedRun("resume", (emitEvent, abortSignal, detachSignal, emitAuditEnvelope) =>
       app.resumeRun({
         ...request,
         execution: daemonExecution(daemonInstanceId),
         abortSignal,
+        detachSignal,
         emitEvent,
         emitAuditEnvelope,
       }),
@@ -2801,6 +3303,9 @@ export async function serveDaemon(
     }
   };
   rebuildManifestIndex();
+  await reconcileStartupRunningRuns();
+  dependencyAutoStartSweepsEnabled = true;
+  queueReadyDependencyAutoStartSweep?.();
   await evaluateSchedules(null, { startup: true });
 
   const eventLoopHistogram = debugPerfEnabled() ? monitorEventLoopDelay({ resolution: 20 }) : null;
@@ -3751,7 +4256,26 @@ export async function serveDaemon(
       });
       const active = [...activeRuns.values()];
       for (const record of active) {
-        record.abortController.abort();
+        if (activeRunIsRemoteDetachable(record.detail)) {
+          try {
+            const manifest = readManifest(record.detail?.workspaceDir ?? "");
+            publishAudit(
+              appendRunControllerDetachedEvent({
+                manifest,
+                context: systemRunEventContext(mutationAuditContext),
+                transportType: codexTransportType(manifest),
+                reason: "daemon_shutdown",
+              }),
+            );
+          } catch (error) {
+            console.error(
+              `task-runner daemon: failed to record remote detach audit: ${formatDaemonError(error)}`,
+            );
+          }
+          record.detachController.abort();
+        } else {
+          record.abortController.abort();
+        }
       }
       await Promise.allSettled(active.map((record) => record.done));
       sessionSyncManager?.close();

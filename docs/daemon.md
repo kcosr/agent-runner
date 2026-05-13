@@ -28,6 +28,53 @@ task-runner serve [--listen <ws-url>]
   `http`.
 - Graceful shutdown on `SIGINT` (exit 130) and `SIGTERM` (exit 0).
 
+## Startup and shutdown recovery
+
+Graceful daemon shutdown still aborts active runs whose controller is
+local to task-runner. This includes subprocess-backed backends and Codex
+`stdio`, where task-runner owns the local `codex app-server` child
+process.
+
+Codex runs using frozen `ws` or `uds` transport and a non-null backend
+session id are remote-detachable. On graceful daemon shutdown, the daemon
+does not send `turn/interrupt` only because the daemon is exiting. It
+records a `run.controller_detached` audit event, closes its Codex
+connection, and leaves the run manifest `running` so the remote Codex
+app-server thread can continue.
+
+On startup, before serving clients or evaluating schedules, the daemon
+reconciles manifests still persisted as `running`:
+
+- non-recoverable runs, including non-Codex backends and Codex `stdio`,
+  are finalized as `error` with a `run.controller_reconciled` audit event
+  because the previous local controller is gone
+- Codex `ws`/`uds` runs reconnect to the frozen transport and call
+  `thread/read` for the saved thread id
+- `Active` Codex threads are re-adopted with `thread/resume`, without a
+  new `turn/start`, and project as live/abortable in daemon list and
+  detail responses
+- `Idle`, `SystemError`, `NotLoaded`, unreachable app-server, and
+  `thread/read` failures are reconciled to terminal state with audit
+  detail; `Idle` imports available backend history before finalizing when
+  there is enough task/run evidence
+
+The recovery audit events are structured for tooling. `run.controller_detached`
+records `backend`, `backendSessionId`, `transportType`, and `reason`.
+`run.controller_reconciled` records those fields plus `decision`,
+`remoteStatus`, `error`, and a reconciliation `reason` such as
+`remote_active`, `remote_unreachable`, `thread_read_failed`, or
+`aborted_after_recovery`.
+
+Codex `ws`/`uds` Idle history import depends on the Codex session file being
+available on the task-runner host. Remote-only session history cannot be
+imported by the current file-based history reader, so zero-task remote Idle
+runs without imported turns finalize as `error / insufficient_idle_evidence`.
+
+This startup reconciliation is scoped to daemon restart recovery. If a
+Codex app-server websocket or UDS connection disappears while the daemon
+is still running, the active backend invocation fails through the normal
+attempt/retry/exhaustion path.
+
 ### Bearer token access
 
 Daemon access protection is opt-in:
@@ -592,5 +639,6 @@ reimplementing lifecycle checks locally.
 - No CORS headers. Single-origin; the daemon itself serves the web UI.
 - Input validation via Zod schemas. Known control-plane errors return
   HTTP 422; unknown errors return 500.
-- Cancellation via `SIGINT` / `SIGTERM`; in-flight runs are aborted
-  gracefully.
+- Cancellation via `SIGINT` / `SIGTERM`; in-flight local/subprocess runs are
+  aborted gracefully, while Codex `ws`/`uds` runs are detached as described in
+  startup and shutdown recovery.

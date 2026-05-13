@@ -52,6 +52,7 @@ export interface ExecuteRunCommandOptions {
   overrides: NonNullable<RunOptions["overrides"]>;
   execution?: RunExecution;
   abortSignal?: AbortSignal;
+  detachSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
   emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
 }
@@ -249,6 +250,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     bootstrapBackendSessionId: opts.backendSessionId,
     execution: opts.execution,
     abortSignal: opts.abortSignal,
+    detachSignal: opts.detachSignal,
     overrides: opts.overrides,
     emitEvent: opts.emitEvent,
     emitAuditEnvelope: opts.emitAuditEnvelope,

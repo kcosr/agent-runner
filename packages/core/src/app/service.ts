@@ -157,6 +157,7 @@ export interface StartRunRequest {
   overrides: RunCommandOverrides;
   execution?: RunExecution;
   abortSignal?: AbortSignal;
+  detachSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
   emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
 }
@@ -167,6 +168,7 @@ export interface ResumeRunRequest {
   overrides: RunCommandOverrides;
   execution?: RunExecution;
   abortSignal?: AbortSignal;
+  detachSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
   emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
 }
@@ -703,6 +705,7 @@ export async function initRun(request: StartRunRequest): Promise<RunDetail> {
     overrides: request.overrides,
     execution: request.execution,
     abortSignal: request.abortSignal,
+    detachSignal: request.detachSignal,
     emitEvent: request.emitEvent,
     emitAuditEnvelope: request.emitAuditEnvelope,
   });
@@ -724,6 +727,7 @@ export function startRun(request: StartRunRequest): Promise<RunOutcome> {
     overrides: request.overrides,
     execution: request.execution,
     abortSignal: request.abortSignal,
+    detachSignal: request.detachSignal,
     emitEvent: request.emitEvent,
     emitAuditEnvelope: request.emitAuditEnvelope,
   });
@@ -739,6 +743,7 @@ export function resumeRun(request: ResumeRunRequest): Promise<RunOutcome> {
     overrides: request.overrides,
     execution: request.execution,
     abortSignal: request.abortSignal,
+    detachSignal: request.detachSignal,
     emitEvent: request.emitEvent,
     emitAuditEnvelope: request.emitAuditEnvelope,
   });
