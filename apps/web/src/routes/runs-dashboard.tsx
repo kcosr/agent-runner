@@ -127,6 +127,7 @@ const DASHBOARD_PANEL_RENDERERS = {
       onRequestActionMenu={onRequestActionMenu}
       onResetFilters={state.resetBoardFilters}
       onSelectRun={onListSelectRun}
+      onSetNote={state.runActions.setNote}
       onSetPinned={state.runActions.setPinned}
       onStructuredFilterToggle={state.toggleStructuredFilter}
       runs={state.runs}

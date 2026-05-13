@@ -1969,6 +1969,56 @@ describe("web app", () => {
     );
   });
 
+  it("uses board card layout for list items on mobile", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: query === "(max-width: 900px)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-list-mobile-card",
+          assignmentName: "Mobile list card",
+          name: "Mobile list card",
+          pinned: true,
+        }),
+      ],
+      details: {
+        "run-list-mobile-card": makeDetail({
+          runId: "run-list-mobile-card",
+          assignment: { name: "Mobile list card", sourcePath: "/tmp/mobile-list-card.md" },
+          name: "Mobile list card",
+          pinned: true,
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Mobile list card");
+
+    await user.click(screen.getByRole("button", { name: "List" }));
+
+    const list = await screen.findByLabelText("Runs list");
+    const listCard = within(list).getByRole("button", { name: "Mobile list card" });
+    expect(listCard.closest(".card")).toBeInstanceOf(HTMLElement);
+    expect(
+      within(list).queryByRole("button", { name: /^Open run Mobile list card$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(list).getByRole("button", { name: "Unpin run run-list-mobile-card" }),
+    ).toBeInTheDocument();
+  });
+
   it("navigates visible list rows with up and down arrows", async () => {
     const runs = [
       makeRun({

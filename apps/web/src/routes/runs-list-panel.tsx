@@ -1,7 +1,9 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
+import { useEffect, useState } from "react";
 import { EmptyPanel } from "../components/empty-states.js";
+import { RunCard } from "../components/run-card.js";
 import { RunRow } from "../components/run-row.js";
 import { isUnauthorizedError } from "../lib/api-client.js";
 import type { DashboardSortField, DashboardStructuredFilters } from "../lib/settings.js";
@@ -22,6 +24,39 @@ const LIST_LOADING_SKELETON_KEYS = [
   "eighth",
 ] as const;
 
+const MOBILE_LIST_CARD_MEDIA_QUERY = "(max-width: 900px)";
+
+function mediaQueryMatches(query: string) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia(query).matches;
+}
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => mediaQueryMatches(query));
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia(query);
+    const update = () => setMatches(mediaQuery.matches);
+    update();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", update);
+      return () => mediaQuery.removeEventListener("change", update);
+    }
+
+    mediaQuery.addListener(update);
+    return () => mediaQuery.removeListener(update);
+  }, [query]);
+
+  return matches;
+}
+
 export function RunsListPanel({
   actionPending,
   hasActiveStructuredFilters,
@@ -32,6 +67,7 @@ export function RunsListPanel({
   onRequestActionMenu,
   onResetFilters,
   onSelectRun,
+  onSetNote,
   onSetPinned,
   onStructuredFilterToggle,
   runs,
@@ -51,6 +87,7 @@ export function RunsListPanel({
   onRequestActionMenu: (runId: string, point: { clientX: number; clientY: number }) => void;
   onResetFilters: () => void;
   onSelectRun: (runId: string) => void;
+  onSetNote: (runId: string, note: string | null) => Promise<void>;
   onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
   runs: RunSummary[];
@@ -62,6 +99,7 @@ export function RunsListPanel({
   visibleRuns: RunSummary[];
 }) {
   const navigate = useNavigate();
+  const mobileListCards = useMediaQuery(MOBILE_LIST_CARD_MEDIA_QUERY);
 
   if (runsQuery.isPending) {
     return (
@@ -194,20 +232,35 @@ export function RunsListPanel({
         </div>
       ) : (
         <div className="runs-list-rows">
-          {listRows.map((run) => (
-            <RunRow
-              actionPending={actionPending}
-              key={run.runId}
-              onRequestActionMenu={(point) => onRequestActionMenu(run.runId, point)}
-              onSelect={() => onSelectRun(run.runId)}
-              onSetPinned={(pinned) => onSetPinned(run.runId, pinned)}
-              onStructuredFilterToggle={onStructuredFilterToggle}
-              run={run}
-              selected={selectedRunId === run.runId}
-              sortField={sortField}
-              structuredFilters={structuredFilters}
-            />
-          ))}
+          {listRows.map((run) =>
+            mobileListCards ? (
+              <RunCard
+                actionPending={actionPending}
+                key={run.runId}
+                onRequestActionMenu={(point) => onRequestActionMenu(run.runId, point)}
+                onSelect={() => onSelectRun(run.runId)}
+                onSetNote={(note) => onSetNote(run.runId, note)}
+                onSetPinned={(pinned) => onSetPinned(run.runId, pinned)}
+                onStructuredFilterToggle={onStructuredFilterToggle}
+                run={run}
+                selected={selectedRunId === run.runId}
+                structuredFilters={structuredFilters}
+              />
+            ) : (
+              <RunRow
+                actionPending={actionPending}
+                key={run.runId}
+                onRequestActionMenu={(point) => onRequestActionMenu(run.runId, point)}
+                onSelect={() => onSelectRun(run.runId)}
+                onSetPinned={(pinned) => onSetPinned(run.runId, pinned)}
+                onStructuredFilterToggle={onStructuredFilterToggle}
+                run={run}
+                selected={selectedRunId === run.runId}
+                sortField={sortField}
+                structuredFilters={structuredFilters}
+              />
+            ),
+          )}
         </div>
       )}
     </section>
