@@ -146,6 +146,9 @@
 
 ### Added
 
+- Added a web dashboard Board/List view-mode toggle. The new List view shows
+  globally sorted compact run rows with status chips while preserving the
+  existing Board workflow and persisted view-mode choice.
 - Added the `plan-implement-feature` assignment for single-run feature
   planning, approval, implementation, review, and PR handoff, plus shared
   `feature-plan/*` and `feature-implement/*` task definitions.
@@ -207,6 +210,18 @@
 
 ### Fixed
 
+- Pinning or archiving a run no longer changes its `updatedAt` timestamp, while
+  content and lifecycle changes such as notes, names, task state, dependencies,
+  and schedules continue to refresh `updatedAt`.
+- Mobile dashboard list rows now use the board card layout and preserve
+  full-card tap, right-click, and long-press action targeting.
+- Dashboard list rows now fold schedule, dependency, attachment, and
+  queued-message indicators into the metadata column, replace the progress bar
+  with a compact task count, expose notes as a row action, and render active
+  tasks beneath the metadata badges instead of reserving a mostly-empty signal
+  column.
+- Dashboard list sorting now keeps pinned runs at the top, then applies the
+  selected sort field and direction within pinned and unpinned groups.
 - Daemon-managed Start/Resume now resolves unique short run ids across repo
   buckets, so web, HTTP, WebSocket, and connected CLI resume the selected run
   even when the daemon process cwd is in a different repo bucket.

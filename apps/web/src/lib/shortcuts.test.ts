@@ -3,6 +3,7 @@ import type { BoardColumn } from "../components/run-column.js";
 import {
   resolveBoardEntryRunId,
   resolveBoardNeighborRunId,
+  resolveListNeighborRunId,
   resolveRunsShortcutCommand,
 } from "./shortcuts.js";
 
@@ -105,6 +106,60 @@ describe("resolveBoardNeighborRunId", () => {
   });
 });
 
+describe("resolveListNeighborRunId", () => {
+  it("enters at the first visible list row when nothing is selected", () => {
+    expect(
+      resolveListNeighborRunId({
+        direction: "down",
+        listRunIds: ["run-1", "run-2"],
+      }),
+    ).toBe("run-1");
+  });
+
+  it("moves up and down through visible list rows", () => {
+    const listRunIds = ["run-1", "run-2", "run-3"];
+    expect(
+      resolveListNeighborRunId({
+        direction: "down",
+        listRunIds,
+        selectedRunId: "run-1",
+      }),
+    ).toBe("run-2");
+    expect(
+      resolveListNeighborRunId({
+        direction: "up",
+        listRunIds,
+        selectedRunId: "run-2",
+      }),
+    ).toBe("run-1");
+  });
+
+  it("returns null at list edges and re-enters when selected row is filtered out", () => {
+    const listRunIds = ["run-1", "run-2"];
+    expect(
+      resolveListNeighborRunId({
+        direction: "up",
+        listRunIds,
+        selectedRunId: "run-1",
+      }),
+    ).toBeNull();
+    expect(
+      resolveListNeighborRunId({
+        direction: "down",
+        listRunIds,
+        selectedRunId: "run-2",
+      }),
+    ).toBeNull();
+    expect(
+      resolveListNeighborRunId({
+        direction: "down",
+        listRunIds,
+        selectedRunId: "run-filtered-out",
+      }),
+    ).toBe("run-1");
+  });
+});
+
 describe("resolveRunsShortcutCommand", () => {
   const context = {
     actionPending: false,
@@ -120,9 +175,34 @@ describe("resolveRunsShortcutCommand", () => {
     selectedDrawerView: undefined,
     selectedRunId: "run-running-1",
     typingTarget: false,
+    viewMode: "board",
   } as const;
 
   it("maps global navigation and focus shortcuts", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("ui.cycleViewMode");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "V",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.cycleViewMode");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -745,6 +825,66 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          typingTarget: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          resumeDialogOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          searchFocused: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
           key: "p",
           metaKey: false,
           shiftKey: false,
@@ -923,6 +1063,57 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBeNull();
   });
 
+  it("scopes horizontal board navigation and hide-empty shortcuts to board mode", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowUp",
+          metaKey: false,
+          shiftKey: false,
+        },
+        { ...context, viewMode: "list" },
+      ),
+    ).toBe("list.moveUp");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowDown",
+          metaKey: false,
+          shiftKey: false,
+        },
+        { ...context, viewMode: "list" },
+      ),
+    ).toBe("list.moveDown");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowRight",
+          metaKey: false,
+          shiftKey: false,
+        },
+        { ...context, viewMode: "list" },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "e",
+          metaKey: false,
+          shiftKey: true,
+        },
+        { ...context, viewMode: "list" },
+      ),
+    ).toBeNull();
+  });
+
   it("allows selected-run actions but blocks board shortcuts while the drawer is fullscreen", () => {
     const fullscreenContext = {
       ...context,
@@ -983,6 +1174,18 @@ describe("resolveRunsShortcutCommand", () => {
           altKey: false,
           ctrlKey: true,
           key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "v",
           metaKey: false,
           shiftKey: false,
         },

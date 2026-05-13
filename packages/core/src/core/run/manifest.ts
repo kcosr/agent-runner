@@ -752,10 +752,14 @@ function readPersistedUpdatedAt(path: string): string | null {
   return parsed.updatedAt;
 }
 
-export function writeManifest(workspaceDir: string, manifest: RunManifest): void {
+export function writeManifest(
+  workspaceDir: string,
+  manifest: RunManifest,
+  opts: { preserveUpdatedAt?: boolean } = {},
+): void {
   const path = join(workspaceDir, MANIFEST_FILENAME);
   const persistedUpdatedAt = readPersistedUpdatedAt(path);
-  if (persistedUpdatedAt !== null) {
+  if (persistedUpdatedAt !== null && opts.preserveUpdatedAt !== true) {
     manifest.updatedAt = nextUpdatedAt(persistedUpdatedAt);
   }
   writeTextFileAtomic(path, `${JSON.stringify(manifest, null, 2)}\n`);

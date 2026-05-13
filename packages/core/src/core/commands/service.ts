@@ -1482,7 +1482,7 @@ function setRunArchived(
         changed = true;
       }
 
-      writeManifest(resolved.workspaceDir, resolved.manifest);
+      writeManifest(resolved.workspaceDir, resolved.manifest, { preserveUpdatedAt: true });
       if (archived) {
         emitPersistedAudit(
           emitAuditEnvelope,
@@ -1623,7 +1623,7 @@ export function setRunPinned(target: string, input: { pinned: boolean }): RunPin
     }
     resolved.manifest.pinned = input.pinned;
     resolved.manifest.resetSeed.pinned = input.pinned;
-    writeManifest(resolved.workspaceDir, resolved.manifest);
+    writeManifest(resolved.workspaceDir, resolved.manifest, { preserveUpdatedAt: true });
     changed = true;
   });
 
