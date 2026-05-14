@@ -10,7 +10,7 @@ const SCRIPT_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-migrate-v10-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-migrate-v10-"));
 }
 
 function writeManifest(root, repo, runId, manifest) {
@@ -358,9 +358,9 @@ test("migrate-manifests-v10 script writes v9 launcher and caller-instructions up
 
 test("migrate-manifests-v10 script filters to selected repo buckets", () => {
   const root = tempDir();
-  const taskRunnerPath = writeManifest(root, "task-runner", "run-task-runner", {
+  const agentRunnerPath = writeManifest(root, "agent-runner", "run-agent-runner", {
     schemaVersion: 9,
-    runId: "run-task-runner",
+    runId: "run-agent-runner",
     backend: "claude",
     model: null,
     effort: null,
@@ -443,17 +443,17 @@ test("migrate-manifests-v10 script filters to selected repo buckets", () => {
 
   const writeRun = execFileSync(
     "node",
-    [SCRIPT_PATH, "--root", root, "--repo", "task-runner", "--write"],
+    [SCRIPT_PATH, "--root", root, "--repo", "agent-runner", "--write"],
     {
       encoding: "utf8",
     },
   );
 
-  assert.match(writeRun, /WRITE\s+.*run-task-runner\/run\.json: promoted to schemaVersion 10/);
+  assert.match(writeRun, /WRITE\s+.*run-agent-runner\/run\.json: promoted to schemaVersion 10/);
   assert.match(writeRun, /SKIP\s+.*run-assistant\/run\.json: repo bucket assistant not selected/);
-  assert.deepEqual(readManifest(taskRunnerPath), {
+  assert.deepEqual(readManifest(agentRunnerPath), {
     schemaVersion: 10,
-    runId: "run-task-runner",
+    runId: "run-agent-runner",
     backend: "claude",
     model: null,
     effort: null,

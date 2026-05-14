@@ -10,7 +10,7 @@ const SCRIPT_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-migrate-v19-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-migrate-v19-"));
 }
 
 function writeJson(path, value) {
@@ -151,7 +151,7 @@ test("migrate-manifests-v19 dry-runs v18 promotion without writing", () => {
   assert.equal("backendSessionSync" in readJson(manifestPath), false);
 });
 
-test("migrate-manifests-v19 writes sync state and task-runner provenance", () => {
+test("migrate-manifests-v19 writes sync state and agent-runner provenance", () => {
   const root = tempDir();
   const manifestPath = writeManifest(root, "demo", "run-ready", baseV18Manifest("run-ready"));
 

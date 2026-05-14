@@ -17,15 +17,15 @@ function usage() {
     "Usage: node scripts/migrate-manifests-v19.mjs [--root <path>] [--repo <name>]... [--file <path>]... [--write]",
     "",
     "Dry-run by default. Use --write to update manifests in place.",
-    "Migrates schemaVersion 18 manifests to 19 by adding backend session sync state and task-runner history provenance.",
-    "Pass a state root such as ~/.local/state/task-runner with --root.",
+    "Migrates schemaVersion 18 manifests to 19 by adding backend session sync state and agent-runner history provenance.",
+    "Pass a state root such as ~/.local/state/agent-runner with --root.",
     "Use repeated --repo filters to limit migration to selected repo buckets.",
     "Use repeated --file paths to migrate only specific run.json manifests.",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  let root = join(homedir(), ".local/state/task-runner");
+  let root = join(homedir(), ".local/state/agent-runner");
   let write = false;
   const repos = [];
   const files = [];
@@ -138,7 +138,7 @@ function isQueuedResumeMessages(value) {
   );
 }
 
-function isTaskRunnerProvenance(value) {
+function isAgentRunnerProvenance(value) {
   return isObjectRecord(value) && value.kind === "task_runner" && Object.keys(value).length === 1;
 }
 
@@ -150,7 +150,7 @@ function validateCanonicalV19(manifest) {
     throw new Error("schemaVersion 19 manifest backendSessionSync must be null after migration");
   }
   const invalidAttempt = (manifest.attemptRecords ?? []).find(
-    (record) => !isTaskRunnerProvenance(record.provenance),
+    (record) => !isAgentRunnerProvenance(record.provenance),
   );
   if (invalidAttempt) {
     throw new Error(
@@ -158,7 +158,7 @@ function validateCanonicalV19(manifest) {
     );
   }
   const invalidSession = (manifest.sessions ?? []).find(
-    (record) => !isTaskRunnerProvenance(record.provenance),
+    (record) => !isAgentRunnerProvenance(record.provenance),
   );
   if (invalidSession) {
     throw new Error(

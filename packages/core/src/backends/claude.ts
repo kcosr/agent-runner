@@ -457,7 +457,7 @@ export const claudeBackend: Backend = {
       onRawSegment: ctx.onRawStdoutLine,
     });
 
-    const command = process.env.TASK_RUNNER_CLAUDE_BIN ?? "claude";
+    const command = process.env.AGENT_RUNNER_CLAUDE_BIN ?? "claude";
 
     const result = await runProcess({
       command,

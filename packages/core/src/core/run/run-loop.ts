@@ -1,15 +1,15 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { resolveAgentRunnerCommand } from "../../agent-runner-command.js";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { BackendConfigError, resolveBackend } from "../../backends/registry.js";
 import {
   deriveRepoKey,
+  resolveAgentRunnerConfigDir,
+  resolveAgentRunnerStateDir,
   resolveRunWorkspaceDirForRepo,
-  resolveTaskRunnerConfigDir,
-  resolveTaskRunnerStateDir,
 } from "../../config/runtime-paths.js";
-import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import { appendTextFileDurable } from "../../util/write-file-atomic.js";
@@ -76,9 +76,9 @@ import {
 } from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
 import {
+  AGENT_RUNNER_CWD_ENV,
+  AGENT_RUNNER_RUN_ID_ENV,
   type RecursionState,
-  TASK_RUNNER_CWD_ENV,
-  TASK_RUNNER_RUN_ID_ENV,
   buildChildRecursionEnv,
   checkRecursionDepth,
   readParentRunIdFromEnv,
@@ -577,11 +577,11 @@ function cloneExecutionEnvironmentForRecurringRun(
   if (cloned?.mode !== "managed") {
     return cloned;
   }
-  const sourceDefaultName = `task-runner-${sourceRunId}`;
+  const sourceDefaultName = `agent-runner-${sourceRunId}`;
   const containerName =
     cloned.lifetime === "group" || cloned.containerName !== sourceDefaultName
       ? cloned.containerName
-      : `task-runner-${runId}`;
+      : `agent-runner-${runId}`;
   const runScopedRootedWorkspace =
     cloned.workspace !== null &&
     cloned.workspace.scope === "run" &&
@@ -761,7 +761,7 @@ function resolveFreshRunCwd(
 }
 
 function captureBackendStdout(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env.TASK_RUNNER_CAPTURE_BACKEND_STDOUT?.trim().toLowerCase();
+  const raw = env.AGENT_RUNNER_CAPTURE_BACKEND_STDOUT?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
@@ -1225,9 +1225,9 @@ function buildInjectedVars(params: {
     run_id: params.runId,
     run_group_id: params.runGroupId,
     cwd: params.cwd,
-    config_dir: resolveTaskRunnerConfigDir(),
-    state_dir: resolveTaskRunnerStateDir(),
-    task_runner_cmd: resolveTaskRunnerCommand(),
+    config_dir: resolveAgentRunnerConfigDir(),
+    state_dir: resolveAgentRunnerStateDir(),
+    agent_runner_cmd: resolveAgentRunnerCommand(),
     ...(params.assignmentName !== undefined ? { assignment_name: params.assignmentName } : {}),
   };
 }
@@ -1241,8 +1241,8 @@ function buildBackendInvokeEnv(params: {
   return {
     ...(process.env as Record<string, string>),
     ...buildChildRecursionEnv(params.recursionState, params.runId, params.runGroupId),
-    [TASK_RUNNER_RUN_ID_ENV]: params.runId,
-    [TASK_RUNNER_CWD_ENV]: params.cwd,
+    [AGENT_RUNNER_RUN_ID_ENV]: params.runId,
+    [AGENT_RUNNER_CWD_ENV]: params.cwd,
   };
 }
 
@@ -1457,8 +1457,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
 
   // Refuse to start if this invocation is nested too deep inside other
-  // task-runner runs. Read the depth from our own env (set by a parent
-  // task-runner via `buildChildRecursionEnv` below); the check fires
+  // agent-runner runs. Read the depth from our own env (set by a parent
+  // agent-runner via `buildChildRecursionEnv` below); the check fires
   // before any workspace creation or backend invocation so a runaway
   // recursive chain dies cheaply.
   const recursionState = readRecursionState();
@@ -1475,7 +1475,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       throw new ResumeError(`cannot reinitialize archived run ${resume.manifest.runId}`);
     }
     throw new ResumeError(
-      `cannot resume archived run ${resume.manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${resume.manifest.runId}`,
+      `cannot resume archived run ${resume.manifest.runId} — unarchive it first with ${resolveAgentRunnerCommand()} run unarchive ${resume.manifest.runId}`,
     );
   }
   if (isReinitialize && resume && resume.manifest.status !== "initialized") {
@@ -1485,7 +1485,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   }
   if (!isInitialize && resume?.manifest.status === "initialized") {
     throw new ResumeError(
-      `cannot execute initialized run ${resume.manifest.runId} — promote it first with ${resolveTaskRunnerCommand()} run ready ${resume.manifest.runId}`,
+      `cannot execute initialized run ${resume.manifest.runId} — promote it first with ${resolveAgentRunnerCommand()} run ready ${resume.manifest.runId}`,
     );
   }
   if (resume && !priorReady && resume.manifest.status === "running") {
@@ -2106,7 +2106,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     );
     // Freeze assignment.callerInstructions (if any) into the manifest
     // with {{var}} refs interpolated. This is documentation for the
-    // CALLER of task-runner, not content sent to the backend — see
+    // CALLER of agent-runner, not content sent to the backend — see
     // the field comment on RunManifest.callerInstructions.
     //
     // Trim before the length check: a whitespace-only value (like
@@ -2324,7 +2324,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const assertResumeAllowed = (targetManifest: RunManifest): void => {
     if (targetManifest.archivedAt !== null) {
       throw new ResumeError(
-        `cannot resume archived run ${targetManifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${targetManifest.runId}`,
+        `cannot resume archived run ${targetManifest.runId} — unarchive it first with ${resolveAgentRunnerCommand()} run unarchive ${targetManifest.runId}`,
       );
     }
     if (targetManifest.status === "running") {
@@ -2377,8 +2377,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   // `init` stops here: persist the prepared workspace + manifest and
   // return a terminal "initialized" outcome. No session is created; the
-  // caller will follow up with `task-runner run --resume-run <id>` —
-  // or, for passive agents, with `task-runner task set` / `task add`.
+  // caller will follow up with `agent-runner run --resume-run <id>` —
+  // or, for passive agents, with `agent-runner task set` / `task add`.
   if (isInitialize) {
     syncManifestTaskState(manifest, tasks);
     writeManifest(workspaceDir, manifest);
@@ -3148,7 +3148,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       } catch (persistError) {
         thrownError = new AggregateError(
           [error, persistError],
-          "task-runner: failed to persist the final attempt record",
+          "agent-runner: failed to persist the final attempt record",
         );
       }
       pendingAttempt = null;

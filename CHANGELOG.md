@@ -4,6 +4,12 @@
 
 ### Breaking Changes
 
+- Renamed the application from TaskRunner/task-runner to Agent Runner/agent-runner
+  across the CLI, package names, runtime directories, env vars, daemon headers,
+  web storage keys, and runner-injected template variables. Existing
+  TaskRunner state/config data must be migrated explicitly; old env vars,
+  package names, commands, and template variables are not dual-read.
+  ([#150](https://github.com/kcosr/agent-runner/pull/150))
 - Manifest schema version is now `24`. Managed container lifecycle state now
   lives at `executionEnvironment.lifecycle`, and authored environment config
   uses top-level `lifecycle.afterStart` / `lifecycle.onWorkspaceCreate`;
@@ -146,6 +152,9 @@
 
 ### Added
 
+- Added `scripts/migrate-task-runner-to-agent-runner.mjs`, a dry-run-by-default
+  migration utility for local TaskRunner state/config paths, embedded old-name
+  references, and shell rc env exports.
 - Added copy buttons to dashboard Markdown code blocks.
   ([#149](https://github.com/kcosr/task-runner/pull/149))
 - Added a bundled `generic` Codex agent with empty role instructions for

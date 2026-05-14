@@ -25,4 +25,4 @@ You may delegate impact-surface exploration to native
 subagents (Claude's Agent tool, Codex subagents,
 whatever your backend supports) if that would
 parallelize the survey. Native subagents do not count
-against task-runner's recursion depth.
+against agent-runner's recursion depth.

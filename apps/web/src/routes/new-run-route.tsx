@@ -1,4 +1,4 @@
-import type { RunInputField } from "@task-runner/core/contracts/run-input-surface.js";
+import type { RunInputField } from "@agent-runner/core/contracts/run-input-surface.js";
 import { useEffect, useRef } from "react";
 import { AppShell, TopbarPrimaryNav } from "../components/app-shell.js";
 import { useNewRunState } from "./use-new-run-state.js";
@@ -179,7 +179,7 @@ export function NewRunRoute() {
       primary={
         <div className="new-run-page">
           <div className="new-run-header">
-            <p className="boot-eyebrow">task-runner</p>
+            <p className="boot-eyebrow">agent-runner</p>
             <h1 ref={headingRef} tabIndex={-1}>
               New Run
             </h1>

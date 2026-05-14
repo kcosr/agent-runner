@@ -1,14 +1,9 @@
-import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
+import type { RunDetail, RunSummary } from "@agent-runner/core/contracts/runs.js";
 import { getRunPrimaryAction } from "./run-primary-action.js";
 
-export type RunActionMenuItemKind =
-  | "primary"
-  | "archive"
-  | "unarchive"
-  | "archive-delete"
-  | "delete";
+type RunActionMenuItemKind = "primary" | "archive" | "unarchive" | "archive-delete" | "delete";
 
-export type RunActionMenuAction =
+type RunActionMenuAction =
   | "ready"
   | "start"
   | "resume"

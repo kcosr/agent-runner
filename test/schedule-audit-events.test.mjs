@@ -12,7 +12,7 @@ import {
 } from "../packages/core/dist/core/run/run-events.js";
 
 function workspace() {
-  const dir = mkdtempSync(join(tmpdir(), "task-runner-schedule-audit-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-runner-schedule-audit-"));
   mkdirSync(dir, { recursive: true });
   return dir;
 }

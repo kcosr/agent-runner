@@ -68,7 +68,7 @@ Work on {{repo_path}}.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-interp-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-interp-"));
 }
 
 function escapeRegExp(value) {

@@ -7,7 +7,7 @@ import { buildCursorArgs, cursorBackend } from "../packages/core/dist/backends/c
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-cursor-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-cursor-"));
 }
 
 function writeFakeCursorAgent(baseDir) {
@@ -72,7 +72,7 @@ test("cursor backend merges streamed and final transcripts when they differ", as
   const command = writeFakeCursorAgent(dir);
   const events = [];
 
-  const result = await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+  const result = await withEnv({ AGENT_RUNNER_CURSOR_BIN: command }, () =>
     cursorBackend.invoke({
       prompt: "Inspect the repo",
       cwd: dir,
@@ -130,7 +130,7 @@ test("cursor backend parses assistant stream-json chunks and top-level result", 
   const command = writeFakeCursorAgent(dir);
   const events = [];
 
-  const result = await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+  const result = await withEnv({ AGENT_RUNNER_CURSOR_BIN: command }, () =>
     cursorBackend.invoke({
       prompt: "Still there?",
       cwd: dir,
@@ -168,7 +168,7 @@ test("cursor backend rejects malformed stream-json output", async () => {
 
   await assert.rejects(
     () =>
-      withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+      withEnv({ AGENT_RUNNER_CURSOR_BIN: command }, () =>
         cursorBackend.invoke({
           prompt: "Inspect the repo",
           cwd: dir,
@@ -192,7 +192,7 @@ test("cursor backend rejects successful runs without a final result string", asy
 
   await assert.rejects(
     () =>
-      withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+      withEnv({ AGENT_RUNNER_CURSOR_BIN: command }, () =>
         cursorBackend.invoke({
           prompt: "Inspect the repo",
           cwd: dir,
@@ -214,7 +214,7 @@ test("cursor backend returns non-zero exits without guessing a transcript", asyn
   const dir = tempDir();
   const command = writeFakeCursorAgent(dir);
 
-  const result = await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+  const result = await withEnv({ AGENT_RUNNER_CURSOR_BIN: command }, () =>
     cursorBackend.invoke({
       prompt: "Inspect the repo",
       cwd: dir,
@@ -241,7 +241,7 @@ test("cursor backend inserts a boundary separator before the next partial output
   const command = writeFakeCursorAgent(dir);
   const events = [];
 
-  await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+  await withEnv({ AGENT_RUNNER_CURSOR_BIN: command }, () =>
     cursorBackend.invoke({
       prompt: "Inspect the repo",
       cwd: dir,
@@ -271,7 +271,7 @@ test("cursor backend streams an assistant event when no prior text was emitted",
   const command = writeFakeCursorAgent(dir);
   const events = [];
 
-  const result = await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+  const result = await withEnv({ AGENT_RUNNER_CURSOR_BIN: command }, () =>
     cursorBackend.invoke({
       prompt: "Inspect the repo",
       cwd: dir,

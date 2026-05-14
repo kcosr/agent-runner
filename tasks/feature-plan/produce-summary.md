@@ -7,12 +7,12 @@ title: Produce human-facing summary artifact
 
 Render the planning Notes from this run into a human-facing markdown summary at a temporary path such as:
 
-    /tmp/task-runner-plan-{{run_id}}/assignment-summary.md
+    /tmp/agent-runner-plan-{{run_id}}/assignment-summary.md
 
 Use the existing summary template unchanged. It lives in one of:
   - `{{cwd}}/assignments/plan-feature/summary-template.md`
   - `{{config_dir}}/assignments/plan-feature/summary-template.md`
-  - under the task-runner install root
+  - under the agent-runner install root
 
 If no template can be found, mark this task `blocked` with the exact
 locations searched.

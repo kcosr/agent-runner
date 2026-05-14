@@ -13,7 +13,7 @@ import {
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-pi-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-pi-"));
 }
 
 function writeFakePiAgent(baseDir) {
@@ -270,7 +270,7 @@ test("pi backend launches in rpc mode, captures streamed text, and persists tran
   const command = writeFakePiAgent(dir);
   const events = [];
 
-  const result = await withEnv({ TASK_RUNNER_PI_BIN: command }, () =>
+  const result = await withEnv({ AGENT_RUNNER_PI_BIN: command }, () =>
     piBackend.invoke({
       prompt: "Inspect the repo",
       cwd: dir,
@@ -345,7 +345,7 @@ test("pi backend rejects malformed rpc output", async () => {
 
   await assert.rejects(
     () =>
-      withEnv({ TASK_RUNNER_PI_BIN: command }, () =>
+      withEnv({ AGENT_RUNNER_PI_BIN: command }, () =>
         piBackend.invoke({
           prompt: "Inspect the repo",
           cwd: dir,
@@ -369,7 +369,7 @@ test("pi backend auto-cancels dialog-style extension ui requests without hanging
   const extensionResponsePath = join(dir, "extension-response.json");
 
   const result = await Promise.race([
-    withEnv({ TASK_RUNNER_PI_BIN: command }, () =>
+    withEnv({ AGENT_RUNNER_PI_BIN: command }, () =>
       piBackend.invoke({
         prompt: "Inspect the repo",
         cwd: dir,
@@ -410,7 +410,7 @@ test("pi backend rejects when the process exits before agent_end", async () => {
   await assert.rejects(
     () =>
       Promise.race([
-        withEnv({ TASK_RUNNER_PI_BIN: command }, () =>
+        withEnv({ AGENT_RUNNER_PI_BIN: command }, () =>
           piBackend.invoke({
             prompt: "Inspect the repo",
             cwd: dir,
@@ -441,7 +441,7 @@ test("pi backend rejects cleanly when the pi binary is missing", async () => {
   await assert.rejects(
     () =>
       Promise.race([
-        withEnv({ TASK_RUNNER_PI_BIN: join(dir, "missing-pi-bin") }, () =>
+        withEnv({ AGENT_RUNNER_PI_BIN: join(dir, "missing-pi-bin") }, () =>
           piBackend.invoke({
             prompt: "Inspect the repo",
             cwd: dir,

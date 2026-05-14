@@ -54,7 +54,7 @@ function fieldByKey(fields, key) {
 }
 
 test("static input surface: built-in planner + plan-feature surfaces the documented static fields", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     const loadedAgent = loadAgentConfig(PLANNER_AGENT_PATH, REPO_ROOT);
     const loadedAssignment = loadAssignmentConfig(PLAN_FEATURE_ASSIGNMENT_PATH, REPO_ROOT);
 
@@ -120,7 +120,7 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
   }));
 
 test("static input surface: built-in generic + plan-implement-feature has no assignment vars", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     const loadedAgent = loadAgentConfig(GENERIC_AGENT_PATH, REPO_ROOT);
     const loadedAssignment = loadAssignmentConfig(
       PLAN_IMPLEMENT_FEATURE_ASSIGNMENT_PATH,
@@ -154,7 +154,7 @@ test("static input surface: built-in generic + plan-implement-feature has no ass
   }));
 
 test("static input surface: review assignments expose the correct CLI/Web inputs", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     const loadedAgent = loadAgentConfig(CODE_REVIEWER_AGENT_PATH, REPO_ROOT);
     const implementationReview = resolveStaticInputSurface(
       loadedAgent,
@@ -186,7 +186,7 @@ test("static input surface: review assignments expose the correct CLI/Web inputs
   }));
 
 test("static input surface: backend choices include loaded custom backend names", async () =>
-  withRuntimeRoots("task-runner-static-input-backends-", async ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-static-input-backends-", async ({ rootDir, configDir }) => {
     writeBackend(
       configDir,
       "my-agent",
@@ -209,7 +209,7 @@ Custom backend agent.
 `,
     );
 
-    await loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir });
+    await loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir });
     const surface = resolveStaticInputSurface(loadAgentConfig("custom-agent", rootDir));
     const backend = fieldByKey(surface.runSettings, "backend");
 
@@ -219,7 +219,7 @@ Custom backend agent.
   }));
 
 test("static input surface: launcher path and inline definitions preserve authored values", () =>
-  withRuntimeRoots("task-runner-static-input-launchers-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-static-input-launchers-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "path-launcher",
@@ -241,7 +241,7 @@ name: inline-launcher
 backend: codex
 launcher:
   command: env
-  args: [TASK_RUNNER_TEST, "1"]
+  args: [AGENT_RUNNER_TEST, "1"]
 ---
 Inline launcher fixture.
 `,
@@ -257,12 +257,12 @@ Inline launcher fixture.
 
     assert.deepEqual(fieldByKey(inlineSurface.runSettings, "launcher").value, {
       command: "env",
-      args: ["TASK_RUNNER_TEST", "1"],
+      args: ["AGENT_RUNNER_TEST", "1"],
     });
   }));
 
 test("static input surface: lock union and CLI-capable var metadata are preserved", () =>
-  withRuntimeRoots("task-runner-static-input-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-static-input-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "fixture",
@@ -383,7 +383,7 @@ Fixture assignment.
   }));
 
 test("static input surface: agent-only resolution keeps run-loop defaults without inventing assignment state", () =>
-  withRuntimeRoots("task-runner-static-input-agent-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-static-input-agent-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "agent-only",

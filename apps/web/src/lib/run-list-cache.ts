@@ -1,5 +1,5 @@
+import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { runQueryKeys } from "./query.js";
 import { sortRunsByStartedAtDesc } from "./run-order.js";
 

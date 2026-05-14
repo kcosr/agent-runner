@@ -7,11 +7,11 @@ work context.
 
 ## Definition layout
 
-Definitions live under `${TASK_RUNNER_CONFIG_DIR}` (default
-`~/.config/task-runner`) or can be passed as direct paths:
+Definitions live under `${AGENT_RUNNER_CONFIG_DIR}` (default
+`~/.config/agent-runner`) or can be passed as direct paths:
 
 ```text
-${TASK_RUNNER_CONFIG_DIR}/
+${AGENT_RUNNER_CONFIG_DIR}/
 ├── agents/
 │   └── <agent-name>/
 │       └── agent.md
@@ -76,18 +76,18 @@ executionEnvironment: dev-container  # optional named/path container environment
 
 The built-in `direct` launcher is always available and means "no
 prefix". User-authored launcher files live under
-`${TASK_RUNNER_CONFIG_DIR}/launchers/*.yaml|*.yml`; their canonical id is
+`${AGENT_RUNNER_CONFIG_DIR}/launchers/*.yaml|*.yml`; their canonical id is
 the filename stem, and authored `name`, when present, must match that
 stem exactly.
 
 `backend` can name a built-in backend or a custom backend loaded from
-`${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`.
+`${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`.
 Custom backend modules are trusted local code, loaded without sandboxing,
 cached for the process lifetime, and daemon changes require a daemon
 restart. Their default export must have an `id` matching the directory
 name; built-in names are reserved. Install custom backend dependencies
 under the config directory, for example
-`cd ~/.config/task-runner && npm install <package>`.
+`cd ~/.config/agent-runner && npm install <package>`.
 
 `backendConfig` is generic backend-owned JSON-like data keyed by backend
 name. Fresh/init selects only the active backend's config, lets that
@@ -105,7 +105,7 @@ Other backend config shapes are owned by their selected backend. There is
 no generic backend-specific env passthrough.
 
 `backendArgs` lets an agent append backend-owned CLI flags without adding
-a new task-runner option. It is keyed by backend id, and each entry has an
+a new agent-runner option. It is keyed by backend id, and each entry has an
 `extraArgs` string array:
 
 ```yaml
@@ -200,8 +200,8 @@ List/show commands resolve launchers the same way as agents and
 assignments:
 
 ```bash
-task-runner list launchers
-task-runner show launcher ssh-docker
+agent-runner list launchers
+agent-runner show launcher ssh-docker
 ```
 
 Fresh-run launcher precedence is:
@@ -214,7 +214,7 @@ The override is named-only by design. Inline launchers are authored on
 agents, not supplied ad hoc on the CLI or daemon request boundary.
 
 Connected mode is daemon-authoritative for named launchers: the daemon
-resolves the name against its own `${TASK_RUNNER_CONFIG_DIR}` and freezes
+resolves the name against its own `${AGENT_RUNNER_CONFIG_DIR}` and freezes
 the result into the manifest. Resume and reset reuse that frozen
 launcher; they do not re-read current launcher files.
 
@@ -268,7 +268,7 @@ lifecycle:
       target: container
       source: "{{repo_source}}"
       baseRef: "{{base_ref}}"
-      branch: "task-runner/{{run_id}}"
+      branch: "agent-runner/{{run_id}}"
     - kind: command
       target: container
       command: npm
@@ -281,11 +281,11 @@ cleanup:
 The `workspace` block is the preferred way to mount a run working
 directory into a managed container. `scope: run` creates/reuses a host
 path for one run; `scope: group` creates/reuses one host path for all
-runs in the run group. When `hostPath` is omitted, task-runner derives it
+runs in the run group. When `hostPath` is omitted, agent-runner derives it
 from `hostRoot` plus the run id or run group id. If `cwd` resolves inside
-the workspace host path, task-runner rewrites it to the matching
+the workspace host path, agent-runner rewrites it to the matching
 container path before invoking the backend. With `create: true`,
-task-runner creates the host directory before starting the container.
+agent-runner creates the host directory before starting the container.
 Managed environments can interpolate `workspace_host_path` and
 `workspace_container_path` after the workspace has been resolved.
 Environment `vars` use the same schema and approved sources as
@@ -418,13 +418,13 @@ Task definitions must match:
 Assignments may also mix reusable task refs with inline task objects:
 
 - bare strings such as `orient` or `review/reuse` resolve as named task
-  refs under `${TASK_RUNNER_CONFIG_DIR}/tasks`
+  refs under `${AGENT_RUNNER_CONFIG_DIR}/tasks`
 - only absolute paths and strings beginning with `./` or `../` resolve
   as explicit task file paths
 - inline objects stay local to the assignment
 
 Named task definitions are markdown files under
-`${TASK_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`:
+`${AGENT_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`:
 
 ```md
 ---
@@ -447,8 +447,8 @@ Read the shared review checklist.
 - `loadAssignmentConfig()` resolves named and path refs into the normal
   plain task objects before runtime; later `{{var}}` interpolation still
   happens during run construction
-- inspect reusable task definitions with `task-runner list tasks` and
-  `task-runner show task <name|path>` without creating or mutating runs
+- inspect reusable task definitions with `agent-runner list tasks` and
+  `agent-runner show task <name|path>` without creating or mutating runs
 
 Assignment schedules use the same input shape as CLI/API schedule
 requests. Define exactly one of:
@@ -477,7 +477,7 @@ Discovery warns and skips config-root definitions whose authored
 internal id does not match that canonical key. Direct named/path loads of
 those skipped config-root definitions still fail clearly.
 
-Direct path loads outside `TASK_RUNNER_CONFIG_DIR` are one-off file loads,
+Direct path loads outside `AGENT_RUNNER_CONFIG_DIR` are one-off file loads,
 not named config-root discovery. They may use authored agent,
 assignment, task, and launcher identities that differ from the
 filesystem-derived fallback id; when an outside-root task `id` or launcher
@@ -569,7 +569,7 @@ hooks:
 Resolution rules:
 
 - `builtin` loads one of the first-party hooks shipped by core.
-- `name` resolves from `${TASK_RUNNER_CONFIG_DIR}/hooks/<name>/hook.(ts|mts|js|mjs)`.
+- `name` resolves from `${AGENT_RUNNER_CONFIG_DIR}/hooks/<name>/hook.(ts|mts|js|mjs)`.
 - `path` resolves relative to the authored `assignment.md`.
 - Raw `.ts` / `.mts` hook files load directly through the runtime's
   `jiti` loader. Hook authors do not need a separate build step.
@@ -680,13 +680,13 @@ init time and then reused on resume:
 1. Agent frontmatter `backendConfig.codex.transport`
 2. Request override `overrides.backendConfig.codex.transport` when
    supplied by a daemon/API caller
-3. `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` from the
+3. `AGENT_RUNNER_CODEX_UDS_PATH` or `AGENT_RUNNER_CODEX_WS_URL` from the
    current process environment
 4. `{ type: "stdio" }`
 
 UDS transport uses WebSocket-over-UDS for Codex app-server, not raw UDS
 bytes, and `path` must be absolute. If both UDS and WS env vars are set
-with no higher-precedence transport, Task Runner fails fast. Resume does
+with no higher-precedence transport, Agent Runner fails fast. Resume does
 not re-read these env vars because the transport is already frozen.
 
 Once frozen into the manifest, later env drift does not change the run's
@@ -699,7 +699,7 @@ newly-added tasks appear):
 
 1. Agent role instructions
 2. Assignment instructions
-3. task-runner worker workflow template (only if tasks exist)
+3. agent-runner worker workflow template (only if tasks exist)
 4. Run message (CLI positional message, or the assignment's default
    `message`, or an implicit continue message on resume with incomplete
    tasks)
@@ -722,7 +722,7 @@ being frozen into the manifest:
 
 The syntax is `{{key}}` (whitespace permitted). Always-available variables
 include `run_id`, `cwd`, `config_dir`, `state_dir`, `assignment_name`,
-and `task_runner_cmd`. See [variables.md](variables.md).
+and `agent_runner_cmd`. See [variables.md](variables.md).
 
 This runtime `{{key}}` interpolation is distinct from the config-time
 `${...}` env interpolation used while loading frontmatter.
@@ -730,13 +730,13 @@ This runtime `{{key}}` interpolation is distinct from the config-time
 ## Inspecting definitions
 
 ```bash
-task-runner list agents
-task-runner list assignments
-task-runner list tasks
+agent-runner list agents
+agent-runner list assignments
+agent-runner list tasks
 
-task-runner show agent <name|path>
-task-runner show assignment <name|path>
-task-runner show task <name|path>
+agent-runner show agent <name|path>
+agent-runner show assignment <name|path>
+agent-runner show task <name|path>
 ```
 
 These surfaces render parsed frontmatter, interpolation hooks, task lists,
@@ -745,10 +745,10 @@ and reusable task definition title/body/hooks for human review.
 ## Authoring hook modules
 
 First-party and custom hooks share the public authoring surface exported
-from `@task-runner/core/hooks`:
+from `@agent-runner/core/hooks`:
 
 ```ts
-import { defineHook, type PrepareHookContext } from "@task-runner/core/hooks";
+import { defineHook, type PrepareHookContext } from "@agent-runner/core/hooks";
 
 export default defineHook({
   name: "freeze-prepare",
@@ -777,7 +777,7 @@ Task-transition hooks return `{ accept: true }` or
 
 - Keep agent instructions focused on role (tone, approach, standards).
   Leave work-specific instructions in the assignment.
-- Use `callerInstructions` for anything the human invoking task-runner needs
+- Use `callerInstructions` for anything the human invoking agent-runner needs
   but the worker does not. The worker never sees it.
 - Use `lockedFields: [tasks]` on assignments whose task list must not be
   dropped or reordered at runtime.

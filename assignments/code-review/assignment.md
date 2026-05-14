@@ -42,7 +42,7 @@ vars:
     required: true
     sources: [cli, web]
     description: |
-      Canonical task-runner run id for the implementation run
+      Canonical agent-runner run id for the implementation run
       being reviewed. The reviewer reads the implementation run's
       canonical task state and attachments by run id for the
       plan-coverage pass.
@@ -68,7 +68,7 @@ callerInstructions: |
   format (`APPROVED for ship` or `BLOCKED -- cannot approve`)
   so you can grep it directly:
 
-      {{task_runner_cmd}} run status {{run_id}} --output-format json \
+      {{agent_runner_cmd}} run status {{run_id}} --output-format json \
         --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
   This review expects `--var implementation_run_id=<run-id>`.
@@ -88,8 +88,8 @@ callerInstructions: |
 
   Pull the full review:
 
-      {{task_runner_cmd}} run status {{run_id}}                         # human-readable
-      {{task_runner_cmd}} run status {{run_id}} --output-format json    # machine-readable
+      {{agent_runner_cmd}} run status {{run_id}}                         # human-readable
+      {{agent_runner_cmd}} run status {{run_id}} --output-format json    # machine-readable
 
   Each finding in a task's notes block follows this format:
 
@@ -118,7 +118,7 @@ callerInstructions: |
   After implementing fixes, resume this same run with a follow-up
   message that tells the reviewer what you did:
 
-      {{task_runner_cmd}} run --resume-run {{run_id}} "<your follow-up>"
+      {{agent_runner_cmd}} run --resume-run {{run_id}} "<your follow-up>"
 
   The follow-up message should cover, for each prior finding:
     - **resolved** — cite the file:line or commit of the fix so
@@ -199,9 +199,9 @@ tasks:
       the repository state, the requested scope, and
       `implementation_run_id`.
 
-          {{task_runner_cmd}} attachment list "{{implementation_run_id}}" --scope group --output-format json
-          mkdir -p /tmp/task-runner-review-artifacts-{{run_id}}
-          {{task_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/task-runner-review-artifacts-{{run_id}}/
+          {{agent_runner_cmd}} attachment list "{{implementation_run_id}}" --scope group --output-format json
+          mkdir -p /tmp/agent-runner-review-artifacts-{{run_id}}
+          {{agent_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/agent-runner-review-artifacts-{{run_id}}/
 
       In the group-scoped JSON output, find the row whose `name` is
       `assignment-summary.md` and use that row's `ownerRunId` plus
@@ -228,7 +228,7 @@ tasks:
     body: |
       Read the implementation run's canonical task state:
 
-          {{task_runner_cmd}} run status {{implementation_run_id}} --output-format json --field tasks
+          {{agent_runner_cmd}} run status {{implementation_run_id}} --output-format json --field tasks
 
       Your job is to verify that what shipped matches what the
       implementation run claimed to complete, with no silent

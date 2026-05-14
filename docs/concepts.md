@@ -1,6 +1,6 @@
 # Concepts
 
-`task-runner` drives an agent through a structured list of tasks and persists
+`agent-runner` drives an agent through a structured list of tasks and persists
 the run state in a manifest-canonical workspace. This page gives a tour of the
 core concepts. Each concept has its own detailed doc — follow the links when
 you need specifics.
@@ -13,7 +13,7 @@ execution instance created from one agent and (optionally) one assignment. A
 run exposes two distinct instruction surfaces: the **worker brief** that is
 sent to the backend and the **caller instructions** that are printed for the
 human or script invoking the CLI. Task state is canonical in `run.json` and
-workers mutate it through the `task-runner task ...` CLI.
+workers mutate it through the `agent-runner task ...` CLI.
 
 ## Agents
 
@@ -24,7 +24,7 @@ separate `backendArgs` for extra argv tokens. The body is the agent's role
 instructions.
 
 Bundled examples live under `agents/`. Custom backend modules live under
-`${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`
+`${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`
 and are trusted local code loaded without sandboxing. See
 [agents-and-assignments.md](agents-and-assignments.md) for the full schema.
 
@@ -36,7 +36,7 @@ and `lockedFields`. The body is the assignment instructions sent to the
 worker.
 
 Assignments are source definitions. They can be named definitions under
-`${TASK_RUNNER_CONFIG_DIR}/assignments/<name>/assignment.md` or direct paths.
+`${AGENT_RUNNER_CONFIG_DIR}/assignments/<name>/assignment.md` or direct paths.
 They are not a live workspace surface — task state lives in the manifest, not
 in a workspace markdown file.
 
@@ -47,7 +47,7 @@ See [agents-and-assignments.md](agents-and-assignments.md).
 A run is a frozen execution record at:
 
 ```text
-${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
+${AGENT_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ```
 
 The canonical record is `run.json`. If the run was created from an assignment
@@ -79,10 +79,10 @@ and `blocked`.
 Workers drive tasks through the CLI:
 
 ```bash
-task-runner task list <run-id>
-task-runner task show <run-id> <task-id>
-task-runner task set <run-id> <task-id> --status in_progress
-task-runner task append-notes <run-id> <task-id> --text "..."
+agent-runner task list <run-id>
+agent-runner task show <run-id> <task-id>
+agent-runner task set <run-id> <task-id> --status in_progress
+agent-runner task append-notes <run-id> <task-id> --text "..."
 ```
 
 Mutation rules depend on run lifecycle state and whether the backend is
@@ -90,14 +90,14 @@ passive. See [tasks.md](tasks.md).
 
 ## Brief and caller instructions
 
-task-runner maintains two separate instruction surfaces:
+agent-runner maintains two separate instruction surfaces:
 
 - **Worker brief** (`brief`) is the worker-facing handoff. It is composed
-  from agent instructions, assignment instructions, the task-runner workflow
+  from agent instructions, assignment instructions, the agent-runner workflow
   template, and the run message. It is frozen in the manifest and re-used on
-  every attempt. Fetch it with `task-runner run brief <run-id>`.
+  every attempt. Fetch it with `agent-runner run brief <run-id>`.
 - **Caller instructions** (`callerInstructions`) are assignment docs for the
-  human or script invoking task-runner. They are printed to stderr on fresh
+  human or script invoking agent-runner. They are printed to stderr on fresh
   `run` / `init`, exposed through `run status --output-format json`, and never
   sent to the backend.
 
@@ -145,10 +145,10 @@ group dependencies. See [dependencies.md](dependencies.md).
 
 ## Daemon and web dashboard
 
-`task-runner serve` hosts a local control plane: WebSocket JSON-RPC for CLI
+`agent-runner serve` hosts a local control plane: WebSocket JSON-RPC for CLI
 clients, HTTP + SSE for browser clients, and the bundled web dashboard from
 `apps/web`. The CLI can route through the daemon with `--connect` or
-`TASK_RUNNER_CONNECT`. See [daemon.md](daemon.md) and
+`AGENT_RUNNER_CONNECT`. See [daemon.md](daemon.md) and
 [web-dashboard.md](web-dashboard.md).
 
 ## Where to go next

@@ -1,4 +1,4 @@
-import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
+import type { RunAttachment } from "@agent-runner/core/contracts/attachments.js";
 
 const IMAGE_ATTACHMENT_MEDIA_TYPES = new Set([
   "image/png",

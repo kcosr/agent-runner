@@ -116,7 +116,7 @@ Reconfig assignment for {{target}}.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-daemon-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-daemon-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -157,7 +157,7 @@ function writeSyncBackend(baseDir) {
     `
 import { readFileSync, writeFileSync } from "node:fs";
 
-const statePath = process.env.TASK_RUNNER_SYNC_BACKEND_STATE;
+const statePath = process.env.AGENT_RUNNER_SYNC_BACKEND_STATE;
 
 function readState() {
   return JSON.parse(readFileSync(statePath, "utf8"));
@@ -400,7 +400,7 @@ async function withSeededFrontendDist(fn) {
         '<html lang="en">',
         "  <head>",
         '    <meta charset="utf-8" />',
-        "    <title>task-runner</title>",
+        "    <title>agent-runner</title>",
         '    <script type="module" src="/assets/daemon-test.js"></script>',
         "  </head>",
         '  <body><div id="root"></div></body>',
@@ -679,8 +679,8 @@ import { appendFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 
 const args = process.argv.slice(2);
-const mode = process.env.TASK_RUNNER_FAKE_SSH_MODE ?? "proxy";
-const logPath = process.env.TASK_RUNNER_FAKE_SSH_LOG;
+const mode = process.env.AGENT_RUNNER_FAKE_SSH_MODE ?? "proxy";
+const logPath = process.env.AGENT_RUNNER_FAKE_SSH_LOG;
 const forwardIndex = args.indexOf("-L");
 const host = args.at(-1) ?? "";
 const forward = forwardIndex >= 0 ? args[forwardIndex + 1] : "";
@@ -702,7 +702,7 @@ if (!match) {
 
 const [, localPortRaw, targetHostRaw, targetPortRaw] = match;
 const localPort = Number(localPortRaw);
-const targetHost = process.env.TASK_RUNNER_FAKE_SSH_TARGET_HOST ?? targetHostRaw;
+const targetHost = process.env.AGENT_RUNNER_FAKE_SSH_TARGET_HOST ?? targetHostRaw;
 const targetPort = Number(targetPortRaw);
 
 const server = createServer((client) => {
@@ -1568,7 +1568,7 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
         method: "POST",
         headers: {
           "content-type": "text/plain",
-          "x-task-runner-attachment-name": "evidence.txt",
+          "x-agent-runner-attachment-name": "evidence.txt",
         },
         body: Buffer.from("evidence payload\n"),
       });
@@ -1589,8 +1589,8 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       );
       assert.equal(content.status, 200);
       assert.equal(await content.text(), "evidence payload\n");
-      assert.equal(content.headers.get("x-task-runner-attachment-id"), attachmentId);
-      assert.equal(content.headers.get("x-task-runner-sha256"), uploadedBody.attachment.sha256);
+      assert.equal(content.headers.get("x-agent-runner-attachment-id"), attachmentId);
+      assert.equal(content.headers.get("x-agent-runner-sha256"), uploadedBody.attachment.sha256);
       assert.match(
         content.headers.get("content-disposition") ?? "",
         /attachment; filename\*=UTF-8''evidence\.txt/,
@@ -1626,7 +1626,7 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
         method: "POST",
         headers: {
           "content-type": "text/plain",
-          "x-task-runner-attachment-name": "overflow.txt",
+          "x-agent-runner-attachment-name": "overflow.txt",
         },
         body: Buffer.from("x"),
       });
@@ -1745,7 +1745,7 @@ test("daemon attachment HTTP routes default to group scope and reject invalid sc
           method: "POST",
           headers: {
             "content-type": "text/plain",
-            "x-task-runner-attachment-name": name,
+            "x-agent-runner-attachment-name": name,
           },
           body: Buffer.from(`${name}\n`),
         });
@@ -2324,7 +2324,7 @@ test("daemon run projections expose explicit abort capability from local ownersh
     getRun() {
       return {
         runId,
-        repo: "task-runner",
+        repo: "agent-runner",
         status: "running",
         effectiveStatus: "running",
         archivedAt: null,
@@ -2393,7 +2393,7 @@ test("daemon run projections expose explicit abort capability from local ownersh
       return [
         {
           runId,
-          repo: "task-runner",
+          repo: "agent-runner",
           status: "running",
           effectiveStatus: "running",
           archivedAt: null,
@@ -2529,7 +2529,7 @@ test("daemon projects active run detail as live while it owns the run", async ()
     getRun() {
       return {
         runId,
-        repo: "task-runner",
+        repo: "agent-runner",
         status,
         effectiveStatus: status,
         archivedAt: null,
@@ -2601,7 +2601,7 @@ test("daemon projects active run detail as live while it owns the run", async ()
       return [
         {
           runId,
-          repo: "task-runner",
+          repo: "agent-runner",
           status,
           effectiveStatus: status,
           archivedAt: null,
@@ -2771,7 +2771,7 @@ test("daemon HTTP projections preserve hook summary and detail fields", async ()
     getRun() {
       return {
         runId,
-        repo: "task-runner",
+        repo: "agent-runner",
         status: "initialized",
         effectiveStatus: "initialized",
         archivedAt: null,
@@ -2866,7 +2866,7 @@ test("daemon HTTP projections preserve hook summary and detail fields", async ()
       return [
         {
           runId,
-          repo: "task-runner",
+          repo: "agent-runner",
           status: "initialized",
           effectiveStatus: "initialized",
           archivedAt: null,
@@ -2936,7 +2936,7 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
     getRun() {
       return {
         runId: "daemon-live-run",
-        repo: "task-runner",
+        repo: "agent-runner",
         status,
         effectiveStatus: status,
         archivedAt: null,
@@ -3089,7 +3089,7 @@ test("daemon republishes summary and detail projections when a run retries", asy
     getRun() {
       return {
         runId,
-        repo: "task-runner",
+        repo: "agent-runner",
         status,
         effectiveStatus: status,
         archivedAt: null,
@@ -3153,7 +3153,7 @@ test("daemon republishes summary and detail projections when a run retries", asy
       return [
         {
           runId,
-          repo: "task-runner",
+          repo: "agent-runner",
           status,
           effectiveStatus: status,
           archivedAt: null,
@@ -3677,7 +3677,7 @@ Zero-task daemon work.
   };
 
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "60" },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "60" },
     async () => {
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
@@ -4243,7 +4243,7 @@ test("daemon scheduler rebuilds future timers after schedule mutations and start
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+      AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
     },
     async () => {
       const server = await serveDaemon(listenUrl, {
@@ -4303,7 +4303,7 @@ test("daemon scheduler rejects manual starts while a scheduled start is pending"
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+      AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
     },
     async () => {
       const server = await serveDaemon(listenUrl, {
@@ -4370,7 +4370,7 @@ test("daemon scheduler records failed starts without immediately requeueing the 
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+      AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
     },
     async () => {
       const server = await serveDaemon(listenUrl, {
@@ -4432,7 +4432,7 @@ test("daemon scheduler resumes completed runs for due one-time schedules", async
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+      AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
     },
     async () => {
       const server = await serveDaemon(listenUrl, {
@@ -4547,7 +4547,7 @@ test("daemon scheduler resumes recurring reuse runs with a synthetic message aft
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+      AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
     },
     async () => {
       const server = await serveDaemon(listenUrl, {
@@ -4690,7 +4690,7 @@ test("daemon projections skip task-state filesystem locks by default", async () 
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS: undefined,
+      AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS: undefined,
     },
     async () => {
       const server = await serveDaemon(listenUrl);
@@ -4718,7 +4718,7 @@ test("daemon can opt into deferring run.created projection until task-state lock
   const listenUrl = `ws://127.0.0.1:${port}/`;
 
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS: "true" },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS: "true" },
     async () => {
       const server = await serveDaemon(listenUrl, {
         async startRun({ emitEvent, emitAuditEnvelope }) {
@@ -4902,7 +4902,7 @@ test("daemon scheduler advances missed recurring schedules and disables invalid 
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "120",
+      AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "120",
     },
     async () => {
       const server = await serveDaemon(listenUrl, {
@@ -5035,7 +5035,7 @@ test("daemon mutation publishing suppresses stale-schema projection failures", a
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const projectionError = new ResumeError(
-    "manifest at /tmp/stale/run.json has schemaVersion 13; this version of task-runner requires schemaVersion 14",
+    "manifest at /tmp/stale/run.json has schemaVersion 13; this version of agent-runner requires schemaVersion 14",
   );
 
   const server = await serveDaemon(listenUrl, {
@@ -5575,7 +5575,7 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
     getRun() {
       return {
         runId,
-        repo: "task-runner",
+        repo: "agent-runner",
         status,
         effectiveStatus: status,
         archivedAt: null,
@@ -5647,7 +5647,7 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
       return [
         {
           runId,
-          repo: "task-runner",
+          repo: "agent-runner",
           status,
           effectiveStatus: status,
           archivedAt: null,
@@ -5822,7 +5822,7 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
     getRun() {
       return {
         runId,
-        repo: "task-runner",
+        repo: "agent-runner",
         status,
         effectiveStatus: status,
         archivedAt: null,
@@ -5886,7 +5886,7 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
       return [
         {
           runId,
-          repo: "task-runner",
+          repo: "agent-runner",
           status,
           effectiveStatus: status,
           archivedAt: null,
@@ -6060,7 +6060,7 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
     getRun() {
       return {
         runId,
-        repo: "task-runner",
+        repo: "agent-runner",
         status,
         effectiveStatus: status,
         archivedAt: null,
@@ -6121,7 +6121,7 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
       return [
         {
           runId,
-          repo: "task-runner",
+          repo: "agent-runner",
           status,
           effectiveStatus: status,
           archivedAt: null,
@@ -6353,7 +6353,7 @@ test("daemon session sync polls subscribed detail runs, skips unchanged reads, a
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
@@ -6471,7 +6471,7 @@ test("daemon session sync ignores summary-only and running run subscriptions", a
   const listenUrl = `ws://127.0.0.1:${port}/`;
   let releaseActiveRun;
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
       const server = await serveDaemon(listenUrl, {
         async startRun({ emitEvent }) {
@@ -6510,7 +6510,7 @@ test("daemon session sync ignores summary-only and running run subscriptions", a
   );
 });
 
-test("daemon session sync is disabled by TASK_RUNNER_BACKEND_SESSION_SYNC=false", async () => {
+test("daemon session sync is disabled by AGENT_RUNNER_BACKEND_SESSION_SYNC=false", async () => {
   const dir = tempDir();
   const statePath = join(dir, "sync-state.json");
   writeAgent(dir, "sync-daemon-agent", SYNC_AGENT);
@@ -6533,8 +6533,8 @@ test("daemon session sync is disabled by TASK_RUNNER_BACKEND_SESSION_SYNC=false"
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_SYNC_BACKEND_STATE: statePath,
-      TASK_RUNNER_BACKEND_SESSION_SYNC: "false",
+      AGENT_RUNNER_SYNC_BACKEND_STATE: statePath,
+      AGENT_RUNNER_BACKEND_SESSION_SYNC: "false",
     },
     async () => {
       const server = await serveDaemon(listenUrl);
@@ -6578,7 +6578,7 @@ test("daemon session sync invalidates timeline subscribers after importing backe
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
@@ -6662,7 +6662,7 @@ test("daemon session sync publishes audit failures and persists lastError", asyn
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
@@ -6728,7 +6728,7 @@ test("daemon session sync skips busy task-state locks without failure audit", as
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
@@ -6794,7 +6794,7 @@ test("daemon session sync reads backend history outside the task-state lock", as
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
@@ -6868,7 +6868,7 @@ test("daemon session sync skips apply when sync state changes during backend rea
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
@@ -6934,7 +6934,7 @@ test("daemon session sync close clears pending poll timers", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   await withEnv(
-    { ...sharedRuntimeEnv(dir), TASK_RUNNER_SYNC_BACKEND_STATE: statePath },
+    { ...sharedRuntimeEnv(dir), AGENT_RUNNER_SYNC_BACKEND_STATE: statePath },
     async () => {
       const server = await serveDaemon(listenUrl);
       const client = await DaemonClient.connect(listenUrl);
@@ -7308,7 +7308,7 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
 
     const statusViaEnv = runCli(["run", "status", init.runId], {
       cwd: dir,
-      env: { TASK_RUNNER_CONNECT: listenUrl },
+      env: { AGENT_RUNNER_CONNECT: listenUrl },
     });
     assert.match(statusViaEnv, new RegExp(`── run ${init.runId} ──`));
     assert.match(statusViaEnv, /Name:\s+Remote CLI name/);
@@ -7351,7 +7351,7 @@ test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen 
         ],
         {
           cwd: dir,
-          env: { TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" },
+          env: { AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" },
         },
       ),
     );
@@ -7377,7 +7377,7 @@ test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen 
         ],
         {
           cwd: dir,
-          env: { TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4884/" },
+          env: { AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4884/" },
         },
       ),
     );
@@ -7461,7 +7461,7 @@ test("connected cli can reach a daemon through --connect-host and stream attachm
   const port = await freePort();
   const localPort = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/control`;
-  const logicalConnectUrl = `ws://task-runner.remote.invalid:${port}/control`;
+  const logicalConnectUrl = `ws://agent-runner.remote.invalid:${port}/control`;
   const daemon = await startCliDaemon(dir, listenUrl);
   try {
     const statusJson = JSON.parse(
@@ -7480,7 +7480,7 @@ test("connected cli can reach a daemon through --connect-host and stream attachm
         {
           cwd: dir,
           env: fakeSshEnv(fakeSsh.binDir, {
-            TASK_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
+            AGENT_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
           }),
         },
       ),
@@ -7507,7 +7507,7 @@ test("connected cli can reach a daemon through --connect-host and stream attachm
         {
           cwd: dir,
           env: fakeSshEnv(fakeSsh.binDir, {
-            TASK_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
+            AGENT_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
           }),
         },
       ),
@@ -7527,7 +7527,7 @@ test("connect-host surfaces ssh tunnel setup failures before daemon dialing", as
   const fakeSsh = installFakeSsh(dir);
   const port = await freePort();
   const localPort = await freePort();
-  const logicalConnectUrl = `ws://task-runner.remote.invalid:${port}/`;
+  const logicalConnectUrl = `ws://agent-runner.remote.invalid:${port}/`;
 
   const failed = runCliExpectFail(
     [
@@ -7542,7 +7542,7 @@ test("connect-host surfaces ssh tunnel setup failures before daemon dialing", as
     {
       cwd: dir,
       env: fakeSshEnv(fakeSsh.binDir, {
-        TASK_RUNNER_FAKE_SSH_MODE: "fail-auth",
+        AGENT_RUNNER_FAKE_SSH_MODE: "fail-auth",
       }),
     },
   );
@@ -7550,7 +7550,7 @@ test("connect-host surfaces ssh tunnel setup failures before daemon dialing", as
   assert.equal(failed.status, 3);
   assert.match(
     failed.stderr,
-    /task-runner: ssh tunnel setup failed for host prod-box: Permission denied \(publickey\)\./,
+    /agent-runner: ssh tunnel setup failed for host prod-box: Permission denied \(publickey\)\./,
   );
   assert.doesNotMatch(failed.stderr, /cannot connect to daemon/);
 });
@@ -7560,7 +7560,7 @@ test("connect-host reports local port collisions before websocket dialing", asyn
   const fakeSsh = installFakeSsh(dir);
   const port = await freePort();
   const localPort = await freePort();
-  const logicalConnectUrl = `ws://task-runner.remote.invalid:${port}/`;
+  const logicalConnectUrl = `ws://agent-runner.remote.invalid:${port}/`;
   const blocker = createServer();
   await new Promise((resolve) => blocker.listen(localPort, "127.0.0.1", resolve));
 
@@ -7578,7 +7578,7 @@ test("connect-host reports local port collisions before websocket dialing", asyn
       {
         cwd: dir,
         env: fakeSshEnv(fakeSsh.binDir, {
-          TASK_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
+          AGENT_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
         }),
       },
     );
@@ -7586,7 +7586,7 @@ test("connect-host reports local port collisions before websocket dialing", asyn
     assert.equal(failed.status, 3);
     assert.match(
       failed.stderr,
-      /task-runner: ssh tunnel setup failed for host prod-box: bind \[127\.0\.0\.1\]:\d+: Address already in use/,
+      /agent-runner: ssh tunnel setup failed for host prod-box: bind \[127\.0\.0\.1\]:\d+: Address already in use/,
     );
     assert.doesNotMatch(failed.stderr, /cannot connect to daemon/);
   } finally {
@@ -7598,11 +7598,11 @@ test("serve rejects connect-host tunnel flags", async () => {
   const dir = tempDir();
   const failedHost = runCliExpectFail(["serve", "--connect-host", "prod-box"], { cwd: dir });
   assert.equal(failedHost.status, 3);
-  assert.match(failedHost.stderr, /task-runner: serve does not accept --connect-host/);
+  assert.match(failedHost.stderr, /agent-runner: serve does not accept --connect-host/);
 
   const failedLocalPort = runCliExpectFail(["serve", "--connect-local-port", "5773"], { cwd: dir });
   assert.equal(failedLocalPort.status, 3);
-  assert.match(failedLocalPort.stderr, /task-runner: serve does not accept --connect-local-port/);
+  assert.match(failedLocalPort.stderr, /agent-runner: serve does not accept --connect-local-port/);
 });
 
 test("serve exposes HTTP/SSE alongside the existing WebSocket RPC transport", async () => {
@@ -7641,15 +7641,15 @@ test("serve fails before binding when daemon auth is enabled without a token", a
 
   await withEnv(
     {
-      TASK_RUNNER_DAEMON_AUTH_ENABLED: "true",
-      TASK_RUNNER_DAEMON_TOKEN: "",
+      AGENT_RUNNER_DAEMON_AUTH_ENABLED: "true",
+      AGENT_RUNNER_DAEMON_TOKEN: "",
     },
     async () => {
       await assert.rejects(
         () => serveDaemon(listenUrl),
         (error) =>
           error instanceof Error &&
-          error.message.includes("TASK_RUNNER_DAEMON_TOKEN") &&
+          error.message.includes("AGENT_RUNNER_DAEMON_TOKEN") &&
           !error.message.includes("secret-value"),
       );
     },
@@ -7675,8 +7675,8 @@ test("daemon bearer auth protects HTTP, SSE, and WebSocket while leaving public 
     await withEnv(
       {
         ...sharedRuntimeEnv(dir),
-        TASK_RUNNER_DAEMON_AUTH_ENABLED: "yes",
-        TASK_RUNNER_DAEMON_TOKEN: `  ${token}  `,
+        AGENT_RUNNER_DAEMON_AUTH_ENABLED: "yes",
+        AGENT_RUNNER_DAEMON_TOKEN: `  ${token}  `,
       },
       async () => {
         const server = await serveDaemon(listenUrl);
@@ -7774,17 +7774,17 @@ test("connected CLI reports daemon auth failures with token guidance", async () 
   const token = "daemon-auth-secret";
   const daemon = await startCliDaemon(dir, listenUrl, {
     env: {
-      TASK_RUNNER_DAEMON_AUTH_ENABLED: "true",
-      TASK_RUNNER_DAEMON_TOKEN: token,
+      AGENT_RUNNER_DAEMON_AUTH_ENABLED: "true",
+      AGENT_RUNNER_DAEMON_TOKEN: token,
     },
   });
   try {
     const missingTokenCli = runCliExpectFail(["status", "--connect", listenUrl], {
       cwd: dir,
-      env: { TASK_RUNNER_DAEMON_TOKEN: "" },
+      env: { AGENT_RUNNER_DAEMON_TOKEN: "" },
     });
     assert.equal(missingTokenCli.status, 3);
-    assert.match(missingTokenCli.stderr, /set TASK_RUNNER_DAEMON_TOKEN/);
+    assert.match(missingTokenCli.stderr, /set AGENT_RUNNER_DAEMON_TOKEN/);
     assert.doesNotMatch(missingTokenCli.stderr, /serve --listen/);
     assert.doesNotMatch(missingTokenCli.stderr, new RegExp(token));
   } finally {
@@ -7806,8 +7806,8 @@ test("daemon direct HTTP helpers send bearer auth when configured", async () => 
   await withEnv(
     {
       ...sharedRuntimeEnv(dir),
-      TASK_RUNNER_DAEMON_AUTH_ENABLED: "true",
-      TASK_RUNNER_DAEMON_TOKEN: token,
+      AGENT_RUNNER_DAEMON_AUTH_ENABLED: "true",
+      AGENT_RUNNER_DAEMON_TOKEN: token,
     },
     async () => {
       const server = await serveDaemon(listenUrl);
@@ -8756,9 +8756,9 @@ test("daemon-target CLI detaches fresh runs without subscribing for events", asy
     );
     assert.equal(
       result.stdout,
-      "task-runner: detached run detached-start-run\n" +
-        'Resume later with: task-runner run --resume-run detached-start-run "..."\n' +
-        "Check status with: task-runner run status detached-start-run\n",
+      "agent-runner: detached run detached-start-run\n" +
+        'Resume later with: agent-runner run --resume-run detached-start-run "..."\n' +
+        "Check status with: agent-runner run status detached-start-run\n",
     );
     assert.deepEqual(
       requests.map((request) => request.method),
@@ -8772,7 +8772,7 @@ test("daemon-target CLI detaches fresh runs without subscribing for events", asy
   }
 });
 
-test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_WS_URL on start requests", async () => {
+test("daemon-target CLI does not forward local AGENT_RUNNER_CODEX_WS_URL on start requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -8809,7 +8809,7 @@ test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_WS_URL on start
       ],
       {
         env: {
-          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+          AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
         },
       },
     );
@@ -8972,7 +8972,7 @@ test("daemon-target CLI does not forward local Codex transport env on resume req
       ],
       {
         env: {
-          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+          AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
         },
       },
     );
@@ -8986,7 +8986,7 @@ test("daemon-target CLI does not forward local Codex transport env on resume req
   }
 });
 
-test("daemon-target CLI does not forward TASK_RUNNER_PARENT_RUN_ID on resume requests", async () => {
+test("daemon-target CLI does not forward AGENT_RUNNER_PARENT_RUN_ID on resume requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -9023,7 +9023,7 @@ test("daemon-target CLI does not forward TASK_RUNNER_PARENT_RUN_ID on resume req
       ],
       {
         env: {
-          TASK_RUNNER_PARENT_RUN_ID: "parent-123",
+          AGENT_RUNNER_PARENT_RUN_ID: "parent-123",
         },
       },
     );
@@ -9037,7 +9037,7 @@ test("daemon-target CLI does not forward TASK_RUNNER_PARENT_RUN_ID on resume req
   }
 });
 
-test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_WS_URL on init requests", async () => {
+test("daemon-target CLI does not forward local AGENT_RUNNER_CODEX_WS_URL on init requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -9069,7 +9069,7 @@ test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_WS_URL on init 
       ["init", "--connect", listenUrl, "--agent", "daemon-agent", "--output-format", "json"],
       {
         env: {
-          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+          AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
         },
       },
     );
@@ -9083,7 +9083,7 @@ test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_WS_URL on init 
   }
 });
 
-test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_UDS_PATH on run/init/resume requests", async () => {
+test("daemon-target CLI does not forward local AGENT_RUNNER_CODEX_UDS_PATH on run/init/resume requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -9122,7 +9122,7 @@ test("daemon-target CLI does not forward local TASK_RUNNER_CODEX_UDS_PATH on run
 
   try {
     const env = {
-      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
+      AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
     };
     const start = await runCliAsync(
       [
@@ -9210,8 +9210,8 @@ test("daemon-target CLI does not forward conflicting local Codex transport env",
       ],
       {
         env: {
-          TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
-          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+          AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
+          AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
         },
       },
     );
@@ -9227,7 +9227,7 @@ test("daemon-target CLI does not forward conflicting local Codex transport env",
   }
 });
 
-test("daemon-target CLI forwards local TASK_RUNNER_PARENT_RUN_ID as structured init parentRunId", async () => {
+test("daemon-target CLI forwards local AGENT_RUNNER_PARENT_RUN_ID as structured init parentRunId", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -9259,7 +9259,7 @@ test("daemon-target CLI forwards local TASK_RUNNER_PARENT_RUN_ID as structured i
       ["init", "--connect", listenUrl, "--agent", "daemon-agent", "--output-format", "json"],
       {
         env: {
-          TASK_RUNNER_PARENT_RUN_ID: "parent-123",
+          AGENT_RUNNER_PARENT_RUN_ID: "parent-123",
         },
       },
     );
@@ -9279,7 +9279,7 @@ test("daemon-target CLI rejects --detach without daemon mode", () => {
   assert.equal(failure.stdout, "");
   assert.match(
     failure.stderr,
-    /--detach requires daemon-connected run execution \(\-\-connect or TASK_RUNNER_CONNECT\)/,
+    /--detach requires daemon-connected run execution \(\-\-connect or AGENT_RUNNER_CONNECT\)/,
   );
 });
 

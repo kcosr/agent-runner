@@ -1,6 +1,9 @@
-import type { RunAuditHistory } from "@task-runner/core/contracts/events.js";
-import { runAuditHistorySchema, runDetailSchema } from "@task-runner/core/contracts/run-schemas.js";
-import type { ReconfigureRunPatch, RunDetail } from "@task-runner/core/contracts/runs.js";
+import type { RunAuditHistory } from "@agent-runner/core/contracts/events.js";
+import {
+  runAuditHistorySchema,
+  runDetailSchema,
+} from "@agent-runner/core/contracts/run-schemas.js";
+import type { ReconfigureRunPatch, RunDetail } from "@agent-runner/core/contracts/runs.js";
 import { deriveHttpBaseUrl } from "./config.js";
 
 interface DaemonHttpOptions {

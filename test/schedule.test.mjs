@@ -11,12 +11,12 @@ import {
 
 const now = new Date("2026-04-25T00:00:00.000Z");
 const defaultGuardrailEnv = {
-  TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "300",
-  TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "300",
+  AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC: "300",
+  AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "300",
 };
 const relaxedEnv = {
-  TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
-  TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "60",
+  AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+  AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "60",
 };
 
 test("schedule resolves valid one-time at input and derives future/due states", () => {

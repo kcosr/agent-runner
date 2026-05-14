@@ -95,7 +95,7 @@ Should not load.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-canonical-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-canonical-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -255,7 +255,7 @@ test("resolveResumeTarget rejects current manifests missing archivedAt", async (
   assert.throws(
     () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
     (err) => {
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -281,12 +281,12 @@ test("resolveResumeTarget accepts top-level environment lifecycle state", async 
     lastError: null,
     image: "node:22",
     lifetime: "run",
-    containerName: "task-runner-run123",
+    containerName: "agent-runner-run123",
     containerId: null,
     workspace: {
       scope: "run",
-      hostRoot: "/tmp/task-runner-workspaces",
-      hostPath: "/tmp/task-runner-workspaces/run123",
+      hostRoot: "/tmp/agent-runner-workspaces",
+      hostPath: "/tmp/agent-runner-workspaces/run123",
       containerPath: "/workspace",
       mode: "rw",
       create: true,
@@ -364,12 +364,12 @@ test("resolveResumeTarget rejects old workspace lifecycle environment state", as
     lastError: null,
     image: "node:22",
     lifetime: "run",
-    containerName: "task-runner-run123",
+    containerName: "agent-runner-run123",
     containerId: null,
     workspace: {
       scope: "run",
-      hostRoot: "/tmp/task-runner-workspaces",
-      hostPath: "/tmp/task-runner-workspaces/run123",
+      hostRoot: "/tmp/agent-runner-workspaces",
+      hostPath: "/tmp/agent-runner-workspaces/run123",
       containerPath: "/workspace",
       mode: "rw",
       create: true,
@@ -394,7 +394,7 @@ test("resolveResumeTarget rejects old workspace lifecycle environment state", as
   assert.throws(
     () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
     (err) => {
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -420,7 +420,7 @@ test("resolveResumeTarget rejects invalid lifecycle command invariants", async (
     lastError: null,
     image: "node:22",
     lifetime: "run",
-    containerName: "task-runner-run123",
+    containerName: "agent-runner-run123",
     containerId: null,
     workspace: null,
     lifecycle: {
@@ -458,7 +458,7 @@ test("resolveResumeTarget rejects invalid lifecycle command invariants", async (
   assert.throws(
     () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
     (err) => {
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );

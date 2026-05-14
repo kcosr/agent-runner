@@ -11,7 +11,7 @@ import {
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-claude-history-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-claude-history-"));
 }
 
 function writeJsonl(path, records) {

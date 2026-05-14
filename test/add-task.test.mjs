@@ -72,7 +72,7 @@ Work on the repo. Assignment at {{cwd}}.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-addtask-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-addtask-"));
 }
 
 function writeAgent(baseDir, name, body) {

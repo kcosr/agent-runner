@@ -1,9 +1,9 @@
 {
-  "name": "@task-runner/core",
+  "name": "@agent-runner/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shared task-runner business logic and helpers.",
+  "description": "Shared agent-runner business logic and helpers.",
   "license": "MIT",
   "files": ["dist/"],
   "exports": {
@@ -15,7 +15,7 @@
     "./core/*": "./dist/core/*",
     "./hooks": "./dist/hooks.js",
     "./run-command.js": "./dist/run-command.js",
-    "./task-runner-command.js": "./dist/task-runner-command.js",
+    "./agent-runner-command.js": "./dist/agent-runner-command.js",
     "./util/*": "./dist/util/*"
   },
   "scripts": {

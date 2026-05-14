@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
-import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+import type { RunCommandOverrides } from "@agent-runner/core/app/service.js";
+import { VALID_STATUSES } from "@agent-runner/core/assignment/model.js";
 import type {
   RunAuditEnvelope,
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineEnvelope,
-} from "@task-runner/core/contracts/events.js";
-import { startDebugPerfTimer } from "@task-runner/core/util/debug-perf.js";
+} from "@agent-runner/core/contracts/events.js";
+import { startDebugPerfTimer } from "@agent-runner/core/util/debug-perf.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
@@ -467,14 +467,14 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "attachments"],
     handler: async (req, res, ctx, params) => {
       const rawName = requiredHeaderString(
-        req.headers["x-task-runner-attachment-name"],
-        "x-task-runner-attachment-name",
+        req.headers["x-agent-runner-attachment-name"],
+        "x-agent-runner-attachment-name",
       );
       let name: string;
       try {
         name = decodeURIComponent(rawName);
       } catch {
-        throw new RequestValidationError("x-task-runner-attachment-name must be percent-encoded");
+        throw new RequestValidationError("x-agent-runner-attachment-name must be percent-encoded");
       }
       const mimeType =
         optionalHeaderString(req.headers["content-type"], "content-type")?.trim() || undefined;
@@ -514,8 +514,8 @@ const routes: RouteDefinition[] = [
       );
       sendBuffer(res, 200, readFileSync(result.absolutePath), result.attachment.mimeType, {
         "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(result.attachment.name)}`,
-        "x-task-runner-attachment-id": result.attachment.id,
-        "x-task-runner-sha256": result.attachment.sha256,
+        "x-agent-runner-attachment-id": result.attachment.id,
+        "x-agent-runner-sha256": result.attachment.sha256,
       });
     },
   },

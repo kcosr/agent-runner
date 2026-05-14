@@ -83,7 +83,7 @@ function SettingsProbe() {
             drawerWidth: 700,
             activeRightSurface: "chat",
             drawerFullscreen: true,
-            search: "task-runner-web",
+            search: "agent-runner-web",
             activeBoardColumnKey: "running",
             drawerViewsByRunId: {
               "run-1": {
@@ -194,7 +194,7 @@ describe("DashboardSettingsProvider", () => {
 
   it("hydrates only the new persisted preference shape and ignores the old board-settings key", () => {
     window.localStorage.setItem(
-      "task-runner:web:board-settings",
+      "agent-runner:web:board-settings",
       JSON.stringify({
         showArchived: true,
         hideEmptyColumns: false,
@@ -211,7 +211,7 @@ describe("DashboardSettingsProvider", () => {
       }),
     );
     window.localStorage.setItem(
-      "task-runner:web:dashboard-preferences",
+      "agent-runner:web:dashboard-preferences",
       JSON.stringify({
         showArchived: true,
         hideEmptyColumns: false,
@@ -265,7 +265,7 @@ describe("DashboardSettingsProvider", () => {
 
   it("migrates the legacy recent-updates preference while keeping unsaved view-state fields transient", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-preferences",
+      "agent-runner:web:dashboard-preferences",
       JSON.stringify({ sortByRecentUpdates: true }),
     );
 
@@ -282,7 +282,7 @@ describe("DashboardSettingsProvider", () => {
 
   it("hydrates persisted dashboard surface view state", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-view-state",
+      "agent-runner:web:dashboard-view-state",
       JSON.stringify({
         collapsedColumnKeys: ["running"],
         drawerWidth: 700,
@@ -303,7 +303,7 @@ describe("DashboardSettingsProvider", () => {
 
   it("defaults malformed dashboard surface view state", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-view-state",
+      "agent-runner:web:dashboard-view-state",
       JSON.stringify({
         drawerWidth: Number.NaN,
         activeRightSurface: "messages",
@@ -321,7 +321,7 @@ describe("DashboardSettingsProvider", () => {
 
   it("hydrates persisted collapsed column keys while defaulting unsaved columns to expanded", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-view-state",
+      "agent-runner:web:dashboard-view-state",
       JSON.stringify({ collapsedColumnKeys: ["running", "failed"] }),
     );
 
@@ -335,10 +335,10 @@ describe("DashboardSettingsProvider", () => {
 
   it("defaults missing structured-filter categories to Any while preserving stored values", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-preferences",
+      "agent-runner:web:dashboard-preferences",
       JSON.stringify({
         structuredFilters: {
-          repo: "task-runner",
+          repo: "agent-runner",
         },
       }),
     );
@@ -346,13 +346,13 @@ describe("DashboardSettingsProvider", () => {
     renderSettingsProbe();
 
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":"task-runner","agent":null,"backend":null,"runGroupId":null}',
+      '"structuredFilters":{"repo":"agent-runner","agent":null,"backend":null,"runGroupId":null}',
     );
   });
 
   it("falls back to Any for malformed stored structured-filter values", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-preferences",
+      "agent-runner:web:dashboard-preferences",
       JSON.stringify({
         showArchived: true,
         structuredFilters: {
@@ -374,7 +374,7 @@ describe("DashboardSettingsProvider", () => {
 
   it("hydrates and resets visible focus indicators independently", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-preferences",
+      "agent-runner:web:dashboard-preferences",
       JSON.stringify({ visibleFocusIndicators: true }),
     );
 
@@ -389,7 +389,7 @@ describe("DashboardSettingsProvider", () => {
 
   it("hydrates the persisted audit sort preference", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-preferences",
+      "agent-runner:web:dashboard-preferences",
       JSON.stringify({ auditNewestFirst: true }),
     );
 
@@ -410,7 +410,7 @@ describe("DashboardSettingsProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update view state" }));
     fireEvent.click(screen.getByRole("button", { name: "Collapse running" }));
 
-    expect(window.localStorage.getItem("task-runner:web:dashboard-preferences")).toBe(
+    expect(window.localStorage.getItem("agent-runner:web:dashboard-preferences")).toBe(
       JSON.stringify({
         hideEmptyColumns: true,
         collapseFailureStates: true,
@@ -431,11 +431,11 @@ describe("DashboardSettingsProvider", () => {
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"search":"task-runner-web"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"search":"agent-runner-web"');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"viewMode":"list"');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeBoardColumnKey":"running"');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerViewsByRunId":{"run-1"');
-    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
+    expect(window.localStorage.getItem("agent-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
         viewMode: "list",
         collapsedColumnKeys: ["running"],

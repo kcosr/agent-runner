@@ -12,7 +12,7 @@ const SCRIPT_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-migrate-v12-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-migrate-v12-"));
 }
 
 function writeJson(path, value) {

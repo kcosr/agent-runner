@@ -1,5 +1,5 @@
+import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
 import { useQuery } from "@tanstack/react-query";
-import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties, FocusEvent, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";

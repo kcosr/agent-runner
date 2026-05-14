@@ -4,7 +4,7 @@ A run is the persisted execution instance created from one agent and
 (optionally) one assignment. Every run has a short id and lives under:
 
 ```text
-${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
+${AGENT_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ```
 
 ## Run workspace layout
@@ -18,7 +18,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ├── attempts/
 │   ├── 00.json
 │   ├── 01.json
-│   └── 01.stdout.log      # optional, when TASK_RUNNER_CAPTURE_BACKEND_STDOUT=1
+│   └── 01.stdout.log      # optional, when AGENT_RUNNER_CAPTURE_BACKEND_STDOUT=1
 └── attachments/
     └── <attachment-id>/
         └── <file>
@@ -34,7 +34,7 @@ current code also include
 `scripts/migrate-run-events-v2.mjs` before the audit history has canonical
 cursors. The file records compact lifecycle/task provenance, including
 `run.hook_recorded` hook execution records. It is durable history surfaced
-via `task-runner run audit <run-id>` and daemon audit APIs, but it is
+via `agent-runner run audit <run-id>` and daemon audit APIs, but it is
 never replayed to derive current run state.
 
 ## Manifest (`run.json`)
@@ -79,7 +79,7 @@ The manifest is the source of truth. Important fields:
 
 Timeline history exposes compact attempt provenance (`task_runner` or
 `backend_session` with `bootstrap`/`sync` mode) so clients can distinguish
-task-runner-authored attempts from backend-imported turns without reading
+agent-runner-authored attempts from backend-imported turns without reading
 the manifest directly.
 
 `RunSummary` and `RunDetail` also expose derived `scheduleState`:
@@ -100,26 +100,29 @@ the next session. Attempts are backend invocations within a session.
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
 
-Task-runner-created attempts and sessions carry
+Agent-runner-created attempts and sessions carry
 `provenance: { kind: "task_runner" }`. Attempts and sessions imported
 from a backend-owned session history carry `kind: "backend_session"` plus
 the backend name, backend session id, backend turn id, import/sync
 timestamps, sync mode, and source descriptor. Imported backend turns are
 inserted into the same monotonic attempt/session sequence, so later
-task-runner-owned resume attempts allocate after the imported history.
+agent-runner-owned resume attempts allocate after the imported history.
+The `task_runner` provenance literal is an intentionally preserved manifest
+schema value from before the Agent Runner rename, not a user-facing product
+name.
 
 ## Backend session history
 
 When a backend supports session history reads, `--backend-session-id`
 bootstrap import can materialize complete prior backend turns into the
-new run before the first task-runner-owned attempt. The import writes
+new run before the first agent-runner-owned attempt. The import writes
 canonical `sessions`, `attemptRecords`, attempt logs, and
 `backendSessionSync` state. Open backend turns are recorded only in
 `backendSessionSync.openTurnIds`; they are not attempts until a later
 sync reports them complete.
 
-Before `task-runner run --resume-run <id>` allocates a new session or
-attempt, task-runner syncs backend-owned history for runs with a backend
+Before `agent-runner run --resume-run <id>` allocates a new session or
+attempt, agent-runner syncs backend-owned history for runs with a backend
 session id and a backend that implements history reads. This pre-resume
 sync is independent of daemon subscriptions. If the source changed and
 history cannot be read or persisted safely, resume fails before any new
@@ -132,7 +135,7 @@ indexes, publishes fresh summary/detail projections, and emits audit
 `run.backend_session_history_synced` events for synced backend turns.
 Daemon sync failures emit `run.backend_session_history_sync_failed` audit
 events. Summary-only subscriptions do not start history polling. Set
-`TASK_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
+`AGENT_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
 `off`) to disable backend-owned session history import/sync for the
 current process.
 
@@ -155,7 +158,7 @@ execution (see [tasks.md](tasks.md)).
 ### Fresh run
 
 ```bash
-task-runner run \
+agent-runner run \
   --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md \
   "Optional message to the worker"
@@ -169,7 +172,7 @@ extra argv and launcher, freezes the manifest, composes the brief, and
 invokes the backend — except for passive runs, which stop after
 initialization and freeze an empty backend-args list.
 
-If a run launches another `task-runner` process from inside a worker, the
+If a run launches another `agent-runner` process from inside a worker, the
 child run automatically freezes `parentRunId` and can inherit parent vars
 through assignment `sources: [parent]`. This is how planner →
 implementer → descendant worktree flows reuse values such as
@@ -181,25 +184,25 @@ dependencies; it is separate from parent lineage.
 ### Init, then execute later
 
 ```bash
-task-runner init \
+agent-runner init \
   --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md
 
-task-runner run ready <run-id>
-task-runner run --resume-run <run-id>
+agent-runner run ready <run-id>
+agent-runner run --resume-run <run-id>
 ```
 
 `init` performs the same setup work but does not invoke the backend. This
 is useful for passive runs, planning flows, or delayed execution. `init`
 does not dump the worker brief to stdout — fetch it explicitly with
-`task-runner run brief <run-id>`. Non-passive initialized runs must be
-promoted with `task-runner run ready <run-id>` before the first
+`agent-runner run brief <run-id>`. Non-passive initialized runs must be
+promoted with `agent-runner run ready <run-id>` before the first
 `run --resume-run`.
 
 When `init` reinitializes an existing initialized run with `--run-id`, the
 run preserves its frozen run group. `--group-id` and
-`TASK_RUNNER_RUN_GROUP_ID` are fresh-workspace defaults; use
-`task-runner run set-group` or `clear-group` to change an existing run's
+`AGENT_RUNNER_RUN_GROUP_ID` are fresh-workspace defaults; use
+`agent-runner run set-group` or `clear-group` to change an existing run's
 membership.
 
 `init` and `run ready` accept schedule input through `--schedule-at
@@ -225,21 +228,21 @@ still allowed for ready scheduled runs:
 Schedule input can also be changed after creation:
 
 ```bash
-task-runner run schedule <id|path> --at <iso>
-task-runner run schedule <id|path> --delay 30m
-task-runner run schedule <id|path> --cron "0 9 * * *" --timezone UTC --mode clone
-task-runner run schedule enable <id|path>
-task-runner run schedule disable <id|path>
-task-runner run schedule clear <id|path>
+agent-runner run schedule <id|path> --at <iso>
+agent-runner run schedule <id|path> --delay 30m
+agent-runner run schedule <id|path> --cron "0 9 * * *" --timezone UTC --mode clone
+agent-runner run schedule enable <id|path>
+agent-runner run schedule disable <id|path>
+agent-runner run schedule clear <id|path>
 ```
 
 `run schedule clear` removes one-time schedules only. Recurring
 schedules must be disabled instead, so their recurrence definition stays
 auditable.
 
-One-time schedules below `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC` are
+One-time schedules below `AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC` are
 rejected; recurring schedules below
-`TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC` are rejected at input and are
+`AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC` are rejected at input and are
 disabled if a later recurrence advance violates the same guardrail. Both
 defaults are `300` seconds. Cron validation samples bounded future
 occurrences rather than scanning indefinitely.
@@ -266,13 +269,13 @@ frozen manifest schedule and rejects new `--schedule-*` input.
 ## Read surfaces
 
 ```bash
-task-runner status
-task-runner run status <run-id> [--output-format json] [--field <name>]...
-task-runner run brief <run-id>
-task-runner run audit <run-id> [--output-format text|json] [--limit <n>]
-task-runner task list <run-id>
-task-runner task show <run-id> <task-id>
-task-runner attachment list <run-id> [--scope run|group]
+agent-runner status
+agent-runner run status <run-id> [--output-format json] [--field <name>]...
+agent-runner run brief <run-id>
+agent-runner run audit <run-id> [--output-format text|json] [--limit <n>]
+agent-runner task list <run-id>
+agent-runner task show <run-id> <task-id>
+agent-runner attachment list <run-id> [--scope run|group]
 ```
 
 - Top-level `status` reports system/environment status and takes no run id.
@@ -298,33 +301,33 @@ task-runner attachment list <run-id> [--scope run|group]
 ## Mutation surfaces
 
 ```bash
-task-runner run ready <id>
-task-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>]
-task-runner run reset <id>
-task-runner run archive <id>
-task-runner run unarchive <id>
-task-runner run delete <id>                # archived runs only
-task-runner run set-name <id> <name>
-task-runner run set-name <id> --clear
-task-runner run set-note <id> <markdown>
-task-runner run clear-note <id>
-task-runner run pin <id>
-task-runner run unpin <id>
-task-runner run set-backend-session <id> <session-id>   # passive only
-task-runner run clear-backend-session <id>              # passive only
-task-runner run set-group <id> <group-id>
-task-runner run clear-group <id>
-task-runner run add-dep <id> --run <dep-run-id>
-task-runner run add-dep <id> --group <group-id>
-task-runner run remove-dep <id> --run <dep-run-id>
-task-runner run remove-dep <id> --group <group-id>
-task-runner run clear-deps <id>
-task-runner run schedule <id|path> --at <iso>
-task-runner run schedule <id|path> --delay <duration>
-task-runner run schedule <id|path> --cron <expr> [--timezone <iana>] [--mode reuse|reset|clone] [--continue-on-failure]
-task-runner run schedule enable <id|path>
-task-runner run schedule disable <id|path>
-task-runner run schedule clear <id|path>
+agent-runner run ready <id>
+agent-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>]
+agent-runner run reset <id>
+agent-runner run archive <id>
+agent-runner run unarchive <id>
+agent-runner run delete <id>                # archived runs only
+agent-runner run set-name <id> <name>
+agent-runner run set-name <id> --clear
+agent-runner run set-note <id> <markdown>
+agent-runner run clear-note <id>
+agent-runner run pin <id>
+agent-runner run unpin <id>
+agent-runner run set-backend-session <id> <session-id>   # passive only
+agent-runner run clear-backend-session <id>              # passive only
+agent-runner run set-group <id> <group-id>
+agent-runner run clear-group <id>
+agent-runner run add-dep <id> --run <dep-run-id>
+agent-runner run add-dep <id> --group <group-id>
+agent-runner run remove-dep <id> --run <dep-run-id>
+agent-runner run remove-dep <id> --group <group-id>
+agent-runner run clear-deps <id>
+agent-runner run schedule <id|path> --at <iso>
+agent-runner run schedule <id|path> --delay <duration>
+agent-runner run schedule <id|path> --cron <expr> [--timezone <iana>] [--mode reuse|reset|clone] [--continue-on-failure]
+agent-runner run schedule enable <id|path>
+agent-runner run schedule disable <id|path>
+agent-runner run schedule clear <id|path>
 ```
 
 ### Reset
@@ -385,7 +388,7 @@ dependency readiness.
 Passive-only metadata mutations. Update `manifest.backendSessionId` without
 changing task state, lifecycle status, attempt history, archive state, or
 dependency projections. Both mutations clear `manifest.backendSessionSync`
-because externally tracked passive session ids have no task-runner-owned
+because externally tracked passive session ids have no agent-runner-owned
 history reader.
 
 ### set-group / clear-group
@@ -416,12 +419,12 @@ runs. See [dependencies.md](dependencies.md).
 ## Listing runs
 
 ```bash
-task-runner list runs
-task-runner list runs --cwd <path>
-task-runner list runs --repo <name>
-task-runner list runs --global
-task-runner list runs --include-archived
-task-runner list runs --group-id <group-id>
+agent-runner list runs
+agent-runner list runs --cwd <path>
+agent-runner list runs --repo <name>
+agent-runner list runs --global
+agent-runner list runs --include-archived
+agent-runner list runs --group-id <group-id>
 ```
 
 By default, `list runs` scopes to the caller's exact cwd. `--repo <name>`
@@ -435,7 +438,7 @@ and `--global`.
 Every run persists an `execution` record:
 
 - `hostMode: "embedded"` — ran in the CLI process
-- `hostMode: "daemon"` — ran inside `task-runner serve`, with
+- `hostMode: "daemon"` — ran inside `agent-runner serve`, with
   `controller.daemonInstanceId` linking back to that daemon instance
 
 See [daemon.md](daemon.md) for how the daemon adopts and publishes runs.

@@ -6,17 +6,17 @@ lockedFields:
   - tasks
 callerInstructions: |
   This assignment plans and implements a feature in a single
-  task-runner run.
+  agent-runner run.
 
   Invoke it from the target repository root with the feature brief as
   a message file or positional message body:
 
-      {{task_runner_cmd}} run \
+      {{agent_runner_cmd}} run \
         --agent generic \
         --assignment plan-implement-feature \
         --message-file /tmp/feature-brief.md
 
-      {{task_runner_cmd}} run \
+      {{agent_runner_cmd}} run \
         --agent generic \
         --assignment plan-implement-feature \
         "$(cat /tmp/feature-brief.md)"
@@ -35,10 +35,10 @@ callerInstructions: |
   After reviewing `assignment-summary.md`, resume the same run with a
   clear approval or concrete requested changes:
 
-      {{task_runner_cmd}} run --resume-run {{run_id}} \
+      {{agent_runner_cmd}} run --resume-run {{run_id}} \
         "Approved. Continue implementation."
 
-      {{task_runner_cmd}} run --resume-run {{run_id}} \
+      {{agent_runner_cmd}} run --resume-run {{run_id}} \
         "Requested changes: <specific changes>"
 
   The implementation stage follows the assignment's current task list,
@@ -69,7 +69,7 @@ tasks:
   - feature-implement/push-pr
   - feature-implement/merge-after-approval
 ---
-You are a senior planning-and-implementation agent for a single task-runner run.
+You are a senior planning-and-implementation agent for a single agent-runner run.
 
 The feature brief was handed to you as the user message that started this run. Read it before starting the first task. Do not fabricate scope.
 

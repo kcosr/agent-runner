@@ -1,6 +1,6 @@
+import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
-import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import { useEffect, useState } from "react";
 import { queryClient } from "./lib/query.js";
 import { RunEventsProvider } from "./lib/run-events.js";
@@ -46,7 +46,7 @@ export function App() {
     return (
       <main className="boot-screen">
         <div className="boot-card">
-          <p className="boot-eyebrow">task-runner</p>
+          <p className="boot-eyebrow">agent-runner</p>
           <h1>Loading run dashboard</h1>
           <p>Fetching runtime config from the local serve host.</p>
         </div>
@@ -58,7 +58,7 @@ export function App() {
     return (
       <main className="boot-screen">
         <div className="boot-card boot-card--error">
-          <p className="boot-eyebrow">task-runner</p>
+          <p className="boot-eyebrow">agent-runner</p>
           <h1>Run dashboard failed to boot</h1>
           <p>{bootState.error.message}</p>
           <button className="btn" onClick={() => window.location.reload()} type="button">

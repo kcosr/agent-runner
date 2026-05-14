@@ -26,7 +26,7 @@ import {
 
 export type BackendSessionHistorySyncMode = "bootstrap" | "sync";
 
-export const TASK_RUNNER_BACKEND_SESSION_SYNC_ENV = "TASK_RUNNER_BACKEND_SESSION_SYNC";
+export const AGENT_RUNNER_BACKEND_SESSION_SYNC_ENV = "AGENT_RUNNER_BACKEND_SESSION_SYNC";
 
 export type BackendSessionHistorySyncResult =
   | {
@@ -80,7 +80,7 @@ export class BackendSessionHistorySyncError extends Error {
 export function backendSessionHistorySyncEnabled(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  const raw = env[TASK_RUNNER_BACKEND_SESSION_SYNC_ENV]?.trim().toLowerCase();
+  const raw = env[AGENT_RUNNER_BACKEND_SESSION_SYNC_ENV]?.trim().toLowerCase();
   return raw !== "0" && raw !== "false" && raw !== "off" && raw !== "no";
 }
 
@@ -208,7 +208,7 @@ function promptsMatchBackendTurn(backend: Backend, turn: BackendSyncedTurn, prom
   if (prompt === userText) {
     return true;
   }
-  return backend.taskRunnerPromptMatchesSyncedTurn?.({ prompt, turn }) === true;
+  return backend.agentRunnerPromptMatchesSyncedTurn?.({ prompt, turn }) === true;
 }
 
 function attemptTimingMatchesBackendTurn(
@@ -216,7 +216,7 @@ function attemptTimingMatchesBackendTurn(
   turn: BackendSyncedTurn,
   record: AttemptRecord,
 ): boolean {
-  const backendMatch = backend.taskRunnerAttemptTimingMatchesSyncedTurn?.({
+  const backendMatch = backend.agentRunnerAttemptTimingMatchesSyncedTurn?.({
     attemptStartedAt: record.startedAt,
     attemptEndedAt: record.endedAt,
     turn,
@@ -231,7 +231,7 @@ function attemptTimingMatchesBackendTurn(
   return recordStartedAt <= turnUpdatedAt && recordEndedAt >= turnStartedAt;
 }
 
-function taskRunnerAttemptMatchesBackendTurn(
+function agentRunnerAttemptMatchesBackendTurn(
   backend: Backend,
   manifest: RunManifest,
   backendSessionId: string,
@@ -270,7 +270,7 @@ function findExistingAttempt(
       isBackendSessionAttempt(manifest, backendSessionId, turn, record),
     ) ??
     manifest.attemptRecords.find((record) =>
-      taskRunnerAttemptMatchesBackendTurn(backend, manifest, backendSessionId, turn, record),
+      agentRunnerAttemptMatchesBackendTurn(backend, manifest, backendSessionId, turn, record),
     )
   );
 }

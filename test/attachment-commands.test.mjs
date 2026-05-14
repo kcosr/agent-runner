@@ -31,7 +31,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-attachmentcmd-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-attachmentcmd-"));
 }
 
 function writeAgent(baseDir, name, body) {

@@ -10,7 +10,7 @@ const SCRIPT_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-migrate-v5-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-migrate-v5-"));
 }
 
 function writeManifest(root, repo, runId, manifest) {

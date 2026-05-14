@@ -27,7 +27,7 @@ callerInstructions: |
   revise the draft and resume this same review run for a delta
   pass.
 
-      {{task_runner_cmd}} run status {{run_id}} --output-format json \
+      {{agent_runner_cmd}} run status {{run_id}} --output-format json \
         --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
   The planner should read both `synthesis` and `approval`, apply
@@ -40,10 +40,10 @@ tasks:
       Read the draft plan file plus the planning run's task notes:
 
           {{plan_draft}}
-          {{task_runner_cmd}} run status {{planning_run_id}} --output-format json --field tasks
+          {{agent_runner_cmd}} run status {{planning_run_id}} --output-format json --field tasks
 
       First, confirm the draft exists and is readable. If it is
-      missing or obviously not a task-runner assignment, mark this
+      missing or obviously not an agent-runner assignment, mark this
       task `blocked` with the exact path and problem.
 
       Then summarize in Notes:
@@ -278,12 +278,12 @@ tasks:
           Path to approval: <short, concrete instructions on what the planner
             must revise in the draft or handoff.>
 ---
-You are reviewing a task-runner draft assignment, not the
+You are reviewing an agent-runner draft assignment, not the
 implementation code itself. Treat `{{cwd}}` as context for
 the repo the draft targets, but the primary review artifacts are:
 
   - `{{plan_draft}}`
-  - `{{task_runner_cmd}} run status {{planning_run_id}} --output-format json --field tasks`
+  - `{{agent_runner_cmd}} run status {{planning_run_id}} --output-format json --field tasks`
 
 Do not modify any file under `{{cwd}}` or `{{plan_draft}}`.
 Use the task CLI as the task interface for this run; do not rely

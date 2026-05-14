@@ -1,20 +1,20 @@
-import type { DefinitionDetail, RunCommandOverrides } from "@task-runner/core/app/service.js";
-import type { DefinitionEntry } from "@task-runner/core/config/loader.js";
+import type { DefinitionDetail, RunCommandOverrides } from "@agent-runner/core/app/service.js";
+import type { DefinitionEntry } from "@agent-runner/core/config/loader.js";
 import type {
   AttachmentListEntry,
   RunAttachment,
   RunAttachmentRemoveResult,
-} from "@task-runner/core/contracts/attachments.js";
+} from "@agent-runner/core/contracts/attachments.js";
 import type {
   RunAuditEnvelope,
   RunAuditHistory,
   RunTimelineEvent,
   RunTimelineHistory,
-} from "@task-runner/core/contracts/events.js";
+} from "@agent-runner/core/contracts/events.js";
 import type {
   RunInputSurfaceParams,
   RunInputSurfaceResult,
-} from "@task-runner/core/contracts/run-input-surface.js";
+} from "@agent-runner/core/contracts/run-input-surface.js";
 import type {
   QueueResumeMessageResult,
   RemoveQueuedResumeMessageResult,
@@ -29,21 +29,21 @@ import type {
   RunPinnedResult,
   RunSummary,
   RunTaskSummary,
-} from "@task-runner/core/contracts/runs.js";
-import type { DefinitionListResult } from "@task-runner/core/core/commands/service.js";
-import type { RunListFilter } from "@task-runner/core/core/commands/service.js";
-import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
+} from "@agent-runner/core/contracts/runs.js";
+import type { DefinitionListResult } from "@agent-runner/core/core/commands/service.js";
+import type { RunListFilter } from "@agent-runner/core/core/commands/service.js";
+import type { ScheduleInput } from "@agent-runner/core/core/run/schedule.js";
 
 type TaskDefinitionDetail = Extract<DefinitionDetail, { kind: "task" }>;
 type RunEventChannel = "run_summary" | "run_detail" | "run_timeline" | "run_audit";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:4773/";
-export const TASK_RUNNER_LISTEN_ENV = "TASK_RUNNER_LISTEN";
-export const TASK_RUNNER_CONNECT_ENV = "TASK_RUNNER_CONNECT";
-export const TASK_RUNNER_CONNECT_HOST_ENV = "TASK_RUNNER_CONNECT_HOST";
-export const TASK_RUNNER_CONNECT_LOCAL_PORT_ENV = "TASK_RUNNER_CONNECT_LOCAL_PORT";
-export const TASK_RUNNER_DAEMON_AUTH_ENABLED_ENV = "TASK_RUNNER_DAEMON_AUTH_ENABLED";
-export const TASK_RUNNER_DAEMON_TOKEN_ENV = "TASK_RUNNER_DAEMON_TOKEN";
+export const AGENT_RUNNER_LISTEN_ENV = "AGENT_RUNNER_LISTEN";
+export const AGENT_RUNNER_CONNECT_ENV = "AGENT_RUNNER_CONNECT";
+export const AGENT_RUNNER_CONNECT_HOST_ENV = "AGENT_RUNNER_CONNECT_HOST";
+export const AGENT_RUNNER_CONNECT_LOCAL_PORT_ENV = "AGENT_RUNNER_CONNECT_LOCAL_PORT";
+export const AGENT_RUNNER_DAEMON_AUTH_ENABLED_ENV = "AGENT_RUNNER_DAEMON_AUTH_ENABLED";
+export const AGENT_RUNNER_DAEMON_TOKEN_ENV = "AGENT_RUNNER_DAEMON_TOKEN";
 export const RPC_ERROR_COMMAND = -32003;
 export const RPC_ERROR_RUNTIME = -32004;
 

@@ -18,8 +18,8 @@ backend: passive
 lockedFields:
   - backend
 ---
-You drive this run from outside task-runner.
-Work each task via \`task-runner task set\`.
+You drive this run from outside agent-runner.
+Work each task via \`agent-runner task set\`.
 `;
 
 const PASSIVE_AGENT_NO_LOCK = `---
@@ -64,7 +64,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-passive-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-passive-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -158,7 +158,7 @@ test("passive agent: init creates manifest with backend=passive, status=initiali
   // brief should contain the PASSIVE workflow template
   const prompt = outcome.manifest.brief ?? "";
   assert.ok(prompt.length > 0, "brief populated");
-  assert.match(prompt, /task-runner task set/, "prompt uses CLI workflow template");
+  assert.match(prompt, /agent-runner task set/, "prompt uses CLI workflow template");
   assert.match(prompt, new RegExp(outcome.runId), "prompt interpolates run id");
 });
 
@@ -183,8 +183,8 @@ test("passive agent: init output — bootstrap on stdout, progress on stderr", a
   assert.equal(res.status, 0);
   // Progress lines on stderr
   assert.match(res.stderr, /initialized passive agent=passive-agent/);
-  assert.match(res.stderr, /drive with: task-runner task set/);
-  // Stdout is empty; callers re-orient with `task-runner run brief <run-id>`.
+  assert.match(res.stderr, /drive with: agent-runner task set/);
+  // Stdout is empty; callers re-orient with `agent-runner run brief <run-id>`.
   assert.equal(res.stdout, "");
 });
 
@@ -199,7 +199,7 @@ test("passive agent: `run` is rejected with a clear error", async () => {
   );
   assert.equal(result.status, 3);
   assert.match(result.stderr, /cannot run passive agent/);
-  assert.match(result.stderr, /task-runner init --agent/);
+  assert.match(result.stderr, /agent-runner init --agent/);
 });
 
 test("passive agent: `run --resume-run` is rejected", async () => {
@@ -419,9 +419,9 @@ test("passive status: initialized footer points at task set, not run", async () 
   assert.match(text, /Drive this run externally:/);
   assert.match(
     text,
-    new RegExp(`task-runner task set ${outcome.runId} <task-id> --status in_progress`),
+    new RegExp(`agent-runner task set ${outcome.runId} <task-id> --status in_progress`),
   );
-  assert.doesNotMatch(text, /task-runner run --resume-run/);
+  assert.doesNotMatch(text, /agent-runner run --resume-run/);
 });
 
 test("passive status and list surfaces use effectiveStatus while capabilities stay canonical", async () => {
@@ -603,5 +603,5 @@ test("passive re-orient: run brief command returns the bootstrap text", async ()
   const outcome = await initPassive(dir);
 
   const out = runCli(["run", "brief", outcome.runId], { cwd: dir });
-  assert.match(out, /task-runner task set/);
+  assert.match(out, /agent-runner task set/);
 });

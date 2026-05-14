@@ -48,7 +48,7 @@ Locked.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-taskcmd-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-taskcmd-"));
 }
 
 function writeAgent(baseDir, name, body) {

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { overridesFromParsedArgs, parseArgs } from "../apps/cli/dist/cli/parse-args.js";
 
 function argv(...rest) {
-  return ["node", "task-runner", ...rest];
+  return ["node", "agent-runner", ...rest];
 }
 
 test("parseArgs: bare --add-task flag collects title", () => {

@@ -85,7 +85,7 @@ Audit passive assignment.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-audit-log-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-audit-log-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -395,7 +395,7 @@ test("stdout sidecars stay out of compact audit records and attempt JSON", async
   const dir = tempDir();
   writeAuditBundle(dir);
 
-  const outcome = await withEnv({ TASK_RUNNER_CAPTURE_BACKEND_STDOUT: "true" }, () =>
+  const outcome = await withEnv({ AGENT_RUNNER_CAPTURE_BACKEND_STDOUT: "true" }, () =>
     runIn(dir, {
       agentName: "audit-active",
       assignmentName: "audit-active-work",

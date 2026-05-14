@@ -2,8 +2,8 @@
 import { spawn } from "node:child_process";
 
 const mode = process.argv[2];
-const remoteHost = process.env.TASK_RUNNER_TEST_REMOTE_HOST?.trim() ?? "";
-const remoteDir = process.env.TASK_RUNNER_TEST_REMOTE_DIR?.trim() || "task-runner";
+const remoteHost = process.env.AGENT_RUNNER_TEST_REMOTE_HOST?.trim() ?? "";
+const remoteDir = process.env.AGENT_RUNNER_TEST_REMOTE_DIR?.trim() || "agent-runner";
 const remoteTarget = `${remoteHost}:${remoteDir}/`;
 const localTestScript = "scripts/run-tests-concurrently.mjs";
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -14,12 +14,12 @@ if (mode !== "test" && mode !== "check") {
 }
 
 if (remoteHost && !/^[A-Za-z0-9._@-]+$/.test(remoteHost)) {
-  console.error("TASK_RUNNER_TEST_REMOTE_HOST may contain only letters, numbers, ., _, @, or -");
+  console.error("AGENT_RUNNER_TEST_REMOTE_HOST may contain only letters, numbers, ., _, @, or -");
   process.exit(1);
 }
 
 if (!/^[A-Za-z0-9._~/-]+$/.test(remoteDir)) {
-  console.error("TASK_RUNNER_TEST_REMOTE_DIR may contain only letters, numbers, ., _, ~, /, or -");
+  console.error("AGENT_RUNNER_TEST_REMOTE_DIR may contain only letters, numbers, ., _, ~, /, or -");
   process.exit(1);
 }
 

@@ -1,9 +1,9 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import type {
   RunInputField,
   RunInputSurface,
-} from "@task-runner/core/contracts/run-input-surface.js";
+} from "@agent-runner/core/contracts/run-input-surface.js";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";

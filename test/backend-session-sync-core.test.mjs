@@ -38,7 +38,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-session-sync-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-session-sync-"));
 }
 
 function writeProject(baseDir) {
@@ -89,8 +89,8 @@ function historyBackend({
         turns,
       };
     },
-    ...(matches ? { taskRunnerPromptMatchesSyncedTurn: matches } : {}),
-    ...(timingMatches ? { taskRunnerAttemptTimingMatchesSyncedTurn: timingMatches } : {}),
+    ...(matches ? { agentRunnerPromptMatchesSyncedTurn: matches } : {}),
+    ...(timingMatches ? { agentRunnerAttemptTimingMatchesSyncedTurn: timingMatches } : {}),
     async invoke(ctx) {
       if (invoke) {
         return invoke(ctx);
@@ -264,7 +264,7 @@ test("sync is idempotent and open turns update only sync metadata", async () => 
   assert.deepEqual(initial.manifest.backendSessionSync.openTurnIds, ["open-1"]);
 });
 
-test("sync skips backend session history when TASK_RUNNER_BACKEND_SESSION_SYNC is false", async () => {
+test("sync skips backend session history when AGENT_RUNNER_BACKEND_SESSION_SYNC is false", async () => {
   const dir = tempDir();
   writeProject(dir);
   const initial = await runIn(dir, {
@@ -307,7 +307,7 @@ test("sync skips backend session history when TASK_RUNNER_BACKEND_SESSION_SYNC i
       },
     }),
     mode: "sync",
-    env: { TASK_RUNNER_BACKEND_SESSION_SYNC: "false" },
+    env: { AGENT_RUNNER_BACKEND_SESSION_SYNC: "false" },
   });
 
   assert.equal(result.status, "skipped");
@@ -370,7 +370,7 @@ test("sync promotes an open backend turn to a complete imported attempt", async 
   assert.deepEqual(initial.manifest.backendSessionSync.openTurnIds, []);
 });
 
-test("sync upgrades an overlapping task-runner attempt instead of double-counting it", async () => {
+test("sync upgrades an overlapping agent-runner attempt instead of double-counting it", async () => {
   const dir = tempDir();
   writeProject(dir);
   const first = await runIn(dir, {
@@ -418,7 +418,7 @@ test("sync upgrades an overlapping task-runner attempt instead of double-countin
   assert.equal(first.manifest.sessions[0].provenance.kind, "backend_session");
 });
 
-test("cursor sync matches task-runner attempts without real timestamp overlap", async () => {
+test("cursor sync matches agent-runner attempts without real timestamp overlap", async () => {
   const dir = tempDir();
   writeProject(dir);
   const first = await runIn(dir, {
@@ -467,7 +467,7 @@ test("cursor sync matches task-runner attempts without real timestamp overlap", 
   assert.equal(first.manifest.attemptRecords[0].provenance.backendTurnId, "cursor-turn-live");
 });
 
-test("opencode sync matches task-runner attempts when stored prompt is JSON-quoted", async () => {
+test("opencode sync matches agent-runner attempts when stored prompt is JSON-quoted", async () => {
   const dir = tempDir();
   writeProject(dir);
   const first = await runIn(dir, {

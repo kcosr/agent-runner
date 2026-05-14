@@ -1283,7 +1283,7 @@ export function loadTaskConfig(arg: string, cwd: string = process.cwd()): Loaded
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Definition catalog — enumerate available definitions from the
-// TASK_RUNNER_CONFIG_DIR / XDG config root. Used by `list` and `show`.
+// AGENT_RUNNER_CONFIG_DIR / XDG config root. Used by `list` and `show`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface DefinitionEntry {

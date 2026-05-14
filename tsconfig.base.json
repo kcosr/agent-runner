@@ -13,7 +13,7 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@task-runner/core/*": ["packages/core/src/*"]
+      "@agent-runner/core/*": ["packages/core/src/*"]
     }
   }
 }

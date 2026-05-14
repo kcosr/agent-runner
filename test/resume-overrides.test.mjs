@@ -13,14 +13,14 @@ import {
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-resume-target-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-resume-target-"));
 }
 
 function withStateRoot(stateDir, fn) {
   return withEnv(
     {
-      TASK_RUNNER_STATE_DIR: stateDir,
-      TASK_RUNNER_CONFIG_DIR: stateDir,
+      AGENT_RUNNER_STATE_DIR: stateDir,
+      AGENT_RUNNER_CONFIG_DIR: stateDir,
     },
     fn,
   );
@@ -98,7 +98,7 @@ test("resolveResumeTarget rejects a manifest with finalTasks: null", () => {
     () => withStateRoot(dir, () => resolveResumeTarget("corrupt1", dir)),
     (err) => {
       assert.ok(err instanceof ResumeError);
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -114,7 +114,7 @@ test("resolveResumeTarget rejects a v14 manifest carrying legacy assignmentPath"
     () => withStateRoot(dir, () => resolveResumeTarget("corrupt2", dir)),
     (err) => {
       assert.ok(err instanceof ResumeError);
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -132,7 +132,7 @@ test("resolveResumeTarget rejects a v14 manifest missing assignment", () => {
     () => withStateRoot(dir, () => resolveResumeTarget("corrupt-missing-assignment", dir)),
     (err) => {
       assert.ok(err instanceof ResumeError);
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -148,7 +148,7 @@ test("resolveResumeTarget rejects a manifest with runtimeVars: null", () => {
     () => withStateRoot(dir, () => resolveResumeTarget("corrupt3", dir)),
     (err) => {
       assert.ok(err instanceof ResumeError);
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -164,7 +164,7 @@ test("resolveResumeTarget rejects blank persisted backend args", () => {
     () => withStateRoot(dir, () => resolveResumeTarget("corrupt-args", dir)),
     (err) => {
       assert.ok(err instanceof ResumeError);
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -186,7 +186,7 @@ test("resolveResumeTarget rejects a manifest whose execution host and controller
     () => withStateRoot(dir, () => resolveResumeTarget("corrupt4", dir)),
     (err) => {
       assert.ok(err instanceof ResumeError);
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -216,7 +216,7 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
     () => withStateRoot(dir, () => resolveResumeTarget("corrupt5", dir)),
     (err) => {
       assert.ok(err instanceof ResumeError);
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
@@ -248,7 +248,7 @@ test("resolveResumeTarget rejects a v24 manifest carrying legacy assignment.work
     () => withStateRoot(dir, () => resolveResumeTarget("legacy-workspace-path", dir)),
     (err) => {
       assert.ok(err instanceof ResumeError);
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );

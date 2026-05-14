@@ -27,9 +27,9 @@ hooks:
 maxRetries: 4
 callerInstructions: |
   This assignment turns a free-form feature description into an
-  executable task-runner plan. The feature summary and any
+  executable agent-runner plan. The feature summary and any
   rough implementation notes go in as the positional message
-  body when you invoke task-runner — not as a var — so there
+  body when you invoke agent-runner — not as a var — so there
   is no length limit.
 
   ## Invoking the planner
@@ -37,7 +37,7 @@ callerInstructions: |
   Run this from the target repo root. Pass a short slug that
   the planner can freeze into descendant worktree vars:
 
-      {{task_runner_cmd}} run \
+      {{agent_runner_cmd}} run \
         --agent <your-planner-agent> \
         --assignment plan-feature \
         --var worktree_slug=<git-safe-slug> \
@@ -54,7 +54,7 @@ callerInstructions: |
   does need shell access (`unrestricted: true`) so it can
   inspect the repo and validate the generated draft
   assignment. The caller environment must allow one nested
-  `task-runner run`, because the planner runs `plan-review`
+  `agent-runner run`, because the planner runs `plan-review`
   before handing the draft back.
 
   ## What the planner does
@@ -116,13 +116,13 @@ callerInstructions: |
   Pull the handoff summary and attachment info from the
   `handoff` task's notes block:
 
-      {{task_runner_cmd}} run status {{run_id}}
-      {{task_runner_cmd}} run status {{run_id}} --output-format json \
+      {{agent_runner_cmd}} run status {{run_id}}
+      {{agent_runner_cmd}} run status {{run_id}} --output-format json \
         --field tasks
 
   Review the planning-run attachments first:
 
-      {{task_runner_cmd}} attachment list {{run_id}}
+      {{agent_runner_cmd}} attachment list {{run_id}}
 
   If `assignment-summary.md` exists there, download it and
   review it before deciding whether to approve execution.
@@ -138,9 +138,9 @@ callerInstructions: |
   inspect the worker handoff and then promote/execute the
   initialized run via:
 
-      {{task_runner_cmd}} run brief <new-run-id>
-      {{task_runner_cmd}} run ready <new-run-id>
-      {{task_runner_cmd}} run --resume-run <new-run-id>
+      {{agent_runner_cmd}} run brief <new-run-id>
+      {{agent_runner_cmd}} run ready <new-run-id>
+      {{agent_runner_cmd}} run --resume-run <new-run-id>
 
   Use `run brief` to inspect the frozen worker handoff,
   `run ready` to approve the initialized implementer run for
@@ -153,7 +153,7 @@ callerInstructions: |
   - the planner run nests `plan-review`
   - the generated implementation plan nests `code-review`
 
-  If nested `task-runner run` invocations are disallowed in the
+  If nested `agent-runner run` invocations are disallowed in the
   surrounding environment, the review step will be rejected.
 
   The executor may be the same agent that did the planning, or
@@ -188,14 +188,14 @@ tasks:
       assignment's source file in one of:
         - `{{cwd}}/assignments/plan-feature/template.md`
         - `{{config_dir}}/assignments/plan-feature/template.md`
-        - under the task-runner install root
+        - under the agent-runner install root
 
       Copy it to a new draft file at:
 
           {{state_dir}}/drafts/<repo-name>/plan-<slug>-<shortid>.md
 
       Create the repo-name drafts directory if it does not
-      exist. `<repo-name>` is the basename of task-runner's
+      exist. `<repo-name>` is the basename of agent-runner's
       resolved repo root for the current checkout, `<slug>` is the feature's kebab-cased
       short title (5 words or fewer), and `<shortid>` is any
       4-character base32 string, just to disambiguate multiple
@@ -264,7 +264,7 @@ tasks:
           lines — their deliverable is the Notes block
           itself.
         - Keep a dedicated internal-review task that
-          launches `{{task_runner_cmd}} run --agent code-reviewer
+          launches `{{agent_runner_cmd}} run --agent code-reviewer
           --assignment code-review --var
           implementation_run_id={{run_id}} ...` so
           the reviewer sees the full plan context.
@@ -338,7 +338,7 @@ tasks:
 
       Also fill `<<PLACEHOLDER_PLANNING_RUN_ID>>` with this
       run's id ({{run_id}}) so the implementer can pull
-      additional planning context via `{{task_runner_cmd}} run status`
+      additional planning context via `{{agent_runner_cmd}} run status`
       if needed.
 
       Validate frontmatter parses by eye before moving on:
@@ -346,13 +346,13 @@ tasks:
       characters. Report the final draft path in this
       task's Notes.
   - id: review_draft
-    title: Review the draft plan via task-runner
+    title: Review the draft plan via agent-runner
     body: |
       Before launching the draft review, finalize the planning
       evidence the reviewer depends on:
 
         1. Inspect this run's task state with
-           `{{task_runner_cmd}} run status {{run_id}} --output-format json --field tasks`
+           `{{agent_runner_cmd}} run status {{run_id}} --output-format json --field tasks`
            and scan every task above this one.
            every task above this one.
         2. Every prior task must have status `completed`.
@@ -371,9 +371,9 @@ tasks:
 
       Once the draft and planning evidence are finalized,
       launch the bundled `plan-review` assignment as a nested
-      `{{task_runner_cmd}} run`:
+      `{{agent_runner_cmd}} run`:
 
-          {{task_runner_cmd}} run \
+          {{agent_runner_cmd}} run \
             --agent code-reviewer \
             --assignment plan-review \
             --name <short-descriptive-name> \
@@ -400,7 +400,7 @@ tasks:
       in this task's Notes immediately after launch. Once the
       review finishes, check its terminal status first:
 
-          {{task_runner_cmd}} run status <review-run-id> --output-format json \
+          {{agent_runner_cmd}} run status <review-run-id> --output-format json \
             --field status
 
       The `plan-review` assignment ends with an `approval`
@@ -410,10 +410,10 @@ tasks:
 
       Pull the reviewer's synthesis and approval decision:
 
-          {{task_runner_cmd}} run status <review-run-id> --output-format json \
+          {{agent_runner_cmd}} run status <review-run-id> --output-format json \
             --field tasks | jq -r '.tasks[] | select(.id=="synthesis") | .notes'
 
-          {{task_runner_cmd}} run status <review-run-id> --output-format json \
+          {{agent_runner_cmd}} run status <review-run-id> --output-format json \
             --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
       Paste the reviewer's synthesis and `approval` decision
@@ -421,9 +421,9 @@ tasks:
       approval is BLOCKED, copy its "Path to approval" list
       here so `apply_review_fixes` knows exactly what to fix.
 
-      This nested review consumes one level of `task-runner`
+      This nested review consumes one level of `agent-runner`
       recursion (planner → plan-review). If your environment
-      disallows nested `task-runner run` calls, block here and
+      disallows nested `agent-runner run` calls, block here and
       surface that to the caller instead of continuing.
   - id: apply_review_fixes
     title: Apply draft-review fixes and request delta re-review
@@ -447,14 +447,14 @@ tasks:
       After applying fixes, resume the draft review run for a
       delta pass:
 
-          {{task_runner_cmd}} run --resume-run <review-run-id> \
+          {{agent_runner_cmd}} run --resume-run <review-run-id> \
             "Draft updated. <one-line summary per prior finding>."
 
       The reviewer does a focused delta pass, not a full
       re-walk. Iterate until the review run's terminal status
       is `success`:
 
-          {{task_runner_cmd}} run status <review-run-id> --output-format json \
+          {{agent_runner_cmd}} run status <review-run-id> --output-format json \
             --field status
 
       If it still returns `blocked`, read the updated
@@ -488,7 +488,7 @@ tasks:
       this assignment's source file in one of:
         - `{{cwd}}/assignments/plan-feature/summary-template.md`
         - `{{config_dir}}/assignments/plan-feature/summary-template.md`
-        - under the task-runner install root
+        - under the agent-runner install root
 
       Copy it to a new summary file next to the approved draft:
 
@@ -591,7 +591,7 @@ tasks:
         - `assignment-seed.md` from `draft_plan`
         - `assignment-summary.md` from `produce_summary`
 
-      Use `{{task_runner_cmd}} attachment add {{run_id}} ...` and
+      Use `{{agent_runner_cmd}} attachment add {{run_id}} ...` and
       record the resulting attachment ids in Notes.
 
       If you are re-running this task after revising the draft or
@@ -601,7 +601,7 @@ tasks:
       planning run; do not duplicate them onto the implementer
       run just because you are revising a post-init plan.
 
-      Verify the final state with `{{task_runner_cmd}} attachment list {{run_id}}`
+      Verify the final state with `{{agent_runner_cmd}} attachment list {{run_id}}`
       and paste the command output or equivalent attachment-id
       summary into Notes.
   - id: create_initialized_implementer_run
@@ -635,7 +635,7 @@ tasks:
 
       For the first creation, run:
 
-            {{task_runner_cmd}} init \
+            {{agent_runner_cmd}} init \
               --agent implementer \
               --assignment <draft-path-from-draft_plan> \
               --name <short-descriptive-name>
@@ -643,7 +643,7 @@ tasks:
       For the post-feedback refresh path, rerun `init` against
       the updated draft with the existing run id:
 
-            {{task_runner_cmd}} init \
+            {{agent_runner_cmd}} init \
               --run-id <existing-implementer-run-id> \
               --agent implementer \
               --assignment <updated-draft-path-from-draft_plan> \
@@ -699,9 +699,9 @@ tasks:
         listing rooted at the new run id
       - the post-init approval/execution handoff:
 
-            {{task_runner_cmd}} run brief <new-run-id>
-            {{task_runner_cmd}} run ready <new-run-id>
-            {{task_runner_cmd}} run --resume-run <new-run-id>
+            {{agent_runner_cmd}} run brief <new-run-id>
+            {{agent_runner_cmd}} run ready <new-run-id>
+            {{agent_runner_cmd}} run --resume-run <new-run-id>
 
         Use `run brief` to inspect the frozen worker handoff,
         `run ready` to approve the initialized implementer run,
@@ -725,7 +725,7 @@ tasks:
           tell the caller those are attached to the planning run
           for review. Include the exact listing command:
 
-              {{task_runner_cmd}} attachment list {{run_id}}
+              {{agent_runner_cmd}} attachment list {{run_id}}
         - **Draft-review run id** from `review_draft`, so the
           caller can inspect the final draft-approval audit
           trail if desired.
@@ -749,12 +749,12 @@ tasks:
           draft before being handed back again.
         - The exact approval/execution flow:
 
-              {{task_runner_cmd}} run brief <new-run-id>
-              {{task_runner_cmd}} run ready <new-run-id>
-              {{task_runner_cmd}} run --resume-run <new-run-id>
+              {{agent_runner_cmd}} run brief <new-run-id>
+              {{agent_runner_cmd}} run ready <new-run-id>
+              {{agent_runner_cmd}} run --resume-run <new-run-id>
 
         - A note that the caller environment must allow one
-          nested `task-runner run`, because the generated plan
+          nested `agent-runner run`, because the generated plan
           runs a bundled `code-review` step.
         - **Open assumptions** from `feature-plan/capture-feature` that the caller
           should confirm before kicking off execution.
@@ -763,14 +763,14 @@ tasks:
           that deserve a pre-execution sanity check.
 
       Keep this block tight. The caller will read it via
-      `{{task_runner_cmd}} run status {{run_id}}`, review the
+      `{{agent_runner_cmd}} run status {{run_id}}`, review the
       attachments, review the initialized implementer run, and
       either promote it with `run ready`, adjust the plan, or
       hand off to a different agent. If there is nothing to
       flag, say so plainly.
 ---
 You are planning, not implementing. Your output is a concrete,
-executable `task-runner` assignment file — not the feature
+executable `agent-runner` assignment file — not the feature
 itself.
 
 The feature you are planning for was handed to you as the user
@@ -790,17 +790,17 @@ later ones depend on. The draft plan in `draft_plan` should cite
 specific files, functions, and commands from your earlier
 notes — vague plans produce vague execution.
 
-This run itself launches a nested `plan-review` task-runner
+This run itself launches a nested `plan-review` agent-runner
 review against the draft. The caller environment must allow
 that nested review. Surface the same requirement for the
 implementer run in the final handoff, because the generated
 plan also launches a nested `code-review` run.
 
-The generated plan will use task-runner's existing
+The generated plan will use agent-runner's existing
 code-review assignment for its internal review step, invoked
-as a nested `{{task_runner_cmd}} run`. This means whoever executes
+as a nested `{{agent_runner_cmd}} run`. This means whoever executes
 the plan must run it in an environment that permits one nested
-`task-runner run`. Surface this
+`agent-runner run`. Surface this
 requirement in the `handoff` summary so the caller does not
 get bitten by it.
 

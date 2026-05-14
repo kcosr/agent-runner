@@ -76,7 +76,7 @@ Work on the repo. Plan at {{cwd}}.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-locked-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-locked-"));
 }
 
 function writeAgent(baseDir, name, body) {

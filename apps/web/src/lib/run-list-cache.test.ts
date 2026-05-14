@@ -1,4 +1,4 @@
-import type { RunSummary } from "@task-runner/core/contracts/runs.js";
+import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
 import { describe, expect, it } from "vitest";
 import { runQueryKeys } from "./query.js";
 import {
@@ -13,7 +13,7 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
     runId: "run-1",
     parentRunId: null,
     runGroupId: "group-a",
-    repo: "task-runner",
+    repo: "agent-runner",
     status: "running",
     effectiveStatus: "running",
     archivedAt: null,
@@ -24,7 +24,7 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
     assignmentName: "Build dashboard",
     backend: "codex",
     model: "gpt-5.4",
-    cwd: "/tmp/task-runner",
+    cwd: "/tmp/agent-runner",
     startedAt: "2026-04-13T05:00:00.000Z",
     updatedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,

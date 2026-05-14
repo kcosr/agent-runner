@@ -104,7 +104,7 @@ Task-runner will halt the run cleanly (exit 2). The
 caller resumes with a follow-up message answering
 your questions:
 
-    {{task_runner_cmd}} run --resume-run {{run_id}} \
+    {{agent_runner_cmd}} run --resume-run {{run_id}} \
       "answers: <your answers here>"
 
 On resume, the runner normalizes `blocked` back to

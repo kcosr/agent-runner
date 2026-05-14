@@ -31,7 +31,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-abort-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-abort-"));
 }
 
 function writeAgent(baseDir, name, body) {

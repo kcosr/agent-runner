@@ -1,9 +1,9 @@
 # Daemon
 
-`task-runner serve` starts a local control plane. It exposes:
+`agent-runner serve` starts a local control plane. It exposes:
 
 - **WebSocket JSON-RPC** for CLI clients (via `--connect` /
-  `TASK_RUNNER_CONNECT`) and for the bundled web UI. The same WebSocket
+  `AGENT_RUNNER_CONNECT`) and for the bundled web UI. The same WebSocket
   also carries multiplexed byte-stream notifications for connected CLI
   features that need bounded file transfer.
 - **HTTP API** for browser clients and scripting.
@@ -18,11 +18,11 @@ bearer token for daemon API/WebSocket access.
 ## Starting the daemon
 
 ```bash
-task-runner serve [--listen <ws-url>]
+agent-runner serve [--listen <ws-url>]
 ```
 
 - `--listen <ws-url>` — defaults to `ws://127.0.0.1:4773/` (or
-  `TASK_RUNNER_LISTEN`).
+  `AGENT_RUNNER_LISTEN`).
 - Prints `serving on <ws-url>` and `http api on <http-base-url>/api/`.
 - HTTP base URL is derived from the listen URL by substituting `ws` →
   `http`.
@@ -31,8 +31,8 @@ task-runner serve [--listen <ws-url>]
 ## Startup and shutdown recovery
 
 Graceful daemon shutdown still aborts active runs whose controller is
-local to task-runner. This includes subprocess-backed backends and Codex
-`stdio`, where task-runner owns the local `codex app-server` child
+local to agent-runner. This includes subprocess-backed backends and Codex
+`stdio`, where agent-runner owns the local `codex app-server` child
 process.
 
 Codex runs using frozen `ws` or `uds` transport and a non-null backend
@@ -66,7 +66,7 @@ records `backend`, `backendSessionId`, `transportType`, and `reason`.
 `aborted_after_recovery`.
 
 Codex `ws`/`uds` Idle history import depends on the Codex session file being
-available on the task-runner host. Remote-only session history cannot be
+available on the agent-runner host. Remote-only session history cannot be
 imported by the current file-based history reader, so zero-task remote Idle
 runs without imported turns finalize as `error / insufficient_idle_evidence`.
 
@@ -80,21 +80,21 @@ attempt/retry/exhaustion path.
 Daemon access protection is opt-in:
 
 ```bash
-export TASK_RUNNER_DAEMON_AUTH_ENABLED=true
-export TASK_RUNNER_DAEMON_TOKEN='a-long-random-token'
-task-runner serve
+export AGENT_RUNNER_DAEMON_AUTH_ENABLED=true
+export AGENT_RUNNER_DAEMON_TOKEN='a-long-random-token'
+agent-runner serve
 ```
 
-`TASK_RUNNER_DAEMON_AUTH_ENABLED` accepts `true`, `1`, `yes`, or `on`
+`AGENT_RUNNER_DAEMON_AUTH_ENABLED` accepts `true`, `1`, `yes`, or `on`
 after trimming and lowercasing. Other values leave daemon auth disabled.
-When auth is enabled, `TASK_RUNNER_DAEMON_TOKEN` must be non-empty after
-trimming or `task-runner serve` fails before binding.
+When auth is enabled, `AGENT_RUNNER_DAEMON_TOKEN` must be non-empty after
+trimming or `agent-runner serve` fails before binding.
 
 With auth enabled, every `/api/*` HTTP/SSE request and every WebSocket
 JSON-RPC connection must send:
 
 ```http
-Authorization: Bearer <TASK_RUNNER_DAEMON_TOKEN>
+Authorization: Bearer <AGENT_RUNNER_DAEMON_TOKEN>
 ```
 
 For HTTP and SSE, missing, malformed, or wrong tokens return the normal
@@ -131,32 +131,32 @@ On startup the daemon mints a short `daemonInstanceId` and exposes it via
 Any client command (e.g. `run`, `list`, `task set`, `attachment add`)
 runs in one of two modes:
 
-- **Embedded** — no `--connect`, no `TASK_RUNNER_CONNECT`. The CLI
+- **Embedded** — no `--connect`, no `AGENT_RUNNER_CONNECT`. The CLI
   executes the command directly in-process.
-- **Connected** — `--connect <ws-url>` (or `TASK_RUNNER_CONNECT` env).
+- **Connected** — `--connect <ws-url>` (or `AGENT_RUNNER_CONNECT` env).
   The CLI opens a WebSocket, makes JSON-RPC calls, and prints the
   response.
 
 Connected mode can optionally add an invocation-scoped SSH tunnel:
 
-- `--connect-host <host>` (or `TASK_RUNNER_CONNECT_HOST`) tells the CLI
+- `--connect-host <host>` (or `AGENT_RUNNER_CONNECT_HOST`) tells the CLI
   to run `ssh -N -L 127.0.0.1:<local-port>:<daemon-host>:<daemon-port>`
   before it dials the daemon.
-- `--connect-local-port <port>` (or `TASK_RUNNER_CONNECT_LOCAL_PORT`)
+- `--connect-local-port <port>` (or `AGENT_RUNNER_CONNECT_LOCAL_PORT`)
   overrides the loopback port used for that local forward. Without it,
   the CLI reuses the daemon port from `--connect`.
 - The logical `--connect` URL remains the user-facing daemon address in
   status output and error hints; the tunneled loopback URL is internal.
 - This helper is per-invocation only. Advanced SSH behavior such as jump
   hosts, identities, or multiplexing belongs in the user's SSH config.
-- `task-runner serve` is still local-only infrastructure and rejects
+- `agent-runner serve` is still local-only infrastructure and rejects
   `--connect`, `--connect-host`, and `--connect-local-port`.
 
 Connected mode is how multiple terminals can share state and how the web
 UI and CLI stay in sync. `run --detach` only works in connected mode.
 
 If the daemon requires auth, connected CLI invocations read
-`TASK_RUNNER_DAEMON_TOKEN` from the client environment and send it as an
+`AGENT_RUNNER_DAEMON_TOKEN` from the client environment and send it as an
 Authorization bearer header on WebSocket and direct HTTP helper requests.
 The token is not forwarded as a generic daemon environment variable.
 
@@ -191,28 +191,28 @@ download. Listing and removal use WebSocket JSON-RPC methods
 (`attachments.list` and `attachments.remove`). SSH-agent forwarding is a
 possible future stream consumer; it is not implemented.
 
-Nested `task-runner` invocations launched by a worker also preserve
-lineage through `TASK_RUNNER_PARENT_RUN_ID`. Shared `RunSummary` /
+Nested `agent-runner` invocations launched by a worker also preserve
+lineage through `AGENT_RUNNER_PARENT_RUN_ID`. Shared `RunSummary` /
 `RunDetail` payloads surface that edge as `parentRunId`.
 Nested invocations also preserve run grouping through
-`TASK_RUNNER_RUN_GROUP_ID`. Shared payloads surface that grouping key as
+`AGENT_RUNNER_RUN_GROUP_ID`. Shared payloads surface that grouping key as
 `runGroupId`; it is independent of parent lineage.
 
 Connected-mode runtime selection stays explicit:
 
 - the client does not forward arbitrary env vars to the daemon
 - if the client passes `--parent-run <run-id>` or has
-  `TASK_RUNNER_PARENT_RUN_ID` set, fresh `run` / new `init` requests
+  `AGENT_RUNNER_PARENT_RUN_ID` set, fresh `run` / new `init` requests
   synthesize structured `parentRunId`
 - if the client passes `--group-id <group-id>` or has
-  `TASK_RUNNER_RUN_GROUP_ID` set, fresh `run` / new `init` requests
+  `AGENT_RUNNER_RUN_GROUP_ID` set, fresh `run` / new `init` requests
   synthesize structured `runGroupId`
-- caller-local `TASK_RUNNER_CODEX_UDS_PATH` and
-  `TASK_RUNNER_CODEX_WS_URL` are not forwarded; daemon-owned Codex runs
+- caller-local `AGENT_RUNNER_CODEX_UDS_PATH` and
+  `AGENT_RUNNER_CODEX_WS_URL` are not forwarded; daemon-owned Codex runs
   resolve transport from authored/request `backendConfig` and then the
   daemon process env
-- task-runner-owned lineage/runtime values such as
-  `TASK_RUNNER_PARENT_RUN_ID`, `TASK_RUNNER_RUN_GROUP_ID`, and recursion
+- agent-runner-owned lineage/runtime values such as
+  `AGENT_RUNNER_PARENT_RUN_ID`, `AGENT_RUNNER_RUN_GROUP_ID`, and recursion
   guard depth are injected into Codex thread config for backend shell
   tools; this fixed allowlist is separate from caller-local env
   forwarding
@@ -231,12 +231,12 @@ not raw UDS bytes. For daemon-owned Codex runs, the daemon process must
 be able to access that absolute socket path.
 
 That special case exists only for Codex transport selection.
-`TASK_RUNNER_CODEX_UDS_PATH` is not a generic env passthrough mechanism,
+`AGENT_RUNNER_CODEX_UDS_PATH` is not a generic env passthrough mechanism,
 and launcher override handling is still explicit and named-only; no
 generic daemon-side env passthrough exists for other backends.
 
 The daemon loads custom backend modules from
-`${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`
+`${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`
 before accepting requests. Custom backend code is trusted local code,
 runs without sandboxing, and is cached for the daemon lifetime; restart
 the daemon after changing a backend module or its dependencies.
@@ -389,9 +389,9 @@ are reusable task-definition fields, not run task-state fields such as
 | Method | Path | Effect |
 |--------|------|--------|
 | `GET` | `/api/runs/:runId/attachments` | List. Query: `scope=run\|group` (default `group`) |
-| `POST` | `/api/runs/:runId/attachments` | Upload; requires `x-task-runner-attachment-name` header |
+| `POST` | `/api/runs/:runId/attachments` | Upload; requires `x-agent-runner-attachment-name` header |
 | `DELETE` | `/api/runs/:runId/attachments/:attachmentId` | Delete |
-| `GET` | `/api/runs/:runId/attachments/:attachmentId/content` | Download; sets `content-disposition`, `x-task-runner-attachment-id`, `x-task-runner-sha256` |
+| `GET` | `/api/runs/:runId/attachments/:attachmentId/content` | Download; sets `content-disposition`, `x-agent-runner-attachment-id`, `x-agent-runner-sha256` |
 
 These HTTP attachment endpoints remain the browser/API surface. Connected
 CLI attachment commands use the daemon WebSocket instead of these HTTP
@@ -458,7 +458,7 @@ Error codes:
   `runs.disableSchedule`
 
 `runs.ready` accepts optional `schedule` params so connected CLI
-`task-runner run ready --schedule-*` can promote and schedule in one
+`agent-runner run ready --schedule-*` can promote and schedule in one
 mutation. The HTTP ready route is a promotion-only endpoint; browser
 callers set schedules through the explicit schedule routes.
 
@@ -506,7 +506,7 @@ is treated as missed/skipped with an audit record:
 - one-time schedules are cleared
 - recurring schedules are advanced to the next occurrence
 - recurrence is disabled if advancing violates
-  `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
+  `AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
 
 For normal due schedules, the daemon uses the same runnability checks as
 manual start. It skips and audits schedules when dependencies are unmet,

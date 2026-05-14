@@ -1,4 +1,4 @@
-import { shortId } from "@task-runner/core/util/short-id.js";
+import { shortId } from "@agent-runner/core/util/short-id.js";
 import type { StreamNotification } from "./protocol.js";
 
 export const STREAM_MAX_CHUNK_BYTES = 65_536;

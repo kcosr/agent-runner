@@ -1,33 +1,33 @@
 # Container Lifecycle Design
 
 This document describes first-class container lifecycle management for
-task-runner. It is based on the current manifest-canonical run model, the
+agent-runner. It is based on the current manifest-canonical run model, the
 existing launcher and backend contracts, and the container lifecycle notes in
-`/home/kevin/assistant/task-runner-container-lifecycle-design-notes.md`.
+`/home/kevin/assistant/agent-runner-container-lifecycle-design-notes.md`.
 
 ## Summary
 
-Container support is a task-runner execution-environment layer below
+Container support is an agent-runner execution-environment layer below
 backend invocation. It does not replace backends, and it is not hidden
 inside launcher wrappers.
 
 The implementation supports two modes:
 
-- `managed`: task-runner creates, starts, validates, uses, audits, and cleans up
+- `managed`: agent-runner creates, starts, validates, uses, audits, and cleans up
   a run- or run-group-scoped container.
-- `existing`: task-runner attaches to an already-running external container,
+- `existing`: agent-runner attaches to an already-running external container,
   validates it, executes backend subprocesses inside it, audits use, and never
   stops or removes it.
 
 This keeps the backend contract focused on native backend semantics while giving
-task-runner a durable place to own containment, mounts, validation, cleanup, and
+agent-runner a durable place to own containment, mounts, validation, cleanup, and
 status.
 
 ## Scope Fit
 
 This feature is in scope because it strengthens run execution, lifecycle,
 orchestration, audit, and external-driver ergonomics. It does not turn
-task-runner into an interactive coding environment, and it does not reimplement
+agent-runner into an interactive coding environment, and it does not reimplement
 backend-native tools, skills, MCP servers, or model/tool guardrails.
 
 Container support should be documented as execution containment, not as a
@@ -39,7 +39,7 @@ and externally owned containers all grant meaningful authority.
 The OpenAI Agents SDK Docker sandbox is a useful reference model for long-lived
 idle containers, `docker exec`, workspace materialization, bind mounts, cleanup,
 resume, and Docker/Podman edge cases. It is not the right primary abstraction
-for task-runner because task-runner invokes executable backends and transports:
+for agent-runner because agent-runner invokes executable backends and transports:
 `claude`, `codex`, `cursor-agent`, `opencode`, `pi`, passive/custom backends,
 and Codex app-server modes.
 
@@ -47,7 +47,7 @@ Those backends own session handles, auth, local state, tool calls, permissions,
 and resume semantics. The SDK owns a different layer: TypeScript agent objects,
 tool routing, guardrails, approvals, and sandbox sessions. A future
 `openai-agents` backend could use the SDK directly, but general container
-support for subprocess backends should be task-runner-native.
+support for subprocess backends should be agent-runner-native.
 
 ## Existing Mechanisms
 
@@ -58,7 +58,7 @@ at fresh-run/init time. They can wrap subprocess-backed backends, and the README
 already describes using a launcher wrapper for persistent-container workflows.
 
 Launchers should remain as generic subprocess prefixes. First-class container
-support should replace launcher-wrapper container conventions when task-runner
+support should replace launcher-wrapper container conventions when agent-runner
 needs to validate, audit, reuse, or clean up containers.
 
 Launchers still compose with non-container use cases such as SSH wrappers. For
@@ -97,21 +97,21 @@ runtime state according to ownership mode.
 ### Daemon Forwarding
 
 Workers use the task CLI, not workspace files. In containerized active runs, the
-worker should not need a read-write mount of `TASK_RUNNER_STATE_DIR` just to run
-`task-runner task set`.
+worker should not need a read-write mount of `AGENT_RUNNER_STATE_DIR` just to run
+`agent-runner task set`.
 
-When a daemon is available, task-runner should inject the existing connected CLI
+When a daemon is available, agent-runner should inject the existing connected CLI
 contract into container exec environments so task mutations route through the
 daemon. The exact variables should match the daemon connection contract already
 used by the CLI, plus the existing per-run overlay:
 
-- `TASK_RUNNER_CONNECT`
-- `TASK_RUNNER_DAEMON_TOKEN` when daemon auth is enabled
-- `TASK_RUNNER_RUN_ID`
-- `TASK_RUNNER_RUN_GROUP_ID`
-- `TASK_RUNNER_CWD`
+- `AGENT_RUNNER_CONNECT`
+- `AGENT_RUNNER_DAEMON_TOKEN` when daemon auth is enabled
+- `AGENT_RUNNER_RUN_ID`
+- `AGENT_RUNNER_RUN_GROUP_ID`
+- `AGENT_RUNNER_CWD`
 
-Backend auth and session directories are separate from task-runner state. They
+Backend auth and session directories are separate from agent-runner state. They
 may still need explicit read-write mounts.
 
 ## Proposed Model
@@ -149,7 +149,7 @@ The implementation should touch these existing boundaries:
 - `packages/core/src/config/runtime-paths.ts`: add
   `resolveEnvironmentsRoot()`.
 - `packages/core/src/config/loader.ts`: load named environment files from
-  `${TASK_RUNNER_CONFIG_DIR}/environments`.
+  `${AGENT_RUNNER_CONFIG_DIR}/environments`.
 - `packages/core/src/core/run/run-loop.ts`: resolve and freeze the environment
   after backend/cwd resolution, prepare the environment before active attempts,
   and run cleanup during terminal/reset paths.
@@ -197,7 +197,7 @@ need.
 Add named environment definitions under the config root:
 
 ```text
-${TASK_RUNNER_CONFIG_DIR}/environments/<name>.yaml
+${AGENT_RUNNER_CONFIG_DIR}/environments/<name>.yaml
 ```
 
 Agents may reference an environment because agents already own runtime/backend
@@ -255,7 +255,7 @@ lifecycle:
       target: container
       source: /host/repos/project.git
       baseRef: origin/main
-      branch: "task-runner/{{run_id}}"
+      branch: "agent-runner/{{run_id}}"
     - kind: command
       target: container
       command: npm
@@ -289,16 +289,16 @@ expectedMounts:
 
 Interpolation should use the same injected variables as launchers after final
 `cwd` is known: `run_id`, `run_group_id`, `cwd`, `config_dir`, `state_dir`,
-`task_runner_cmd`, and `assignment_name` when present. Unknown interpolation
+`agent_runner_cmd`, and `assignment_name` when present. Unknown interpolation
 tokens should fail for environment paths and container names because unresolved
 mounts or container identities are unsafe.
 
 Managed environments may use a first-class `workspace` block for the primary
-working directory. If `hostPath` is omitted, task-runner derives the host path
+working directory. If `hostPath` is omitted, agent-runner derives the host path
 from `hostRoot` plus the run id for `scope: run` or the run group id for
-`scope: group`. With `create: true`, task-runner creates that host directory
+`scope: group`. With `create: true`, agent-runner creates that host directory
 before the container starts. If the resolved environment cwd is inside the host
-workspace path, task-runner rewrites it to the corresponding container path.
+workspace path, agent-runner rewrites it to the corresponding container path.
 Generic `mounts` remain available for auth stores, caches, sockets, and other
 explicit bind mounts. After resolving the workspace, managed environments can
 interpolate `workspace_host_path` and `workspace_container_path` in cwd, env,
@@ -332,7 +332,7 @@ group id. Explicit `hostPath` workspaces use a stable hash of the resolved host
 path. Clearing that state directory causes the lifecycle to run again on the
 next environment validation. When `onWorkspaceCreate` is configured, the
 managed container starts with `--workdir` set to the workspace mount root;
-task-runner validates the authored `cwd` only after lifecycle setup has
+agent-runner validates the authored `cwd` only after lifecycle setup has
 had a chance to create it.
 
 `sessionMounts` expands same-path read-write mounts for built-in backend
@@ -342,7 +342,7 @@ known store; explicit lists can mount multiple stores, for example
 `opencode`, and `pi`. These resolved mounts are frozen into the manifest so
 resume/reset do not re-read current host environment paths.
 For containerized backends with host-readable session history, these mounts are
-also the bridge that lets task-runner sync or import backend-owned history
+also the bridge that lets agent-runner sync or import backend-owned history
 using the container execution cwd. Without the selected backend's session mount,
 the run can still execute, but host-side session history sync may report no
 durable history for that backend session.
@@ -362,13 +362,13 @@ Managed runtime example:
     "engine": "podman",
     "image": "agent-dev:latest",
     "lifetime": "group",
-    "containerName": "task-runner-group-abc123",
+    "containerName": "agent-runner-group-abc123",
     "containerId": "9d2f...",
     "cwd": "/workspace",
     "workspace": {
       "scope": "group",
-      "hostRoot": "/home/kevin/.task-runner/workspaces",
-      "hostPath": "/home/kevin/.task-runner/workspaces/abc123",
+      "hostRoot": "/home/kevin/.agent-runner/workspaces",
+      "hostPath": "/home/kevin/.agent-runner/workspaces/abc123",
       "containerPath": "/workspace",
       "mode": "rw",
       "create": true,
@@ -398,7 +398,7 @@ Existing runtime example:
     "engine": "podman",
     "container": "agent-dev",
     "containerIdAtValidation": "9d2f...",
-    "cwd": "/home/kevin/worktrees/task-runner",
+    "cwd": "/home/kevin/worktrees/agent-runner",
     "expectedMounts": [],
     "lastValidatedAt": "2026-05-06T00:00:00.000Z"
   }
@@ -431,16 +431,16 @@ commands through `docker exec` or `podman exec` against an idle container:
 
 ```bash
 podman exec -i \
-  -w /home/kevin/worktrees/task-runner \
-  -e TASK_RUNNER_RUN_ID=<run-id> \
-  -e TASK_RUNNER_RUN_GROUP_ID=<group-id> \
-  -e TASK_RUNNER_CWD=/home/kevin/worktrees/task-runner \
-  task-runner-<run-id> \
+  -w /home/kevin/worktrees/agent-runner \
+  -e AGENT_RUNNER_RUN_ID=<run-id> \
+  -e AGENT_RUNNER_RUN_GROUP_ID=<group-id> \
+  -e AGENT_RUNNER_CWD=/home/kevin/worktrees/agent-runner \
+  agent-runner-<run-id> \
   claude --print ...
 ```
 
 The environment layer should preserve abort and timeout behavior. If a backend
-attempt is aborted, task-runner should terminate the exec process. Managed
+attempt is aborted, agent-runner should terminate the exec process. Managed
 container cleanup follows the configured cleanup policy, not every aborted exec.
 
 ### Resume
@@ -450,7 +450,7 @@ manifest:
 
 - Managed mode validates that the container still exists and is running. If the
   managed lifetime is `run` or `group` and the container is missing,
-  task-runner may recreate it from the frozen config and audit the recreation.
+  agent-runner may recreate it from the frozen config and audit the recreation.
 - Existing mode validates that the named/id container exists, is running, and
   still matches required cwd/mount expectations. If validation fails, resume
   fails clearly and never recreates the container.
@@ -510,7 +510,7 @@ invocations:
 It should not apply to:
 
 - `passive`, because no backend process is invoked
-- Codex websocket/UDS transports, because task-runner connects to an existing
+- Codex websocket/UDS transports, because agent-runner connects to an existing
   transport instead of spawning a local subprocess
 - custom backends that run in-process or declare `launcherMode: "direct"`
 
@@ -626,22 +626,22 @@ environment state.
 Named environment management:
 
 ```bash
-task-runner list environments
-task-runner show environment agent-dev
+agent-runner list environments
+agent-runner show environment agent-dev
 ```
 
 Fresh-run/init override:
 
 ```bash
-task-runner run --agent implementer --assignment work --environment agent-dev
+agent-runner run --agent implementer --assignment work --environment agent-dev
 ```
 
 Run-scoped status and actions:
 
 ```bash
-task-runner run environment status <run-id>
-task-runner run environment validate <run-id>
-task-runner run environment cleanup <run-id>
+agent-runner run environment status <run-id>
+agent-runner run environment validate <run-id>
+agent-runner run environment cleanup <run-id>
 ```
 
 The command group is `environment`, not `container`, so future execution
@@ -655,7 +655,7 @@ cleanup actions as the embedded CLI path.
 Implemented:
 
 - environment config loading from
-  `${TASK_RUNNER_CONFIG_DIR}/environments`
+  `${AGENT_RUNNER_CONFIG_DIR}/environments`
 - `agent.executionEnvironment` plus fresh-run/init `--environment`
   override
 - frozen `manifest.executionEnvironment` and

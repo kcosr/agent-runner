@@ -294,22 +294,22 @@ export interface Backend {
   /**
    * Optional reader for complete/open turns from a previously resolved
    * backend-owned history source. Returned source change tokens and cursors
-   * must be JSON-persistable because task-runner stores them in run.json.
+   * must be JSON-persistable because agent-runner stores them in run.json.
    */
   readSessionHistory?(ctx: BackendSessionHistoryContext): Promise<BackendSessionHistoryResult>;
   /**
    * Optional backend-owned equivalence check used when sync tries to
    * identify a backend history turn that corresponds to an already-recorded
-   * task-runner attempt. Use this for backend storage quirks; exact prompt
+   * agent-runner attempt. Use this for backend storage quirks; exact prompt
    * equality is always accepted before this hook is called.
    */
-  taskRunnerPromptMatchesSyncedTurn?(ctx: BackendSyncedTurnMatchContext): boolean;
+  agentRunnerPromptMatchesSyncedTurn?(ctx: BackendSyncedTurnMatchContext): boolean;
   /**
    * Optional backend-owned timing equivalence check used after sync has
    * matched a backend history turn by session and prompt. Omitted means the
-   * task-runner attempt and backend turn timestamp windows must overlap.
+   * agent-runner attempt and backend turn timestamp windows must overlap.
    */
-  taskRunnerAttemptTimingMatchesSyncedTurn?(ctx: BackendSyncedTurnTimingContext): boolean;
+  agentRunnerAttemptTimingMatchesSyncedTurn?(ctx: BackendSyncedTurnTimingContext): boolean;
   /**
    * Optional backend-owned propagation for `run set-name` when the backend
    * can persist names on its own session/thread object.

@@ -12,7 +12,7 @@ import { LockedFieldError, runAgent } from "../packages/core/dist/core/run/run-l
 import { sharedRuntimeEnv, withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-reconfigure-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-reconfigure-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -132,7 +132,7 @@ Assignment for {{target}} on {{branch}}.
   );
 
   const initialTransport = { transport: { type: "ws", url: "ws://initial.example/ws" } };
-  const init = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://initial.example/ws" }, () =>
+  const init = await withEnv({ AGENT_RUNNER_CODEX_WS_URL: "ws://initial.example/ws" }, () =>
     initRunIn(dir, {
       backendId: "codex",
       cliVars: { target: "alpha", branch: "main" },
@@ -148,7 +148,7 @@ Assignment for {{target}} on {{branch}}.
     }),
   );
 
-  const detail = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://changed.example/ws" }, () =>
+  const detail = await withEnv({ AGENT_RUNNER_CODEX_WS_URL: "ws://changed.example/ws" }, () =>
     withSharedRuntimeEnv(dir, () =>
       reconfigureRun(init.runId, {
         vars: { branch: "release" },
@@ -391,7 +391,7 @@ Assignment.
   });
 
   const detail = await withSharedRuntimeEnv(dir, () =>
-    withEnv({ TASK_RUNNER_RUN_GROUP_ID: "leaked-group" }, () =>
+    withEnv({ AGENT_RUNNER_RUN_GROUP_ID: "leaked-group" }, () =>
       reconfigureRun(init.runId, {
         vars: { flavor: "beta" },
       }),

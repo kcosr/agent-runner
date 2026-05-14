@@ -289,16 +289,16 @@ function enforceMinimumScheduleDelay(
 
 function getMinimumScheduleDelaySec(env: NodeJS.ProcessEnv): number {
   return readPositiveIntegerEnv(
-    env.TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC,
-    "TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC",
+    env.AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC,
+    "AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC",
     DEFAULT_MIN_SCHEDULE_DELAY_SEC,
   );
 }
 
 function getMinimumRecurrenceIntervalSec(env: NodeJS.ProcessEnv): number {
   return readPositiveIntegerEnv(
-    env.TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC,
-    "TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC",
+    env.AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC,
+    "AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC",
     DEFAULT_MIN_RECURRENCE_INTERVAL_SEC,
   );
 }

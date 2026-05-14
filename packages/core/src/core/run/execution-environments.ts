@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { loadEnvironmentConfig } from "../../config/loader.js";
-import { resolveTaskRunnerStateDir } from "../../config/runtime-paths.js";
+import { resolveAgentRunnerStateDir } from "../../config/runtime-paths.js";
 import { runProcess } from "../../util/spawn.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import type { BackendName } from "../backends/types.js";
@@ -40,13 +40,13 @@ const ENGINE_START_TIMEOUT_MS = 60_000;
 const WORKSPACE_LIFECYCLE_STEP_TIMEOUT_MS = 30 * 60_000;
 const WORKSPACE_LIFECYCLE_LOCK_WAIT_MS = 100;
 const WORKSPACE_LIFECYCLE_LOCK_STALE_BUFFER_MS = 60_000;
-const WORKSPACE_LIFECYCLE_MARKER = ".task-runner-workspace-lifecycle.json";
-const WORKSPACE_LIFECYCLE_LOCK = ".task-runner-workspace-lifecycle.lock";
+const WORKSPACE_LIFECYCLE_MARKER = ".agent-runner-workspace-lifecycle.json";
+const WORKSPACE_LIFECYCLE_LOCK = ".agent-runner-workspace-lifecycle.lock";
 const WORKSPACE_LIFECYCLE_LOCK_METADATA = "metadata.json";
 const WORKSPACE_STATE_DIR = "workspace-state";
 const CONTAINER_STATE_DIR = "container-state";
-const AFTER_START_LIFECYCLE_MARKER = ".task-runner-after-start-lifecycle.json";
-const AFTER_START_LIFECYCLE_LOCK = ".task-runner-after-start-lifecycle.lock";
+const AFTER_START_LIFECYCLE_MARKER = ".agent-runner-after-start-lifecycle.json";
+const AFTER_START_LIFECYCLE_LOCK = ".agent-runner-after-start-lifecycle.lock";
 
 interface ResolveEnvironmentOptions {
   reference: EnvironmentReference | undefined;
@@ -146,7 +146,7 @@ function generatedContainerName(
   runId: string,
   runGroupId: string,
 ): string {
-  return `task-runner-${lifetime === "group" ? runGroupId : runId}`;
+  return `agent-runner-${lifetime === "group" ? runGroupId : runId}`;
 }
 
 function resolveMounts(
@@ -172,7 +172,7 @@ function homeRoot(): string {
 
 function opencodeDataDir(): string {
   const explicit =
-    process.env.TASK_RUNNER_OPENCODE_DATA_DIR?.trim() || process.env.OPENCODE_DATA_DIR?.trim();
+    process.env.AGENT_RUNNER_OPENCODE_DATA_DIR?.trim() || process.env.OPENCODE_DATA_DIR?.trim();
   if (explicit) {
     return resolve(explicit);
   }
@@ -795,7 +795,7 @@ function workspaceLifecycleStateDir(workspace: RunEnvironmentWorkspace): string 
       ? explicitWorkspaceStateKey(workspace.hostPath)
       : pathWithin(workspace.hostRoot, workspace.hostPath);
   return join(
-    resolveTaskRunnerStateDir(),
+    resolveAgentRunnerStateDir(),
     WORKSPACE_STATE_DIR,
     key && key.length > 0 ? key : explicitWorkspaceStateKey(workspace.hostPath),
   );
@@ -815,7 +815,7 @@ function afterStartLifecycleStateDirForContainerId(
   const key = createHash("sha256")
     .update(`${environment.engine}\0${environment.containerName}\0${containerId}`)
     .digest("hex");
-  return join(resolveTaskRunnerStateDir(), CONTAINER_STATE_DIR, key);
+  return join(resolveAgentRunnerStateDir(), CONTAINER_STATE_DIR, key);
 }
 
 function readWorkspaceLifecycleMarker(stateDir: string): string | null {
@@ -1281,9 +1281,9 @@ async function startManagedContainer(
     "--name",
     environment.containerName,
     "--label",
-    "task-runner=true",
+    "agent-runner=true",
     "--label",
-    `task-runner-environment=${environment.name ?? "inline"}`,
+    `agent-runner-environment=${environment.name ?? "inline"}`,
     "--workdir",
     environment.workspace !== null && environment.lifecycle?.onWorkspaceCreate !== null
       ? environment.workspace.containerPath
@@ -1539,7 +1539,7 @@ export function buildEnvironmentLauncher(
     return undefined;
   }
   const forwardedEnv = Object.fromEntries(
-    Object.entries(env).filter(([key]) => key.startsWith("TASK_RUNNER_")),
+    Object.entries(env).filter(([key]) => key.startsWith("AGENT_RUNNER_")),
   );
   const args = [
     "exec",

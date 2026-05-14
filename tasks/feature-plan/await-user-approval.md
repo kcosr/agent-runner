@@ -14,12 +14,12 @@ On the initial pass, immediately mark this task `blocked` after `assignment-summ
   - that no separate implementer run was initialized
   - the exact command to inspect attachments:
 
-        {{task_runner_cmd}} attachment list {{run_id}}
+        {{agent_runner_cmd}} attachment list {{run_id}}
 
   - the exact resume shape for approval or requested changes:
 
-        {{task_runner_cmd}} run --resume-run {{run_id}} "Approved. Continue implementation."
-        {{task_runner_cmd}} run --resume-run {{run_id}} "Requested changes: <specific changes>"
+        {{agent_runner_cmd}} run --resume-run {{run_id}} "Approved. Continue implementation."
+        {{agent_runner_cmd}} run --resume-run {{run_id}} "Requested changes: <specific changes>"
 
 On resume, read the caller's latest message carefully:
   - If the caller clearly approved implementation, record the approval text in Notes and mark this task `completed`.

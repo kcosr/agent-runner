@@ -42,7 +42,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-run-mgmt-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-run-mgmt-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -323,7 +323,7 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
 
 test("list runs rejects conflicting scope flags with exit code 3", () => {
   const dir = tempDir();
-  const failure = runCliExpectFail(["list", "runs", "--cwd", dir, "--group-id", "task-runner"], {
+  const failure = runCliExpectFail(["list", "runs", "--cwd", dir, "--group-id", "agent-runner"], {
     cwd: dir,
   });
   assert.equal(failure.status, 3);
@@ -434,7 +434,7 @@ test("run queued resume message commands expose text and json contracts", async 
   );
   assert.equal(
     removedText,
-    `task-runner: removed queued message ${queuedJson.queuedResumeMessage.id} from run ${outcome.runId}\n`,
+    `agent-runner: removed queued message ${queuedJson.queuedResumeMessage.id} from run ${outcome.runId}\n`,
   );
 
   const emptyText = runCli(["run", "queued-messages", outcome.runId], { cwd: dir });
@@ -465,7 +465,7 @@ test("run queued resume message commands support connected daemon mutations", as
           "--output-format",
           "json",
         ],
-        { cwd: dir, env: { TASK_RUNNER_CLAUDE_BIN: command } },
+        { cwd: dir, env: { AGENT_RUNNER_CLAUDE_BIN: command } },
       ),
     );
     const runId = started.runId;
@@ -592,7 +592,7 @@ Work.
         "--output-format",
         "json",
       ],
-      { cwd: dir, env: { HOME: dir, TASK_RUNNER_CLAUDE_BIN: fakeClaude } },
+      { cwd: dir, env: { HOME: dir, AGENT_RUNNER_CLAUDE_BIN: fakeClaude } },
     ),
   );
   assert.equal(first.message, "fresh file message\n");
@@ -610,7 +610,7 @@ Work.
         "--output-format",
         "json",
       ],
-      { cwd: dir, env: { HOME: dir, TASK_RUNNER_CLAUDE_BIN: fakeClaude } },
+      { cwd: dir, env: { HOME: dir, AGENT_RUNNER_CLAUDE_BIN: fakeClaude } },
     ),
   );
   assert.equal(second.sessions.at(-1).message, "resume file message\n");
@@ -629,7 +629,7 @@ test("run reconfigure accepts --message-file and rejects message-file conflicts 
   const text = runCli(["run", "reconfigure", outcome.runId, "--message-file", messagePath], {
     cwd: dir,
   });
-  assert.equal(text, `task-runner: reconfigured run ${outcome.runId}\n`);
+  assert.equal(text, `agent-runner: reconfigured run ${outcome.runId}\n`);
   const manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.message, "replacement from file\n");
   assertTimestampAdvanced(beforeReconfigure, manifest.updatedAt, "run reconfigure updatedAt");
@@ -642,7 +642,7 @@ test("run reconfigure accepts --message-file and rejects message-file conflicts 
   assert.equal(conflict.status, 3);
   assert.match(
     conflict.stderr,
-    /task-runner: --message-file cannot be combined with a positional message/,
+    /agent-runner: --message-file cannot be combined with a positional message/,
   );
   assert.equal(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"), before);
 });
@@ -703,7 +703,7 @@ test("init --message-file reports unreadable files before creating a run", () =>
     { cwd: dir },
   );
   assert.equal(failure.status, 3);
-  assert.match(failure.stderr, /task-runner: cannot read --message-file .*missing\.md:/);
+  assert.match(failure.stderr, /agent-runner: cannot read --message-file .*missing\.md:/);
 });
 
 test("run schedule sets, toggles, clears, and run ready accepts schedule flags", async () => {

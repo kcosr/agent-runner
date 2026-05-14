@@ -25,7 +25,7 @@ Work through the findings from `feature-implement/internal-code-review`:
 After applying fixes, resume the review run for a
 delta pass:
 
-    {{task_runner_cmd}} run --resume-run <review-run-id> \
+    {{agent_runner_cmd}} run --resume-run <review-run-id> \
       "Fixes applied. <one-line summary per prior finding>."
 
 The reviewer does a focused delta pass, not a full
@@ -34,7 +34,7 @@ status is `success`** — that is the reviewer's
 approval gate, and the only signal that the change
 is cleared to ship. Check after each delta pass:
 
-    {{task_runner_cmd}} run status <review-run-id> --output-format json \
+    {{agent_runner_cmd}} run status <review-run-id> --output-format json \
       --field status
 
 If it still returns `blocked`, read the updated

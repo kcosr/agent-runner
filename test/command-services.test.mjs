@@ -139,7 +139,7 @@ Locked schedule service test assignment.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-command-services-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-command-services-"));
 }
 
 function writeFakePiRenameAgent(baseDir) {
@@ -887,9 +887,9 @@ args: [worker]
 test("command services: task definitions flow through command and app services", () =>
   withEnv(
     {
-      TASK_RUNNER_CONFIG_DIR: REPO_ROOT,
-      TASK_RUNNER_CONNECT: undefined,
-      TASK_RUNNER_LISTEN: undefined,
+      AGENT_RUNNER_CONFIG_DIR: REPO_ROOT,
+      AGENT_RUNNER_CONNECT: undefined,
+      AGENT_RUNNER_LISTEN: undefined,
     },
     () => {
       const tasks = listDefinitions("task");
@@ -931,9 +931,9 @@ test("command services: task definitions flow through command and app services",
 test("command services: showDefinition resolves built-in code-review named task refs", () =>
   withEnv(
     {
-      TASK_RUNNER_CONFIG_DIR: REPO_ROOT,
-      TASK_RUNNER_CONNECT: undefined,
-      TASK_RUNNER_LISTEN: undefined,
+      AGENT_RUNNER_CONFIG_DIR: REPO_ROOT,
+      AGENT_RUNNER_CONNECT: undefined,
+      AGENT_RUNNER_LISTEN: undefined,
     },
     () => {
       const implementationReview = showDefinition("assignment", "code-review");
@@ -1406,7 +1406,7 @@ test("command services: group-scoped execution environments pin group membership
     lastError: null,
     image: "node:22",
     lifetime: "group",
-    containerName: "task-runner-shared-group",
+    containerName: "agent-runner-shared-group",
     containerId: "container-123",
     workspace: {
       scope: "group",
@@ -1466,7 +1466,7 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-validate") {
+if (cmd === "inspect" && target === "agent-runner-validate") {
   process.exit(1);
 }
 if (cmd === "inspect" && target === "container-validate") {
@@ -1496,7 +1496,7 @@ process.exit(0);
     lastError: null,
     image: "node:22",
     lifetime: "run",
-    containerName: "task-runner-validate",
+    containerName: "agent-runner-validate",
     containerId: null,
     workspace: null,
     lifecycle: {
@@ -1568,7 +1568,7 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-validate-fail") {
+if (cmd === "inspect" && target === "agent-runner-validate-fail") {
   process.exit(1);
 }
 if (cmd === "inspect" && target === "container-validate-fail") {
@@ -1600,7 +1600,7 @@ process.exit(0);
     lastError: null,
     image: "node:22",
     lifetime: "run",
-    containerName: "task-runner-validate-fail",
+    containerName: "agent-runner-validate-fail",
     containerId: null,
     workspace: null,
     lifecycle: {
@@ -1687,7 +1687,7 @@ process.exit(0);
     lastError: null,
     image: "node:22",
     lifetime: "run",
-    containerName: `task-runner-${containerId}`,
+    containerName: `agent-runner-${containerId}`,
     containerId,
     workspace: null,
     lifecycle: null,
@@ -1703,7 +1703,7 @@ process.exit(0);
     manifest.executionEnvironment = environment("reset-container");
     manifest.resetSeed.executionEnvironment = {
       ...environment(null),
-      containerName: "task-runner-reset-container",
+      containerName: "agent-runner-reset-container",
       containerId: null,
       lastValidatedAt: null,
       workspace: {
@@ -1734,7 +1734,7 @@ process.exit(0);
     manifest.executionEnvironment = environment("delete-container");
     manifest.resetSeed.executionEnvironment = {
       ...environment(null),
-      containerName: "task-runner-delete-container",
+      containerName: "agent-runner-delete-container",
       containerId: null,
       lastValidatedAt: null,
     };
@@ -2247,7 +2247,7 @@ test("command services: enabling a paused recurring schedule reports interval vi
       };
     });
 
-    await withEnv({ TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "7200" }, async () => {
+    await withEnv({ AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "7200" }, async () => {
       assert.throws(
         () => setRunScheduleEnabled(target.runId, true),
         (err) =>
@@ -2660,7 +2660,7 @@ test("command services: containerized codex stdio rename starts from host proces
   });
 
   await withSharedRuntimeEnv(dir, async () => {
-    await withEnv({ TASK_RUNNER_CODEX_BIN: fakeCodex }, async () => {
+    await withEnv({ AGENT_RUNNER_CODEX_BIN: fakeCodex }, async () => {
       const renamed = await setRunName(outcome.runId, { name: "Container rename" });
       assert.equal(renamed.name, "Container rename");
     });
@@ -2866,7 +2866,7 @@ test("command services: setRunName propagates pi session renames into the sessio
     manifest.cwd = dir;
   });
 
-  await withEnv({ PI_HOME: piHome, TASK_RUNNER_PI_BIN: command }, () =>
+  await withEnv({ PI_HOME: piHome, AGENT_RUNNER_PI_BIN: command }, () =>
     withSharedRuntimeEnv(dir, async () => {
       const renamed = await setRunName(outcome.runId, { name: "  Pi rename  " });
       assert.deepEqual(renamed, {

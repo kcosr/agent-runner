@@ -12,7 +12,7 @@ import {
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-opencode-history-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-opencode-history-"));
 }
 
 function createOpenCodeDb(dataDir, cwd = "/repo", sessionId = "ses_123") {
@@ -306,7 +306,7 @@ test("opencode history resolves and validates sessions by cwd-bound sqlite data"
 
 test("opencode history honors OpenCode data directory env fallbacks", async () => {
   const home = tempDir();
-  const explicitDataDir = join(home, "task-runner-opencode");
+  const explicitDataDir = join(home, "agent-runner-opencode");
   const opencodeDataDir = join(home, "opencode-env");
   const { db: explicitDb, sessionId, cwd } = createOpenCodeDb(explicitDataDir);
   const { db: fallbackDb } = createOpenCodeDb(opencodeDataDir, cwd, sessionId);
@@ -320,7 +320,7 @@ test("opencode history honors OpenCode data directory env fallbacks", async () =
       {
         HOME: home,
         OPENCODE_DATA_DIR: opencodeDataDir,
-        TASK_RUNNER_OPENCODE_DATA_DIR: explicitDataDir,
+        AGENT_RUNNER_OPENCODE_DATA_DIR: explicitDataDir,
       },
       async () => {
         assert.equal(opencodeDbPath(process.env), join(explicitDataDir, "opencode.db"));

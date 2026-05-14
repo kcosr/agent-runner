@@ -105,16 +105,16 @@ function validateCustomBackend(name: string, sourcePath: string, value: unknown)
       issues.push("readSessionHistory must be a function when present");
     }
     if (
-      value.taskRunnerPromptMatchesSyncedTurn !== undefined &&
-      typeof value.taskRunnerPromptMatchesSyncedTurn !== "function"
+      value.agentRunnerPromptMatchesSyncedTurn !== undefined &&
+      typeof value.agentRunnerPromptMatchesSyncedTurn !== "function"
     ) {
-      issues.push("taskRunnerPromptMatchesSyncedTurn must be a function when present");
+      issues.push("agentRunnerPromptMatchesSyncedTurn must be a function when present");
     }
     if (
-      value.taskRunnerAttemptTimingMatchesSyncedTurn !== undefined &&
-      typeof value.taskRunnerAttemptTimingMatchesSyncedTurn !== "function"
+      value.agentRunnerAttemptTimingMatchesSyncedTurn !== undefined &&
+      typeof value.agentRunnerAttemptTimingMatchesSyncedTurn !== "function"
     ) {
-      issues.push("taskRunnerAttemptTimingMatchesSyncedTurn must be a function when present");
+      issues.push("agentRunnerAttemptTimingMatchesSyncedTurn must be a function when present");
     }
     if (value.renameSession !== undefined && typeof value.renameSession !== "function") {
       issues.push("renameSession must be a function when present");

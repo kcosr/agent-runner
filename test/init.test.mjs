@@ -47,7 +47,7 @@ Work on {{cwd}}. Plan at {{cwd}}.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-init-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-init-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -173,7 +173,7 @@ test("init: freezes UDS codex transport into manifest and reset seed", async () 
   writeAgent(dir, "two", CODEX_AGENT);
   writeAssignment(dir, "two-work", TWO_ASSIGNMENT);
 
-  const outcome = await withEnv({ TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock" }, () =>
+  const outcome = await withEnv({ AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock" }, () =>
     initIn(dir, { backendId: "codex" }),
   );
 

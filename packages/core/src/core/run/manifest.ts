@@ -110,6 +110,7 @@ export interface RunResetSeed {
 }
 
 export type RunHistoryProvenance =
+  // On-disk schema discriminator intentionally preserved across the Agent Runner rename.
   | { kind: "task_runner" }
   | {
       kind: "backend_session";
@@ -334,7 +335,7 @@ export interface RunSchedule {
   recurrence: RunScheduleRecurrence | null;
 }
 
-// The manifest is the canonical record of a run. Post-creation, task-runner
+// The manifest is the canonical record of a run. Post-creation, agent-runner
 // never re-reads the agent's source file — every field needed to resume or
 // inspect a run comes from here. That means first-write freezes a snapshot
 // of the agent definition: `agent.instructions`, `lockedFields`, and
@@ -348,7 +349,7 @@ export interface QueuedResumeMessage {
 }
 
 // schemaVersion: 24 is the current manifest-canonical generation. Manifests written
-// by earlier task-runner versions are not resumable by this version —
+// by earlier agent-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // reinitialize or run an explicit migration if one is added.
@@ -414,7 +415,7 @@ export interface RunManifest {
   hookState: Record<string, unknown>;
   hookAudits: HookAuditRecord[];
   // Assignment-level documentation surface for the caller of
-  // task-runner (the human or script invoking `run` / `init`).
+  // agent-runner (the human or script invoking `run` / `init`).
   // Frozen at first write from `assignmentConfig.callerInstructions`
   // with `{{var}}` references interpolated against the same
   // injectedVars as other body fields. `null` when no assignment
@@ -858,11 +859,11 @@ function readManifestCandidate(candidate: string): RunManifest {
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 24.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of agent-runner requires schemaVersion 24.`,
     );
   }
   if (!isRunManifest(parsed)) {
-    throw new ResumeError(`manifest at ${candidate} does not look like a task-runner run.json`);
+    throw new ResumeError(`manifest at ${candidate} does not look like an agent-runner run.json`);
   }
   return normalizeRunManifest(parsed);
 }

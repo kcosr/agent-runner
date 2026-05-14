@@ -53,7 +53,7 @@ Work on the repo. Plan at {{cwd}}.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-loader-extra-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-loader-extra-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -164,8 +164,8 @@ const SHARED_FEATURE_IMPLEMENT_TASK_IDS = [
   "feature-implement/merge-after-approval",
 ];
 
-test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+test("loadAgentConfig parses a minimal agent.md from AGENT_RUNNER_CONFIG_DIR", () =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(configDir, "demo", MINIMAL_AGENT);
 
     const loaded = loadAgentConfig("demo", rootDir);
@@ -178,7 +178,7 @@ test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", ()
   }));
 
 test("loadAssignmentConfig loads authored cwd from assignment frontmatter", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "explicit-cwd",
@@ -199,7 +199,7 @@ body
   }));
 
 test("loadAssignmentConfig rejects empty authored cwd after trimming", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "blank-cwd",
@@ -219,7 +219,7 @@ body
   }));
 
 test("loadAgentConfig throws AgentConfigError on bad frontmatter", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "bad",
@@ -235,7 +235,7 @@ body
   }));
 
 test("loadAgentConfig rejects `tasks` (which belongs on assignments)", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "with-tasks",
@@ -262,7 +262,7 @@ body
   }));
 
 test("loadAgentConfig accepts agent with no tasks/vars/message fields", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "notasks",
@@ -280,7 +280,7 @@ body
   }));
 
 test("loadAgentConfig resolves exact-match env fields and whole-body instructions", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv(
       {
         AGENT_NAME: "env-agent",
@@ -332,7 +332,7 @@ backendConfig:
   ));
 
 test("loadAssignmentConfig resolves typed fields, whole-field prose envs, and env-backed var defaults", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv(
       {
         ASSIGNMENT_NAME: "env-work",
@@ -402,7 +402,7 @@ tasks:
   ));
 
 test("loadAssignmentConfig accepts hooks and vars.requiredAt", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "hooked-work",
@@ -436,7 +436,7 @@ body
   }));
 
 test("loadAssignmentConfig rejects invalid schedule field combinations", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "bad-schedule",
@@ -463,7 +463,7 @@ body
   }));
 
 test("loadAssignmentConfig accepts schedule as a lockable field", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "locked-schedule",
@@ -485,7 +485,7 @@ body
   }));
 
 test("loadAssignmentConfig accepts task-local task-transition hooks", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "task-local-hooks",
@@ -511,7 +511,7 @@ body
   }));
 
 test("loadAssignmentConfig rejects invalid task-transition when clauses", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "bad-task-transition-when",
@@ -539,12 +539,12 @@ body
   }));
 
 test("loadAssignmentConfig leaves partial env syntax literal in prose surfaces", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv(
       {
         TARGET_BRANCH: "main",
         ENVIRONMENT: "staging",
-        BODY_TEXT: "Use ${TASK_RUNNER_CONFIG_DIR} when debugging.",
+        BODY_TEXT: "Use ${AGENT_RUNNER_CONFIG_DIR} when debugging.",
       },
       () => {
         writeAssignment(
@@ -575,13 +575,13 @@ vars:
         assert.equal(loaded.config.tasks[0].title, "Review ${TARGET_BRANCH}");
         assert.equal(loaded.config.tasks[0].body, "Validate ${ENVIRONMENT} before merge.");
         assert.equal(loaded.config.vars.target.description, "Uses ${ENVIRONMENT}");
-        assert.equal(loaded.instructions, "Use ${TASK_RUNNER_CONFIG_DIR} when debugging.");
+        assert.equal(loaded.instructions, "Use ${AGENT_RUNNER_CONFIG_DIR} when debugging.");
       },
     ),
   ));
 
 test("loadAssignmentConfig rejects hook entries without exactly one source selector", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "bad-hook-work",
@@ -633,7 +633,7 @@ for (const { name, expression, envValue, expected } of [
   },
 ]) {
   test(`loadAssignmentConfig ${name}`, () =>
-    withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
       withEnv({ RETRIES: envValue }, () => {
         writeAssignment(
           configDir,
@@ -654,7 +654,7 @@ body
 }
 
 test("loadAssignmentConfig treats an empty env value as empty for - fallback exact fields", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv({ RETRIES: "" }, () => {
       writeAssignment(
         configDir,
@@ -682,7 +682,7 @@ body
   ));
 
 test("loadAssignmentConfig rejects missing required exact env fields", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv({ RETRIES: undefined }, () => {
       writeAssignment(
         configDir,
@@ -710,7 +710,7 @@ body
   ));
 
 test("loadAssignmentConfig rejects empty required exact env fields", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv({ RETRIES: "" }, () => {
       writeAssignment(
         configDir,
@@ -738,7 +738,7 @@ body
   ));
 
 test("loadAgentConfig rejects invalid number coercion for exact env fields", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv({ AGENT_TIMEOUT: "abc" }, () => {
       writeAgent(
         configDir,
@@ -767,7 +767,7 @@ body
   ));
 
 test("loadAgentConfig rejects invalid boolean coercion for exact env fields", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv({ AGENT_FLAG: "yes" }, () => {
       writeAgent(
         configDir,
@@ -796,7 +796,7 @@ body
   ));
 
 test("loadAgentConfig rejects partial interpolation in exact-only fields", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv({ AGENT_NAME: "demo" }, () => {
       writeAgent(
         configDir,
@@ -824,7 +824,7 @@ body
   ));
 
 test("loadAgentConfig reports invalid env syntax with path context", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "invalid-syntax",
@@ -929,7 +929,7 @@ body
   },
 ]) {
   test(name, () =>
-    withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
       withEnv(
         {
           CODEX_SETTINGS: '{"codex":{"transport":{"type":"ws","url":"ws://127.0.0.1:4773/"}}}',
@@ -958,7 +958,7 @@ body
 }
 
 test("loadAgentConfig accepts backendConfig.codex.transport in agent frontmatter", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "codex-transport",
@@ -988,7 +988,7 @@ body
   }));
 
 test("loadAgentConfig accepts UDS backendConfig.codex.transport in agent frontmatter", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "codex-uds-transport",
@@ -1018,7 +1018,7 @@ body
   }));
 
 test("loadAgentConfig accepts backendArgs entries for multiple backends", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "backend-args",
@@ -1055,7 +1055,7 @@ body
   }));
 
 test("loadAgentConfig rejects malformed backendArgs values", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     for (const [name, backendArgs, pattern] of [
       ["missing-extra-args", "claude: {}", /backendArgs\.claude\.extraArgs/],
       ["extra-field", "claude:\n    extraArgs: [--flag]\n    env: {}", /backendArgs\.claude/],
@@ -1089,7 +1089,7 @@ body
   }));
 
 test("loadAgentConfig applies exact env interpolation to backendArgs tokens only", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) =>
     withEnv({ BACKEND_FLAG: "--from-env", FLAG_VALUE: "value" }, () => {
       writeAgent(
         configDir,
@@ -1161,7 +1161,7 @@ body
   ));
 
 test("loadAgentConfig preserves backendConfig for backend-owned validation", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "bad-transport",
@@ -1192,7 +1192,7 @@ body
   }));
 
 test("loadAgentConfig accepts arbitrary backendConfig names and values", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "custom-backend-config",
@@ -1226,7 +1226,7 @@ body
   }));
 
 test("loadAgentConfig rejects removed backendSpecific frontmatter", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "old-backend-field",
@@ -1254,7 +1254,7 @@ body
   }));
 
 test("loadAgentConfig throws AgentNotFoundError for missing agent and lists config-root path", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     assert.throws(
       () => loadAgentConfig("nope", rootDir),
       (err) => {
@@ -1274,7 +1274,7 @@ test("resolveAgentPath accepts a direct path", () => {
 });
 
 test("direct agent paths outside the config root may use authored names", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir }) => {
     const dir = join(rootDir, "external-agents", "worker");
     mkdirSync(dir, { recursive: true });
     const agentPath = join(dir, "agent.md");
@@ -1293,8 +1293,8 @@ External direct-path agent.
     assert.equal(loaded.config.name, "direct-worker");
   }));
 
-test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFIG_DIR", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+test("loadAssignmentConfig parses a minimal assignment.md from AGENT_RUNNER_CONFIG_DIR", () =>
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(configDir, "demo-work", MINIMAL_ASSIGNMENT);
 
     const loaded = loadAssignmentConfig("demo-work", rootDir);
@@ -1306,7 +1306,7 @@ test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFI
   }));
 
 test("loadAssignmentConfig resolves named and explicit task refs into plain task objects", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeTask(
       configDir,
       "orient",
@@ -1383,7 +1383,7 @@ Assignment body.
   }));
 
 test("loadAssignmentConfig hard-fails when a referenced task id mismatches its canonical file id", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeTask(
       configDir,
       "review/reuse",
@@ -1421,7 +1421,7 @@ Assignment body.
   }));
 
 test("direct task paths outside the config root may use authored ids", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     const externalTaskPath = join(rootDir, "external-tasks", "review", "reuse.md");
     mkdirSync(dirname(externalTaskPath), { recursive: true });
     writeFileSync(
@@ -1453,7 +1453,7 @@ Assignment body.
   }));
 
 test("loadTaskConfig loads named config-root task definitions", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     const sourcePath = writeTask(
       configDir,
       "orient",
@@ -1479,7 +1479,7 @@ Read README.md.
   }));
 
 test("loadTaskConfig treats slashful task ids as named config refs", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     const sourcePath = writeTask(
       configDir,
       "review/architecture",
@@ -1500,7 +1500,7 @@ Review module boundaries.
   }));
 
 test("loadTaskConfig direct paths outside the config root may use authored ids", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir }) => {
     const externalTaskPath = join(rootDir, "external-tasks", "review", "reuse.md");
     mkdirSync(dirname(externalTaskPath), { recursive: true });
     writeFileSync(
@@ -1522,7 +1522,7 @@ Check external reusable pieces.
   }));
 
 test("listTaskDefinitions recursively lists sorted config-root task definitions", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     const alphaPath = writeTask(
       configDir,
       "alpha",
@@ -1572,7 +1572,7 @@ Zeta body.
   }));
 
 test("listTaskDefinitions warn-skips identity mismatches while direct load fails", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeTask(
       configDir,
       "review/good",
@@ -1619,7 +1619,7 @@ Bad body.
   }));
 
 test("loadTaskConfig rejects malformed task config", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeTask(
       configDir,
       "bad",
@@ -1642,7 +1642,7 @@ Missing required title.
   }));
 
 test("loadTaskConfig reports searched paths for missing named tasks", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     assert.throws(
       () => loadTaskConfig("missing/task", rootDir),
       (error) => {
@@ -1657,7 +1657,7 @@ test("loadTaskConfig reports searched paths for missing named tasks", () =>
   }));
 
 test("built-in shared review task files are valid config-root named task definitions", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeTask(
       configDir,
       "review/architecture",
@@ -1684,7 +1684,7 @@ Assignment body.
   }));
 
 test("built-in shared feature task files are valid config-root named task definitions", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     for (const taskId of [...SHARED_FEATURE_PLAN_TASK_IDS, ...SHARED_FEATURE_IMPLEMENT_TASK_IDS]) {
       const loaded = loadTaskConfig(taskId, REPO_ROOT);
       assert.equal(loaded.task.id, taskId);
@@ -1727,7 +1727,7 @@ test("built-in shared feature task files are valid config-root named task defini
   }));
 
 test("loadAssignmentConfig hard-fails when a referenced named task is missing", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "missing-task",
@@ -1753,7 +1753,7 @@ Assignment body.
   }));
 
 test("built-in code-review assignment resolves shared review tasks and preserves implementation-run gates", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     const loaded = loadAssignmentConfig(BUILTIN_CODE_REVIEW_PATH);
 
     assert.deepEqual(
@@ -1783,7 +1783,7 @@ test("built-in code-review assignment resolves shared review tasks and preserves
   }));
 
 test("built-in code-review-direct assignment resolves shared review tasks without implementation-run gates", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     const loaded = loadAssignmentConfig(BUILTIN_CODE_REVIEW_DIRECT_PATH);
 
     assert.deepEqual(
@@ -1815,7 +1815,7 @@ test("built-in code-review-direct assignment resolves shared review tasks withou
   }));
 
 test("built-in plan-feature assignment uses cwd instead of repo_path for canonical repo context", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
     assert.equal(loaded.config.vars.repo_path, undefined);
     assert.deepEqual(loaded.config.vars.worktree_slug?.sources, ["cli", "web"]);
@@ -1869,7 +1869,7 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
   }));
 
 test("built-in plan-implement-feature assignment composes shared tasks for a single-run flow", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     const loaded = loadAssignmentConfig(BUILTIN_PLAN_IMPLEMENT_FEATURE_PATH);
 
     assert.equal(loaded.config.name, "plan-implement-feature");
@@ -1927,7 +1927,7 @@ test("built-in plan-implement-feature assignment composes shared tasks for a sin
   }));
 
 test("built-in code-review assignment fits single-run feature implementation reviews", () =>
-  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+  withEnv({ AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
     const loaded = loadAssignmentConfig(BUILTIN_CODE_REVIEW_PATH);
     const orient = loaded.config.tasks.find((task) => task.id === "orient");
     const planCoverage = loaded.config.tasks.find((task) => task.id === "plan_coverage");
@@ -2013,7 +2013,7 @@ test("built-in generic agent provides runtime settings without role instructions
 });
 
 test("loadAssignmentConfig throws AssignmentNotFoundError for missing assignment and lists config-root path", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     assert.throws(
       () => loadAssignmentConfig("nope-work", rootDir),
       (err) => {
@@ -2035,8 +2035,8 @@ test("resolveAssignmentPath accepts a direct path", () => {
 });
 
 test("direct assignment paths outside the config root may use authored names", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
-    const draftDir = join(rootDir, "drafts", "task-runner");
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir }) => {
+    const draftDir = join(rootDir, "drafts", "agent-runner");
     mkdirSync(draftDir, { recursive: true });
     const assignmentPath = join(draftDir, "plan-feature-abcd.md");
     writeFileSync(
@@ -2059,7 +2059,7 @@ Draft assignment body.
   }));
 
 test("assignment schema rejects duplicate task ids", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "dup",
@@ -2080,7 +2080,7 @@ body
   }));
 
 test("assignment schema rejects multiline task titles", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "multiline-title",
@@ -2101,7 +2101,7 @@ body
   }));
 
 test("assignment schema rejects incompatible var defaults", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
       configDir,
       "bad-default",
@@ -2121,7 +2121,7 @@ body
   }));
 
 test("loadAgentConfig does not fall back to cwd-local bare names", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(rootDir, "demo", MINIMAL_AGENT);
 
     assert.throws(
@@ -2135,7 +2135,7 @@ test("loadAgentConfig does not fall back to cwd-local bare names", () =>
   }));
 
 test("listAgents discovers config-root agents", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     writeAgent(configDir, "alpha", MINIMAL_AGENT);
     writeAgent(configDir, "beta", MINIMAL_AGENT);
 
@@ -2147,7 +2147,7 @@ test("listAgents discovers config-root agents", () =>
   }));
 
 test("listAssignments discovers config-root assignments", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     writeAssignment(configDir, "work-a", MINIMAL_ASSIGNMENT);
     writeAssignment(configDir, "work-b", MINIMAL_ASSIGNMENT);
 
@@ -2158,7 +2158,7 @@ test("listAssignments discovers config-root assignments", () =>
   }));
 
 test("listAgents returns sorted names", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     writeAgent(configDir, "zeta", MINIMAL_AGENT);
     writeAgent(configDir, "alpha", MINIMAL_AGENT);
     writeAgent(configDir, "mid", MINIMAL_AGENT);
@@ -2169,19 +2169,19 @@ test("listAgents returns sorted names", () =>
   }));
 
 test("listAgents returns empty array when no agents exist", () =>
-  withRuntimeRoots("task-runner-loader-", () => {
+  withRuntimeRoots("agent-runner-loader-", () => {
     const entries = listAgents();
     assert.deepEqual(entries, []);
   }));
 
 test("listAssignments returns empty array when no assignments exist", () =>
-  withRuntimeRoots("task-runner-loader-", () => {
+  withRuntimeRoots("agent-runner-loader-", () => {
     const entries = listAssignments();
     assert.deepEqual(entries, []);
   }));
 
 test("listAgentDefinitions and listAssignmentDefinitions warn-skip identity mismatches and bad task refs", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "reviewers/code",
@@ -2249,7 +2249,7 @@ Assignment body.
   }));
 
 test("listAgents skips directories without agent.md", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     writeAgent(configDir, "real", MINIMAL_AGENT);
     mkdirSync(join(configDir, "agents", "empty"), { recursive: true });
 
@@ -2258,17 +2258,17 @@ test("listAgents skips directories without agent.md", () =>
     assert.equal(entries[0].name, "real");
   }));
 
-test("TASK_RUNNER_CONFIG_DIR overrides XDG_CONFIG_HOME and HOME fallbacks", () => {
+test("AGENT_RUNNER_CONFIG_DIR overrides XDG_CONFIG_HOME and HOME fallbacks", () => {
   const explicitRoot = tempDir();
   const xdgRoot = tempDir();
   const homeRoot = tempDir();
   writeAgent(explicitRoot, "explicit", MINIMAL_AGENT);
-  writeAgent(join(xdgRoot, "task-runner"), "xdg", MINIMAL_AGENT);
-  writeAgent(join(homeRoot, ".config", "task-runner"), "home", MINIMAL_AGENT);
+  writeAgent(join(xdgRoot, "agent-runner"), "xdg", MINIMAL_AGENT);
+  writeAgent(join(homeRoot, ".config", "agent-runner"), "home", MINIMAL_AGENT);
 
   withEnv(
     {
-      TASK_RUNNER_CONFIG_DIR: explicitRoot,
+      AGENT_RUNNER_CONFIG_DIR: explicitRoot,
       XDG_CONFIG_HOME: xdgRoot,
       HOME: homeRoot,
     },
@@ -2282,14 +2282,14 @@ test("TASK_RUNNER_CONFIG_DIR overrides XDG_CONFIG_HOME and HOME fallbacks", () =
   );
 });
 
-test("XDG_CONFIG_HOME fallback is used when TASK_RUNNER_CONFIG_DIR is unset", () => {
+test("XDG_CONFIG_HOME fallback is used when AGENT_RUNNER_CONFIG_DIR is unset", () => {
   const xdgRoot = tempDir();
   const homeRoot = tempDir();
-  writeAssignment(join(xdgRoot, "task-runner"), "demo-work", MINIMAL_ASSIGNMENT);
+  writeAssignment(join(xdgRoot, "agent-runner"), "demo-work", MINIMAL_ASSIGNMENT);
 
   withEnv(
     {
-      TASK_RUNNER_CONFIG_DIR: undefined,
+      AGENT_RUNNER_CONFIG_DIR: undefined,
       XDG_CONFIG_HOME: xdgRoot,
       HOME: homeRoot,
     },
@@ -2297,19 +2297,19 @@ test("XDG_CONFIG_HOME fallback is used when TASK_RUNNER_CONFIG_DIR is unset", ()
       const loaded = loadAssignmentConfig("demo-work");
       assert.equal(
         loaded.sourcePath,
-        join(xdgRoot, "task-runner", "assignments", "demo-work", "assignment.md"),
+        join(xdgRoot, "agent-runner", "assignments", "demo-work", "assignment.md"),
       );
     },
   );
 });
 
-test("HOME fallback uses ~/.config/task-runner when explicit and XDG vars are unset", () => {
+test("HOME fallback uses ~/.config/agent-runner when explicit and XDG vars are unset", () => {
   const homeRoot = tempDir();
-  writeAgent(join(homeRoot, ".config", "task-runner"), "demo", MINIMAL_AGENT);
+  writeAgent(join(homeRoot, ".config", "agent-runner"), "demo", MINIMAL_AGENT);
 
   withEnv(
     {
-      TASK_RUNNER_CONFIG_DIR: undefined,
+      AGENT_RUNNER_CONFIG_DIR: undefined,
       XDG_CONFIG_HOME: undefined,
       HOME: homeRoot,
     },
@@ -2317,14 +2317,14 @@ test("HOME fallback uses ~/.config/task-runner when explicit and XDG vars are un
       const loaded = loadAgentConfig("demo");
       assert.equal(
         loaded.sourcePath,
-        join(homeRoot, ".config", "task-runner", "agents", "demo", "agent.md"),
+        join(homeRoot, ".config", "agent-runner", "agents", "demo", "agent.md"),
       );
     },
   );
 });
 
 test("listAgents throws DefinitionListError when config agents directory is unreadable", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     const agentsDir = join(configDir, "agents");
     mkdirSync(agentsDir, { recursive: true });
     writeAgent(configDir, "visible", MINIMAL_AGENT);
@@ -2337,7 +2337,7 @@ test("listAgents throws DefinitionListError when config agents directory is unre
   }));
 
 test("loadAgentConfig normalizes named, path, and inline launcher authoring", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeLauncher(
       configDir,
       "ssh-docker",
@@ -2418,7 +2418,7 @@ body
   }));
 
 test("loadAgentConfig normalizes named and path execution environment authoring", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     const environmentPath = join(rootDir, "one-off-env.yaml");
     writeFileSync(
       environmentPath,
@@ -2467,7 +2467,7 @@ body
   }));
 
 test("loadEnvironmentConfig accepts top-level managed lifecycle phases", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeEnvironment(
       configDir,
       "managed-lifecycle",
@@ -2477,7 +2477,7 @@ mode: managed
 cwd: /workspace/repo
 image: node:22
 workspace:
-  hostPath: /tmp/task-runner-workspace
+  hostPath: /tmp/agent-runner-workspace
   containerPath: /workspace
 lifecycle:
   afterStart:
@@ -2521,7 +2521,7 @@ lifecycle:
   }));
 
 test("loadEnvironmentConfig rejects removed and invalid lifecycle shapes", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     const cases = [
       [
         "workspace-lifecycle",
@@ -2613,7 +2613,7 @@ lifecycle:
   }));
 
 test("loadAgentConfig rejects empty launcher strings at schema validation time", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "blank-launcher",
@@ -2638,7 +2638,7 @@ body
   }));
 
 test("listEnvironments loads valid container definitions and skips invalid files with warnings", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     const existingPath = writeEnvironment(
       configDir,
       "existing-dev",
@@ -2666,7 +2666,7 @@ image: node:22
 lifetime: group
 workspace:
   scope: group
-  hostRoot: /home/user/task-runner-workspaces
+  hostRoot: /home/user/agent-runner-workspaces
   containerPath: /workspace
 sessionMounts: backend
 mounts:
@@ -2711,7 +2711,7 @@ cwd: workspace
     assert.equal(managed.config.lifetime, "group");
     assert.deepEqual(managed.config.workspace, {
       scope: "group",
-      hostRoot: "/home/user/task-runner-workspaces",
+      hostRoot: "/home/user/agent-runner-workspaces",
       containerPath: "/workspace",
       mode: "rw",
       create: true,
@@ -2722,7 +2722,7 @@ cwd: workspace
   }));
 
 test("loadEnvironmentConfig rejects missing and targeted invalid environment definitions", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     const brokenPath = writeEnvironment(
       configDir,
       "broken",
@@ -2755,7 +2755,7 @@ cwd: /workspace
   }));
 
 test("listLaunchers returns direct plus valid named launchers and skips invalid files with warnings", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     writeLauncher(
       configDir,
       "ssh-docker",
@@ -2803,7 +2803,7 @@ command:
   }));
 
 test("loadLauncherConfig supports direct, named files, and targeted path loads", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     const path = writeLauncher(
       configDir,
       "ssh-docker",
@@ -2839,7 +2839,7 @@ args: [worker]
   }));
 
 test("loadLauncherConfig hard-fails targeted invalid paths and named invalid launchers remain undiscoverable", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir, configDir }) => {
     const mismatchPath = writeLauncher(
       configDir,
       "bad-name",
@@ -2867,7 +2867,7 @@ command: ssh
   }));
 
 test("direct launcher paths outside the config root may use authored names", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ rootDir }) => {
     const launcherDir = join(rootDir, "external-launchers");
     mkdirSync(launcherDir, { recursive: true });
     const launcherPath = join(launcherDir, "ssh-wrapper.yaml");
@@ -2886,7 +2886,7 @@ args: [worker]
   }));
 
 test("listLaunchers throws DefinitionListError when launcher root is unreadable", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     const launchersDir = join(configDir, "launchers");
     mkdirSync(launchersDir, { recursive: true });
     writeLauncher(
@@ -2905,7 +2905,7 @@ command: ssh
   }));
 
 test("listLaunchers warn-skips unreadable launcher files", () =>
-  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-loader-", ({ configDir }) => {
     const unreadablePath = writeLauncher(
       configDir,
       "cant-read",

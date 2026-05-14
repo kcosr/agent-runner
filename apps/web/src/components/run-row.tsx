@@ -1,4 +1,4 @@
-import type { RunSummary } from "@task-runner/core/contracts/runs.js";
+import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
 import {
   type KeyboardEvent,
   type MouseEvent,

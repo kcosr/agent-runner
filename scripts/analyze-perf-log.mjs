@@ -2,7 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 
-const PERF_PREFIX = "[task-runner perf] ";
+const PERF_PREFIX = "[agent-runner perf] ";
 const DEFAULT_TOP = 10;
 const METRICS = ["durationMs", "queuedMs", "waitMs", "holdMs", "maxMs", "p99Ms", "meanMs"];
 
@@ -55,7 +55,7 @@ function printUsage() {
     [
       "Usage: node scripts/analyze-perf-log.mjs [--top N] <perf-log-path>",
       "",
-      "Parses [task-runner perf] lines and prints the highest-latency samples",
+      "Parses [agent-runner perf] lines and prints the highest-latency samples",
       "plus per-event metric summaries.",
       "",
     ].join("\n"),

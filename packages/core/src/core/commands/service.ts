@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { resolveAgentRunnerCommand } from "../../agent-runner-command.js";
 import {
   type TaskState,
   type TaskStatus,
@@ -58,7 +59,6 @@ import {
   toRunPinnedResult,
   toRunSummary,
 } from "../../contracts/runs.js";
-import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { startDebugPerfTimer } from "../../util/debug-perf.js";
 import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
@@ -544,7 +544,7 @@ function requireTaskMutationAllowed(
     }
     if (manifest.backend !== "passive" && isTerminalStatus(manifest.status)) {
       throw new CommandError(
-        `cannot add tasks to a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> --add-task "..." instead`,
+        `cannot add tasks to a terminal non-passive run; use ${resolveAgentRunnerCommand()} run --resume-run <id> --add-task "..." instead`,
       );
     }
     if (manifest.status === "ready") {
@@ -560,7 +560,7 @@ function requireTaskMutationAllowed(
   }
 
   throw new CommandError(
-    `cannot mutate tasks on a ${manifest.status} run (task-runner task set/add is rejected while a run is in-flight)`,
+    `cannot mutate tasks on a ${manifest.status} run (agent-runner task set/add is rejected while a run is in-flight)`,
   );
 }
 

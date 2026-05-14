@@ -738,7 +738,7 @@ export const cursorBackend: Backend = {
   validateSessionId: validateCursorSession,
   resolveSessionHistorySource: resolveCursorSessionHistorySource,
   readSessionHistory: readCursorSessionHistory,
-  taskRunnerAttemptTimingMatchesSyncedTurn: () => true,
+  agentRunnerAttemptTimingMatchesSyncedTurn: () => true,
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const state: StreamState = {
       sessionId: null,
@@ -755,7 +755,7 @@ export const cursorBackend: Backend = {
     });
 
     const result = await runProcess({
-      command: process.env.TASK_RUNNER_CURSOR_BIN ?? "cursor-agent",
+      command: process.env.AGENT_RUNNER_CURSOR_BIN ?? "cursor-agent",
       args: buildCursorArgs(ctx),
       launcher: ctx.launcher,
       cwd: ctx.processCwd ?? ctx.cwd,

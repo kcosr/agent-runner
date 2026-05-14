@@ -10,7 +10,7 @@ const SCRIPT_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-migrate-attempt-stdout-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-migrate-attempt-stdout-"));
 }
 
 function writeJson(path, value) {
