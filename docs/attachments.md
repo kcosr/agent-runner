@@ -152,7 +152,8 @@ The selected-run panel has two attachment surfaces:
   `ownerRunId`.
 - In-app preview supports `text/markdown`, `text/plain`, `image/png`,
   `image/jpeg`, `image/gif`, `image/webp`, and `image/svg+xml`.
-  Markdown fenced `mermaid` blocks render inline.
+  Markdown fenced `mermaid` blocks render inline, and non-Mermaid fenced
+  code blocks include a copy button.
 - Preview actions from Chat artifact cards and Detail -> Attachments rows
   switch to the top-level Attachments tab without changing the selected-run
   route.

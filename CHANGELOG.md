@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added copy buttons to dashboard Markdown code blocks.
+
+### Changed
+
+- Dashboard list rows now show relative-only timestamps for started,
+  updated, and ended sort modes.
+
 ### Breaking Changes
 
 - Manifest schema version is now `24`. Managed container lifecycle state now

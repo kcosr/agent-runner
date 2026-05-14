@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownContent } from "./markdown.js";
 
 const initializeMermaid = vi.fn();
@@ -13,6 +13,26 @@ vi.mock("mermaid", () => ({
 }));
 
 describe("MarkdownContent", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function stubClipboard(writeText: (value: string) => Promise<void>) {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+  }
+
+  function stubDocumentCopy(copy: () => boolean) {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(copy),
+    });
+  }
+
   it("renders mermaid fenced code blocks as diagrams", async () => {
     renderMermaid.mockResolvedValueOnce({
       svg: "<svg><text>diagram</text></svg>",
@@ -22,6 +42,7 @@ describe("MarkdownContent", () => {
 
     const diagram = await screen.findByLabelText("Mermaid diagram");
     await waitFor(() => expect(diagram.querySelector("svg")).not.toBeNull());
+    expect(screen.queryByRole("button", { name: "Copy code block" })).not.toBeInTheDocument();
     expect(renderMermaid).toHaveBeenCalledWith(
       expect.stringMatching(/^mermaid-/),
       "graph TD\nA-->B",
@@ -75,5 +96,50 @@ describe("MarkdownContent", () => {
     expect(frontmatterCode?.textContent).toBe("title: Notes\nsource: attachment\n");
     expect(screen.getByRole("heading", { name: "Body" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "title: Notes" })).not.toBeInTheDocument();
+  });
+
+  it("copies non-Mermaid fenced code blocks", async () => {
+    const writeText = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    stubClipboard(writeText);
+
+    render(<MarkdownContent text={'```ts\nconsole.log("copied");\n```'} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy code block" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('console.log("copied");'));
+    expect(await screen.findByRole("button", { name: "Copied code block" })).toBeInTheDocument();
+  });
+
+  it("reports code block copy failures", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    stubDocumentCopy(() => false);
+
+    render(<MarkdownContent text={"```sh\nexit 1\n```"} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy code block" }));
+
+    await waitFor(() => expect(document.execCommand).toHaveBeenCalledWith("copy"));
+    expect(
+      await screen.findByRole("button", { name: "Failed to copy code block" }),
+    ).toBeInTheDocument();
+  });
+
+  it("makes frontmatter code blocks copyable", async () => {
+    const writeText = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    stubClipboard(writeText);
+
+    render(
+      <MarkdownContent
+        renderFrontmatterAsCodeBlock
+        text={"---\ntitle: Notes\nsource: attachment\n---\n# Body"}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy code block" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("title: Notes\nsource: attachment"));
   });
 });

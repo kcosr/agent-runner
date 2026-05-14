@@ -1,5 +1,6 @@
 import {
   Children,
+  type HTMLAttributes,
   type ReactNode,
   isValidElement,
   memo,
@@ -10,6 +11,8 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { writeToClipboard } from "../lib/clipboard.js";
+import { CopyIcon } from "./icons.js";
 
 type MermaidApi = typeof import("mermaid").default;
 
@@ -22,6 +25,7 @@ const MERMAID_CONFIG = {
   theme: "neutral",
 } as const;
 const FRONTMATTER_PATTERN = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
+const COPY_STATUS_RESET_MS = 1800;
 
 let mermaidApiPromise: Promise<MermaidApi> | null = null;
 
@@ -37,6 +41,21 @@ function loadMermaidApi(): Promise<MermaidApi> {
 
 function normalizeMermaidCode(value: ReactNode): string {
   return Children.toArray(value).join("").replace(/\n$/, "");
+}
+
+function normalizeCodeBlockText(value: ReactNode): string {
+  return Children.toArray(value)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") {
+        return String(child);
+      }
+      if (isValidElement<{ children?: ReactNode }>(child)) {
+        return normalizeCodeBlockText(child.props.children);
+      }
+      return "";
+    })
+    .join("")
+    .replace(/\n$/, "");
 }
 
 function codeFenceFor(code: string): string {
@@ -166,6 +185,73 @@ function MermaidDiagram({ code }: { code: string }) {
   return <div aria-label="Mermaid diagram" className="markdown-mermaid" ref={containerRef} />;
 }
 
+function CodeBlock({
+  children,
+  preProps,
+}: {
+  children: ReactNode;
+  preProps: HTMLAttributes<HTMLPreElement>;
+}) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimeoutRef = useRef<number | null>(null);
+  const codeText = normalizeCodeBlockText(children);
+  const copyLabel =
+    copyStatus === "copied"
+      ? "Copied code block"
+      : copyStatus === "failed"
+        ? "Failed to copy code block"
+        : "Copy code block";
+
+  function clearResetTimeout() {
+    if (resetTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+    window.clearTimeout(resetTimeoutRef.current);
+    resetTimeoutRef.current = null;
+  }
+
+  function scheduleStatusReset() {
+    clearResetTimeout();
+    if (typeof window === "undefined") {
+      return;
+    }
+    resetTimeoutRef.current = window.setTimeout(() => {
+      setCopyStatus("idle");
+      resetTimeoutRef.current = null;
+    }, COPY_STATUS_RESET_MS);
+  }
+
+  async function handleCopy() {
+    setCopyStatus((await writeToClipboard(codeText)) ? "copied" : "failed");
+    scheduleStatusReset();
+  }
+
+  useEffect(
+    () => () => {
+      if (resetTimeoutRef.current !== null && typeof window !== "undefined") {
+        window.clearTimeout(resetTimeoutRef.current);
+        resetTimeoutRef.current = null;
+      }
+    },
+    [],
+  );
+
+  return (
+    <div className="markdown-code-block">
+      <pre {...preProps}>{children}</pre>
+      <button
+        aria-label={copyLabel}
+        className="markdown-code-block__copy copy"
+        onClick={() => void handleCopy()}
+        title={copyLabel}
+        type="button"
+      >
+        <CopyIcon aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
 const components: Components = {
   a({ node: _node, href, ...props }) {
     return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
@@ -175,7 +261,7 @@ const components: Components = {
     if (mermaidCode !== null) {
       return <MermaidDiagram code={mermaidCode} />;
     }
-    return <pre {...props}>{children}</pre>;
+    return <CodeBlock preProps={props}>{children}</CodeBlock>;
   },
   table({ node: _node, ...props }) {
     return (

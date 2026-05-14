@@ -15,6 +15,7 @@ import { deriveDependencyStateFromDetails } from "@task-runner/core/core/run/dep
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardColumn } from "../components/run-column.js";
 import { type ReconfigureRunPatch, createApiClient, isNotFoundError } from "../lib/api-client.js";
+import { writeToClipboard } from "../lib/clipboard.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunAuditState } from "../lib/run-audit.js";
 import { useRunEvents } from "../lib/run-events.js";
@@ -220,37 +221,6 @@ function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[
     return current;
   }
   return [...current, notice];
-}
-
-async function writeToClipboard(value: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(value);
-      return true;
-    } catch {
-      // Fall back to document-based copy for insecure origins and older browsers.
-    }
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.top = "0";
-  textarea.style.left = "-9999px";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  textarea.focus();
-  textarea.select();
-  textarea.setSelectionRange(0, value.length);
-
-  try {
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    textarea.remove();
-  }
 }
 
 function useRunActionMutation(

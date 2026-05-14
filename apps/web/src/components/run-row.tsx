@@ -7,12 +7,7 @@ import {
   useEffect,
   useRef,
 } from "react";
-import {
-  formatRelativeTimestamp,
-  formatScheduleState,
-  formatTimestampWithRelative,
-  truncateEnd,
-} from "../lib/format.js";
+import { formatRelativeTimestamp, formatScheduleState, truncateEnd } from "../lib/format.js";
 import type { DashboardSortField, DashboardStructuredFilters } from "../lib/settings.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import {
@@ -104,10 +99,7 @@ export function RunRow({
   const assignmentName = run.assignmentName ?? "Ad hoc run";
   const timeLabel = timeFieldLabel(sortField);
   const rawTimeValue = timeFieldValue(run, sortField);
-  const formattedTime =
-    sortField === "updatedAt"
-      ? formatRelativeTimestamp(rawTimeValue) || "Not available"
-      : formatTimestampWithRelative(rawTimeValue);
+  const formattedTime = formatRelativeTimestamp(rawTimeValue) || "Not available";
   const timeMuted = rawTimeValue === null;
   const dependencySignal =
     run.dependencyState.total > 0

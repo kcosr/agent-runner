@@ -168,6 +168,9 @@ Each desktop compact row opens the selected-run panel, exposes
 repo/agent/backend and run-group filter shortcuts, shows a compact task count,
 keeps schedule, dependency, attachment, queued-message, and active-task
 indicators in the metadata area, and exposes note, pin, and overflow actions.
+The sorted timestamp column uses relative-only text for started, updated,
+and ended sorting; absolute timestamps remain available in the detail
+surface.
 On mobile, List uses the same board card layout and full-card tap,
 right-click, and long-press behavior as Board.
 
@@ -271,6 +274,9 @@ current `RunDetail.attachments` list and timeline attempt timestamps.
 Previewable cards open the top-level Attachments surface, and every card
 can use the existing browser download flow. Removing an attachment from the
 selected run removes its synthesized Chat card on the next detail projection.
+Markdown code blocks rendered in Chat, attachment previews, notes, tasks, and
+timeline content include a top-right copy button. The button appears on
+hover/focus on pointer-based layouts and stays visible on touch layouts.
 
 The composer is fixed at the bottom of the Chat panel for a selected
 run. For resumable non-live runs, it sends only non-empty trimmed
