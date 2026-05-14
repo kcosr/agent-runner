@@ -134,10 +134,7 @@ describe("MarkdownContent", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy code block" }));
 
     const copiedButton = await screen.findByRole("button", { name: "Copied code block" });
-    expect(copiedButton.querySelector("polyline")).toHaveAttribute(
-      "points",
-      "8.5 12.5 11 15 16 9.5",
-    );
+    expect(copiedButton.querySelector("path")).toHaveAttribute("d", "M20 6 9 17l-5-5");
     fireEvent.pointerLeave(container.querySelector(".markdown-code-block") ?? copiedButton);
 
     expect(screen.getByRole("button", { name: "Copy code block" })).toBeInTheDocument();
