@@ -113,6 +113,36 @@ describe("MarkdownContent", () => {
     expect(await screen.findByRole("button", { name: "Copied code block" })).toBeInTheDocument();
   });
 
+  it("shows copied feedback until the pointer leaves the code block", async () => {
+    const writeText = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    stubClipboard(writeText);
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockReturnValue({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: false,
+        media: "(hover: none), (pointer: coarse), (max-width: 720px)",
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      }),
+    );
+    const { container } = render(<MarkdownContent text={"```sh\nprintf copied\n```"} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy code block" }));
+
+    const copiedButton = await screen.findByRole("button", { name: "Copied code block" });
+    expect(copiedButton.querySelector("polyline")).toHaveAttribute(
+      "points",
+      "8.5 12.5 11 15 16 9.5",
+    );
+    fireEvent.pointerLeave(container.querySelector(".markdown-code-block") ?? copiedButton);
+
+    expect(screen.getByRole("button", { name: "Copy code block" })).toBeInTheDocument();
+  });
+
   it("reports code block copy failures", async () => {
     stubClipboard();
     stubDocumentCopy(() => false);

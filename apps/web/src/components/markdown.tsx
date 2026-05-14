@@ -13,7 +13,7 @@ import {
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { writeToClipboard } from "../lib/clipboard.js";
-import { CopyIcon } from "./icons.js";
+import { CheckIcon, CopyIcon } from "./icons.js";
 
 type MermaidApi = typeof import("mermaid").default;
 
@@ -27,6 +27,7 @@ const MERMAID_CONFIG = {
 } as const;
 const FRONTMATTER_PATTERN = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 const COPY_STATUS_RESET_MS = 1800;
+const TOUCH_COPY_BUTTON_QUERY = "(hover: none), (pointer: coarse), (max-width: 720px)";
 
 let mermaidApiPromise: Promise<MermaidApi> | null = null;
 
@@ -73,6 +74,13 @@ function renderLeadingFrontmatterAsCodeBlock(text: string): string {
   const fence = codeFenceFor(yaml);
   const frontmatterBlock = `${fence}yaml\n${yaml}\n${fence}`;
   return body.length > 0 ? `${frontmatterBlock}\n\n${body}` : frontmatterBlock;
+}
+
+function shouldResetCopyStatusOnTimer(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) {
+    return true;
+  }
+  return window.matchMedia(TOUCH_COPY_BUTTON_QUERY).matches;
 }
 
 function readMermaidBlock(children: ReactNode): string | null {
@@ -219,6 +227,11 @@ function CodeBlock({
     }, COPY_STATUS_RESET_MS);
   }, [clearResetTimeout]);
 
+  const resetCopyStatus = useCallback(() => {
+    clearResetTimeout();
+    setCopyStatus("idle");
+  }, [clearResetTimeout]);
+
   async function handleCopy() {
     let copied = false;
     try {
@@ -230,7 +243,9 @@ function CodeBlock({
       return;
     }
     setCopyStatus(copied ? "copied" : "failed");
-    scheduleStatusReset();
+    if (!copied || shouldResetCopyStatusOnTimer()) {
+      scheduleStatusReset();
+    }
   }
 
   useEffect(() => {
@@ -242,16 +257,34 @@ function CodeBlock({
   }, [clearResetTimeout]);
 
   return (
-    <div className="markdown-code-block">
+    <div
+      className="markdown-code-block"
+      onBlur={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        ) {
+          return;
+        }
+        resetCopyStatus();
+      }}
+      onPointerLeave={resetCopyStatus}
+    >
       <pre {...preProps}>{children}</pre>
       <button
         aria-label={copyLabel}
-        className="markdown-code-block__copy copy"
+        className={`markdown-code-block__copy copy${
+          copyStatus === "copied" ? " markdown-code-block__copy--copied" : ""
+        }`}
         onClick={() => void handleCopy()}
         title={copyLabel}
         type="button"
       >
-        <CopyIcon aria-hidden="true" />
+        {copyStatus === "copied" ? (
+          <CheckIcon aria-hidden="true" />
+        ) : (
+          <CopyIcon aria-hidden="true" />
+        )}
       </button>
     </div>
   );

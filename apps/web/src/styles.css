@@ -2724,6 +2724,10 @@ body {
   transition: opacity 120ms ease;
 }
 
+.markdown-code-block__copy--copied {
+  color: var(--success-foreground);
+}
+
 .markdown-code-block:hover .markdown-code-block__copy,
 .markdown-code-block:focus-within .markdown-code-block__copy {
   opacity: 1;
