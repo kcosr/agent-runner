@@ -123,6 +123,7 @@ A backend is the runtime that actually executes the worker:
 - `claude`
 - `codex` (stdio, WebSocket app-server, or WebSocket-over-UDS app-server)
 - `cursor` (`cursor-agent`)
+- `opencode`
 - `pi`
 - `passive` — no backend invocation; the run is driven externally through
   the task CLI

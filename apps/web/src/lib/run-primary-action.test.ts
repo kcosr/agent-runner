@@ -1,4 +1,4 @@
-import type { RunDetail } from "@agent-runner/core/contracts/runs.js";
+import type { RunDetail } from "@kcosr/agent-runner-core/contracts/runs.js";
 import { describe, expect, it } from "vitest";
 import { getRunPrimaryAction } from "./run-primary-action.js";
 

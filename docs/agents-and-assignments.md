@@ -745,10 +745,10 @@ and reusable task definition title/body/hooks for human review.
 ## Authoring hook modules
 
 First-party and custom hooks share the public authoring surface exported
-from `@agent-runner/core/hooks`:
+from `@kcosr/agent-runner-core/hooks`:
 
 ```ts
-import { defineHook, type PrepareHookContext } from "@agent-runner/core/hooks";
+import { defineHook, type PrepareHookContext } from "@kcosr/agent-runner-core/hooks";
 
 export default defineHook({
   name: "freeze-prepare",

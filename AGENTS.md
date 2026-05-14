@@ -89,8 +89,9 @@ Use these sections under `## [Unreleased]`:
 1. Make sure `CHANGELOG.md` under `## [Unreleased]` reflects the release contents.
 2. Run `npm run check`.
 3. Bump the package version with `npm version patch`, `npm version minor`, or `npm version major`.
-4. Move the unreleased entries into a dated release section in `CHANGELOG.md`.
+4. Run `npm run release:sync-versions` to keep workspace versions and `@kcosr/agent-runner-core` dependency refs aligned, then run `npm install` to refresh `package-lock.json`.
+5. Move the unreleased entries into a dated release section in `CHANGELOG.md`.
 
 Notes:
-- This repo does not currently ship with an automated release script.
-- If release automation is added later, update this file instead of carrying stale manual instructions.
+- `npm run release:sync-versions -- --version <version>` can set the root, CLI, core, and web workspace versions to an explicit release version.
+- If broader release automation is added later, update this file instead of carrying stale manual instructions.

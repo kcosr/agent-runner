@@ -1,6 +1,6 @@
-import type { RunSchedule, RunScheduleState } from "@agent-runner/core/contracts/runs.js";
-import type { RunScheduleMode } from "@agent-runner/core/core/run/manifest.js";
-import { humanizeCronExpression } from "@agent-runner/core/core/run/schedule.js";
+import type { RunSchedule, RunScheduleState } from "@kcosr/agent-runner-core/contracts/runs.js";
+import type { RunScheduleMode } from "@kcosr/agent-runner-core/core/run/manifest.js";
+import { humanizeCronExpression } from "@kcosr/agent-runner-core/core/run/schedule.js";
 
 export function formatTimestamp(value: string | null): string {
   if (!value) {

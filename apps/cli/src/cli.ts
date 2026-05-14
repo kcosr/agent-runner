@@ -45,7 +45,7 @@ import {
   updateRunPinned,
   updateTask,
   validateRunEnvironment,
-} from "@agent-runner/core/app/service.js";
+} from "@kcosr/agent-runner-core/app/service.js";
 import {
   AgentConfigError,
   AgentNotFoundError,
@@ -58,26 +58,29 @@ import {
   LauncherNotFoundError,
   TaskConfigError,
   TaskNotFoundError,
-} from "@agent-runner/core/config/loader.js";
+} from "@kcosr/agent-runner-core/config/loader.js";
 import {
   isPathArg,
   resolveAgentRunnerConfigDir,
   resolveAgentRunnerStateDir,
   resolveInputPath,
-} from "@agent-runner/core/config/runtime-paths.js";
-import type { RunDependencyRef } from "@agent-runner/core/contracts/runs.js";
+} from "@kcosr/agent-runner-core/config/runtime-paths.js";
+import type { RunDependencyRef } from "@kcosr/agent-runner-core/contracts/runs.js";
 import {
   CommandError,
   type RunListFilter,
   isCommandError,
-} from "@agent-runner/core/core/commands/service.js";
-import { HookRuntimeError } from "@agent-runner/core/core/hooks/runtime.js";
-import { AttachmentError } from "@agent-runner/core/core/run/attachments.js";
-import { ExecutionEnvironmentError } from "@agent-runner/core/core/run/execution-environments.js";
-import { RunGroupValidationError, validateRunGroupId } from "@agent-runner/core/core/run/groups.js";
-import { RunNotFoundError } from "@agent-runner/core/core/run/manifest.js";
-import { ReconfigureLockedFieldError } from "@agent-runner/core/core/run/reconfigure.js";
-import { readParentRunIdFromEnv } from "@agent-runner/core/core/run/recursion-guard.js";
+} from "@kcosr/agent-runner-core/core/commands/service.js";
+import { HookRuntimeError } from "@kcosr/agent-runner-core/core/hooks/runtime.js";
+import { AttachmentError } from "@kcosr/agent-runner-core/core/run/attachments.js";
+import { ExecutionEnvironmentError } from "@kcosr/agent-runner-core/core/run/execution-environments.js";
+import {
+  RunGroupValidationError,
+  validateRunGroupId,
+} from "@kcosr/agent-runner-core/core/run/groups.js";
+import { RunNotFoundError } from "@kcosr/agent-runner-core/core/run/manifest.js";
+import { ReconfigureLockedFieldError } from "@kcosr/agent-runner-core/core/run/reconfigure.js";
+import { readParentRunIdFromEnv } from "@kcosr/agent-runner-core/core/run/recursion-guard.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -87,18 +90,18 @@ import {
   RecursionDepthError,
   type RunEvent,
   VarResolutionError,
-} from "@agent-runner/core/core/run/run-loop.js";
+} from "@kcosr/agent-runner-core/core/run/run-loop.js";
 import {
   type ScheduleInput,
   ScheduleValidationError,
-} from "@agent-runner/core/core/run/schedule.js";
+} from "@kcosr/agent-runner-core/core/run/schedule.js";
 import {
   BackendConfigError,
   ResumeError,
   RunCommandError,
   UnknownBackendError,
-} from "@agent-runner/core/run-command.js";
-import { normalizeRunNameMutation } from "@agent-runner/core/util/run-name.js";
+} from "@kcosr/agent-runner-core/run-command.js";
+import { normalizeRunNameMutation } from "@kcosr/agent-runner-core/util/run-name.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import { renderRunEvent } from "./cli/render-run.js";
 import {

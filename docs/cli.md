@@ -72,6 +72,7 @@ agent-runner run \
   [--var <key>=<value> ...] \
   [--add-task <title> ...] \
   [--backend-session-id <id>] \
+  [--parent-run <run-id>] \
   [--resume-run <id|path>] \
   [--detach] \
   [--message-file <path>] \
@@ -112,6 +113,8 @@ Flags:
   Allowed on resume (non-passive runs); forbidden on ready-start.
 - `--backend-session-id <id>` — bootstrap-import an existing backend
   session. Forbidden on resume.
+- `--parent-run <run-id>` — set the lineage parent for a fresh run/init.
+  If omitted, `AGENT_RUNNER_PARENT_RUN_ID` is honored.
 - `--resume-run <id|path>` — continue an existing run. Many flags are
   forbidden in combination with this; see [resume.md](resume.md).
 - `--detach` — daemon mode only; dispatch the run and exit after the
@@ -151,6 +154,7 @@ agent-runner init \
   [--cwd <path>] [--backend <id>] [--model <id>] [--effort <level>] \
   [--unrestricted] [--name <name>] [--group-id <group-id>] [--var key=value ...] \
   [--add-task <title> ...] [--backend-session-id <id>] \
+  [--run-id <id|path>] \
   [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>] \
   [--schedule-timezone <iana>] [--schedule-mode reuse|reset|clone] \
   [--schedule-continue-on-failure] \
@@ -489,15 +493,21 @@ typed ref for add/remove: exactly one of `--run` or `--group`. See
 Recognized by the CLI:
 
 - `AGENT_RUNNER_CONFIG_DIR`, `AGENT_RUNNER_STATE_DIR`
-- `AGENT_RUNNER_LISTEN`, `AGENT_RUNNER_CONNECT`
-- `AGENT_RUNNER_PARENT_RUN_ID`, `AGENT_RUNNER_RUN_GROUP_ID`
+- `AGENT_RUNNER_LISTEN`, `AGENT_RUNNER_CONNECT`,
+  `AGENT_RUNNER_CONNECT_HOST`, `AGENT_RUNNER_CONNECT_LOCAL_PORT`
+- `AGENT_RUNNER_PARENT_RUN_ID`, `AGENT_RUNNER_RUN_ID`,
+  `AGENT_RUNNER_RUN_GROUP_ID`, `AGENT_RUNNER_CWD`
 - `AGENT_RUNNER_CLAUDE_BIN`, `AGENT_RUNNER_CODEX_BIN`,
   `AGENT_RUNNER_CODEX_UDS_PATH`, `AGENT_RUNNER_CODEX_WS_URL`,
-  `AGENT_RUNNER_CURSOR_BIN`, `AGENT_RUNNER_PI_BIN`, `PI_HOME`
+  `AGENT_RUNNER_CURSOR_BIN`, `AGENT_RUNNER_OPENCODE_BIN`,
+  `AGENT_RUNNER_OPENCODE_DATA_DIR`, `AGENT_RUNNER_PI_BIN`, `PI_HOME`
+- `AGENT_RUNNER_CAPTURE_BACKEND_STDOUT`,
+  `AGENT_RUNNER_BACKEND_SESSION_SYNC`
 - `AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC`,
   `AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
-- `AGENT_RUNNER_CALL_DEPTH`, `AGENT_RUNNER_MAX_CALL_DEPTH`
-- `AGENT_RUNNER_DAEMON_AUTH_ENABLED`, `AGENT_RUNNER_DAEMON_TOKEN`
+- `AGENT_RUNNER_MAX_CALL_DEPTH`
+- `AGENT_RUNNER_DAEMON_AUTH_ENABLED`, `AGENT_RUNNER_DAEMON_TOKEN`,
+  `AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS`
 
 See [configuration.md](configuration.md).
 

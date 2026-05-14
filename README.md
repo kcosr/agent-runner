@@ -1,15 +1,17 @@
 # agent-runner
 
-`agent-runner` drives agents through structured task lists and keeps run
-state in a manifest-canonical workspace. It supports embedded CLI
-execution, active backend invocation, passive sidecar operation, a local
-daemon, a browser dashboard, resumable runs, attachments, dependencies,
-scheduled runs, launcher prefixes for subprocess backends, a first-class
-container execution environment layer, a first-class
-`run brief` surface for handing a run to a worker, and `agent-runner run
-audit` for reading durable run audit history. Live runs can also hold
-queued resume messages as daemon-owned pending user intent for the next
-runnable resume opportunity.
+> [!WARNING]
+> Agent Runner is early experimental software. Its CLI, config schema,
+> manifest schema, hooks, daemon API, web UI behavior, and internal
+> workflow contracts may change without compatibility guarantees. Expect
+> migrations and breaking changes while the project is still taking
+> shape.
+
+`agent-runner` wraps the coding-agent loop with structured task state,
+durable run history, and automatic follow-up when work is incomplete.
+Instead of trusting a final "all done" message, the runner checks the
+task list the agent updated and keeps the run moving until the checklist
+is complete, blocked, or out of retries.
 
 - Task state is canonical in `run.json`.
 - `run-events.jsonl` is a per-run append-only audit trail with monotonic
@@ -18,6 +20,9 @@ runnable resume opportunity.
 - `agent-runner run brief <run-id>` is the canonical worker handoff.
 - `agent-runner status` reports the current system/environment context.
 - Run-targeted read surfaces live under `agent-runner run`.
+- Active execution, passive sidecar workflows, the local daemon, web
+  dashboard, attachments, dependencies, schedules, audit history, and
+  container execution all build on that run record.
 
 ## Why
 
@@ -59,7 +64,7 @@ You can use `agent-runner` in two main modes:
   tracking, briefs, attachments, and durable run state without handing
   execution over to agent-runner.
 - **Active backend mode** — execute the run through a supported backend
-  (`claude`, `codex`, `cursor-agent`, `opencode`, `pi`). In this mode agent-runner
+  (`claude`, `codex`, `cursor`, `opencode`, `pi`). In this mode agent-runner
   performs the run/retry loop itself and validates whether tasks were
   actually marked complete before the run is treated as done.
   Backend-native capabilities like skills, subagents, MCP servers, and
@@ -105,7 +110,7 @@ Build from the repo root:
 ```bash
 npm install
 npm run build
-npm link
+npm link --workspace @kcosr/agent-runner
 ```
 
 The built CLI entrypoint is `node apps/cli/dist/cli.js`. The workspace
@@ -121,10 +126,13 @@ Once agent-runner is published as a package, the intended no-install path
 is:
 
 ```bash
-npx agent-runner <args>
+npx @kcosr/agent-runner <args>
 ```
 
 ## Quickstart
+
+All quickstart commands assume you are running from the repository root,
+where `./agents` and `./assignments` are available.
 
 ### Fresh run
 
@@ -151,6 +159,8 @@ agent-runner task show <run-id> <task-id>
 agent-runner init \
   --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md
+
+echo "Review the current state and continue from the handoff." > ./handoff.md
 
 agent-runner run reconfigure <run-id> \
   --var target=next \
@@ -567,7 +577,11 @@ The rest are focused topic pages:
 | `AGENT_RUNNER_CONFIG_DIR` | Agent/assignment definitions root |
 | `AGENT_RUNNER_STATE_DIR` | Run workspaces root |
 | `AGENT_RUNNER_CONNECT` | Route client commands through a daemon |
+| `AGENT_RUNNER_CONNECT_HOST` | SSH host used to create an invocation-scoped local forward for connected commands |
+| `AGENT_RUNNER_CONNECT_LOCAL_PORT` | Loopback port for the `AGENT_RUNNER_CONNECT_HOST` SSH forward |
 | `AGENT_RUNNER_LISTEN` | Daemon listen URL |
+| `AGENT_RUNNER_DAEMON_AUTH_ENABLED` | Set to `true` in the daemon environment to require bearer-token auth for daemon API and WebSocket access |
+| `AGENT_RUNNER_DAEMON_TOKEN` | Shared daemon bearer token for auth-enabled daemon servers and clients |
 | `AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks |
 | `AGENT_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
 | `AGENT_RUNNER_RUN_ID` | Active run id provided to backend wrapper processes |
@@ -641,8 +655,9 @@ without writing, `npm run imports:fix` applies Biome import
 organization, and `npm run imports:check` verifies import organization
 without writing. `npm run test:all:local` runs the Node and web tests
 locally. `npm run check:knip` runs the unused-file/export/dependency
-baseline. `npm test` runs build plus tests, and `npm run check` runs
-build, lint, format-check, import-check, and tests. Set
+baseline. For the standard pre-commit gate, run `npm run check`.
+`npm test` runs build plus tests, and `npm run check` runs build, lint,
+format-check, import-check, and tests. Set
 `AGENT_RUNNER_TEST_REMOTE_HOST` to sync the worktree and run the test gate
 on a remote host; otherwise tests run locally.
 

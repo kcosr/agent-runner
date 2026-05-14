@@ -1,14 +1,17 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { RunAttachment } from "@agent-runner/core/contracts/attachments.js";
-import type { RunAuditHistory, RunTimelineHistory } from "@agent-runner/core/contracts/events.js";
-import type { RunInputSurface } from "@agent-runner/core/contracts/run-input-surface.js";
+import type { RunAttachment } from "@kcosr/agent-runner-core/contracts/attachments.js";
+import type {
+  RunAuditHistory,
+  RunTimelineHistory,
+} from "@kcosr/agent-runner-core/contracts/events.js";
+import type { RunInputSurface } from "@kcosr/agent-runner-core/contracts/run-input-surface.js";
 import type {
   QueuedResumeMessage,
   RunDetail,
   RunSessionSummary,
   RunSummary,
-} from "@agent-runner/core/contracts/runs.js";
+} from "@kcosr/agent-runner-core/contracts/runs.js";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

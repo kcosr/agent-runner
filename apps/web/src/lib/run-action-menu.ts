@@ -1,4 +1,4 @@
-import type { RunDetail, RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type { RunDetail, RunSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 import { getRunPrimaryAction } from "./run-primary-action.js";
 
 type RunActionMenuItemKind = "primary" | "archive" | "unarchive" | "archive-delete" | "delete";

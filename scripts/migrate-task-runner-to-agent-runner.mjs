@@ -15,12 +15,14 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 const REPLACEMENTS = [
+  ["@task-runner/core", "@kcosr/agent-runner-core"],
+  ["@task-runner/web", "@kcosr/agent-runner-web"],
   ["TASK_RUNNER", "AGENT_RUNNER"],
   ["task_runner_cmd", "agent_runner_cmd"],
   ["TaskRunner", "AgentRunner"],
   ["Task Runner", "Agent Runner"],
   ["taskRunner", "agentRunner"],
-  ["@task-runner", "@agent-runner"],
+  ["@task-runner", "@kcosr/agent-runner"],
   ["x-task-runner", "x-agent-runner"],
   ["task-runner", "agent-runner"],
 ];

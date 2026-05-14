@@ -1,4 +1,4 @@
-import type { RunStatus } from "@agent-runner/core/contracts/runs.js";
+import type { RunStatus } from "@kcosr/agent-runner-core/contracts/runs.js";
 
 const LABELS: Record<RunStatus, string> = {
   initialized: "initialized",

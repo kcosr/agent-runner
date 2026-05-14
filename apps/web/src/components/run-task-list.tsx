@@ -1,4 +1,4 @@
-import type { RunTaskSummary } from "@agent-runner/core/contracts/runs.js";
+import type { RunTaskSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 import { useState } from "react";
 import { AlertIcon, CheckIcon, ChevronIcon, PendingIcon, RunningIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";

@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { RunCommandOverrides } from "@agent-runner/core/app/service.js";
-import { VALID_STATUSES } from "@agent-runner/core/assignment/model.js";
+import type { RunCommandOverrides } from "@kcosr/agent-runner-core/app/service.js";
+import { VALID_STATUSES } from "@kcosr/agent-runner-core/assignment/model.js";
 import type {
   RunAuditEnvelope,
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineEnvelope,
-} from "@agent-runner/core/contracts/events.js";
-import { startDebugPerfTimer } from "@agent-runner/core/util/debug-perf.js";
+} from "@kcosr/agent-runner-core/contracts/events.js";
+import { startDebugPerfTimer } from "@kcosr/agent-runner-core/util/debug-perf.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";

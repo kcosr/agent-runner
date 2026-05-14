@@ -1,9 +1,9 @@
-import type { RunAttachment } from "@agent-runner/core/contracts/attachments.js";
+import type { RunAttachment } from "@kcosr/agent-runner-core/contracts/attachments.js";
 import type {
   RunTimelineAttempt,
   RunTimelineHistory,
-} from "@agent-runner/core/contracts/events.js";
-import type { RunDetail, RunSessionSummary } from "@agent-runner/core/contracts/runs.js";
+} from "@kcosr/agent-runner-core/contracts/events.js";
+import type { RunDetail, RunSessionSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 import { describe, expect, it } from "vitest";
 import { type RunChatAssistantRow, deriveRunChatRows } from "./run-chat.js";
 

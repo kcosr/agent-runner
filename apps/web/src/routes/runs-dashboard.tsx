@@ -1,4 +1,4 @@
-import type { RunDetail, RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type { RunDetail, RunSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";

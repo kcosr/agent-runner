@@ -1,14 +1,17 @@
-import type { DefinitionDetail, StartRunRequest } from "@agent-runner/core/app/service.js";
-import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
+import type { DefinitionDetail, StartRunRequest } from "@kcosr/agent-runner-core/app/service.js";
+import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import type {
   AttachmentListEntry,
   AttachmentScope,
   RunAttachment,
   RunAttachmentRemoveResult,
-} from "@agent-runner/core/contracts/attachments.js";
-import type { RunAuditHistory, RunTimelineHistory } from "@agent-runner/core/contracts/events.js";
-import { runInputSurfaceSchema } from "@agent-runner/core/contracts/run-input-surface-schemas.js";
-import type { RunInputSurface } from "@agent-runner/core/contracts/run-input-surface.js";
+} from "@kcosr/agent-runner-core/contracts/attachments.js";
+import type {
+  RunAuditHistory,
+  RunTimelineHistory,
+} from "@kcosr/agent-runner-core/contracts/events.js";
+import { runInputSurfaceSchema } from "@kcosr/agent-runner-core/contracts/run-input-surface-schemas.js";
+import type { RunInputSurface } from "@kcosr/agent-runner-core/contracts/run-input-surface.js";
 import {
   attachmentListEntrySchema,
   queueResumeMessageResultSchema,
@@ -26,7 +29,7 @@ import {
   runPinnedResultSchema,
   runSummarySchema,
   runTimelineHistorySchema,
-} from "@agent-runner/core/contracts/run-schemas.js";
+} from "@kcosr/agent-runner-core/contracts/run-schemas.js";
 import type {
   QueueResumeMessageResult,
   ReconfigureRunPatch as ReconfigureRunPatchContract,
@@ -42,19 +45,19 @@ import type {
   RunNoteResult,
   RunPinnedResult,
   RunSummary,
-} from "@agent-runner/core/contracts/runs.js";
-import type { DefinitionListResult } from "@agent-runner/core/core/commands/service.js";
+} from "@kcosr/agent-runner-core/contracts/runs.js";
+import type { DefinitionListResult } from "@kcosr/agent-runner-core/core/commands/service.js";
 import {
   agentConfigSchema,
   assignmentConfigSchema,
   launcherDefinitionSchema,
   taskDefSchema,
-} from "@agent-runner/core/core/config/schema.js";
-import type { ScheduleInput } from "@agent-runner/core/core/run/schedule.js";
+} from "@kcosr/agent-runner-core/core/config/schema.js";
+import type { ScheduleInput } from "@kcosr/agent-runner-core/core/run/schedule.js";
 import { z } from "zod";
 import { daemonAuthHeaders, normalizeDaemonToken } from "./daemon-token.js";
 
-export type { ReconfigureRunPatch } from "@agent-runner/core/contracts/runs.js";
+export type { ReconfigureRunPatch } from "@kcosr/agent-runner-core/contracts/runs.js";
 
 export class ApiError extends Error {
   constructor(

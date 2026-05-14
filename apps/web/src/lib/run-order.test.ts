@@ -1,4 +1,4 @@
-import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type { RunSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 import { describe, expect, it } from "vitest";
 import { createRunComparator, sortRunsWithPinnedFirst } from "./run-order.js";
 

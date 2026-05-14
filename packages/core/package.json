@@ -1,10 +1,20 @@
 {
-  "name": "@agent-runner/core",
+  "name": "@kcosr/agent-runner-core",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Shared agent-runner business logic and helpers.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/kcosr/agent-runner.git",
+    "directory": "packages/core"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": ["dist/"],
   "exports": {
     "./app/*": "./dist/app/*",
@@ -19,7 +29,7 @@
     "./util/*": "./dist/util/*"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -b"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",

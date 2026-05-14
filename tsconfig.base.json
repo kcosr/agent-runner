@@ -13,7 +13,7 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@agent-runner/core/*": ["packages/core/src/*"]
+      "@kcosr/agent-runner-core/*": ["packages/core/src/*"]
     }
   }
 }

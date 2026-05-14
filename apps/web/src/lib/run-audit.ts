@@ -1,5 +1,8 @@
-import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
-import type { RunAuditEnvelope, RunAuditHistory } from "@agent-runner/core/contracts/events.js";
+import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
+import type {
+  RunAuditEnvelope,
+  RunAuditHistory,
+} from "@kcosr/agent-runner-core/contracts/events.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "./api-client.js";
 import { type ApplyEnvelopeResult, applyCursoredEnvelope } from "./run-timeline.js";

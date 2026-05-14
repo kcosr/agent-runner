@@ -1,16 +1,16 @@
-import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
+import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import type {
   RunAuditEnvelope,
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineEnvelope,
-} from "@agent-runner/core/contracts/events.js";
+} from "@kcosr/agent-runner-core/contracts/events.js";
 import {
   runAuditEnvelopeSchema,
   runDetailStreamEventSchema,
   runSummaryStreamEventSchema,
   runTimelineEnvelopeSchema,
-} from "@agent-runner/core/contracts/run-schemas.js";
+} from "@kcosr/agent-runner-core/contracts/run-schemas.js";
 import type { z } from "zod";
 import { daemonAuthHeaders, normalizeDaemonToken } from "./daemon-token.js";
 
