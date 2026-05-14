@@ -14,6 +14,9 @@
   `@kcosr/agent-runner`, the public core package is
   `@kcosr/agent-runner-core`, and the private web workspace is
   `@kcosr/agent-runner-web`. The executable remains `agent-runner`.
+  `scripts/migrate-task-runner-to-agent-runner.mjs` now rewrites legacy
+  `@task-runner/core` and `@task-runner/web` references to the scoped
+  package names. ([#151](https://github.com/kcosr/agent-runner/pull/151))
 - Manifest schema version is now `24`. Managed container lifecycle state now
   lives at `executionEnvironment.lifecycle`, and authored environment config
   uses top-level `lifecycle.afterStart` / `lifecycle.onWorkspaceCreate`;

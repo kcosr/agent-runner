@@ -30,6 +30,7 @@
     "test:all": "node scripts/run-verification.mjs test",
     "check": "node scripts/run-verification.mjs check",
     "test": "node scripts/run-verification.mjs test",
+    "release:sync-versions": "node scripts/sync-workspace-versions.mjs",
     "prepack": "npm run build",
     "prepare": "husky install",
     "clean": "rimraf apps/*/dist packages/*/dist apps/*/tsconfig.tsbuildinfo packages/*/tsconfig.tsbuildinfo",
