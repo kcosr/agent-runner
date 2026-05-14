@@ -1,8 +1,10 @@
 import {
   Children,
+  type HTMLAttributes,
   type ReactNode,
   isValidElement,
   memo,
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -10,6 +12,8 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { writeToClipboard } from "../lib/clipboard.js";
+import { CheckIcon, CopyIcon } from "./icons.js";
 
 type MermaidApi = typeof import("mermaid").default;
 
@@ -22,6 +26,8 @@ const MERMAID_CONFIG = {
   theme: "neutral",
 } as const;
 const FRONTMATTER_PATTERN = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
+const COPY_STATUS_RESET_MS = 1800;
+const TOUCH_COPY_BUTTON_QUERY = "(hover: none), (pointer: coarse), (max-width: 720px)";
 
 let mermaidApiPromise: Promise<MermaidApi> | null = null;
 
@@ -35,8 +41,19 @@ function loadMermaidApi(): Promise<MermaidApi> {
   return mermaidApiPromise;
 }
 
-function normalizeMermaidCode(value: ReactNode): string {
-  return Children.toArray(value).join("").replace(/\n$/, "");
+function normalizeReactNodeText(value: ReactNode): string {
+  return Children.toArray(value)
+    .map((child) => {
+      if (typeof child === "string" || typeof child === "number") {
+        return String(child);
+      }
+      if (isValidElement<{ children?: ReactNode }>(child)) {
+        return normalizeReactNodeText(child.props.children);
+      }
+      return "";
+    })
+    .join("")
+    .replace(/\n$/, "");
 }
 
 function codeFenceFor(code: string): string {
@@ -59,6 +76,13 @@ function renderLeadingFrontmatterAsCodeBlock(text: string): string {
   return body.length > 0 ? `${frontmatterBlock}\n\n${body}` : frontmatterBlock;
 }
 
+function shouldResetCopyStatusOnTimer(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) {
+    return true;
+  }
+  return window.matchMedia(TOUCH_COPY_BUTTON_QUERY).matches;
+}
+
 function readMermaidBlock(children: ReactNode): string | null {
   const childNodes = Children.toArray(children);
   if (childNodes.length !== 1) {
@@ -73,7 +97,7 @@ function readMermaidBlock(children: ReactNode): string | null {
   if (!classes.includes(MERMAID_LANGUAGE_CLASS)) {
     return null;
   }
-  return normalizeMermaidCode(child.props.children);
+  return normalizeReactNodeText(child.props.children);
 }
 
 function MermaidDiagram({ code }: { code: string }) {
@@ -166,6 +190,106 @@ function MermaidDiagram({ code }: { code: string }) {
   return <div aria-label="Mermaid diagram" className="markdown-mermaid" ref={containerRef} />;
 }
 
+function CodeBlock({
+  children,
+  preProps,
+}: {
+  children: ReactNode;
+  preProps: HTMLAttributes<HTMLPreElement>;
+}) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const isMountedRef = useRef(true);
+  const resetTimeoutRef = useRef<number | null>(null);
+  const codeText = normalizeReactNodeText(children);
+  const copyLabel =
+    copyStatus === "copied"
+      ? "Copied code block"
+      : copyStatus === "failed"
+        ? "Failed to copy code block"
+        : "Copy code block";
+
+  const clearResetTimeout = useCallback(() => {
+    if (resetTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+    window.clearTimeout(resetTimeoutRef.current);
+    resetTimeoutRef.current = null;
+  }, []);
+
+  const scheduleStatusReset = useCallback(() => {
+    clearResetTimeout();
+    if (typeof window === "undefined") {
+      return;
+    }
+    resetTimeoutRef.current = window.setTimeout(() => {
+      setCopyStatus("idle");
+      resetTimeoutRef.current = null;
+    }, COPY_STATUS_RESET_MS);
+  }, [clearResetTimeout]);
+
+  const resetCopyStatus = useCallback(() => {
+    clearResetTimeout();
+    setCopyStatus("idle");
+  }, [clearResetTimeout]);
+
+  async function handleCopy() {
+    let copied = false;
+    try {
+      copied = await writeToClipboard(codeText);
+    } catch {
+      copied = false;
+    }
+    if (!isMountedRef.current) {
+      return;
+    }
+    setCopyStatus(copied ? "copied" : "failed");
+    if (!copied || shouldResetCopyStatusOnTimer()) {
+      scheduleStatusReset();
+    }
+  }
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      clearResetTimeout();
+    };
+  }, [clearResetTimeout]);
+
+  return (
+    <div
+      className="markdown-code-block"
+      onBlur={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        ) {
+          return;
+        }
+        resetCopyStatus();
+      }}
+      onPointerLeave={resetCopyStatus}
+    >
+      <pre {...preProps}>{children}</pre>
+      <button
+        aria-label={copyLabel}
+        className={`markdown-code-block__copy copy${
+          copyStatus === "copied" ? " markdown-code-block__copy--copied" : ""
+        }`}
+        onClick={() => void handleCopy()}
+        title={copyLabel}
+        type="button"
+      >
+        {copyStatus === "copied" ? (
+          <CheckIcon aria-hidden="true" />
+        ) : (
+          <CopyIcon aria-hidden="true" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 const components: Components = {
   a({ node: _node, href, ...props }) {
     return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
@@ -175,7 +299,7 @@ const components: Components = {
     if (mermaidCode !== null) {
       return <MermaidDiagram code={mermaidCode} />;
     }
-    return <pre {...props}>{children}</pre>;
+    return <CodeBlock preProps={props}>{children}</CodeBlock>;
   },
   table({ node: _node, ...props }) {
     return (

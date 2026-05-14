@@ -1983,6 +1983,145 @@ describe("web app", () => {
     );
   });
 
+  it.each([
+    [
+      "startedAt",
+      "Started",
+      {
+        startedAtOffsetMs: -2 * 60 * 60 * 1000,
+        updatedAtOffsetMs: -60 * 60 * 1000,
+        endedAtOffsetMs: undefined,
+      },
+    ],
+    [
+      "updatedAt",
+      "Updated",
+      {
+        startedAtOffsetMs: -4 * 60 * 60 * 1000,
+        updatedAtOffsetMs: -3 * 60 * 60 * 1000,
+        endedAtOffsetMs: undefined,
+      },
+    ],
+    [
+      "endedAt",
+      "Ended",
+      {
+        startedAtOffsetMs: -5 * 60 * 60 * 1000,
+        updatedAtOffsetMs: -2 * 60 * 60 * 1000,
+        endedAtOffsetMs: -4 * 60 * 60 * 1000,
+      },
+    ],
+  ] as const)(
+    "shows relative-only timestamps in list mode for %s sorting",
+    async (sortField, label, offsets) => {
+      const now = Date.now();
+      const startedAt = new Date(
+        now + (offsets.startedAtOffsetMs ?? -60 * 60 * 1000),
+      ).toISOString();
+      const updatedAt = new Date(
+        now + (offsets.updatedAtOffsetMs ?? -60 * 60 * 1000),
+      ).toISOString();
+      const endedAt =
+        offsets.endedAtOffsetMs === undefined
+          ? null
+          : new Date(now + offsets.endedAtOffsetMs).toISOString();
+      const run = makeRun({
+        runId: `run-list-${sortField}`,
+        assignmentName: `${label} relative list`,
+        name: `${label} relative list`,
+        startedAt,
+        updatedAt,
+        endedAt,
+        status: endedAt === null ? "running" : "success",
+        effectiveStatus: endedAt === null ? "running" : "success",
+      });
+
+      setStoredDashboardPreferences({ sortField, sortDirection: "desc" });
+      setStoredDashboardViewState({ viewMode: "list" });
+      installFetchMock({
+        runs: [run],
+        details: {
+          [run.runId]: makeDetail({
+            runId: run.runId,
+            assignment: { name: run.assignmentName ?? "", sourcePath: "/tmp/list-relative.md" },
+            name: run.name,
+            startedAt,
+            updatedAt,
+            endedAt,
+            status: run.status,
+            effectiveStatus: run.effectiveStatus,
+          }),
+        },
+      });
+
+      await renderApp();
+
+      const rowSurface = await findRunRowSurface(`${label} relative list`);
+      const timeCell = rowSurface.querySelector(".run-row__time");
+      if (!(timeCell instanceof HTMLElement)) {
+        throw new Error("Expected list row time cell.");
+      }
+      const timeValue = timeCell.querySelector(".run-row__time-value");
+      if (!(timeValue instanceof HTMLElement)) {
+        throw new Error("Expected list row time value.");
+      }
+
+      expect(within(timeCell).getByText(label)).toBeInTheDocument();
+      expect(timeValue).not.toHaveTextContent(/\d{4}/);
+      expect(timeValue).not.toHaveTextContent("Not available");
+    },
+  );
+
+  it("shows Not available for null ended timestamps in ended list sort mode", async () => {
+    const now = Date.now();
+    const startedAt = new Date(now - 60 * 60 * 1000).toISOString();
+    const updatedAt = new Date(now - 30 * 60 * 1000).toISOString();
+    const run = makeRun({
+      runId: "run-list-ended-null",
+      assignmentName: "Ended missing list",
+      name: "Ended missing list",
+      startedAt,
+      updatedAt,
+      endedAt: null,
+      status: "running",
+      effectiveStatus: "running",
+    });
+
+    setStoredDashboardPreferences({ sortField: "endedAt", sortDirection: "desc" });
+    setStoredDashboardViewState({ viewMode: "list" });
+    installFetchMock({
+      runs: [run],
+      details: {
+        [run.runId]: makeDetail({
+          runId: run.runId,
+          assignment: { name: run.assignmentName ?? "", sourcePath: "/tmp/list-ended-null.md" },
+          name: run.name,
+          startedAt,
+          updatedAt,
+          endedAt: null,
+          status: run.status,
+          effectiveStatus: run.effectiveStatus,
+        }),
+      },
+    });
+
+    await renderApp();
+
+    const rowSurface = await findRunRowSurface("Ended missing list");
+    const timeCell = rowSurface.querySelector(".run-row__time");
+    if (!(timeCell instanceof HTMLElement)) {
+      throw new Error("Expected list row time cell.");
+    }
+    const timeValue = timeCell.querySelector(".run-row__time-value");
+    if (!(timeValue instanceof HTMLElement)) {
+      throw new Error("Expected list row time value.");
+    }
+
+    expect(within(timeCell).getByText("Ended")).toBeInTheDocument();
+    expect(timeValue).toHaveTextContent("Not available");
+    expect(timeValue).toHaveClass("run-row__time-value--muted");
+  });
+
   it("uses board card layout for list items on mobile", async () => {
     vi.stubGlobal(
       "matchMedia",

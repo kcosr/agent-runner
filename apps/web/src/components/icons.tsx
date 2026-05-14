@@ -203,8 +203,7 @@ export function StopIcon(props: IconProps) {
 export function CheckIcon(props: IconProps) {
   return (
     <IconBase {...props}>
-      <circle cx="12" cy="12" r="9.5" />
-      <polyline points="8.5 12.5 11 15 16 9.5" />
+      <path d="M20 6 9 17l-5-5" />
     </IconBase>
   );
 }

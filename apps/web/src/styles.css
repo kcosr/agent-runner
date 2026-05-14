@@ -2698,6 +2698,41 @@ body {
   box-sizing: border-box;
 }
 
+.markdown-code-block {
+  position: relative;
+  min-width: 100%;
+  max-width: 100%;
+  margin: 0 0 0.6em;
+}
+
+.markdown-code-block pre {
+  margin: 0;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  padding-right: 42px;
+  overflow-x: auto;
+}
+
+.markdown-code-block__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: color-mix(in srgb, var(--background) 84%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--foreground) 16%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.markdown-code-block__copy--copied {
+  color: var(--success-foreground);
+}
+
+.markdown-code-block:hover .markdown-code-block__copy,
+.markdown-code-block:focus-within .markdown-code-block__copy {
+  opacity: 1;
+}
+
 .markdown pre code {
   display: block;
   padding: 0;
@@ -2707,6 +2742,12 @@ body {
   line-height: 1.45;
   overflow-wrap: normal;
   white-space: pre;
+}
+
+@media (hover: none), (pointer: coarse), (max-width: 720px) {
+  .markdown-code-block__copy {
+    opacity: 1;
+  }
 }
 
 .markdown blockquote {
