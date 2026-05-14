@@ -2072,6 +2072,56 @@ describe("web app", () => {
     },
   );
 
+  it("shows Not available for null ended timestamps in ended list sort mode", async () => {
+    const now = Date.now();
+    const startedAt = new Date(now - 60 * 60 * 1000).toISOString();
+    const updatedAt = new Date(now - 30 * 60 * 1000).toISOString();
+    const run = makeRun({
+      runId: "run-list-ended-null",
+      assignmentName: "Ended missing list",
+      name: "Ended missing list",
+      startedAt,
+      updatedAt,
+      endedAt: null,
+      status: "running",
+      effectiveStatus: "running",
+    });
+
+    setStoredDashboardPreferences({ sortField: "endedAt", sortDirection: "desc" });
+    setStoredDashboardViewState({ viewMode: "list" });
+    installFetchMock({
+      runs: [run],
+      details: {
+        [run.runId]: makeDetail({
+          runId: run.runId,
+          assignment: { name: run.assignmentName ?? "", sourcePath: "/tmp/list-ended-null.md" },
+          name: run.name,
+          startedAt,
+          updatedAt,
+          endedAt: null,
+          status: run.status,
+          effectiveStatus: run.effectiveStatus,
+        }),
+      },
+    });
+
+    await renderApp();
+
+    const rowSurface = await findRunRowSurface("Ended missing list");
+    const timeCell = rowSurface.querySelector(".run-row__time");
+    if (!(timeCell instanceof HTMLElement)) {
+      throw new Error("Expected list row time cell.");
+    }
+    const timeValue = timeCell.querySelector(".run-row__time-value");
+    if (!(timeValue instanceof HTMLElement)) {
+      throw new Error("Expected list row time value.");
+    }
+
+    expect(within(timeCell).getByText("Ended")).toBeInTheDocument();
+    expect(timeValue).toHaveTextContent("Not available");
+    expect(timeValue).toHaveClass("run-row__time-value--muted");
+  });
+
   it("uses board card layout for list items on mobile", async () => {
     vi.stubGlobal(
       "matchMedia",

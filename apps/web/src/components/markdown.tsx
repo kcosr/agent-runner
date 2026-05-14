@@ -4,6 +4,7 @@ import {
   type ReactNode,
   isValidElement,
   memo,
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -39,18 +40,14 @@ function loadMermaidApi(): Promise<MermaidApi> {
   return mermaidApiPromise;
 }
 
-function normalizeMermaidCode(value: ReactNode): string {
-  return Children.toArray(value).join("").replace(/\n$/, "");
-}
-
-function normalizeCodeBlockText(value: ReactNode): string {
+function normalizeReactNodeText(value: ReactNode): string {
   return Children.toArray(value)
     .map((child) => {
       if (typeof child === "string" || typeof child === "number") {
         return String(child);
       }
       if (isValidElement<{ children?: ReactNode }>(child)) {
-        return normalizeCodeBlockText(child.props.children);
+        return normalizeReactNodeText(child.props.children);
       }
       return "";
     })
@@ -92,7 +89,7 @@ function readMermaidBlock(children: ReactNode): string | null {
   if (!classes.includes(MERMAID_LANGUAGE_CLASS)) {
     return null;
   }
-  return normalizeMermaidCode(child.props.children);
+  return normalizeReactNodeText(child.props.children);
 }
 
 function MermaidDiagram({ code }: { code: string }) {
@@ -193,8 +190,9 @@ function CodeBlock({
   preProps: HTMLAttributes<HTMLPreElement>;
 }) {
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const isMountedRef = useRef(true);
   const resetTimeoutRef = useRef<number | null>(null);
-  const codeText = normalizeCodeBlockText(children);
+  const codeText = normalizeReactNodeText(children);
   const copyLabel =
     copyStatus === "copied"
       ? "Copied code block"
@@ -202,15 +200,15 @@ function CodeBlock({
         ? "Failed to copy code block"
         : "Copy code block";
 
-  function clearResetTimeout() {
+  const clearResetTimeout = useCallback(() => {
     if (resetTimeoutRef.current === null || typeof window === "undefined") {
       return;
     }
     window.clearTimeout(resetTimeoutRef.current);
     resetTimeoutRef.current = null;
-  }
+  }, []);
 
-  function scheduleStatusReset() {
+  const scheduleStatusReset = useCallback(() => {
     clearResetTimeout();
     if (typeof window === "undefined") {
       return;
@@ -219,22 +217,29 @@ function CodeBlock({
       setCopyStatus("idle");
       resetTimeoutRef.current = null;
     }, COPY_STATUS_RESET_MS);
-  }
+  }, [clearResetTimeout]);
 
   async function handleCopy() {
-    setCopyStatus((await writeToClipboard(codeText)) ? "copied" : "failed");
+    let copied = false;
+    try {
+      copied = await writeToClipboard(codeText);
+    } catch {
+      copied = false;
+    }
+    if (!isMountedRef.current) {
+      return;
+    }
+    setCopyStatus(copied ? "copied" : "failed");
     scheduleStatusReset();
   }
 
-  useEffect(
-    () => () => {
-      if (resetTimeoutRef.current !== null && typeof window !== "undefined") {
-        window.clearTimeout(resetTimeoutRef.current);
-        resetTimeoutRef.current = null;
-      }
-    },
-    [],
-  );
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      clearResetTimeout();
+    };
+  }, [clearResetTimeout]);
 
   return (
     <div className="markdown-code-block">

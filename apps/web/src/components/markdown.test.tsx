@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownContent } from "./markdown.js";
 
@@ -15,15 +15,18 @@ vi.mock("mermaid", () => ({
 describe("MarkdownContent", () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  function stubClipboard(writeText: (value: string) => Promise<void>) {
-    Object.defineProperty(navigator, "clipboard", {
+  function stubClipboard(writeText?: (value: string) => Promise<void>) {
+    const stubbedNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(stubbedNavigator, "clipboard", {
       configurable: true,
-      value: { writeText },
+      value: writeText ? { writeText } : undefined,
     });
+    vi.stubGlobal("navigator", stubbedNavigator);
   }
 
   function stubDocumentCopy(copy: () => boolean) {
@@ -111,10 +114,7 @@ describe("MarkdownContent", () => {
   });
 
   it("reports code block copy failures", async () => {
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: undefined,
-    });
+    stubClipboard();
     stubDocumentCopy(() => false);
 
     render(<MarkdownContent text={"```sh\nexit 1\n```"} />);
@@ -125,6 +125,27 @@ describe("MarkdownContent", () => {
     expect(
       await screen.findByRole("button", { name: "Failed to copy code block" }),
     ).toBeInTheDocument();
+  });
+
+  it("resets code block copy feedback after a short delay", async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    stubClipboard(writeText);
+
+    render(<MarkdownContent text={"```sh\nprintf copied\n```"} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy code block" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("button", { name: "Copied code block" })).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(1800);
+    });
+
+    expect(screen.getByRole("button", { name: "Copy code block" })).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it("makes frontmatter code blocks copyable", async () => {

@@ -59,6 +59,20 @@ describe("writeToClipboard", () => {
     expect(document.querySelector("textarea")).toBeNull();
   });
 
+  it("restores focus after document copy fallback", async () => {
+    stubNavigatorClipboard();
+    stubDocumentCopy(() => true);
+    const button = document.createElement("button");
+    document.body.append(button);
+    button.focus();
+
+    await expect(writeToClipboard("focused copy")).resolves.toBe(true);
+
+    expect(document.execCommand).toHaveBeenCalledWith("copy");
+    expect(document.activeElement).toBe(button);
+    button.remove();
+  });
+
   it("returns false when document copy fails", async () => {
     stubNavigatorClipboard();
     stubDocumentCopy(() => {
