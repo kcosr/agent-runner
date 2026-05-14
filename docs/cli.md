@@ -1,6 +1,6 @@
 # CLI Reference
 
-This is the complete `task-runner` command reference. For conceptual
+This is the complete `agent-runner` command reference. For conceptual
 context, see [concepts.md](concepts.md) and [runs.md](runs.md).
 
 All commands accept `--help` / `-h`.
@@ -31,9 +31,9 @@ All commands accept `--help` / `-h`.
 | Flag | Applies to | Effect |
 |------|-----------|--------|
 | `--help`, `-h` | any | Print command help |
-| `--connect <ws-url>` | client commands | Route command through a daemon (also `TASK_RUNNER_CONNECT`) |
-| `--connect-host <host>` | connected client commands | Open an invocation-scoped SSH local forward before dialing `--connect` (also `TASK_RUNNER_CONNECT_HOST`) |
-| `--connect-local-port <port>` | connected client commands | Override the loopback port used by `--connect-host` (also `TASK_RUNNER_CONNECT_LOCAL_PORT`) |
+| `--connect <ws-url>` | client commands | Route command through a daemon (also `AGENT_RUNNER_CONNECT`) |
+| `--connect-host <host>` | connected client commands | Open an invocation-scoped SSH local forward before dialing `--connect` (also `AGENT_RUNNER_CONNECT_HOST`) |
+| `--connect-local-port <port>` | connected client commands | Override the loopback port used by `--connect-host` (also `AGENT_RUNNER_CONNECT_LOCAL_PORT`) |
 | `--output-format text\|json` | most commands | Output format (default `text`) |
 
 Commands reject flags they do not consume — unknown flag combinations
@@ -41,10 +41,10 @@ error out rather than being silently ignored.
 
 Reusable task definition inspection uses top-level `list tasks` and
 `show task <name|path>`. Run task state remains under
-`task-runner task ...`.
+`agent-runner task ...`.
 
 `--connect-host` requires connected mode via `--connect` or
-`TASK_RUNNER_CONNECT`. When present, the CLI keeps the logical daemon URL
+`AGENT_RUNNER_CONNECT`. When present, the CLI keeps the logical daemon URL
 for user-facing output, but tunnels the actual WebSocket/HTTP traffic
 through `127.0.0.1:<local-port>` for the lifetime of the invocation.
 
@@ -55,7 +55,7 @@ run (`run ready` then `run --resume-run`), or resumes an existing run.
 See [resume.md](resume.md) for the rules.
 
 ```bash
-task-runner run \
+agent-runner run \
   [--agent <name|path>] \
   [--assignment <name|path>] \
   [--cwd <path>] \
@@ -131,7 +131,7 @@ within its session.
 
 Assignment task refs follow the same explicit loader model:
 
-- bare strings are named task refs under `${TASK_RUNNER_CONFIG_DIR}/tasks`
+- bare strings are named task refs under `${AGENT_RUNNER_CONFIG_DIR}/tasks`
 - only absolute paths and strings beginning with `./` or `../` are path
   refs
 - slashful ids such as `review/reuse` are named refs, not implicit paths
@@ -145,7 +145,7 @@ Same inputs as `run` (except no `--detach`, `--max-retries`,
 runs or to inspect a run before executing it.
 
 ```bash
-task-runner init \
+agent-runner init \
   --agent <name|path> \
   --assignment <name|path> \
   [--cwd <path>] [--backend <id>] [--model <id>] [--effort <level>] \
@@ -159,10 +159,10 @@ task-runner init \
 ```
 
 `init` does not dump the worker brief to stdout — fetch it with
-`task-runner run brief <run-id>`.
+`agent-runner run brief <run-id>`.
 When `init` reinitializes an existing initialized run via `--run-id`, the
 run keeps its frozen run group even if `--group-id` is present. Use
-`task-runner run set-group` or `clear-group` to change group membership.
+`agent-runner run set-group` or `clear-group` to change group membership.
 
 Launcher precedence on fresh run/init is:
 
@@ -196,15 +196,15 @@ rejected on fresh `run`, `run --resume-run`, and ready-start execution.
 Start the daemon. Hosts WebSocket JSON-RPC, HTTP, and the bundled web UI.
 
 ```bash
-task-runner serve [--listen <ws-url>]
+agent-runner serve [--listen <ws-url>]
 ```
 
 - `--listen <ws-url>` — defaults to `ws://127.0.0.1:4773/` (or
-  `TASK_RUNNER_LISTEN`).
+  `AGENT_RUNNER_LISTEN`).
 - Rejects `--connect`, `--connect-host`, and `--connect-local-port`.
 
-Set `TASK_RUNNER_DAEMON_AUTH_ENABLED=true` and
-`TASK_RUNNER_DAEMON_TOKEN=<token>` in the daemon environment to require a
+Set `AGENT_RUNNER_DAEMON_AUTH_ENABLED=true` and
+`AGENT_RUNNER_DAEMON_TOKEN=<token>` in the daemon environment to require a
 shared bearer token for daemon `/api/*` and WebSocket access. This is
 daemon access protection only; anyone with the token has full daemon
 access.
@@ -213,11 +213,11 @@ See [daemon.md](daemon.md).
 
 ## `status`
 
-Print the current task-runner system/environment context for this
+Print the current agent-runner system/environment context for this
 invocation.
 
 ```bash
-task-runner status [--output-format text|json]
+agent-runner status [--output-format text|json]
 ```
 
 - Takes no positional arguments.
@@ -231,7 +231,7 @@ task-runner status [--output-format text|json]
 Print the run's current state.
 
 ```bash
-task-runner run status <run-id> [--output-format json] [--field <name> ...]
+agent-runner run status <run-id> [--output-format json] [--field <name> ...]
 ```
 
 - Run-id-only. Paths are not accepted.
@@ -251,7 +251,7 @@ Print the composed worker handoff for a run. Text-only — does not support
 `--output-format` or `--field`. Run-id-only.
 
 ```bash
-task-runner run brief <run-id>
+agent-runner run brief <run-id>
 ```
 
 ## `run audit <run-id>`
@@ -260,7 +260,7 @@ Print the persisted audit history for a run. Text is the default output;
 JSON returns the shared `RunAuditHistory` DTO.
 
 ```bash
-task-runner run audit <run-id> [--output-format text|json] [--limit <n>]
+agent-runner run audit <run-id> [--output-format text|json] [--limit <n>]
 ```
 
 - Run-id-only. Paths are not accepted.
@@ -283,16 +283,16 @@ Canonical task state commands. All subcommands accept `--connect` and
 `--output-format`.
 
 ```bash
-task-runner task list <run-id>
-task-runner task show <run-id> <task-id>
+agent-runner task list <run-id>
+agent-runner task show <run-id> <task-id>
 
-task-runner task set <run-id> <task-id> \
+agent-runner task set <run-id> <task-id> \
   [--status pending|in_progress|completed|blocked] \
   [--notes <text>]
 
-task-runner task append-notes <run-id> <task-id> --text <text>
+agent-runner task append-notes <run-id> <task-id> --text <text>
 
-task-runner task add <run-id> --title <title> [--body <body>]
+agent-runner task add <run-id> --title <title> [--body <body>]
 ```
 
 Mutation rules depend on run state and backend type; see
@@ -301,14 +301,14 @@ Mutation rules depend on run state and backend type; see
 ## `attachment`
 
 ```bash
-task-runner attachment add <run-id|path> <source-file> \
+agent-runner attachment add <run-id|path> <source-file> \
   [--name <text>] [--mime-type <type>]
 
-task-runner attachment list <run-id|path> [--scope run|group]
+agent-runner attachment list <run-id|path> [--scope run|group]
 
-task-runner attachment download <run-id|path> <attachment-id> <output-path>
+agent-runner attachment download <run-id|path> <attachment-id> <output-path>
 
-task-runner attachment remove <run-id|path> <attachment-id>
+agent-runner attachment remove <run-id|path> <attachment-id>
 ```
 
 All attachment subcommands accept connected mode through the global
@@ -322,12 +322,12 @@ See [attachments.md](attachments.md).
 ## `list`
 
 ```bash
-task-runner list agents
-task-runner list assignments
-task-runner list launchers
-task-runner list environments
-task-runner list tasks
-task-runner list runs \
+agent-runner list agents
+agent-runner list assignments
+agent-runner list launchers
+agent-runner list environments
+agent-runner list tasks
+agent-runner list runs \
   [--cwd <path> | --repo <name> | --global] \
   [--group-id <group-id>] \
   [--include-archived]
@@ -335,9 +335,9 @@ task-runner list runs \
 
 - `list agents`, `list assignments`, `list launchers`,
   `list environments`, and `list tasks` enumerate reusable definitions
-  from `${TASK_RUNNER_CONFIG_DIR}`.
+  from `${AGENT_RUNNER_CONFIG_DIR}`.
 - `list tasks` lists markdown task definition files under
-  `${TASK_RUNNER_CONFIG_DIR}/tasks`; invalid task definitions are warned
+  `${AGENT_RUNNER_CONFIG_DIR}/tasks`; invalid task definitions are warned
   to stderr in text mode and included in the JSON payload's `warnings`
   array in JSON mode.
 - `list runs` defaults to the caller's exact cwd.
@@ -351,18 +351,18 @@ task-runner list runs \
 ## `show`
 
 ```bash
-task-runner show agent <name|path>
-task-runner show assignment <name|path>
-task-runner show launcher <name|path>
-task-runner show environment <name|path>
-task-runner show task <name|path>
+agent-runner show agent <name|path>
+agent-runner show assignment <name|path>
+agent-runner show launcher <name|path>
+agent-runner show environment <name|path>
+agent-runner show task <name|path>
 ```
 
 Renders the parsed frontmatter, declared vars (for assignments), task
 lists, launcher definitions, environment definitions, or reusable task
 definition title/body/hooks.
 For `show task`, bare strings are named ids under
-`${TASK_RUNNER_CONFIG_DIR}/tasks`; absolute paths and strings beginning
+`${AGENT_RUNNER_CONFIG_DIR}/tasks`; absolute paths and strings beginning
 with `./` or `../` are direct markdown file paths.
 
 ## `run` groupings
@@ -370,12 +370,12 @@ with `./` or `../` are direct markdown file paths.
 ### Lifecycle
 
 ```bash
-task-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>]
-task-runner run ready    <id|path> [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>]
-task-runner run reset     <id|path>
-task-runner run archive   <id|path>
-task-runner run unarchive <id|path>
-task-runner run delete    <id|path>    # archived only
+agent-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>]
+agent-runner run ready    <id|path> [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>]
+agent-runner run reset     <id|path>
+agent-runner run archive   <id|path>
+agent-runner run unarchive <id|path>
+agent-runner run delete    <id|path>    # archived only
 ```
 
 `run ready` can attach or replace the run's schedule during the
@@ -395,15 +395,15 @@ values from the initialized run.
 ### Execution environment
 
 ```bash
-task-runner run environment status <id|path>
-task-runner run environment validate <id|path>
-task-runner run environment cleanup <id|path>
+agent-runner run environment status <id|path>
+agent-runner run environment validate <id|path>
+agent-runner run environment cleanup <id|path>
 ```
 
 `status` prints the frozen execution environment state from the run
 manifest. `validate` checks an existing container or starts/validates a
 managed container and persists the updated state. `cleanup` removes a
-task-runner-managed environment when the run is not running and no
+agent-runner-managed environment when the run is not running and no
 same-group initialized, ready, or running run still references the shared
 environment. Externally managed containers are never removed.
 
@@ -414,13 +414,13 @@ unexpected runtime errors.
 ### Schedule
 
 ```bash
-task-runner run schedule <id|path> --at <iso>
-task-runner run schedule <id|path> --delay <duration>
-task-runner run schedule <id|path> --cron <expr> \
+agent-runner run schedule <id|path> --at <iso>
+agent-runner run schedule <id|path> --delay <duration>
+agent-runner run schedule <id|path> --cron <expr> \
   [--timezone <iana>] [--mode reuse|reset|clone] [--continue-on-failure]
-task-runner run schedule enable <id|path>
-task-runner run schedule disable <id|path>
-task-runner run schedule clear <id|path>
+agent-runner run schedule enable <id|path>
+agent-runner run schedule disable <id|path>
+agent-runner run schedule clear <id|path>
 ```
 
 The default `run schedule` action is `set`; `run schedule set <id|path>
@@ -429,23 +429,23 @@ The default `run schedule` action is `set`; `run schedule set <id|path>
 only with `--cron`. `clear` removes one-time schedules only; recurring
 schedules must be disabled.
 
-One-time schedules stay subject to `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC`.
-Recurring schedules are validated with `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
+One-time schedules stay subject to `AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC`.
+Recurring schedules are validated with `AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
 and can run in `reuse`, `reset`, or `clone` mode.
 
 ### Metadata
 
 ```bash
-task-runner run set-name <id|path> <name>
-task-runner run set-name <id|path> --clear
-task-runner run set-note <id|path> <markdown>
-task-runner run clear-note <id|path>
-task-runner run pin <id|path>
-task-runner run unpin <id|path>
-task-runner run set-group <id|path> <group-id>
-task-runner run clear-group <id|path>
-task-runner run set-backend-session   <id|path> <session-id>   # passive only
-task-runner run clear-backend-session <id|path>                # passive only
+agent-runner run set-name <id|path> <name>
+agent-runner run set-name <id|path> --clear
+agent-runner run set-note <id|path> <markdown>
+agent-runner run clear-note <id|path>
+agent-runner run pin <id|path>
+agent-runner run unpin <id|path>
+agent-runner run set-group <id|path> <group-id>
+agent-runner run clear-group <id|path>
+agent-runner run set-backend-session   <id|path> <session-id>   # passive only
+agent-runner run clear-backend-session <id|path>                # passive only
 ```
 
 - `run set-note` trims only for empty/whitespace detection; a
@@ -462,11 +462,11 @@ task-runner run clear-backend-session <id|path>                # passive only
 ### Dependencies
 
 ```bash
-task-runner run add-dep    <id> --run <dependency-run-id>
-task-runner run add-dep    <id> --group <group-id>
-task-runner run remove-dep <id> --run <dependency-run-id>
-task-runner run remove-dep <id> --group <group-id>
-task-runner run clear-deps <id>
+agent-runner run add-dep    <id> --run <dependency-run-id>
+agent-runner run add-dep    <id> --group <group-id>
+agent-runner run remove-dep <id> --run <dependency-run-id>
+agent-runner run remove-dep <id> --group <group-id>
+agent-runner run clear-deps <id>
 ```
 
 Dependency mutations are only allowed on `initialized` runs and require a
@@ -488,16 +488,16 @@ typed ref for add/remove: exactly one of `--run` or `--group`. See
 
 Recognized by the CLI:
 
-- `TASK_RUNNER_CONFIG_DIR`, `TASK_RUNNER_STATE_DIR`
-- `TASK_RUNNER_LISTEN`, `TASK_RUNNER_CONNECT`
-- `TASK_RUNNER_PARENT_RUN_ID`, `TASK_RUNNER_RUN_GROUP_ID`
-- `TASK_RUNNER_CLAUDE_BIN`, `TASK_RUNNER_CODEX_BIN`,
-  `TASK_RUNNER_CODEX_UDS_PATH`, `TASK_RUNNER_CODEX_WS_URL`,
-  `TASK_RUNNER_CURSOR_BIN`, `TASK_RUNNER_PI_BIN`, `PI_HOME`
-- `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC`,
-  `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
-- `TASK_RUNNER_CALL_DEPTH`, `TASK_RUNNER_MAX_CALL_DEPTH`
-- `TASK_RUNNER_DAEMON_AUTH_ENABLED`, `TASK_RUNNER_DAEMON_TOKEN`
+- `AGENT_RUNNER_CONFIG_DIR`, `AGENT_RUNNER_STATE_DIR`
+- `AGENT_RUNNER_LISTEN`, `AGENT_RUNNER_CONNECT`
+- `AGENT_RUNNER_PARENT_RUN_ID`, `AGENT_RUNNER_RUN_GROUP_ID`
+- `AGENT_RUNNER_CLAUDE_BIN`, `AGENT_RUNNER_CODEX_BIN`,
+  `AGENT_RUNNER_CODEX_UDS_PATH`, `AGENT_RUNNER_CODEX_WS_URL`,
+  `AGENT_RUNNER_CURSOR_BIN`, `AGENT_RUNNER_PI_BIN`, `PI_HOME`
+- `AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC`,
+  `AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
+- `AGENT_RUNNER_CALL_DEPTH`, `AGENT_RUNNER_MAX_CALL_DEPTH`
+- `AGENT_RUNNER_DAEMON_AUTH_ENABLED`, `AGENT_RUNNER_DAEMON_TOKEN`
 
 See [configuration.md](configuration.md).
 
@@ -505,15 +505,15 @@ See [configuration.md](configuration.md).
 
 Every client command (except `serve`) can run embedded (no daemon) or
 route through a daemon with `--connect <ws-url>` or
-`TASK_RUNNER_CONNECT`. Daemon-routed commands use the same WebSocket
+`AGENT_RUNNER_CONNECT`. Daemon-routed commands use the same WebSocket
 JSON-RPC surface that the web dashboard uses.
 
-When connecting to an auth-enabled daemon, set `TASK_RUNNER_DAEMON_TOKEN`
+When connecting to an auth-enabled daemon, set `AGENT_RUNNER_DAEMON_TOKEN`
 in the client environment. Connected CLI requests trim that value and send
 `Authorization: Bearer <token>` on WebSocket handshakes and direct daemon
 HTTP helper requests. Empty or unset client tokens omit Authorization and
 will be rejected by auth-enabled daemons. A 401 WebSocket handshake failure
-prints a hint to set `TASK_RUNNER_DAEMON_TOKEN` instead of the generic
+prints a hint to set `AGENT_RUNNER_DAEMON_TOKEN` instead of the generic
 daemon-start hint.
 
 The token is not a transport security layer. For remote daemons, use

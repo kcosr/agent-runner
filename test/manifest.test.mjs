@@ -59,7 +59,7 @@ Codex agent prompt.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-manifest-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-manifest-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -211,17 +211,17 @@ test("manifest: current manifests missing parentRunId are rejected on resume", a
   assert.throws(
     () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
     (err) => {
-      assert.match(err.message, /does not look like a task-runner run\.json/);
+      assert.match(err.message, /does not look like an agent-runner run\.json/);
       return true;
     },
   );
 });
 
-test("manifest: TASK_RUNNER_CAPTURE_BACKEND_STDOUT writes raw stdout sidecars", async () => {
+test("manifest: AGENT_RUNNER_CAPTURE_BACKEND_STDOUT writes raw stdout sidecars", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
-  const outcome = await withEnv({ TASK_RUNNER_CAPTURE_BACKEND_STDOUT: "yes" }, () =>
+  const outcome = await withEnv({ AGENT_RUNNER_CAPTURE_BACKEND_STDOUT: "yes" }, () =>
     runWithMock(dir, async (ctx) => {
       updateTasksForPrompt(ctx.prompt, {
         t1: { status: "completed" },
@@ -259,7 +259,7 @@ test("manifest: stdout sidecar append failures do not fail the attempt", async (
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
-  const outcome = await withEnv({ TASK_RUNNER_CAPTURE_BACKEND_STDOUT: "1" }, () =>
+  const outcome = await withEnv({ AGENT_RUNNER_CAPTURE_BACKEND_STDOUT: "1" }, () =>
     runWithMock(dir, async (ctx) => {
       updateTasksForPrompt(ctx.prompt, {
         t1: { status: "completed" },
@@ -289,11 +289,11 @@ test("manifest: stdout sidecar append failures do not fail the attempt", async (
   assert.equal(log.stderr, "raw stderr text");
 });
 
-test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS no longer enables stdout capture", async () => {
+test("manifest: AGENT_RUNNER_FULL_ATTEMPT_LOGS no longer enables stdout capture", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
-  const outcome = await withEnv({ TASK_RUNNER_FULL_ATTEMPT_LOGS: "1" }, () =>
+  const outcome = await withEnv({ AGENT_RUNNER_FULL_ATTEMPT_LOGS: "1" }, () =>
     runWithMock(dir, async (ctx) => {
       updateTasksForPrompt(ctx.prompt, {
         t1: { status: "completed" },
@@ -557,7 +557,7 @@ test("manifest: codex runs persist the stdio default transport in run metadata a
   writeAgent(dir, "three", CODEX_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
-  const outcome = await withEnv({ TASK_RUNNER_CODEX_WS_URL: undefined }, () =>
+  const outcome = await withEnv({ AGENT_RUNNER_CODEX_WS_URL: undefined }, () =>
     runWithMock(
       dir,
       async (ctx) => {
@@ -600,7 +600,7 @@ test("manifest: codex runs persist UDS transport in run metadata and reset seed"
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
   const outcome = await withEnv(
-    { TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock", TASK_RUNNER_CODEX_WS_URL: undefined },
+    { AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock", AGENT_RUNNER_CODEX_WS_URL: undefined },
     () =>
       runWithMock(
         dir,
@@ -645,7 +645,7 @@ test("manifest: backend-owned malformed persisted UDS transport remains readable
   writeAgent(dir, "three", CODEX_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
-  const outcome = await withEnv({ TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock" }, () =>
+  const outcome = await withEnv({ AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock" }, () =>
     runWithMock(
       dir,
       async (ctx) => {

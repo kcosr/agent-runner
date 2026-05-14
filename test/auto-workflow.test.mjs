@@ -41,7 +41,7 @@ You are a chat assistant.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-workflow-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-workflow-"));
 }
 
 function writeAgent(baseDir, name, body) {

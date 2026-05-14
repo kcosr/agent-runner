@@ -83,7 +83,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-import-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-import-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -228,7 +228,7 @@ test("import (run): codex bootstrap validation receives daemon-forwarded transpo
     resolveConfig: codexBackend.resolveConfig,
   };
 
-  const outcome = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
+  const outcome = await withEnv({ AGENT_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
     runImportIn(
       dir,
       {
@@ -293,8 +293,8 @@ test("import (run): codex bootstrap validation accepts daemon-forwarded UDS tran
 
   const outcome = await withEnv(
     {
-      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/daemon-codex.sock",
-      TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket",
+      AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/daemon-codex.sock",
+      AGENT_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket",
     },
     () =>
       runImportIn(
@@ -679,7 +679,7 @@ test("import: cursor bootstrap session import is explicitly rejected", async () 
   );
 });
 
-test("import: task-runner-created cursor runs reuse the captured backend session id on resume", async () => {
+test("import: agent-runner-created cursor runs reuse the captured backend session id on resume", async () => {
   const dir = tempDir();
   writeAgent(dir, "cursor-import-agent", CURSOR_IMPORT_AGENT);
   writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);

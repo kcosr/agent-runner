@@ -8,7 +8,7 @@ API. It is a client of the daemon only — there is no standalone mode.
 
 1. Start the daemon:
    ```bash
-   task-runner serve
+   agent-runner serve
    ```
 2. Open the HTTP base URL printed on startup (e.g.
    `http://127.0.0.1:4773/`).
@@ -20,10 +20,10 @@ those plus the active run id.
 
 ## Daemon Token
 
-If the daemon was started with `TASK_RUNNER_DAEMON_AUTH_ENABLED=true`,
+If the daemon was started with `AGENT_RUNNER_DAEMON_AUTH_ENABLED=true`,
 open Settings -> General and enter the shared daemon token. The dashboard
 stores the trimmed value in `localStorage` under
-`task-runner.daemonToken`. Save updates future API, attachment, and SSE
+`agent-runner.daemonToken`. Save updates future API, attachment, and SSE
 requests without a page reload; Clear removes the stored value and future
 requests omit Authorization.
 
@@ -70,7 +70,7 @@ A multi-surface workspace:
 
 The center surface defaults to Board. The toolbar view-mode toggle switches
 between Board and List, and the durable mode choice persists in
-`task-runner:web:dashboard-view-state.viewMode`. Selecting a run opens one
+`agent-runner:web:dashboard-view-state.viewMode`. Selecting a run opens one
 resizable selected-run panel. Its header owns the run identity plus action
 toolbar, and the tabs below the toolbar switch between Chat, Detail,
 Notes, Tasks, and Attachments. Chat does not create a separate chat route
@@ -257,7 +257,7 @@ initial message, because before-attempt hooks may rewrite the prompt. If a
 hook clears `attempt.prompt`, Chat does not fall back to the original run
 message. Attempts imported from a bootstrapped backend session suppress
 that System prompt card because the message came from backend-owned
-history rather than a task-runner-authored handoff. Later resume sessions
+history rather than an agent-runner-authored handoff. Later resume sessions
 keep their stored session message as a user bubble, and automatic
 follow-up or retry prompts continue to render as System cards.
 Chat shows the existing loading skeleton until timeline history is available,
@@ -420,7 +420,7 @@ The web package is a workspace under `apps/web`.
 
 ```bash
 # In one terminal: run the daemon the dashboard talks to.
-task-runner serve
+agent-runner serve
 
 # In another terminal: start the Vite dev server (proxies /api to the daemon).
 cd apps/web
@@ -428,7 +428,7 @@ npm run dev
 ```
 
 The dev server listens on port 4174 and proxies `/api` and
-`/app-config.json` to `TASK_RUNNER_WEB_PROXY_TARGET` (default
+`/app-config.json` to `AGENT_RUNNER_WEB_PROXY_TARGET` (default
 `http://127.0.0.1:4773`).
 
 Build and tests:
@@ -438,7 +438,7 @@ npm run build    # tsc --noEmit && vite build (output to dist/)
 npm run test     # vitest run
 ```
 
-The production build is bundled and served by `task-runner serve`; there
+The production build is bundled and served by `agent-runner serve`; there
 is no standalone web server in the shipped runtime.
 
 ## Data flow summary

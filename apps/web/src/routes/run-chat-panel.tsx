@@ -1,5 +1,5 @@
+import type { RunDetail } from "@agent-runner/core/contracts/runs.js";
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { RunDetail } from "@task-runner/core/contracts/runs.js";
 import {
   type FormEvent,
   Fragment,

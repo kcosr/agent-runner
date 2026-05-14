@@ -3,8 +3,8 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
-export const TASK_RUNNER_CONFIG_DIR_ENV = "TASK_RUNNER_CONFIG_DIR";
-export const TASK_RUNNER_STATE_DIR_ENV = "TASK_RUNNER_STATE_DIR";
+export const AGENT_RUNNER_CONFIG_DIR_ENV = "AGENT_RUNNER_CONFIG_DIR";
+export const AGENT_RUNNER_STATE_DIR_ENV = "AGENT_RUNNER_STATE_DIR";
 export const UNKNOWN_REPO_KEY = "unknown";
 
 type DefinitionKind = "agent" | "assignment";
@@ -43,24 +43,24 @@ export function isPathArg(arg: string): boolean {
   return isAbsolute(arg) || arg.startsWith("./") || arg.startsWith("../");
 }
 
-export function resolveTaskRunnerConfigDir(env: NodeJS.ProcessEnv = process.env): string {
-  const explicit = nonEmpty(env[TASK_RUNNER_CONFIG_DIR_ENV]);
+export function resolveAgentRunnerConfigDir(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = nonEmpty(env[AGENT_RUNNER_CONFIG_DIR_ENV]);
   if (explicit) return explicit;
 
   const xdgConfigHome = nonEmpty(env.XDG_CONFIG_HOME);
-  if (xdgConfigHome) return join(xdgConfigHome, "task-runner");
+  if (xdgConfigHome) return join(xdgConfigHome, "agent-runner");
 
-  return join(resolvedHome(env), ".config", "task-runner");
+  return join(resolvedHome(env), ".config", "agent-runner");
 }
 
-export function resolveTaskRunnerStateDir(env: NodeJS.ProcessEnv = process.env): string {
-  const explicit = nonEmpty(env[TASK_RUNNER_STATE_DIR_ENV]);
+export function resolveAgentRunnerStateDir(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = nonEmpty(env[AGENT_RUNNER_STATE_DIR_ENV]);
   if (explicit) return explicit;
 
   const xdgStateHome = nonEmpty(env.XDG_STATE_HOME);
-  if (xdgStateHome) return join(xdgStateHome, "task-runner");
+  if (xdgStateHome) return join(xdgStateHome, "agent-runner");
 
-  return join(resolvedHome(env), ".local", "state", "task-runner");
+  return join(resolvedHome(env), ".local", "state", "agent-runner");
 }
 
 export function definitionLayout(kind: DefinitionKind): { dirName: string; fileName: string } {
@@ -74,27 +74,27 @@ export function resolveDefinitionRoot(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   const { dirName } = definitionLayout(kind);
-  return join(resolveTaskRunnerConfigDir(env), dirName);
+  return join(resolveAgentRunnerConfigDir(env), dirName);
 }
 
 export function resolveHooksRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return join(resolveTaskRunnerConfigDir(env), "hooks");
+  return join(resolveAgentRunnerConfigDir(env), "hooks");
 }
 
 export function resolveBackendsRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return join(resolveTaskRunnerConfigDir(env), "backends");
+  return join(resolveAgentRunnerConfigDir(env), "backends");
 }
 
 export function resolveTasksRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return join(resolveTaskRunnerConfigDir(env), "tasks");
+  return join(resolveAgentRunnerConfigDir(env), "tasks");
 }
 
 export function resolveLaunchersRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return join(resolveTaskRunnerConfigDir(env), "launchers");
+  return join(resolveAgentRunnerConfigDir(env), "launchers");
 }
 
 export function resolveEnvironmentsRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return join(resolveTaskRunnerConfigDir(env), "environments");
+  return join(resolveAgentRunnerConfigDir(env), "environments");
 }
 
 export function hookFilenameCandidates(): readonly string[] {
@@ -159,7 +159,7 @@ export function deriveRepoKey(cwd: string = process.cwd()): string {
 }
 
 export function resolveRunsRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return join(resolveTaskRunnerStateDir(env), "runs");
+  return join(resolveAgentRunnerStateDir(env), "runs");
 }
 
 export function resolveRunsBucketDir(bucket: string, env: NodeJS.ProcessEnv = process.env): string {

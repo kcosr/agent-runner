@@ -47,7 +47,7 @@ Scheduled work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-run-loop-schedule-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-run-loop-schedule-"));
 }
 
 function writeBundle(baseDir) {
@@ -400,7 +400,7 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: `task-runner-${clone.runId}`,
+      containerName: `agent-runner-${clone.runId}`,
       containerId: "old-container",
       workspace: {
         scope: "run",
@@ -489,7 +489,7 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   assert.equal(cloneManifest.resetSeed.parentRunId, reuse.runId);
   assert.equal(
     cloneManifest.executionEnvironment.containerName,
-    `task-runner-${cloneManifest.runId}`,
+    `agent-runner-${cloneManifest.runId}`,
   );
   assert.equal(cloneManifest.executionEnvironment.containerId, null);
   assert.equal(
@@ -518,7 +518,7 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-run-loop-fail") {
+if (cmd === "inspect" && target === "agent-runner-run-loop-fail") {
   process.exit(1);
 }
 if (cmd === "inspect" && target === "container-run-loop-fail") {
@@ -550,7 +550,7 @@ process.exit(0);
     lastError: null,
     image: "node:22",
     lifetime: "run",
-    containerName: "task-runner-run-loop-fail",
+    containerName: "agent-runner-run-loop-fail",
     containerId: null,
     workspace: null,
     lifecycle: {

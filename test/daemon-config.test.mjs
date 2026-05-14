@@ -36,8 +36,8 @@ test("daemon config keeps logical and effective connect URLs aligned when connec
 
 test("daemon config resolves connect-host from env and reuses the logical port by default", () => {
   const result = resolveHostMode(undefined, undefined, undefined, {
-    TASK_RUNNER_CONNECT: "ws://remote-daemon.internal:4773/control?view=full#frag",
-    TASK_RUNNER_CONNECT_HOST: "prod-box",
+    AGENT_RUNNER_CONNECT: "ws://remote-daemon.internal:4773/control?view=full#frag",
+    AGENT_RUNNER_CONNECT_HOST: "prod-box",
   });
   assert.equal(result.mode, "daemon");
   assert.equal(result.connectUrl, "ws://remote-daemon.internal:4773/control?view=full#frag");
@@ -56,8 +56,8 @@ test("daemon config lets CLI flags override connect-host env settings", () => {
     "staging-box",
     "5773",
     {
-      TASK_RUNNER_CONNECT_HOST: "prod-box",
-      TASK_RUNNER_CONNECT_LOCAL_PORT: "6773",
+      AGENT_RUNNER_CONNECT_HOST: "prod-box",
+      AGENT_RUNNER_CONNECT_LOCAL_PORT: "6773",
     },
   );
   assert.equal(result.mode, "daemon");
@@ -73,11 +73,11 @@ test("daemon config lets CLI flags override connect-host env settings", () => {
 test("daemon config rejects connect-host and local-port misconfigurations", () => {
   assert.throws(
     () => resolveHostMode(undefined, "prod-box", undefined, {}),
-    /--connect-host requires --connect or TASK_RUNNER_CONNECT/,
+    /--connect-host requires --connect or AGENT_RUNNER_CONNECT/,
   );
   assert.throws(
     () => resolveHostMode("ws://example.com:4773/", undefined, "5773", {}),
-    /--connect-local-port requires --connect-host or TASK_RUNNER_CONNECT_HOST/,
+    /--connect-local-port requires --connect-host or AGENT_RUNNER_CONNECT_HOST/,
   );
   assert.throws(
     () => resolveHostMode("ws://example.com:4773/", "prod-box", "abc", {}),
@@ -93,8 +93,8 @@ test("daemon auth config enables only explicit truthy values and trims the token
   for (const value of ["true", "TRUE", "1", "yes", "Yes", "on", "ON"]) {
     assert.deepEqual(
       resolveDaemonAuthConfig({
-        TASK_RUNNER_DAEMON_AUTH_ENABLED: value,
-        TASK_RUNNER_DAEMON_TOKEN: "  daemon-secret  ",
+        AGENT_RUNNER_DAEMON_AUTH_ENABLED: value,
+        AGENT_RUNNER_DAEMON_TOKEN: "  daemon-secret  ",
       }),
       {
         enabled: true,
@@ -106,8 +106,8 @@ test("daemon auth config enables only explicit truthy values and trims the token
   for (const value of [undefined, "", "false", "0", "no", "off", "enabled"]) {
     assert.deepEqual(
       resolveDaemonAuthConfig({
-        TASK_RUNNER_DAEMON_AUTH_ENABLED: value,
-        TASK_RUNNER_DAEMON_TOKEN: "",
+        AGENT_RUNNER_DAEMON_AUTH_ENABLED: value,
+        AGENT_RUNNER_DAEMON_TOKEN: "",
       }),
       { enabled: false },
     );
@@ -118,21 +118,21 @@ test("daemon auth config requires a non-empty token when enabled without leaking
   assert.throws(
     () =>
       resolveDaemonAuthConfig({
-        TASK_RUNNER_DAEMON_AUTH_ENABLED: "true",
+        AGENT_RUNNER_DAEMON_AUTH_ENABLED: "true",
       }),
     (error) =>
       error instanceof Error &&
-      error.message.includes("TASK_RUNNER_DAEMON_TOKEN") &&
+      error.message.includes("AGENT_RUNNER_DAEMON_TOKEN") &&
       !error.message.includes("daemon-secret"),
   );
 
   assert.throws(
     () =>
       resolveDaemonAuthConfig({
-        TASK_RUNNER_DAEMON_AUTH_ENABLED: "on",
-        TASK_RUNNER_DAEMON_TOKEN: "   ",
+        AGENT_RUNNER_DAEMON_AUTH_ENABLED: "on",
+        AGENT_RUNNER_DAEMON_TOKEN: "   ",
       }),
-    /TASK_RUNNER_DAEMON_TOKEN/,
+    /AGENT_RUNNER_DAEMON_TOKEN/,
   );
 });
 

@@ -53,7 +53,7 @@ Agent prompt.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-resume-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-resume-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -373,7 +373,7 @@ test("resume: codex runs reuse the frozen transport instead of current env", asy
     },
   };
 
-  const first = await withEnv({ TASK_RUNNER_CODEX_WS_URL: initialTransport.transport.url }, () =>
+  const first = await withEnv({ AGENT_RUNNER_CODEX_WS_URL: initialTransport.transport.url }, () =>
     runIn(dir, {
       backend: codexMockBackend(async (ctx) => {
         assert.deepEqual(ctx.backendConfig, initialTransport);
@@ -394,7 +394,7 @@ test("resume: codex runs reuse the frozen transport instead of current env", asy
   );
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
-  const second = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://changed.example/socket" }, () =>
+  const second = await withEnv({ AGENT_RUNNER_CODEX_WS_URL: "ws://changed.example/socket" }, () =>
     runIn(dir, {
       backend: codexMockBackend(async (ctx) => {
         assert.equal(ctx.resumeSessionId, "thr-codex");
@@ -436,31 +436,33 @@ test("resume: codex UDS runs reuse frozen transport and ignore env drift", async
     },
   };
 
-  const first = await withEnv({ TASK_RUNNER_CODEX_UDS_PATH: initialTransport.transport.path }, () =>
-    runIn(dir, {
-      backend: codexMockBackend(async (ctx) => {
-        assert.deepEqual(ctx.backendConfig, initialTransport);
-        updateTasksForPrompt(ctx.prompt, {
-          t1: { status: "blocked", notes: "waiting on dependency" },
-        });
-        return {
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: "thr-codex-uds",
-          transcript: "blocked",
-          rawStdout: "",
-          rawStderr: "",
-        };
+  const first = await withEnv(
+    { AGENT_RUNNER_CODEX_UDS_PATH: initialTransport.transport.path },
+    () =>
+      runIn(dir, {
+        backend: codexMockBackend(async (ctx) => {
+          assert.deepEqual(ctx.backendConfig, initialTransport);
+          updateTasksForPrompt(ctx.prompt, {
+            t1: { status: "blocked", notes: "waiting on dependency" },
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "thr-codex-uds",
+            transcript: "blocked",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        }),
       }),
-    }),
   );
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await withEnv(
     {
-      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/changed-codex.sock",
-      TASK_RUNNER_CODEX_WS_URL: "ws://changed.example/socket",
+      AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/changed-codex.sock",
+      AGENT_RUNNER_CODEX_WS_URL: "ws://changed.example/socket",
     },
     () =>
       runIn(dir, {
@@ -699,7 +701,7 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
 
   assert.equal(second.exitCode, 0);
   // The prompt should be ONLY the new-tasks reminder, no leading whitespace.
-  assert.ok(seenPrompt.startsWith("(task-runner:"), "prompt starts with the reminder");
+  assert.ok(seenPrompt.startsWith("(agent-runner:"), "prompt starts with the reminder");
   assert.ok(seenPrompt.includes("1 new task has been added"));
   assert.ok(!seenPrompt.includes("\n\n\n"), "no triple newlines from empty message slot");
 });
@@ -1180,7 +1182,7 @@ test("resume: text summary includes the resume-run hint with the run id", async 
       assert.ok(
         stderr.includes("To continue this run, provide a follow-up message or add a task:"),
       );
-      assert.ok(stderr.includes(`task-runner run --resume-run ${outcome.runId}`));
+      assert.ok(stderr.includes(`agent-runner run --resume-run ${outcome.runId}`));
     } finally {
       process.chdir(originalCwd);
     }

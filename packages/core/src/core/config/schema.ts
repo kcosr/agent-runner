@@ -519,12 +519,12 @@ const assignmentConfigBaseSchema = z.object({
   schedule: scheduleConfigSchema.optional(),
   maxRetries: z.number().int().min(0).max(20).default(DEFAULT_MAX_RETRIES),
   // Documentation surface for the human / script invoking
-  // task-runner, NOT part of the prompt sent to the backend.
+  // agent-runner, NOT part of the prompt sent to the backend.
   // Printed to stderr on fresh `run` and `init` (never on
   // --resume-run). Interpolated against runtime vars and the
   // runner-injected vars ({{run_id}}, {{assignment_name}},
   // {{config_dir}}, {{state_dir}},
-  // {{task_runner_cmd}}, etc.).
+  // {{agent_runner_cmd}}, etc.).
   // Frozen into `manifest.callerInstructions` at first write so
   // `status --output-format json --field callerInstructions` can
   // always re-fetch it.

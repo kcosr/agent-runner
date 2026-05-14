@@ -67,16 +67,16 @@ callerInstructions: |
   and risk analysis live in the **planning** run's task notes —
   pull them via:
 
-      {{task_runner_cmd}} run status <planning-run-id>
+      {{agent_runner_cmd}} run status <planning-run-id>
 
   If you don't know the planning run id, it's captured in this
   run's first task notes as part of orient.
 
   ## Executing the plan
 
-      {{task_runner_cmd}} run brief {{run_id}}
-      {{task_runner_cmd}} run ready {{run_id}}
-      {{task_runner_cmd}} run --resume-run {{run_id}}
+      {{agent_runner_cmd}} run brief {{run_id}}
+      {{agent_runner_cmd}} run ready {{run_id}}
+      {{agent_runner_cmd}} run --resume-run {{run_id}}
 
   Use `run brief` to inspect the frozen worker handoff,
   `run ready` to approve the initialized implementer run for
@@ -92,7 +92,7 @@ callerInstructions: |
   list in this run remains the canonical execution contract.
 
   The `internal_review` task in this plan launches a nested
-  `{{task_runner_cmd}} run` against the `code-reviewer` agent.
+  `{{agent_runner_cmd}} run` against the `code-reviewer` agent.
   The caller environment must allow one nested review run, or
   that step will be rejected.
 
@@ -106,7 +106,7 @@ callerInstructions: |
 
   ## How the reviewer sees your work
 
-  The internal-review task launches a nested `{{task_runner_cmd}} run`
+  The internal-review task launches a nested `{{agent_runner_cmd}} run`
   against the `code-reviewer` agent with
   `--var implementation_run_id={{run_id}}`. The reviewer reads
   this run's canonical task state by run id and runs its
@@ -130,7 +130,7 @@ callerInstructions: |
 
   Start with:
 
-      {{task_runner_cmd}} run status {{run_id}}
+      {{agent_runner_cmd}} run status {{run_id}}
 
   The `self_check` task carries the synthesis of what shipped,
   the touched files, test results, and a pointer to the review
@@ -141,7 +141,7 @@ callerInstructions: |
   approves merging the PR and fast-forwarding the main
   worktree.
 
-  The review run is a separate task-runner run; its findings
+  The review run is a separate agent-runner run; its findings
   live in that run's own workspace and are referenced by id
   from the internal-review task's notes here.
 
@@ -228,10 +228,10 @@ tasks:
 
       ## Preflight: nested review allowed
 
-      This plan launches a nested `{{task_runner_cmd}} run`
+      This plan launches a nested `{{agent_runner_cmd}} run`
       against the `code-reviewer` agent in `internal_review`.
       If your surrounding environment disallows nested
-      task-runner reviews, mark THIS task `blocked` with a
+      agent-runner reviews, mark THIS task `blocked` with a
       note telling the caller that nested review must be
       enabled before execution can continue. Do not proceed
       into the implementation tasks if the review step cannot
@@ -247,9 +247,9 @@ tasks:
       `assignment-summary.md`, you can load it for additional
       context:
 
-          {{task_runner_cmd}} attachment list {{run_id}} --scope group --output-format json
-          mkdir -p /tmp/task-runner-plan-artifacts-{{run_id}}
-          {{task_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/task-runner-plan-artifacts-{{run_id}}/
+          {{agent_runner_cmd}} attachment list {{run_id}} --scope group --output-format json
+          mkdir -p /tmp/agent-runner-plan-artifacts-{{run_id}}
+          {{agent_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/agent-runner-plan-artifacts-{{run_id}}/
 
       In the group-scoped JSON output, find the row whose `name` is
       `assignment-summary.md` and use that row's `ownerRunId` plus
@@ -276,7 +276,7 @@ tasks:
       If you want the full planning context (impact survey,
       duplication check, risk analysis), pull it via:
 
-          {{task_runner_cmd}} run status <<PLACEHOLDER_PLANNING_RUN_ID>> \
+          {{agent_runner_cmd}} run status <<PLACEHOLDER_PLANNING_RUN_ID>> \
             --output-format json --field tasks
 
       Paste the planning run id into this task's Notes for
@@ -495,7 +495,7 @@ tasks:
       when launching the nested code review. If hooks fail or the
       tree is not clean, fix that here before moving on.
   - id: internal_review
-    title: Internal code review via task-runner
+    title: Internal code review via agent-runner
     body: |
       **Category**: process
 
@@ -507,7 +507,7 @@ tasks:
       launching the reviewer:
 
         1. Inspect this run with
-           `{{task_runner_cmd}} run status {{run_id}} --output-format json --field tasks`
+           `{{agent_runner_cmd}} run status {{run_id}} --output-format json --field tasks`
            and scan every task above this one.
         2. Every prior task must have status `completed`.
            If a prior task is still `in_progress`, `pending`,
@@ -526,10 +526,10 @@ tasks:
            delayed one.
 
       Once every prior task is finalized, launch the bundled
-      `code-review` assignment as a nested `{{task_runner_cmd}} run`,
+      `code-review` assignment as a nested `{{agent_runner_cmd}} run`,
       passing this plan's run id as the implementation context:
 
-          {{task_runner_cmd}} run \
+          {{agent_runner_cmd}} run \
             --agent code-reviewer \
             --assignment code-review \
             --name "<same-short-topic-name>" \
@@ -557,13 +557,13 @@ tasks:
           such as `Review` or `Implementation`
         - never include cwd paths, repo names, or git ranges
 
-      The review produces its own task-runner run with its
+      The review produces its own agent-runner run with its
       own run id. Capture that review run id in this task's
       Notes immediately after launching. Once the review
       finishes, check its **terminal status** first — not
       just its synthesis:
 
-          {{task_runner_cmd}} run status <review-run-id> --output-format json \
+          {{agent_runner_cmd}} run status <review-run-id> --output-format json \
             --field status
 
       The code-review assignment has a final `approval`
@@ -581,10 +581,10 @@ tasks:
 
       Pull the synthesis and the approval decision record:
 
-          {{task_runner_cmd}} run status <review-run-id> --output-format json \
+          {{agent_runner_cmd}} run status <review-run-id> --output-format json \
             --field tasks | jq -r '.tasks[] | select(.id=="synthesis") | .notes'
 
-          {{task_runner_cmd}} run status <review-run-id> --output-format json \
+          {{agent_runner_cmd}} run status <review-run-id> --output-format json \
             --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
       Paste the reviewer's top-findings synthesis and the
@@ -596,7 +596,7 @@ tasks:
       "Path to approval" list here so `apply_review_fixes` knows exactly
       what must be fixed.
 
-      This nested task-runner invocation consumes one level
+      This nested agent-runner invocation consumes one level
       of nested review (implementer → reviewer). If the
       review launch is rejected by recursion policy, block
       and surface that to the caller instead of continuing.
@@ -625,7 +625,7 @@ tasks:
       After applying fixes, resume the review run for a
       delta pass:
 
-          {{task_runner_cmd}} run --resume-run <review-run-id> \
+          {{agent_runner_cmd}} run --resume-run <review-run-id> \
             "Fixes applied. <one-line summary per prior finding>."
 
       The reviewer does a focused delta pass, not a full
@@ -634,7 +634,7 @@ tasks:
       approval gate, and the only signal that the change
       is cleared to ship. Check after each delta pass:
 
-          {{task_runner_cmd}} run status <review-run-id> --output-format json \
+          {{agent_runner_cmd}} run status <review-run-id> --output-format json \
             --field status
 
       If it still returns `blocked`, read the updated
@@ -729,7 +729,7 @@ tasks:
            explicitly by file path (not `git add -A` — that can
            pick up files you didn't intend, including
            runtime-state artifacts under the configured
-           task-runner state dir) and create a final focused
+           agent-runner state dir) and create a final focused
            follow-up commit. Follow the repo's commit-message
            convention from `orient`.
         3. If the repo uses pre-commit hooks, let them run. If
@@ -854,9 +854,9 @@ depend on. Do not skip ahead.
 Native subagent delegation is allowed for exploration and
 implementation (Claude's Agent tool, Codex subagents,
 whatever your backend supports). Native subagents do not
-count against task-runner's recursion depth. The one
+count against agent-runner's recursion depth. The one
 depth-consuming invocation in this plan is the nested
-`{{task_runner_cmd}} run` in `internal_review`; make sure the
+`{{agent_runner_cmd}} run` in `internal_review`; make sure the
 caller environment allows that nested review before execution.
 
 The task list is locked (`lockedFields: [tasks]`). You

@@ -11,14 +11,14 @@ function usage() {
     "",
     "Dry-run by default. Use --write to update manifests in place.",
     "Migrates schemaVersion 12 manifests to 13 by adding resolvedBackendArgs: [].",
-    "Pass a state root such as ~/.local/state/task-runner with --root.",
+    "Pass a state root such as ~/.local/state/agent-runner with --root.",
     "Use repeated --repo filters to limit migration to selected repo buckets.",
     "Use repeated --file paths to migrate only specific run.json manifests.",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  let root = join(homedir(), ".local/state/task-runner");
+  let root = join(homedir(), ".local/state/agent-runner");
   let write = false;
   const repos = [];
   const files = [];
@@ -201,7 +201,7 @@ function main() {
 try {
   main();
 } catch (err) {
-  process.stderr.write(`task-runner: ${err.message}\n`);
+  process.stderr.write(`agent-runner: ${err.message}\n`);
   process.stderr.write(`${usage()}\n`);
   process.exitCode = 1;
 }

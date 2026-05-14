@@ -8,7 +8,7 @@ import { EmptyPromptError, runAgent } from "../packages/core/dist/core/run/run-l
 import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-emptyprompt-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-emptyprompt-"));
 }
 
 function writeAgent(baseDir, name, body) {

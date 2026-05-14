@@ -1,4 +1,4 @@
-export const DAEMON_TOKEN_STORAGE_KEY = "task-runner.daemonToken";
+export const DAEMON_TOKEN_STORAGE_KEY = "agent-runner.daemonToken";
 
 export function normalizeDaemonToken(value: string | null | undefined): string | null {
   const trimmed = value?.trim();

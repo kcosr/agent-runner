@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
+  AGENT_RUNNER_CALL_DEPTH_ENV,
+  AGENT_RUNNER_MAX_CALL_DEPTH_ENV,
+  AGENT_RUNNER_PARENT_RUN_ID_ENV,
   DEFAULT_MAX_CALL_DEPTH,
   RecursionDepthError,
-  TASK_RUNNER_CALL_DEPTH_ENV,
-  TASK_RUNNER_MAX_CALL_DEPTH_ENV,
-  TASK_RUNNER_PARENT_RUN_ID_ENV,
   buildChildRecursionEnv,
   checkRecursionDepth,
   readParentRunIdFromEnv,
@@ -32,8 +32,8 @@ test("readRecursionState: defaults when env is empty", () => {
 
 test("readRecursionState: parses numeric env values", () => {
   const state = readRecursionState({
-    [TASK_RUNNER_CALL_DEPTH_ENV]: "2",
-    [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: "10",
+    [AGENT_RUNNER_CALL_DEPTH_ENV]: "2",
+    [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: "10",
   });
   assert.equal(state.currentDepth, 2);
   assert.equal(state.maxDepth, 10);
@@ -41,8 +41,8 @@ test("readRecursionState: parses numeric env values", () => {
 
 test("readRecursionState: invalid values fall back to defaults", () => {
   const state = readRecursionState({
-    [TASK_RUNNER_CALL_DEPTH_ENV]: "not-a-number",
-    [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: "-5",
+    [AGENT_RUNNER_CALL_DEPTH_ENV]: "not-a-number",
+    [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: "-5",
   });
   assert.equal(state.currentDepth, 0);
   assert.equal(state.maxDepth, DEFAULT_MAX_CALL_DEPTH);
@@ -50,7 +50,7 @@ test("readRecursionState: invalid values fall back to defaults", () => {
 
 test("readRecursionState: negative depth treated as 0", () => {
   const state = readRecursionState({
-    [TASK_RUNNER_CALL_DEPTH_ENV]: "-1",
+    [AGENT_RUNNER_CALL_DEPTH_ENV]: "-1",
   });
   assert.equal(state.currentDepth, 0);
 });
@@ -78,27 +78,27 @@ test("checkRecursionDepth: above cap throws too", () => {
 
 test("buildChildRecursionEnv: increments depth, propagates max", () => {
   const env = buildChildRecursionEnv({ currentDepth: 1, maxDepth: 4 });
-  assert.equal(env[TASK_RUNNER_CALL_DEPTH_ENV], "2");
-  assert.equal(env[TASK_RUNNER_MAX_CALL_DEPTH_ENV], "4");
+  assert.equal(env[AGENT_RUNNER_CALL_DEPTH_ENV], "2");
+  assert.equal(env[AGENT_RUNNER_MAX_CALL_DEPTH_ENV], "4");
 });
 
 test("buildChildRecursionEnv: starts a fresh chain at depth 1", () => {
   const env = buildChildRecursionEnv({ currentDepth: 0, maxDepth: 4 });
-  assert.equal(env[TASK_RUNNER_CALL_DEPTH_ENV], "1");
+  assert.equal(env[AGENT_RUNNER_CALL_DEPTH_ENV], "1");
 });
 
 test("readParentRunIdFromEnv: trims and normalizes the lineage parent env", () => {
   assert.equal(
-    readParentRunIdFromEnv({ [TASK_RUNNER_PARENT_RUN_ID_ENV]: " parent-1 " }),
+    readParentRunIdFromEnv({ [AGENT_RUNNER_PARENT_RUN_ID_ENV]: " parent-1 " }),
     "parent-1",
   );
-  assert.equal(readParentRunIdFromEnv({ [TASK_RUNNER_PARENT_RUN_ID_ENV]: "   " }), null);
+  assert.equal(readParentRunIdFromEnv({ [AGENT_RUNNER_PARENT_RUN_ID_ENV]: "   " }), null);
 });
 
 test("buildChildRecursionEnv: includes the parent run id when provided", () => {
   const env = buildChildRecursionEnv({ currentDepth: 1, maxDepth: 4 }, "run-parent");
-  assert.equal(env[TASK_RUNNER_CALL_DEPTH_ENV], "2");
-  assert.equal(env[TASK_RUNNER_PARENT_RUN_ID_ENV], "run-parent");
+  assert.equal(env[AGENT_RUNNER_CALL_DEPTH_ENV], "2");
+  assert.equal(env[AGENT_RUNNER_PARENT_RUN_ID_ENV], "run-parent");
 });
 
 // ─── runAgent integration tests ─────────────────────────────────────────────
@@ -123,7 +123,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-depth-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-depth-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -190,21 +190,21 @@ test("runAgent: default cap is 1 — top-level allowed, nested refused", async (
   const captured = {};
   await withEnv(
     {
-      [TASK_RUNNER_CALL_DEPTH_ENV]: undefined,
-      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
+      [AGENT_RUNNER_CALL_DEPTH_ENV]: undefined,
+      [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
     },
     async () => {
       await runIn(dir, { backend: captureBackend(captured) });
     },
   );
-  assert.equal(captured.env[TASK_RUNNER_CALL_DEPTH_ENV], "1");
-  assert.equal(captured.env[TASK_RUNNER_MAX_CALL_DEPTH_ENV], "1");
+  assert.equal(captured.env[AGENT_RUNNER_CALL_DEPTH_ENV], "1");
+  assert.equal(captured.env[AGENT_RUNNER_MAX_CALL_DEPTH_ENV], "1");
 
   // The would-be grandchild (depth=1, default cap 1) is refused.
   await withEnv(
     {
-      [TASK_RUNNER_CALL_DEPTH_ENV]: "1",
-      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
+      [AGENT_RUNNER_CALL_DEPTH_ENV]: "1",
+      [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
     },
     async () => {
       await assert.rejects(
@@ -228,16 +228,16 @@ test("runAgent: clean env → child env has depth=1", async () => {
   const captured = {};
   await withEnv(
     {
-      [TASK_RUNNER_CALL_DEPTH_ENV]: undefined,
-      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
+      [AGENT_RUNNER_CALL_DEPTH_ENV]: undefined,
+      [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
     },
     async () => {
       const outcome = await runIn(dir, { backend: captureBackend(captured) });
-      assert.equal(captured.env[TASK_RUNNER_PARENT_RUN_ID_ENV], outcome.runId);
+      assert.equal(captured.env[AGENT_RUNNER_PARENT_RUN_ID_ENV], outcome.runId);
     },
   );
-  assert.equal(captured.env[TASK_RUNNER_CALL_DEPTH_ENV], "1");
-  assert.equal(captured.env[TASK_RUNNER_MAX_CALL_DEPTH_ENV], String(DEFAULT_MAX_CALL_DEPTH));
+  assert.equal(captured.env[AGENT_RUNNER_CALL_DEPTH_ENV], "1");
+  assert.equal(captured.env[AGENT_RUNNER_MAX_CALL_DEPTH_ENV], String(DEFAULT_MAX_CALL_DEPTH));
 });
 
 test("runAgent: nested launches auto-link parentRunId from env into the child manifest", async () => {
@@ -249,7 +249,7 @@ test("runAgent: nested launches auto-link parentRunId from env into the child ma
   const outcome = await runIn(dir, {
     backend: captureBackend({}),
     env: {
-      [TASK_RUNNER_PARENT_RUN_ID_ENV]: parent.runId,
+      [AGENT_RUNNER_PARENT_RUN_ID_ENV]: parent.runId,
     },
   });
   assert.equal(outcome.manifest.parentRunId, parent.runId);
@@ -264,15 +264,15 @@ test("runAgent: depth=2 in env → child env has depth=3", async () => {
   const captured = {};
   await withEnv(
     {
-      [TASK_RUNNER_CALL_DEPTH_ENV]: "2",
-      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: "5",
+      [AGENT_RUNNER_CALL_DEPTH_ENV]: "2",
+      [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: "5",
     },
     async () => {
       await runIn(dir, { backend: captureBackend(captured) });
     },
   );
-  assert.equal(captured.env[TASK_RUNNER_CALL_DEPTH_ENV], "3");
-  assert.equal(captured.env[TASK_RUNNER_MAX_CALL_DEPTH_ENV], "5");
+  assert.equal(captured.env[AGENT_RUNNER_CALL_DEPTH_ENV], "3");
+  assert.equal(captured.env[AGENT_RUNNER_MAX_CALL_DEPTH_ENV], "5");
 });
 
 test("runAgent: at the cap throws RecursionDepthError before any work", async () => {
@@ -283,8 +283,8 @@ test("runAgent: at the cap throws RecursionDepthError before any work", async ()
   const captured = {};
   await withEnv(
     {
-      [TASK_RUNNER_CALL_DEPTH_ENV]: "4",
-      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: "4",
+      [AGENT_RUNNER_CALL_DEPTH_ENV]: "4",
+      [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: "4",
     },
     async () => {
       await assert.rejects(
@@ -308,8 +308,8 @@ test("runAgent: above the cap also throws", async () => {
 
   await withEnv(
     {
-      [TASK_RUNNER_CALL_DEPTH_ENV]: "10",
-      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: "4",
+      [AGENT_RUNNER_CALL_DEPTH_ENV]: "10",
+      [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: "4",
     },
     async () => {
       await assert.rejects(() => runIn(dir, { backend: captureBackend({}) }), RecursionDepthError);
@@ -325,12 +325,12 @@ test("runAgent: raised cap allows deeper invocation", async () => {
   const captured = {};
   await withEnv(
     {
-      [TASK_RUNNER_CALL_DEPTH_ENV]: "9",
-      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: "10",
+      [AGENT_RUNNER_CALL_DEPTH_ENV]: "9",
+      [AGENT_RUNNER_MAX_CALL_DEPTH_ENV]: "10",
     },
     async () => {
       await runIn(dir, { backend: captureBackend(captured) });
     },
   );
-  assert.equal(captured.env[TASK_RUNNER_CALL_DEPTH_ENV], "10");
+  assert.equal(captured.env[AGENT_RUNNER_CALL_DEPTH_ENV], "10");
 });

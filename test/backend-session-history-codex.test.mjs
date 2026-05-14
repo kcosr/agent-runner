@@ -10,7 +10,7 @@ import {
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-codex-history-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-codex-history-"));
 }
 
 function writeJsonl(path, records) {

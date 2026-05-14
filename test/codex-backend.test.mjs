@@ -143,18 +143,18 @@ test("buildCodexThreadParams: unrestricted sets approvalPolicy and sandbox", () 
   );
 });
 
-test("buildCodexThreadParams: projects task-runner lineage env into config", () => {
+test("buildCodexThreadParams: projects agent-runner lineage env into config", () => {
   assert.deepEqual(
     buildCodexThreadParams({
       ...baseCtx,
       env: {
-        TASK_RUNNER_CALL_DEPTH: "1",
-        TASK_RUNNER_MAX_CALL_DEPTH: "2",
-        TASK_RUNNER_PARENT_RUN_ID: "parent-run",
-        TASK_RUNNER_RUN_GROUP_ID: "group-1",
-        TASK_RUNNER_RUN_ID: "current-run",
-        TASK_RUNNER_CWD: "/repo",
-        TASK_RUNNER_CODEX_WS_URL: "ws://should-not-forward.example/socket",
+        AGENT_RUNNER_CALL_DEPTH: "1",
+        AGENT_RUNNER_MAX_CALL_DEPTH: "2",
+        AGENT_RUNNER_PARENT_RUN_ID: "parent-run",
+        AGENT_RUNNER_RUN_GROUP_ID: "group-1",
+        AGENT_RUNNER_RUN_ID: "current-run",
+        AGENT_RUNNER_CWD: "/repo",
+        AGENT_RUNNER_CODEX_WS_URL: "ws://should-not-forward.example/socket",
         SECRET_TOKEN: "should-not-forward",
         EMPTY_LINEAGE: "",
       },
@@ -162,12 +162,12 @@ test("buildCodexThreadParams: projects task-runner lineage env into config", () 
     {
       cwd: "/repo",
       config: {
-        "shell_environment_policy.set.TASK_RUNNER_CALL_DEPTH": "1",
-        "shell_environment_policy.set.TASK_RUNNER_MAX_CALL_DEPTH": "2",
-        "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "parent-run",
-        "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
-        "shell_environment_policy.set.TASK_RUNNER_RUN_ID": "current-run",
-        "shell_environment_policy.set.TASK_RUNNER_CWD": "/repo",
+        "shell_environment_policy.set.AGENT_RUNNER_CALL_DEPTH": "1",
+        "shell_environment_policy.set.AGENT_RUNNER_MAX_CALL_DEPTH": "2",
+        "shell_environment_policy.set.AGENT_RUNNER_PARENT_RUN_ID": "parent-run",
+        "shell_environment_policy.set.AGENT_RUNNER_RUN_GROUP_ID": "group-1",
+        "shell_environment_policy.set.AGENT_RUNNER_RUN_ID": "current-run",
+        "shell_environment_policy.set.AGENT_RUNNER_CWD": "/repo",
       },
     },
   );
@@ -179,16 +179,16 @@ test("buildCodexThreadParams: resume preserves extra config and lets lineage win
       {
         ...baseCtx,
         env: {
-          TASK_RUNNER_PARENT_RUN_ID: "current-run",
-          TASK_RUNNER_RUN_GROUP_ID: "group-1",
-          TASK_RUNNER_CWD: "   ",
+          AGENT_RUNNER_PARENT_RUN_ID: "current-run",
+          AGENT_RUNNER_RUN_GROUP_ID: "group-1",
+          AGENT_RUNNER_CWD: "   ",
         },
       },
       {
         threadId: "thread-123",
         config: {
           model_provider: "local",
-          "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "stale-parent",
+          "shell_environment_policy.set.AGENT_RUNNER_PARENT_RUN_ID": "stale-parent",
         },
       },
     ),
@@ -197,8 +197,8 @@ test("buildCodexThreadParams: resume preserves extra config and lets lineage win
       threadId: "thread-123",
       config: {
         model_provider: "local",
-        "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "current-run",
-        "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
+        "shell_environment_policy.set.AGENT_RUNNER_PARENT_RUN_ID": "current-run",
+        "shell_environment_policy.set.AGENT_RUNNER_RUN_GROUP_ID": "group-1",
       },
     },
   );
@@ -264,7 +264,7 @@ test("resolveCodexBackendConfig: authored config wins over override and env", ()
         transport: { type: "ws", url: "ws://override.example/socket" },
       },
       env: {
-        TASK_RUNNER_CODEX_UDS_PATH: "/tmp/env-codex.sock",
+        AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/env-codex.sock",
       },
     }),
     {
@@ -282,7 +282,7 @@ test("resolveCodexBackendConfig: override config wins over env", () => {
         transport: { type: "ws", url: "ws://override.example/socket" },
       },
       env: {
-        TASK_RUNNER_CODEX_UDS_PATH: "/tmp/env-codex.sock",
+        AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/env-codex.sock",
       },
     }),
     {
@@ -298,7 +298,7 @@ test("resolveCodexBackendConfig: env transport wins over stdio default", () => {
       authoredConfig: undefined,
       overrideConfig: undefined,
       env: {
-        TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773",
+        AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773",
       },
     }),
     {
@@ -329,7 +329,7 @@ test("resolveCodexBackendConfig: rejects malformed and conflicting env transport
         authoredConfig: undefined,
         overrideConfig: undefined,
         env: {
-          TASK_RUNNER_CODEX_WS_URL: "https://example.com/socket",
+          AGENT_RUNNER_CODEX_WS_URL: "https://example.com/socket",
         },
       }),
     /codex websocket transport requires an absolute ws:\/\/ or wss:\/\/ URL/,
@@ -341,11 +341,11 @@ test("resolveCodexBackendConfig: rejects malformed and conflicting env transport
         authoredConfig: undefined,
         overrideConfig: undefined,
         env: {
-          TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
-          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+          AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
+          AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
         },
       }),
-    /TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set/,
+    /AGENT_RUNNER_CODEX_UDS_PATH and AGENT_RUNNER_CODEX_WS_URL cannot both be set/,
   );
 });
 
@@ -761,7 +761,7 @@ async function startCodexRecoveryServer({
 }
 
 async function startCodexUdsServer(socketName = "codex.sock") {
-  const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-uds-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-runner-codex-uds-"));
   const socketPath = join(dir, socketName);
   const server = createServer();
   const wsServer = new WebSocketServer({ server });
@@ -1012,13 +1012,13 @@ test("codexBackend sends lineage config over websocket thread/start", async () =
     const result = await codexBackend.invoke({
       ...baseCtx,
       env: {
-        TASK_RUNNER_CALL_DEPTH: "1",
-        TASK_RUNNER_MAX_CALL_DEPTH: "2",
-        TASK_RUNNER_PARENT_RUN_ID: "parent-run",
-        TASK_RUNNER_RUN_GROUP_ID: "group-1",
-        TASK_RUNNER_RUN_ID: "current-run",
-        TASK_RUNNER_CWD: "/repo",
-        TASK_RUNNER_CODEX_WS_URL: "ws://should-not-forward.example/socket",
+        AGENT_RUNNER_CALL_DEPTH: "1",
+        AGENT_RUNNER_MAX_CALL_DEPTH: "2",
+        AGENT_RUNNER_PARENT_RUN_ID: "parent-run",
+        AGENT_RUNNER_RUN_GROUP_ID: "group-1",
+        AGENT_RUNNER_RUN_ID: "current-run",
+        AGENT_RUNNER_CWD: "/repo",
+        AGENT_RUNNER_CODEX_WS_URL: "ws://should-not-forward.example/socket",
         SECRET_TOKEN: "should-not-forward",
       },
       backendConfig: {
@@ -1031,12 +1031,12 @@ test("codexBackend sends lineage config over websocket thread/start", async () =
     assert.deepEqual(codexServer.capturedThreadStartParams[0], {
       cwd: "/repo",
       config: {
-        "shell_environment_policy.set.TASK_RUNNER_CALL_DEPTH": "1",
-        "shell_environment_policy.set.TASK_RUNNER_MAX_CALL_DEPTH": "2",
-        "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "parent-run",
-        "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
-        "shell_environment_policy.set.TASK_RUNNER_RUN_ID": "current-run",
-        "shell_environment_policy.set.TASK_RUNNER_CWD": "/repo",
+        "shell_environment_policy.set.AGENT_RUNNER_CALL_DEPTH": "1",
+        "shell_environment_policy.set.AGENT_RUNNER_MAX_CALL_DEPTH": "2",
+        "shell_environment_policy.set.AGENT_RUNNER_PARENT_RUN_ID": "parent-run",
+        "shell_environment_policy.set.AGENT_RUNNER_RUN_GROUP_ID": "group-1",
+        "shell_environment_policy.set.AGENT_RUNNER_RUN_ID": "current-run",
+        "shell_environment_policy.set.AGENT_RUNNER_CWD": "/repo",
       },
     });
   } finally {
@@ -1051,10 +1051,10 @@ test("codexBackend sends lineage config over websocket thread/resume", async () 
     const result = await codexBackend.invoke({
       ...baseCtx,
       env: {
-        TASK_RUNNER_PARENT_RUN_ID: "parent-run",
-        TASK_RUNNER_RUN_GROUP_ID: "group-1",
-        TASK_RUNNER_RUN_ID: "current-run",
-        TASK_RUNNER_CWD: "/repo",
+        AGENT_RUNNER_PARENT_RUN_ID: "parent-run",
+        AGENT_RUNNER_RUN_GROUP_ID: "group-1",
+        AGENT_RUNNER_RUN_ID: "current-run",
+        AGENT_RUNNER_CWD: "/repo",
       },
       resumeSessionId: "thread-123",
       backendConfig: {
@@ -1068,10 +1068,10 @@ test("codexBackend sends lineage config over websocket thread/resume", async () 
       cwd: "/repo",
       threadId: "thread-123",
       config: {
-        "shell_environment_policy.set.TASK_RUNNER_PARENT_RUN_ID": "parent-run",
-        "shell_environment_policy.set.TASK_RUNNER_RUN_GROUP_ID": "group-1",
-        "shell_environment_policy.set.TASK_RUNNER_RUN_ID": "current-run",
-        "shell_environment_policy.set.TASK_RUNNER_CWD": "/repo",
+        "shell_environment_policy.set.AGENT_RUNNER_PARENT_RUN_ID": "parent-run",
+        "shell_environment_policy.set.AGENT_RUNNER_RUN_GROUP_ID": "group-1",
+        "shell_environment_policy.set.AGENT_RUNNER_RUN_ID": "current-run",
+        "shell_environment_policy.set.AGENT_RUNNER_CWD": "/repo",
       },
     });
   } finally {
@@ -1080,12 +1080,12 @@ test("codexBackend sends lineage config over websocket thread/resume", async () 
 });
 
 test("codexBackend captures raw stdio stdout without outgoing frames or prefixes", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-stdio-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-runner-codex-stdio-"));
   const command = writeFakeCodexBin(dir);
   const rawStdoutLines = [];
 
   try {
-    const result = await withEnv({ TASK_RUNNER_CODEX_BIN: command }, () =>
+    const result = await withEnv({ AGENT_RUNNER_CODEX_BIN: command }, () =>
       codexBackend.invoke({
         ...baseCtx,
         cwd: dir,
@@ -1121,12 +1121,12 @@ test("codexBackend captures raw stdio stdout without outgoing frames or prefixes
 });
 
 test("codexBackend captures raw stdio stdout on JSON-RPC parse errors", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-stdio-malformed-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-runner-codex-stdio-malformed-"));
   const command = writeFakeCodexBin(dir);
   const rawStdoutLines = [];
 
   try {
-    const result = await withEnv({ TASK_RUNNER_CODEX_BIN: command }, () =>
+    const result = await withEnv({ AGENT_RUNNER_CODEX_BIN: command }, () =>
       codexBackend.invoke({
         ...baseCtx,
         cwd: dir,
@@ -1183,7 +1183,7 @@ test("codexBackend invokes Codex over a Unix domain socket WebSocket transport",
 });
 
 test("codexBackend surfaces UDS connection failures clearly", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-missing-uds-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-runner-codex-missing-uds-"));
   const socketPath = join(dir, "missing.sock");
 
   try {

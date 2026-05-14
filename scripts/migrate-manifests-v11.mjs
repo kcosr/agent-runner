@@ -11,13 +11,13 @@ function usage() {
     "",
     "Dry-run by default. Use --write to update manifests and attempt logs in place.",
     "Migrates schemaVersion 10 manifests to 11 and canonicalizes repairable schemaVersion 11 manifests.",
-    "Pass a state root such as ~/.local/state/task-runner with --root.",
+    "Pass a state root such as ~/.local/state/agent-runner with --root.",
     "Use repeated --repo filters to limit migration to selected repo buckets.",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  let root = join(homedir(), ".local/state/task-runner");
+  let root = join(homedir(), ".local/state/agent-runner");
   let write = false;
   const repos = [];
 

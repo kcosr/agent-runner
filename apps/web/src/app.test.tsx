@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
-import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
-import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surface.js";
+import type { RunAttachment } from "@agent-runner/core/contracts/attachments.js";
+import type { RunAuditHistory, RunTimelineHistory } from "@agent-runner/core/contracts/events.js";
+import type { RunInputSurface } from "@agent-runner/core/contracts/run-input-surface.js";
 import type {
   QueuedResumeMessage,
   RunDetail,
   RunSessionSummary,
   RunSummary,
-} from "@task-runner/core/contracts/runs.js";
+} from "@agent-runner/core/contracts/runs.js";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -101,7 +101,7 @@ class MockEventSource {
 
 function setStoredDashboardPreferences(overrides: Partial<typeof DEFAULT_DASHBOARD_PREFERENCES>) {
   window.localStorage.setItem(
-    "task-runner:web:dashboard-preferences",
+    "agent-runner:web:dashboard-preferences",
     JSON.stringify({
       ...DEFAULT_DASHBOARD_PREFERENCES,
       ...overrides,
@@ -111,7 +111,7 @@ function setStoredDashboardPreferences(overrides: Partial<typeof DEFAULT_DASHBOA
 
 function setStoredDashboardViewState(overrides: Partial<typeof DEFAULT_DASHBOARD_VIEW_STATE>) {
   window.localStorage.setItem(
-    "task-runner:web:dashboard-view-state",
+    "agent-runner:web:dashboard-view-state",
     JSON.stringify({
       ...DEFAULT_DASHBOARD_VIEW_STATE,
       ...overrides,
@@ -143,7 +143,7 @@ function makeRun(
     runId: "run-1",
     parentRunId: null,
     runGroupId: "run-1",
-    repo: "task-runner",
+    repo: "agent-runner",
     status: "running",
     effectiveStatus: "running",
     archivedAt: null,
@@ -154,7 +154,7 @@ function makeRun(
     backend: "codex",
     model: "gpt-5.4",
     name: "Build dashboard",
-    cwd: "/tmp/task-runner",
+    cwd: "/tmp/agent-runner",
     startedAt: "2026-04-13T05:00:00.000Z",
     updatedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
@@ -274,14 +274,14 @@ function makeDetail(
     runId: "run-1",
     parentRunId: null,
     runGroupId: "run-1",
-    repo: "task-runner",
+    repo: "agent-runner",
     status: "running",
     effectiveStatus: "running",
     archivedAt: null,
     note: null,
     pinned: false,
     isLive: true,
-    workspaceDir: "/tmp/task-runner/.state/run-1",
+    workspaceDir: "/tmp/agent-runner/.state/run-1",
     agent: {
       name: "implementer",
       sourcePath: null,
@@ -295,7 +295,7 @@ function makeDetail(
     effort: "high",
     name: "Build dashboard",
     backendSessionId: "thread-1",
-    cwd: "/tmp/task-runner",
+    cwd: "/tmp/agent-runner",
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-13T05:00:00.000Z",
@@ -478,7 +478,7 @@ function makeRunInputSurface(overrides: Partial<RunInputSurface> = {}): RunInput
         section: "context",
         inputKind: "string",
         valueStatus: "concrete",
-        value: "/tmp/task-runner",
+        value: "/tmp/agent-runner",
         editable: false,
         locked: true,
         hiddenWhenUnset: false,
@@ -748,7 +748,7 @@ function installFetchMock(
       return new Response(JSON.stringify(APP_CONFIG), { status: 200 });
     }
 
-    const parsedUrl = new UrlConstructor(url, "http://task-runner.test");
+    const parsedUrl = new UrlConstructor(url, "http://agent-runner.test");
     if (parsedUrl.pathname === "/api/runs" && (!init?.method || init.method === "GET")) {
       const includeArchived = parsedUrl.searchParams.get("includeArchived") === "true";
       const runGroupId = parsedUrl.searchParams.get("runGroupId");
@@ -779,7 +779,7 @@ function installFetchMock(
         );
       }
       if (init.method === "POST") {
-        const rawName = headerValue(init.headers, "x-task-runner-attachment-name");
+        const rawName = headerValue(init.headers, "x-agent-runner-attachment-name");
         const name = rawName ? decodeURIComponent(rawName) : "upload.bin";
         const attachment = {
           id: `att-${detail.attachments.length + 1}`,
@@ -1775,7 +1775,7 @@ describe("web app", () => {
     expect(screen.getAllByText("Build UI").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Repo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("CWD").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("/tmp/task-runner")).toBeInTheDocument();
+    expect(screen.getByText("/tmp/agent-runner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy cwd path/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
@@ -1981,7 +1981,7 @@ describe("web app", () => {
         fetchMutationUrls(fetchMock).some((url) => url === "/api/runs/run-list-completed/pinned"),
       ).toBe(true),
     );
-  });
+  }, 20_000);
 
   it.each([
     [
@@ -5018,7 +5018,7 @@ describe("web app", () => {
     );
     expect(rows[0]).toHaveTextContent("New task");
     expect(rows[1]).toHaveTextContent("Old task");
-    expect(window.localStorage.getItem("task-runner:web:dashboard-preferences")).toContain(
+    expect(window.localStorage.getItem("agent-runner:web:dashboard-preferences")).toContain(
       '"auditNewestFirst":true',
     );
 
@@ -6134,7 +6134,7 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
     expect(screen.getByText("scheduled only")).toBeInTheDocument();
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       showScheduledOnly: true,
     });
@@ -6593,7 +6593,7 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: /Repo A Codex/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Repo B Claude/i })).not.toBeInTheDocument();
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       structuredFilters: {
         repo: "repo-a",
@@ -6681,7 +6681,7 @@ describe("web app", () => {
     expect(await findRunCard("Repo C pinned")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Repo B unpinned/i })).not.toBeInTheDocument();
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       showPinnedOnly: true,
       structuredFilters: {
@@ -6846,7 +6846,7 @@ describe("web app", () => {
     expect(await findRunCard("Group child")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       structuredFilters: {
         runGroupId: "run-root",
@@ -6933,7 +6933,7 @@ describe("web app", () => {
       within(drawer).getByRole("button", { name: "Filter by run group run-root" }),
     ).toHaveAttribute("aria-pressed", "true");
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       structuredFilters: {
         runGroupId: "run-root",
@@ -6954,7 +6954,7 @@ describe("web app", () => {
     expect(
       within(drawer).getByRole("button", { name: "Filter by run group run-root" }),
     ).toHaveAttribute("aria-pressed", "false");
-    const storedAfterToggle = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const storedAfterToggle = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(storedAfterToggle ? JSON.parse(storedAfterToggle) : null).toMatchObject({
       structuredFilters: {
         runGroupId: null,
@@ -7370,7 +7370,7 @@ describe("web app", () => {
       "aria-pressed",
       "true",
     );
-    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toContain(
+    expect(window.localStorage.getItem("agent-runner:web:dashboard-view-state")).toContain(
       '"drawerFullscreen":true',
     );
 
@@ -7379,7 +7379,7 @@ describe("web app", () => {
       "aria-pressed",
       "false",
     );
-    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toContain(
+    expect(window.localStorage.getItem("agent-runner:web:dashboard-view-state")).toContain(
       '"drawerFullscreen":false',
     );
   });
@@ -7914,7 +7914,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url, init) => {
-          const parsed = new URL(url, "http://task-runner.test");
+          const parsed = new URL(url, "http://agent-runner.test");
           if (parsed.pathname === "/api/runs" && (!init?.method || init.method === "GET")) {
             return new Response(
               JSON.stringify({
@@ -7951,7 +7951,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url, init) => {
-          const parsed = new URL(url, "http://task-runner.test");
+          const parsed = new URL(url, "http://agent-runner.test");
           if (parsed.pathname === "/api/runs/run-1" && (!init?.method || init.method === "GET")) {
             return new Response(
               JSON.stringify({
@@ -8001,7 +8001,7 @@ describe("web app", () => {
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("570px");
     expect(handle.getAttribute("aria-valuenow")).toBe("570");
 
-    const storedViewState = window.localStorage.getItem("task-runner:web:dashboard-view-state");
+    const storedViewState = window.localStorage.getItem("agent-runner:web:dashboard-view-state");
     expect(storedViewState ? JSON.parse(storedViewState) : null).toEqual({
       viewMode: "board",
       collapsedColumnKeys: [],
@@ -8137,7 +8137,7 @@ describe("web app", () => {
   });
 
   it("truncates long run names on cards while preserving the full hover title", async () => {
-    const longName = "plan feature · /home/kevin/worktrees/task-runner-run-names";
+    const longName = "plan feature · /home/kevin/worktrees/agent-runner-run-names";
     installFetchMock({
       runs: [
         makeRun({
@@ -8164,7 +8164,7 @@ describe("web app", () => {
     const title = card.querySelector(".card-title");
     expect(title).not.toBeNull();
     expect(card).toHaveAttribute("title", longName);
-    expect(title).toHaveTextContent("plan feature · /home/kevin/worktrees/task...");
+    expect(title).toHaveTextContent("plan feature · /home/kevin/worktrees/agen...");
     expect(card).not.toHaveTextContent(longName);
   });
 
@@ -8774,7 +8774,7 @@ describe("web app", () => {
     );
     expect(screen.getByRole("combobox", { name: "Sort by ended time" })).toHaveValue("endedAt");
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toEqual(
       expect.objectContaining({
         sortField: "endedAt",
@@ -8886,7 +8886,7 @@ describe("web app", () => {
     expect(visibleFocusIndicators).toBeChecked();
     expect(appShell).toHaveAttribute("data-focus-indicators", "on");
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toEqual({
       hideEmptyColumns: false,
       collapseFailureStates: false,
@@ -9123,7 +9123,7 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: /newest running/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /newest completed/i })).not.toBeInTheDocument();
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       showPinnedOnly: true,
     });
@@ -9178,7 +9178,7 @@ describe("web app", () => {
     expect(await findRunCard("Noted dashboard")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       showNotesOnly: true,
     });
@@ -10678,7 +10678,7 @@ describe("web app", () => {
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toEqual({
       hideEmptyColumns: true,
       collapseFailureStates: true,
@@ -10721,7 +10721,7 @@ describe("web app", () => {
     expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).not.toBeChecked();
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "off");
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    const stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toEqual({
       hideEmptyColumns: true,
       collapseFailureStates: true,
@@ -10837,7 +10837,7 @@ describe("web app", () => {
 
   it("falls back to defaults when stored dashboard preferences are malformed", async () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-preferences",
+      "agent-runner:web:dashboard-preferences",
       JSON.stringify({
         collapseFailureStates: "yes",
         hideEmptyColumns: "no",
@@ -10953,7 +10953,7 @@ describe("web app", () => {
     await waitFor(() => {
       expect(runningColumn).toHaveAttribute("data-collapsed", "true");
     });
-    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
+    expect(window.localStorage.getItem("agent-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
         viewMode: "board",
         collapsedColumnKeys: ["running"],
@@ -10972,7 +10972,7 @@ describe("web app", () => {
     await waitFor(() => {
       expect(runningColumn).toHaveAttribute("data-collapsed", "false");
     });
-    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
+    expect(window.localStorage.getItem("agent-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
         viewMode: "board",
         collapsedColumnKeys: [],

@@ -142,7 +142,7 @@ export function serveFrontendRequest(
   }
   if (asset.kind === "error") {
     logError(asset.error);
-    sendText(req, res, 500, "Failed to read task-runner web assets.");
+    sendText(req, res, 500, "Failed to read agent-runner web assets.");
     return;
   }
 
@@ -155,11 +155,11 @@ export function serveFrontendRequest(
   const indexFile = readFrontendFile("/", rootPath, fsApi);
   if (indexFile.kind === "error") {
     logError(indexFile.error);
-    sendText(req, res, 500, "Failed to read task-runner web assets.");
+    sendText(req, res, 500, "Failed to read agent-runner web assets.");
     return;
   }
   if (indexFile.kind === "missing") {
-    sendText(req, res, 503, "task-runner web assets are not available; run npm run build");
+    sendText(req, res, 503, "agent-runner web assets are not available; run npm run build");
     return;
   }
 

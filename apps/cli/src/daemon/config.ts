@@ -1,10 +1,10 @@
-import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
+import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
 import {
+  AGENT_RUNNER_CONNECT_ENV,
+  AGENT_RUNNER_CONNECT_HOST_ENV,
+  AGENT_RUNNER_CONNECT_LOCAL_PORT_ENV,
+  AGENT_RUNNER_LISTEN_ENV,
   DEFAULT_DAEMON_URL,
-  TASK_RUNNER_CONNECT_ENV,
-  TASK_RUNNER_CONNECT_HOST_ENV,
-  TASK_RUNNER_CONNECT_LOCAL_PORT_ENV,
-  TASK_RUNNER_LISTEN_ENV,
 } from "./protocol.js";
 
 export type HostMode = "embedded" | "daemon";
@@ -51,7 +51,7 @@ export function resolveListenUrl(
   listenFlag?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const raw = nonEmpty(listenFlag) ?? nonEmpty(env[TASK_RUNNER_LISTEN_ENV]) ?? DEFAULT_DAEMON_URL;
+  const raw = nonEmpty(listenFlag) ?? nonEmpty(env[AGENT_RUNNER_LISTEN_ENV]) ?? DEFAULT_DAEMON_URL;
   return parseDaemonUrl(raw, "--listen").toString();
 }
 
@@ -59,7 +59,7 @@ export function resolveConnectUrl(
   connectFlag?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  const raw = nonEmpty(connectFlag) ?? nonEmpty(env[TASK_RUNNER_CONNECT_ENV]);
+  const raw = nonEmpty(connectFlag) ?? nonEmpty(env[AGENT_RUNNER_CONNECT_ENV]);
   return raw ? parseDaemonUrl(raw, "--connect").toString() : undefined;
 }
 
@@ -88,15 +88,15 @@ export function resolveHostMode(
   env: NodeJS.ProcessEnv = process.env,
 ): ResolvedHostMode {
   const connectUrl = resolveConnectUrl(connectFlag, env);
-  const connectHost = nonEmpty(connectHostFlag) ?? nonEmpty(env[TASK_RUNNER_CONNECT_HOST_ENV]);
+  const connectHost = nonEmpty(connectHostFlag) ?? nonEmpty(env[AGENT_RUNNER_CONNECT_HOST_ENV]);
   const connectLocalPortRaw =
-    nonEmpty(connectLocalPortFlag) ?? nonEmpty(env[TASK_RUNNER_CONNECT_LOCAL_PORT_ENV]);
+    nonEmpty(connectLocalPortFlag) ?? nonEmpty(env[AGENT_RUNNER_CONNECT_LOCAL_PORT_ENV]);
 
   if (connectHost && !connectUrl) {
-    throw new Error("--connect-host requires --connect or TASK_RUNNER_CONNECT");
+    throw new Error("--connect-host requires --connect or AGENT_RUNNER_CONNECT");
   }
   if (connectLocalPortRaw && !connectHost) {
-    throw new Error("--connect-local-port requires --connect-host or TASK_RUNNER_CONNECT_HOST");
+    throw new Error("--connect-local-port requires --connect-host or AGENT_RUNNER_CONNECT_HOST");
   }
   if (!connectUrl) {
     return { mode: "embedded" };

@@ -1,6 +1,6 @@
-import type { AttachmentScope } from "@task-runner/core/contracts/attachments.js";
-import type { BackendName } from "@task-runner/core/core/backends/types.js";
-import { trimRunName } from "@task-runner/core/util/run-name.js";
+import type { AttachmentScope } from "@agent-runner/core/contracts/attachments.js";
+import type { BackendName } from "@agent-runner/core/core/backends/types.js";
+import { trimRunName } from "@agent-runner/core/util/run-name.js";
 
 type OutputFormat = "text" | "json";
 

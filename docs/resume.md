@@ -1,7 +1,7 @@
 # Resume
 
 Resume continues an existing run from its frozen manifest state.
-task-runner does *not* re-read the source agent or assignment files on
+agent-runner does *not* re-read the source agent or assignment files on
 resume — everything the backend needs is in `run.json`, including the
 selected backend name, frozen backendConfig, resolved backend args, and
 backend session id. Current manifests use schema version 24, which also
@@ -11,7 +11,7 @@ backend-session sync provenance.
 ## Command
 
 ```bash
-task-runner run --resume-run <run-id-or-path>
+agent-runner run --resume-run <run-id-or-path>
 ```
 
 `--resume-run` accepts either a run id or a workspace path. When present,
@@ -22,7 +22,7 @@ time (see [Forbidden flags](#forbidden-flags)).
 
 Resume is how you:
 
-- start a ready run you earlier created with `task-runner init`
+- start a ready run you earlier created with `agent-runner init`
 - re-run a run that exited with incomplete tasks
 - follow up with a continuation message
 - append new tasks to an in-flight workflow
@@ -48,8 +48,8 @@ current agent frontmatter, current `backendConfig`, and current
 Initialized runs are not directly executable. Promote them first:
 
 ```bash
-task-runner run ready <run-id>
-task-runner run --resume-run <run-id>
+agent-runner run ready <run-id>
+agent-runner run --resume-run <run-id>
 ```
 
 For ready-start, `run --resume-run` additionally rejects `--model`,
@@ -68,7 +68,7 @@ For non-initialized (previously-run) runs, resume requires at least one of:
 If all tasks are already `completed` and no follow-up message or new tasks
 are supplied, resume errors rather than re-sending a stale prompt.
 
-If the run has incomplete tasks and no explicit message, task-runner
+If the run has incomplete tasks and no explicit message, agent-runner
 injects an implicit continue message:
 
 > Continue working through the remaining task list items.
@@ -82,8 +82,8 @@ changing the previous terminal lifecycle record.
 Non-passive archived runs must be unarchived before resume:
 
 ```bash
-task-runner run unarchive <run-id>
-task-runner run --resume-run <run-id>
+agent-runner run unarchive <run-id>
+agent-runner run --resume-run <run-id>
 ```
 
 ## Passive runs
@@ -92,10 +92,10 @@ Passive runs are externally driven; `run --resume-run` is rejected for
 them. Drive them through the task CLI instead:
 
 ```bash
-task-runner run brief <run-id>
-task-runner task set <run-id> <task-id> --status in_progress
-task-runner task append-notes <run-id> <task-id> --text "Observed ..."
-task-runner task set <run-id> <task-id> --status completed
+agent-runner run brief <run-id>
+agent-runner task set <run-id> <task-id> --status in_progress
+agent-runner task append-notes <run-id> <task-id> --text "Observed ..."
+agent-runner task set <run-id> <task-id> --status completed
 ```
 
 Passive runs also accept `run set-backend-session` and
@@ -119,9 +119,9 @@ On resume, the brief sent to the backend is composed as follows:
    used if incomplete tasks remain.
 
 Queued resume messages are separate daemon-owned pending intent for live
-runs. `task-runner run queue-message <id|path> <text>` appends a
-message while a run is live, `task-runner run queued-messages <id|path>`
-prints the current queue, and `task-runner run remove-queued-message
+runs. `agent-runner run queue-message <id|path> <text>` appends a
+message while a run is live, `agent-runner run queued-messages <id|path>`
+prints the current queue, and `agent-runner run remove-queued-message
 <id|path> <message-id>` removes one queued message. When a managed run
 finishes and queued messages remain, the daemon starts the next resume
 session with those message texts joined by a blank line in one follow-up
@@ -138,12 +138,12 @@ Only backends that implement both `resolveSessionHistorySource` and
 `readSessionHistory` import durable backend-owned turns; unsupported
 backends skip this step. On
 `--backend-session-id` bootstrap, complete historical turns are imported
-before the first task-runner-owned invocation. Each imported turn becomes
+before the first agent-runner-owned invocation. Each imported turn becomes
 a canonical session plus attempt with `backend_session` provenance; open
 turns are tracked in `manifest.backendSessionSync.openTurnIds` without
 creating attempt records.
 
-Before any `task-runner run --resume-run <id>` starts, task-runner checks
+Before any `agent-runner run --resume-run <id>` starts, agent-runner checks
 backend-owned history for the run's persisted `backendSessionId`. This
 pre-resume sync is subscriber-independent: it runs in embedded CLI and
 daemon-managed resume paths regardless of whether any client is watching
@@ -158,13 +158,13 @@ existing manifest history. If a backend history reader reports the source
 as unavailable for a run with a backend session id, resume fails before
 allocating the next attempt.
 
-Set `TASK_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
+Set `AGENT_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
 `off`) to disable backend-owned session history import, pre-resume sync,
 and daemon subscribed-run polling in the current process.
 
 ## Retry nudges
 
-Within a single `run` invocation, task-runner may retry the backend up to
+Within a single `run` invocation, agent-runner may retry the backend up to
 `maxAttemptsPerSession` times. A run is the durable lifecycle record. Each
 backend execution window is a session: the fresh execution creates session
 `0`, and each resume creates the next session. Attempts are backend
@@ -187,7 +187,7 @@ definitions — it uses `manifest.resetSeed` captured at run creation.
 
 The backend session id (`manifest.backendSessionId`) is the resume handle
 the backend itself uses — Claude session id, Codex thread id, Pi session
-id, etc. task-runner passes it to the backend on resume and validates it
+id, etc. agent-runner passes it to the backend on resume and validates it
 when possible:
 
 - **Claude** — session storage encoded by cwd; validated on-disk.
@@ -199,7 +199,7 @@ when possible:
 - **Pi** — session file must exist under `PI_HOME` / `~/.pi` with a
   matching `cwd` header.
 
-If a backend reports the session as gone, task-runner surfaces the failure
+If a backend reports the session as gone, agent-runner surfaces the failure
 rather than silently restarting.
 
 For subscribed non-running runs, the daemon also polls backend-owned

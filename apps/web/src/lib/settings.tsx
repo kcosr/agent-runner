@@ -117,8 +117,8 @@ export function computeDrawerMaxWidth(viewportWidth: number): number {
   return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(available)));
 }
 
-const PREFERENCES_STORAGE_KEY = "task-runner:web:dashboard-preferences";
-const VIEW_STATE_STORAGE_KEY = "task-runner:web:dashboard-view-state";
+const PREFERENCES_STORAGE_KEY = "agent-runner:web:dashboard-preferences";
+const VIEW_STATE_STORAGE_KEY = "agent-runner:web:dashboard-view-state";
 
 interface DashboardPreferencesContextValue {
   preferences: DashboardPreferences;

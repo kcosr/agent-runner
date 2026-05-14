@@ -41,7 +41,7 @@ schemaVersion: 1
 name: caller-work
 callerInstructions: |
   Hello, caller. Your run id is {{run_id}} and you're working on
-  {{repo_path}}. Use {{task_runner_cmd}} run status {{run_id}} to
+  {{repo_path}}. Use {{agent_runner_cmd}} run status {{run_id}} to
   inspect the run, and pass --output-format json for structured
   data.
 vars:
@@ -76,7 +76,7 @@ Plain assignment.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-caller-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-caller-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -270,7 +270,7 @@ test("passive init prints callerInstructions alongside the passive bootstrap", a
   assert.match(stderr, /Hello, caller/);
   // Passive bootstrap is now stored on the manifest/brief surface
   // instead of being dumped inline during init.
-  assert.match(outcome.manifest.brief, /task-runner task set/);
+  assert.match(outcome.manifest.brief, /agent-runner task set/);
   assert.match(outcome.manifest.brief, new RegExp(outcome.runId));
   // Stdout remains reserved for command output, not caller docs.
   assert.equal(stdout, "");
@@ -388,7 +388,7 @@ test("ad-hoc agent + assignment with callerInstructions still prints them", asyn
 
   const [runId] = readdirSync(join(dir, "runs", "unknown"));
   const brief = runCli(["run", "brief", runId], { cwd: dir });
-  assert.match(brief, /task-runner task set/);
+  assert.match(brief, /agent-runner task set/);
   assert.doesNotMatch(brief, /Hello, caller/);
 });
 
@@ -466,7 +466,7 @@ test("run status --output-format json includes callerInstructions", async () => 
   assert.ok(parsed.callerInstructions);
   assert.match(parsed.callerInstructions, /Hello, caller/);
   assert.match(parsed.callerInstructions, new RegExp(outcome.runId));
-  assert.match(parsed.callerInstructions, /task-runner run status/);
+  assert.match(parsed.callerInstructions, /agent-runner run status/);
 });
 
 test("run status text output does NOT reprint callerInstructions", async () => {

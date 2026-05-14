@@ -11,13 +11,13 @@ function usage() {
     "",
     "Dry-run by default. Use --write to update manifests in place.",
     "Migrates schemaVersion 9 manifests to 10 and canonicalizes repairable schemaVersion 10 manifests.",
-    "Pass a state root such as ~/.local/state/task-runner with --root.",
+    "Pass a state root such as ~/.local/state/agent-runner with --root.",
     "Use repeated --repo filters to limit migration to selected repo buckets.",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  let root = join(homedir(), ".local/state/task-runner");
+  let root = join(homedir(), ".local/state/agent-runner");
   let write = false;
   const repos = [];
 
@@ -267,7 +267,7 @@ function main() {
   try {
     options = parseArgs(process.argv.slice(2));
   } catch (error) {
-    process.stderr.write(`task-runner migrate: ${error.message}\n`);
+    process.stderr.write(`agent-runner migrate: ${error.message}\n`);
     process.stderr.write(`${usage()}\n`);
     process.exit(2);
   }
@@ -282,7 +282,7 @@ function main() {
       }
     }
   } catch (error) {
-    process.stderr.write(`task-runner migrate: failed to scan ${runsRoot}: ${error.message}\n`);
+    process.stderr.write(`agent-runner migrate: failed to scan ${runsRoot}: ${error.message}\n`);
     process.exit(1);
   }
 

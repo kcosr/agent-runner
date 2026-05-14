@@ -8,7 +8,7 @@ or pass directly via `--agent` / `--assignment`.
 Bundled agents use built-in backends. Agents can also select a custom
 backend by name and provide backend-owned `backendConfig.<name>` plus
 separate `backendArgs.<name>.extraArgs` tokens. Custom backend modules
-live under `${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/` and are
+live under `${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/` and are
 trusted local code, not sandboxed plugin packages.
 
 ## Bundled agents
@@ -104,7 +104,7 @@ installation, wiring, or a new agent/backend combination.
 - `maxRetries: 4`
 
 Meta-assignment that converts a free-form feature brief into an
-executable task-runner plan. The driver agent orients, captures the
+executable agent-runner plan. The driver agent orients, captures the
 feature, checks contract dimensions (with an ambiguity gate), surveys
 impact, scans for duplication, assesses risks, produces a contract
 artifact, drafts a plan from a template, runs a nested `plan-review`,
@@ -121,7 +121,7 @@ Notable feature uses:
   inline so the planner can fill placeholders.
 - **Locked generated task list** prevents silent deferrals in the
   implementation assignment produced by the planner.
-- **Nested reviews** via `plan-review` invoked as a child `task-runner
+- **Nested reviews** via `plan-review` invoked as a child `agent-runner
   run`.
 - **Attachment coupling**: approved draft (`assignment-seed.md`) and
   summary are attached to the planning run and later discovered by
@@ -266,14 +266,14 @@ subagents for parallelism.
 ## Using a bundled definition
 
 ```bash
-task-runner run \
+agent-runner run \
   --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md
 ```
 
 Or with bare names if you've installed them under
-`${TASK_RUNNER_CONFIG_DIR}`:
+`${AGENT_RUNNER_CONFIG_DIR}`:
 
 ```bash
-task-runner run --agent implementer --assignment repo-orientation
+agent-runner run --agent implementer --assignment repo-orientation
 ```

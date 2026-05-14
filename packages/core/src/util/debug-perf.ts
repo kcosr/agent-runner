@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 
-export const TASK_RUNNER_DEBUG_PERF_ENV = "TASK_RUNNER_DEBUG_PERF";
-export const TASK_RUNNER_DEBUG_PERF_INTERVAL_MS_ENV = "TASK_RUNNER_DEBUG_PERF_INTERVAL_MS";
+export const AGENT_RUNNER_DEBUG_PERF_ENV = "AGENT_RUNNER_DEBUG_PERF";
+export const AGENT_RUNNER_DEBUG_PERF_INTERVAL_MS_ENV = "AGENT_RUNNER_DEBUG_PERF_INTERVAL_MS";
 
 type DebugPerfFields = Record<string, unknown>;
 type DebugPerfTimer = (extraFields?: DebugPerfFields) => void;
@@ -100,19 +100,19 @@ function formatFields(fields: DebugPerfFields): string {
 }
 
 function writeDebugPerfLog(event: string, fields: DebugPerfFields): void {
-  const line = `[task-runner perf] ${new Date().toISOString()} ${event}${formatFields(fields)}\n`;
+  const line = `[agent-runner perf] ${new Date().toISOString()} ${event}${formatFields(fields)}\n`;
   process.stderr.write(line);
 }
 
 export function debugPerfEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return normalizeEnabled(env[TASK_RUNNER_DEBUG_PERF_ENV]);
+  return normalizeEnabled(env[AGENT_RUNNER_DEBUG_PERF_ENV]);
 }
 
 export function readDebugPerfIntervalMs(
   env: NodeJS.ProcessEnv = process.env,
   fallbackMs = 5_000,
 ): number {
-  const raw = env[TASK_RUNNER_DEBUG_PERF_INTERVAL_MS_ENV];
+  const raw = env[AGENT_RUNNER_DEBUG_PERF_INTERVAL_MS_ENV];
   if (!raw) {
     return fallbackMs;
   }

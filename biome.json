@@ -22,6 +22,6 @@
     "lineWidth": 100
   },
   "files": {
-    "ignore": ["dist/", "node_modules/", "coverage/", ".task-runner/"]
+    "ignore": ["dist/", "node_modules/", "coverage/", ".agent-runner/"]
   }
 }

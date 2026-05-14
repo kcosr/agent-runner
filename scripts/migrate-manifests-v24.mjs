@@ -22,14 +22,14 @@ function usage() {
     "Dry-run by default. Use --write to update manifests in place.",
     "Migrates schemaVersion 19-23 manifests to 24 by adding execution environment state",
     "and converting legacy workspace lifecycle state to top-level environment lifecycle state.",
-    "Pass a state root such as ~/.local/state/task-runner with --root.",
+    "Pass a state root such as ~/.local/state/agent-runner with --root.",
     "Use repeated --repo filters to limit migration to selected repo buckets.",
     "Use repeated --file paths to migrate only specific run.json manifests.",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  let root = join(homedir(), ".local/state/task-runner");
+  let root = join(homedir(), ".local/state/agent-runner");
   let write = false;
   const repos = [];
   const files = [];

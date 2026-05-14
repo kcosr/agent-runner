@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { HttpError } from "./http-errors.js";
-import { TASK_RUNNER_DAEMON_AUTH_ENABLED_ENV, TASK_RUNNER_DAEMON_TOKEN_ENV } from "./protocol.js";
+import { AGENT_RUNNER_DAEMON_AUTH_ENABLED_ENV, AGENT_RUNNER_DAEMON_TOKEN_ENV } from "./protocol.js";
 
 type DaemonAuthConfig =
   | {
@@ -20,15 +20,15 @@ function nonEmpty(value: string | undefined): string | undefined {
 }
 
 export function resolveDaemonAuthConfig(env: NodeJS.ProcessEnv = process.env): DaemonAuthConfig {
-  const enabledRaw = env[TASK_RUNNER_DAEMON_AUTH_ENABLED_ENV]?.trim().toLowerCase();
+  const enabledRaw = env[AGENT_RUNNER_DAEMON_AUTH_ENABLED_ENV]?.trim().toLowerCase();
   if (!enabledRaw || !AUTH_ENABLED_VALUES.has(enabledRaw)) {
     return { enabled: false };
   }
 
-  const token = nonEmpty(env[TASK_RUNNER_DAEMON_TOKEN_ENV]);
+  const token = nonEmpty(env[AGENT_RUNNER_DAEMON_TOKEN_ENV]);
   if (!token) {
     throw new Error(
-      `${TASK_RUNNER_DAEMON_TOKEN_ENV} is required when ${TASK_RUNNER_DAEMON_AUTH_ENABLED_ENV} is enabled`,
+      `${AGENT_RUNNER_DAEMON_TOKEN_ENV} is required when ${AGENT_RUNNER_DAEMON_AUTH_ENABLED_ENV} is enabled`,
     );
   }
 

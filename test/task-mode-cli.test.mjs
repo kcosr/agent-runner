@@ -39,7 +39,7 @@ Work from task CLI commands.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-brief-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-brief-"));
 }
 
 function writeAgent(baseDir, name, body) {

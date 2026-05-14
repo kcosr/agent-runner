@@ -1,11 +1,12 @@
-import type { DefinitionDetail } from "@task-runner/core/app/service.js";
+import { resolveAgentRunnerCommand } from "@agent-runner/core/agent-runner-command.js";
+import type { DefinitionDetail } from "@agent-runner/core/app/service.js";
 import type {
   AttachmentListEntry,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
-} from "@task-runner/core/contracts/attachments.js";
-import type { RunAuditHistory } from "@task-runner/core/contracts/events.js";
+} from "@agent-runner/core/contracts/attachments.js";
+import type { RunAuditHistory } from "@agent-runner/core/contracts/events.js";
 import type {
   QueueResumeMessageResult,
   QueuedResumeMessage,
@@ -17,7 +18,7 @@ import type {
   RunNoteResult,
   RunPinnedResult,
   RunSessionSummary,
-} from "@task-runner/core/contracts/runs.js";
+} from "@agent-runner/core/contracts/runs.js";
 import type {
   DefinitionListResult,
   RunArchiveResult,
@@ -26,9 +27,8 @@ import type {
   RunListResult,
   TaskDetailsResult,
   TaskListResult,
-} from "@task-runner/core/core/commands/service.js";
-import { formatSchedule } from "@task-runner/core/core/run/schedule.js";
-import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
+} from "@agent-runner/core/core/commands/service.js";
+import { formatSchedule } from "@agent-runner/core/core/run/schedule.js";
 import type { HostMode } from "../daemon/config.js";
 import type { DaemonInfo } from "../daemon/protocol.js";
 
@@ -85,13 +85,13 @@ export function queuedResumeMessagesCliResult(detail: RunDetail): RunQueuedResum
 }
 
 export function renderRunQueueResumeMessage(result: QueueResumeMessageCliResult): string {
-  return `task-runner: queued message ${result.queuedResumeMessage.id} for run ${result.runId}\n`;
+  return `agent-runner: queued message ${result.queuedResumeMessage.id} for run ${result.runId}\n`;
 }
 
 export function renderRunRemoveQueuedResumeMessage(
   result: RemoveQueuedResumeMessageCliResult,
 ): string {
-  return `task-runner: removed queued message ${result.removedMessageId} from run ${result.runId}\n`;
+  return `agent-runner: removed queued message ${result.removedMessageId} from run ${result.runId}\n`;
 }
 
 export function renderRunQueuedResumeMessages(result: RunQueuedResumeMessagesResult): string {
@@ -118,7 +118,7 @@ function formatRunSessionSummary(label: string, session: RunSessionSummary | nul
 }
 
 export function renderRunStatus(detail: RunDetail): string {
-  const taskRunnerCmd = resolveTaskRunnerCommand();
+  const agentRunnerCmd = resolveAgentRunnerCommand();
   const lines: string[] = [];
   lines.push("");
   lines.push(`── run ${detail.runId} ──`);
@@ -235,23 +235,23 @@ export function renderRunStatus(detail: RunDetail): string {
   } else if (isArchived) {
     lines.push("");
     lines.push("Run is archived. Unarchive it before resuming:");
-    lines.push(`  ${taskRunnerCmd} run unarchive ${detail.runId}`);
+    lines.push(`  ${agentRunnerCmd} run unarchive ${detail.runId}`);
   } else if (detail.status === "initialized") {
     lines.push("");
     if (isPassive) {
       lines.push("Drive this run externally:");
-      lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
-      lines.push(`  ${taskRunnerCmd} task set ${detail.runId} <task-id> --status in_progress`);
+      lines.push(`  ${agentRunnerCmd} run brief ${detail.runId}`);
+      lines.push(`  ${agentRunnerCmd} task set ${detail.runId} <task-id> --status in_progress`);
     } else {
       lines.push("To promote this run for execution:");
-      lines.push(`  ${taskRunnerCmd} run ready ${detail.runId}`);
-      lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
+      lines.push(`  ${agentRunnerCmd} run ready ${detail.runId}`);
+      lines.push(`  ${agentRunnerCmd} run brief ${detail.runId}`);
     }
   } else if (detail.status === "ready") {
     lines.push("");
     lines.push("To execute this run:");
-    lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId}`);
-    lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
+    lines.push(`  ${agentRunnerCmd} run --resume-run ${detail.runId}`);
+    lines.push(`  ${agentRunnerCmd} run brief ${detail.runId}`);
   } else if (
     detail.status === "blocked" ||
     detail.status === "exhausted" ||
@@ -261,10 +261,10 @@ export function renderRunStatus(detail: RunDetail): string {
     lines.push("");
     if (isPassive) {
       lines.push("Reopen tasks to continue:");
-      lines.push(`  ${taskRunnerCmd} task set ${detail.runId} <task-id> --status in_progress`);
+      lines.push(`  ${agentRunnerCmd} task set ${detail.runId} <task-id> --status in_progress`);
     } else {
       lines.push("To resume this run:");
-      lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId} "..."`);
+      lines.push(`  ${agentRunnerCmd} run --resume-run ${detail.runId} "..."`);
     }
   }
 
@@ -273,9 +273,9 @@ export function renderRunStatus(detail: RunDetail): string {
 
 function renderScheduleMutation(verb: string, detail: RunDetail): string {
   if (detail.schedule === null) {
-    return `task-runner: ${verb} schedule for run ${detail.runId}\n`;
+    return `agent-runner: ${verb} schedule for run ${detail.runId}\n`;
   }
-  return `task-runner: ${verb} schedule for run ${detail.runId}: ${formatSchedule(detail.schedule)} (next ${detail.schedule.runAt}, ${detail.scheduleState})\n`;
+  return `agent-runner: ${verb} schedule for run ${detail.runId}: ${formatSchedule(detail.schedule)} (next ${detail.schedule.runAt}, ${detail.scheduleState})\n`;
 }
 
 export function renderRunScheduleSet(detail: RunDetail): string {
@@ -447,7 +447,7 @@ export function renderDefinitionDetails(result: DefinitionDetail): string {
 
 export function renderRunReady(result: RunDetail): string {
   const schedule = result.schedule === null ? "" : `schedule: ${formatSchedule(result.schedule)}\n`;
-  return `task-runner: promoted run ${result.runId} to ready\n${schedule}`;
+  return `agent-runner: promoted run ${result.runId} to ready\n${schedule}`;
 }
 
 export function renderRunList(result: RunListResult): string {
@@ -464,20 +464,20 @@ export function renderRunList(result: RunListResult): string {
 
 export function renderRunArchive(result: RunArchiveResult): string {
   if (!result.changed) {
-    return `task-runner: run ${result.runId} is already archived\n`;
+    return `agent-runner: run ${result.runId} is already archived\n`;
   }
-  return `task-runner: archived run ${result.runId}\n`;
+  return `agent-runner: archived run ${result.runId}\n`;
 }
 
 export function renderRunUnarchive(result: RunArchiveResult): string {
   if (!result.changed) {
-    return `task-runner: run ${result.runId} is not archived\n`;
+    return `agent-runner: run ${result.runId} is not archived\n`;
   }
-  return `task-runner: unarchived run ${result.runId}\n`;
+  return `agent-runner: unarchived run ${result.runId}\n`;
 }
 
 export function renderRunDelete(result: RunDeleteResult): string {
-  return `task-runner: deleted archived run ${result.runId}\n`;
+  return `agent-runner: deleted archived run ${result.runId}\n`;
 }
 
 function formatAuditFieldValue(value: unknown): string {
@@ -621,34 +621,34 @@ export function renderRunSetName(result: {
 }): string {
   if (result.name === null) {
     return result.changed
-      ? `task-runner: cleared name for run ${result.runId}\n`
-      : `task-runner: run ${result.runId} already has no name\n`;
+      ? `agent-runner: cleared name for run ${result.runId}\n`
+      : `agent-runner: run ${result.runId} already has no name\n`;
   }
   return result.changed
-    ? `task-runner: set name for run ${result.runId} to "${result.name}"\n`
-    : `task-runner: run ${result.runId} already has name "${result.name}"\n`;
+    ? `agent-runner: set name for run ${result.runId} to "${result.name}"\n`
+    : `agent-runner: run ${result.runId} already has name "${result.name}"\n`;
 }
 
 export function renderRunSetNote(result: RunNoteResult): string {
   if (result.note === null) {
     return result.changed
-      ? `task-runner: cleared note for run ${result.runId}\n`
-      : `task-runner: run ${result.runId} already has no note\n`;
+      ? `agent-runner: cleared note for run ${result.runId}\n`
+      : `agent-runner: run ${result.runId} already has no note\n`;
   }
   return result.changed
-    ? `task-runner: set note for run ${result.runId} to present\n`
-    : `task-runner: run ${result.runId} already has note present\n`;
+    ? `agent-runner: set note for run ${result.runId} to present\n`
+    : `agent-runner: run ${result.runId} already has note present\n`;
 }
 
 export function renderRunSetPinned(result: RunPinnedResult): string {
   if (result.pinned) {
     return result.changed
-      ? `task-runner: pinned run ${result.runId}\n`
-      : `task-runner: run ${result.runId} is already pinned\n`;
+      ? `agent-runner: pinned run ${result.runId}\n`
+      : `agent-runner: run ${result.runId} is already pinned\n`;
   }
   return result.changed
-    ? `task-runner: unpinned run ${result.runId}\n`
-    : `task-runner: run ${result.runId} is already unpinned\n`;
+    ? `agent-runner: unpinned run ${result.runId}\n`
+    : `agent-runner: run ${result.runId} is already unpinned\n`;
 }
 
 export function renderRunSetBackendSession(result: RunBackendSessionResult): string {
@@ -656,26 +656,26 @@ export function renderRunSetBackendSession(result: RunBackendSessionResult): str
     throw new Error("renderRunSetBackendSession requires a non-null backendSessionId");
   }
   return result.changed
-    ? `task-runner: set backend session for run ${result.runId} to "${result.backendSessionId}"\n`
-    : `task-runner: run ${result.runId} already has backend session "${result.backendSessionId}"\n`;
+    ? `agent-runner: set backend session for run ${result.runId} to "${result.backendSessionId}"\n`
+    : `agent-runner: run ${result.runId} already has backend session "${result.backendSessionId}"\n`;
 }
 
 export function renderRunClearBackendSession(result: RunBackendSessionResult): string {
   return result.changed
-    ? `task-runner: cleared backend session for run ${result.runId}\n`
-    : `task-runner: run ${result.runId} already has no backend session\n`;
+    ? `agent-runner: cleared backend session for run ${result.runId}\n`
+    : `agent-runner: run ${result.runId} already has no backend session\n`;
 }
 
 export function renderRunSetGroup(result: RunGroupResult): string {
   return result.changed
-    ? `task-runner: set group for run ${result.runId} to ${result.runGroupId}\n`
-    : `task-runner: run ${result.runId} is already in group ${result.runGroupId}\n`;
+    ? `agent-runner: set group for run ${result.runId} to ${result.runGroupId}\n`
+    : `agent-runner: run ${result.runId} is already in group ${result.runGroupId}\n`;
 }
 
 export function renderRunClearGroup(result: RunGroupResult): string {
   return result.changed
-    ? `task-runner: cleared group for run ${result.runId}; run is now in singleton group ${result.runGroupId}\n`
-    : `task-runner: run ${result.runId} is already in singleton group ${result.runGroupId}\n`;
+    ? `agent-runner: cleared group for run ${result.runId}; run is now in singleton group ${result.runGroupId}\n`
+    : `agent-runner: run ${result.runId} is already in singleton group ${result.runGroupId}\n`;
 }
 
 function dependencyLabel(dependency: RunDependencyRef): string {
@@ -686,21 +686,21 @@ export function renderRunAddDependency(
   result: RunDependenciesResult,
   dependency: RunDependencyRef,
 ): string {
-  return `task-runner: added ${dependency.type} dependency ${dependencyLabel(dependency)} to run ${result.runId}\n`;
+  return `agent-runner: added ${dependency.type} dependency ${dependencyLabel(dependency)} to run ${result.runId}\n`;
 }
 
 export function renderRunRemoveDependency(
   result: RunDependenciesResult,
   dependency: RunDependencyRef,
 ): string {
-  return `task-runner: removed ${dependency.type} dependency ${dependencyLabel(dependency)} from run ${result.runId}\n`;
+  return `agent-runner: removed ${dependency.type} dependency ${dependencyLabel(dependency)} from run ${result.runId}\n`;
 }
 
 export function renderRunClearDependencies(result: RunDependenciesResult): string {
   if (!result.changed) {
-    return `task-runner: run ${result.runId} already has no dependencies\n`;
+    return `agent-runner: run ${result.runId} already has no dependencies\n`;
   }
-  return `task-runner: cleared dependencies for run ${result.runId}\n`;
+  return `agent-runner: cleared dependencies for run ${result.runId}\n`;
 }
 
 export function renderTaskList(result: TaskListResult): string {
@@ -741,15 +741,15 @@ export function renderAttachmentList(
 }
 
 export function renderAttachmentAdded(runId: string, attachment: RunAttachment): string {
-  return `task-runner: added attachment ${attachment.id} "${attachment.name}" to run ${runId}\n`;
+  return `agent-runner: added attachment ${attachment.id} "${attachment.name}" to run ${runId}\n`;
 }
 
 export function renderAttachmentRemoved(result: RunAttachmentRemoveResult): string {
   return result.changed
-    ? `task-runner: removed attachment ${result.attachmentId} from run ${result.runId}\n`
-    : `task-runner: attachment ${result.attachmentId} was already absent from run ${result.runId}\n`;
+    ? `agent-runner: removed attachment ${result.attachmentId} from run ${result.runId}\n`
+    : `agent-runner: attachment ${result.attachmentId} was already absent from run ${result.runId}\n`;
 }
 
 export function renderAttachmentDownloaded(result: RunAttachmentDownloadResult): string {
-  return `task-runner: downloaded attachment ${result.id} to ${result.outputPath}\n`;
+  return `agent-runner: downloaded attachment ${result.id} to ${result.outputPath}\n`;
 }

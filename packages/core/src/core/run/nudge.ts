@@ -16,7 +16,7 @@ export function buildNudgeMessage(
 
   const lines: string[] = [];
   lines.push(`Some tasks in run ${runId} are not yet completed. Please continue.`);
-  lines.push(`Inspect them with: task-runner task list ${runId}`);
+  lines.push(`Inspect them with: agent-runner task list ${runId}`);
   lines.push("");
   lines.push("Remaining tasks:");
   for (const task of incomplete) {

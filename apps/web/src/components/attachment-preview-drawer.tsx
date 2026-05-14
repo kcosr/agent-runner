@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
 import type {
   AttachmentListEntry,
   RunAttachment,
-} from "@task-runner/core/contracts/attachments.js";
+} from "@agent-runner/core/contracts/attachments.js";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import {

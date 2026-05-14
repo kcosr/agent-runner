@@ -1,6 +1,6 @@
 # Backends
 
-A backend is the runtime that executes the worker. task-runner ships with
+A backend is the runtime that executes the worker. agent-runner ships with
 six built-in backends and can load trusted local custom backends. Each
 backend owns its own CLI/RPC shape, session handle, and cwd binding
 semantics.
@@ -45,17 +45,17 @@ wrapper scripts:
 
 | Variable | Value |
 |----------|-------|
-| `TASK_RUNNER_CALL_DEPTH` | recursion guard depth for nested task-runner invocations |
-| `TASK_RUNNER_MAX_CALL_DEPTH` | recursion guard cap for nested task-runner invocations |
-| `TASK_RUNNER_PARENT_RUN_ID` | active manifest run id, used as the parent for nested task-runner runs |
-| `TASK_RUNNER_RUN_ID` | active manifest run id |
-| `TASK_RUNNER_RUN_GROUP_ID` | active manifest run group id |
-| `TASK_RUNNER_CWD` | active backend attempt cwd |
+| `AGENT_RUNNER_CALL_DEPTH` | recursion guard depth for nested agent-runner invocations |
+| `AGENT_RUNNER_MAX_CALL_DEPTH` | recursion guard cap for nested agent-runner invocations |
+| `AGENT_RUNNER_PARENT_RUN_ID` | active manifest run id, used as the parent for nested agent-runner runs |
+| `AGENT_RUNNER_RUN_ID` | active manifest run id |
+| `AGENT_RUNNER_RUN_GROUP_ID` | active manifest run group id |
+| `AGENT_RUNNER_CWD` | active backend attempt cwd |
 
 These values override same-named variables inherited from the parent
-process. `TASK_RUNNER_PARENT_RUN_ID` and `TASK_RUNNER_RUN_GROUP_ID`
+process. `AGENT_RUNNER_PARENT_RUN_ID` and `AGENT_RUNNER_RUN_GROUP_ID`
 keep their existing roles as the default lineage and group sources for
-nested task-runner runs. Runtime vars, backend config, messages, model,
+nested agent-runner runs. Runtime vars, backend config, messages, model,
 effort, and resolved backend args are not exported as env vars.
 
 Launchers are subprocess-only. They wrap the spawned backend command for
@@ -64,7 +64,7 @@ to the `passive` backend, Codex websocket transport, or Codex UDS
 transport.
 
 Execution environments are also subprocess-only. When a run has a frozen
-container environment, task-runner validates or starts the container and
+container environment, agent-runner validates or starts the container and
 passes subprocess-backed backend invocations through a generated
 `docker exec` / `podman exec` prefix with the container cwd and merged
 env. Container environments are mutually exclusive with non-direct
@@ -72,9 +72,9 @@ launchers, and do not apply to passive runs or Codex websocket/UDS
 transports.
 
 Backend args are also resolved once for the selected backend and frozen
-into the local run manifest. They are appended after task-runner's
+into the local run manifest. They are appended after agent-runner's
 generated structured flags so duplicate backend-owned flags pass through
-to the underlying tool without task-runner validation. Normal status DTOs
+to the underlying tool without agent-runner validation. Normal status DTOs
 do not expose the frozen args.
 
 Authored `backendConfig.<backend-name>` is backend-owned JSON-like data.
@@ -89,13 +89,13 @@ data.
 Custom backend modules live under the config root:
 
 ```text
-${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.ts
-${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.mts
-${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.js
-${TASK_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.mjs
+${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.ts
+${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.mts
+${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.js
+${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.mjs
 ```
 
-When multiple files exist, task-runner uses that order. Missing
+When multiple files exist, agent-runner uses that order. Missing
 `backends/` means no custom backends; a named backend directory without a
 candidate module is a config error.
 
@@ -107,8 +107,8 @@ The module must default-export a backend object with:
 - optional `validateSessionId(ctx)` as a function
 - optional `resolveSessionHistorySource(ctx)` as a function
 - optional `readSessionHistory(ctx)` as a function
-- optional `taskRunnerPromptMatchesSyncedTurn(ctx)` as a function
-- optional `taskRunnerAttemptTimingMatchesSyncedTurn(ctx)` as a function
+- optional `agentRunnerPromptMatchesSyncedTurn(ctx)` as a function
+- optional `agentRunnerAttemptTimingMatchesSyncedTurn(ctx)` as a function
 - optional `supportsBootstrapSessionImport` as a boolean
 - optional `launcherApplies(ctx)` as a function
 - optional `launcherMode` as `"applies"` or `"direct"`
@@ -188,10 +188,10 @@ self-validating enough to import safely.
 Backends can opt into backend-owned session history import by implementing
 both `resolveSessionHistorySource(ctx)` and `readSessionHistory(ctx)`.
 Task-runner calls them for `--backend-session-id` bootstrap import and
-before `task-runner run --resume-run <id>` allocates a new session or
+before `agent-runner run --resume-run <id>` allocates a new session or
 attempt.
 
-Set `TASK_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
+Set `AGENT_RUNNER_BACKEND_SESSION_SYNC=false` (also accepts `0`, `no`, or
 `off`) to disable backend-owned session history import/sync for the
 current process, including daemon subscribed-run polling.
 
@@ -207,7 +207,7 @@ Most built-ins use `file` sources for local history files. Custom backends
 can return `{ kind: "custom", label, changeToken }`; `changeToken` must be
 JSON-persistable and should change whenever `readSessionHistory` needs to
 run again. `label` is a human-readable source name for diagnostics and
-audit context. For `file` sources, task-runner stores path, size, and
+audit context. For `file` sources, agent-runner stores path, size, and
 mtime as the source change token. Cursor uses a custom SQLite source token
 based on its session root pointer instead of filesystem mtime.
 
@@ -225,26 +225,26 @@ Complete turns are imported as canonical session and attempt records with
 `manifest.backendSessionSync.openTurnIds` but are not persisted as
 attempts until a later sync reports them complete. If a backend returns a
 non-persistable cursor, source change token, or malformed turn,
-task-runner aborts the sync and leaves the prior manifest unchanged.
+agent-runner aborts the sync and leaves the prior manifest unchanged.
 
 When sync sees a backend history turn that may correspond to an
-already-recorded task-runner attempt, exact prompt equality is matched
+already-recorded agent-runner attempt, exact prompt equality is matched
 first. Backends with storage quirks can additionally implement
-`taskRunnerPromptMatchesSyncedTurn({ prompt, turn })` so sync can upgrade
+`agentRunnerPromptMatchesSyncedTurn({ prompt, turn })` so sync can upgrade
 the existing attempt instead of importing a duplicate turn. Backends with
-history timestamps that do not overlap task-runner attempt timestamps can
-implement `taskRunnerAttemptTimingMatchesSyncedTurn(ctx)` to own that
+history timestamps that do not overlap agent-runner attempt timestamps can
+implement `agentRunnerAttemptTimingMatchesSyncedTurn(ctx)` to own that
 matching policy.
 
 Custom backend code is trusted local code. It is loaded into the
-task-runner process without sandboxing and cached for the process
+agent-runner process without sandboxing and cached for the process
 lifetime; daemon changes require a daemon restart, including the first
 creation of the `backends/` root after daemon startup. Dependencies
 resolve normally from the backend file location. Install them under the
 config directory, for example:
 
 ```bash
-cd ~/.config/task-runner
+cd ~/.config/agent-runner
 npm install <package>
 ```
 
@@ -272,11 +272,11 @@ transport-specific launcher applicability and thread rename propagation,
 `pi` owns session rename propagation, `cursor` owns its sync timestamp
 matching policy, and `opencode` owns its stored-prompt equivalence rule.
 `passive` still has externally driven run behavior in core because it is
-a task-runner lifecycle mode, not an invokable subprocess backend.
+an agent-runner lifecycle mode, not an invokable subprocess backend.
 
 ## `claude`
 
-- Binary: `$TASK_RUNNER_CLAUDE_BIN` or `claude`.
+- Binary: `$AGENT_RUNNER_CLAUDE_BIN` or `claude`.
 - Args: `--print --output-format stream-json --verbose
   [--model ...] [--effort ...] [--dangerously-skip-permissions]
   [--name ...] [--resume <session-id>] [extra args...] <prompt>`
@@ -295,7 +295,7 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
 
 - Transport is chosen from the resolved structured
   `backendConfig.codex.transport` contract:
-  - `{ type: "stdio" }` spawns `$TASK_RUNNER_CODEX_BIN` (default
+  - `{ type: "stdio" }` spawns `$AGENT_RUNNER_CODEX_BIN` (default
     `codex`) with `app-server
     [--dangerously-bypass-approvals-and-sandbox] [extra args...]`.
   - `{ type: "ws", url }` connects to a remote Codex app-server over an
@@ -306,9 +306,9 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
     WebSocket protocol, not raw UDS bytes.
 - Fresh-run precedence: authored `backendConfig.codex.transport` →
   request `overrides.backendConfig.codex.transport` when supplied by the
-  daemon/API caller → current process `TASK_RUNNER_CODEX_UDS_PATH` or
-  `TASK_RUNNER_CODEX_WS_URL` → stdio default.
-- `TASK_RUNNER_CODEX_UDS_PATH` and `TASK_RUNNER_CODEX_WS_URL` are
+  daemon/API caller → current process `AGENT_RUNNER_CODEX_UDS_PATH` or
+  `AGENT_RUNNER_CODEX_WS_URL` → stdio default.
+- `AGENT_RUNNER_CODEX_UDS_PATH` and `AGENT_RUNNER_CODEX_WS_URL` are
   Codex-specific defaults, not generic daemon env passthrough. If both are
   set and no higher-precedence transport was authored or explicitly
   overridden, the
@@ -317,9 +317,9 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
   Daemon-owned runs resolve Codex env from the daemon process. Resume
   reuses the frozen manifest transport.
 - Codex `thread/start` and `thread/resume` also receive the fixed
-  task-runner runtime env overlay above through
+  agent-runner runtime env overlay above through
   `shell_environment_policy.set.*` config overrides. This lets shell
-  tools inside Codex websocket and UDS sessions preserve task-runner
+  tools inside Codex websocket and UDS sessions preserve agent-runner
   lineage and recursion guard state without forwarding arbitrary env.
 - Codex stdio honors the resolved launcher prefix; Codex websocket and
   UDS keep `direct` because there is no local subprocess to wrap.
@@ -327,16 +327,16 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
   `backendArgs.codex.extraArgs` are ignored for those transports. Author
   app-server flags where that remote server is launched.
 - Ownership differs by transport. `stdio` is local-owned because
-  task-runner launches the app-server child process, so daemon shutdown
+  agent-runner launches the app-server child process, so daemon shutdown
   aborts it with other subprocess-backed runs. `ws` and `uds` are
-  remote-detachable: daemon shutdown closes task-runner's connection
+  remote-detachable: daemon shutdown closes agent-runner's connection
   without interrupting the remote turn, and daemon startup can reconnect
   to the frozen transport and saved thread id.
 - During daemon startup recovery, `thread/read` status drives
   reconciliation. `Active` threads are re-adopted with `thread/resume`
   and no new `turn/start`; `Idle` threads import available session
   history before finalization; `SystemError`, `NotLoaded`, and
-  unreachable app-servers become terminal task-runner errors with audit
+  unreachable app-servers become terminal agent-runner errors with audit
   detail.
 - Recovery decisions are recorded on the affected run as
   `run.controller_detached` and `run.controller_reconciled` audit events.
@@ -359,7 +359,7 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
 
 ## `cursor`
 
-- Binary: `$TASK_RUNNER_CURSOR_BIN` or `cursor-agent`.
+- Binary: `$AGENT_RUNNER_CURSOR_BIN` or `cursor-agent`.
 - Args: `-p --trust --output-format stream-json --stream-partial-output
   --workspace <cwd> [--model ...] [--force] [--resume <session-id>]
   [extra args...] <prompt>`
@@ -383,7 +383,7 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
 
 ## `opencode`
 
-- Binary: `$TASK_RUNNER_OPENCODE_BIN` or `opencode`.
+- Binary: `$AGENT_RUNNER_OPENCODE_BIN` or `opencode`.
 - Args: `run --format json [--model ...] [--variant <effort>]
   [--session <session-id>] [--title ...]
   [--dangerously-skip-permissions] [extra args...] <prompt>`.
@@ -394,15 +394,15 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
 - Live output is captured from `run --format json` text events when
   OpenCode emits them. This is not a token-delta contract; OpenCode may
   report a final text event for the completed response.
-- `--title` is passed during `run` invocation when task-runner has a run
+- `--title` is passed during `run` invocation when agent-runner has a run
   name. The current OpenCode CLI does not expose a supported post-hoc
   session rename command, so later `run set-name` changes remain
-  task-runner-local for OpenCode.
+  agent-runner-local for OpenCode.
 - Session storage is OpenCode's SQLite database at
   `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db`; tests and
-  wrappers can override it with `TASK_RUNNER_OPENCODE_DATA_DIR`, and
-  task-runner also honors OpenCode's `OPENCODE_DATA_DIR` when the
-  task-runner-specific override is unset.
+  wrappers can override it with `AGENT_RUNNER_OPENCODE_DATA_DIR`, and
+  agent-runner also honors OpenCode's `OPENCODE_DATA_DIR` when the
+  agent-runner-specific override is unset.
 - Resume/import validation opens the SQLite database read-only, requires
   the session id to exist, and requires the stored session `directory` to
   equal the run cwd exactly. Empty/path-like ids are rejected. Read-only
@@ -414,14 +414,14 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
   complete turns, and tracks the latest unfinished sync turn as open until
   OpenCode records completion metadata or a later user turn supersedes it.
 - OpenCode implements the backend prompt-match hook so sync recognizes
-  already-recorded task-runner attempts even when OpenCode stores the
+  already-recorded agent-runner attempts even when OpenCode stores the
   user message with an extra JSON-string quoting layer.
 - Effort mapping passes `minimal`, `low`, `medium`, `high`; `xhigh` and
   `max` map to `--variant max`; `off` omits `--variant`.
 
 ## `pi`
 
-- Binary: `$TASK_RUNNER_PI_BIN` or `pi`.
+- Binary: `$AGENT_RUNNER_PI_BIN` or `pi`.
 - Args: `--mode rpc --no-themes [--model ...] [--thinking <effort>]
   [--session <session-id>] [extra args...]`
 - RPC commands: `get_state`, `set_session_name`, `prompt`. Events:
@@ -447,7 +447,7 @@ a task-runner lifecycle mode, not an invokable subprocess backend.
 ## `passive`
 
 The passive backend is a null-object backend. It never invokes an
-external process. Passive runs can be initialized (`task-runner init`) or
+external process. Passive runs can be initialized (`agent-runner init`) or
 driven by an outer tool, and all task state is mutated through the task
 CLI. Calling `run --resume-run` on a passive run is rejected.
 
@@ -457,8 +457,8 @@ resolves to an empty frozen argv list because there is no backend process.
 Passive-only metadata mutations:
 
 ```bash
-task-runner run set-backend-session <id> <session-id>
-task-runner run clear-backend-session <id>
+agent-runner run set-backend-session <id> <session-id>
+agent-runner run clear-backend-session <id>
 ```
 
 These let an external driver record the session id it is tracking
@@ -468,24 +468,24 @@ without perturbing task state.
 
 | Variable                       | Effect |
 |--------------------------------|--------|
-| `TASK_RUNNER_CLAUDE_BIN`       | Claude CLI binary (default `claude`) |
-| `TASK_RUNNER_CODEX_BIN`        | Codex stdio binary (default `codex`) |
-| `TASK_RUNNER_CODEX_UDS_PATH`   | Fresh Codex runs use this absolute socket path as the default WebSocket-over-UDS transport when no explicit `backendConfig.codex.transport` was authored |
-| `TASK_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendConfig.codex.transport` was authored |
-| `TASK_RUNNER_CURSOR_BIN`       | Cursor CLI binary (default `cursor-agent`) |
-| `TASK_RUNNER_OPENCODE_BIN`     | OpenCode CLI binary (default `opencode`) |
-| `TASK_RUNNER_OPENCODE_DATA_DIR` | OpenCode data directory for session-history validation/sync; falls back to `OPENCODE_DATA_DIR`, then `${XDG_DATA_HOME:-~/.local/share}/opencode` |
-| `TASK_RUNNER_PI_BIN`           | Pi CLI binary (default `pi`) |
+| `AGENT_RUNNER_CLAUDE_BIN`       | Claude CLI binary (default `claude`) |
+| `AGENT_RUNNER_CODEX_BIN`        | Codex stdio binary (default `codex`) |
+| `AGENT_RUNNER_CODEX_UDS_PATH`   | Fresh Codex runs use this absolute socket path as the default WebSocket-over-UDS transport when no explicit `backendConfig.codex.transport` was authored |
+| `AGENT_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendConfig.codex.transport` was authored |
+| `AGENT_RUNNER_CURSOR_BIN`       | Cursor CLI binary (default `cursor-agent`) |
+| `AGENT_RUNNER_OPENCODE_BIN`     | OpenCode CLI binary (default `opencode`) |
+| `AGENT_RUNNER_OPENCODE_DATA_DIR` | OpenCode data directory for session-history validation/sync; falls back to `OPENCODE_DATA_DIR`, then `${XDG_DATA_HOME:-~/.local/share}/opencode` |
+| `AGENT_RUNNER_PI_BIN`           | Pi CLI binary (default `pi`) |
 | `PI_HOME`                      | Pi session storage root (default `~/.pi`) |
 
 See [configuration.md](configuration.md) for the full env var catalog.
 
 ## Recursion guard
 
-Backends that themselves can invoke `task-runner` (e.g. Claude in an agent
-loop) could in principle recurse indefinitely. task-runner enforces a
-`TASK_RUNNER_MAX_CALL_DEPTH` (default `1`) via a child env var
-`TASK_RUNNER_CALL_DEPTH` that is incremented on each nested invocation.
+Backends that themselves can invoke `agent-runner` (e.g. Claude in an agent
+loop) could in principle recurse indefinitely. agent-runner enforces a
+`AGENT_RUNNER_MAX_CALL_DEPTH` (default `1`) via a child env var
+`AGENT_RUNNER_CALL_DEPTH` that is incremented on each nested invocation.
 Deeper recursion is rejected with a `RecursionDepthError`. See
 [configuration.md](configuration.md#recursion-guard).
 

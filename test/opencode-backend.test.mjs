@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { buildOpenCodeArgs, opencodeBackend } from "../packages/core/dist/backends/opencode.js";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-opencode-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-opencode-"));
 }
 
 function writeFakeOpenCodeBin(baseDir) {
@@ -87,7 +87,7 @@ test("opencode backend treats session error events as failed attempts", async ()
       cwd: dir,
       env: {
         ...process.env,
-        TASK_RUNNER_OPENCODE_BIN: command,
+        AGENT_RUNNER_OPENCODE_BIN: command,
         OPENCODE_TEST_STDOUT_JSON: JSON.stringify([
           `${JSON.stringify({ type: "server.connected", sessionID: "ses_123" })}\n`,
           `${JSON.stringify({
@@ -126,7 +126,7 @@ test("opencode backend captures session id and completed text events", async () 
       cwd: dir,
       env: {
         ...process.env,
-        TASK_RUNNER_OPENCODE_BIN: command,
+        AGENT_RUNNER_OPENCODE_BIN: command,
         OPENCODE_TEST_ARGS_PATH: argsPath,
         OPENCODE_TEST_STDOUT_JSON: JSON.stringify([
           `${JSON.stringify({ type: "server.connected", sessionID: "ses_123" })}\n`,

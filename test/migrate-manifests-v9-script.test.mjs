@@ -10,7 +10,7 @@ const SCRIPT_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-migrate-v9-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-migrate-v9-"));
 }
 
 function writeManifest(root, repo, runId, manifest) {
@@ -334,9 +334,9 @@ test("migrate-manifests-v9 script writes v8 hook-state upgrades", () => {
 
 test("migrate-manifests-v9 script filters to selected repo buckets", () => {
   const root = tempDir();
-  const taskRunnerPath = writeManifest(root, "task-runner", "run-task-runner", {
+  const agentRunnerPath = writeManifest(root, "agent-runner", "run-agent-runner", {
     schemaVersion: 8,
-    runId: "run-task-runner",
+    runId: "run-agent-runner",
     backend: "claude",
     model: null,
     effort: null,
@@ -352,8 +352,8 @@ test("migrate-manifests-v9 script filters to selected repo buckets", () => {
     dependencyRunIds: [],
     attachments: [],
     finalTasks: {},
-    workspaceDir: "/tmp/task-runner",
-    assignmentPath: "/tmp/task-runner/assignment-seed.md",
+    workspaceDir: "/tmp/agent-runner",
+    assignmentPath: "/tmp/agent-runner/assignment-seed.md",
     resetSeed: {
       finalTasks: {},
       brief: "brief",
@@ -401,17 +401,17 @@ test("migrate-manifests-v9 script filters to selected repo buckets", () => {
 
   const writeRun = execFileSync(
     "node",
-    [SCRIPT_PATH, "--root", root, "--repo", "task-runner", "--write"],
+    [SCRIPT_PATH, "--root", root, "--repo", "agent-runner", "--write"],
     {
       encoding: "utf8",
     },
   );
 
-  assert.match(writeRun, /WRITE\s+.*run-task-runner\/run\.json: promoted to schemaVersion 9/);
+  assert.match(writeRun, /WRITE\s+.*run-agent-runner\/run\.json: promoted to schemaVersion 9/);
   assert.match(writeRun, /SKIP\s+.*run-assistant\/run\.json: repo bucket assistant not selected/);
-  assert.deepEqual(readManifest(taskRunnerPath), {
+  assert.deepEqual(readManifest(agentRunnerPath), {
     schemaVersion: 9,
-    runId: "run-task-runner",
+    runId: "run-agent-runner",
     backend: "claude",
     model: null,
     effort: null,
@@ -427,8 +427,8 @@ test("migrate-manifests-v9 script filters to selected repo buckets", () => {
     dependencyRunIds: [],
     attachments: [],
     finalTasks: {},
-    workspaceDir: join(root, "runs", "task-runner", "run-task-runner"),
-    assignmentPath: join(root, "runs", "task-runner", "run-task-runner", "assignment-seed.md"),
+    workspaceDir: join(root, "runs", "agent-runner", "run-agent-runner"),
+    assignmentPath: join(root, "runs", "agent-runner", "run-agent-runner", "assignment-seed.md"),
     assignment: null,
     resolvedHooks: [],
     hookState: {},

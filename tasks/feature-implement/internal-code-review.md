@@ -1,7 +1,7 @@
 ---
 schemaVersion: 1
 id: feature-implement/internal-code-review
-title: Internal code review via task-runner
+title: Internal code review via agent-runner
 ---
 **Category**: process
 
@@ -13,7 +13,7 @@ into those task notes. Before
 launching the reviewer:
 
   1. Inspect this run with
-     `{{task_runner_cmd}} run status {{run_id}} --output-format json --field tasks`
+     `{{agent_runner_cmd}} run status {{run_id}} --output-format json --field tasks`
      and scan every task above this one.
   2. Every prior task must have status `completed`.
      If a prior task is still `in_progress`, `pending`,
@@ -32,10 +32,10 @@ launching the reviewer:
      delayed one.
 
 Once every prior task is finalized, launch the bundled
-`code-review` assignment as a nested `{{task_runner_cmd}} run`,
+`code-review` assignment as a nested `{{agent_runner_cmd}} run`,
 passing this plan's run id as the implementation context:
 
-    {{task_runner_cmd}} run \
+    {{agent_runner_cmd}} run \
       --agent code-reviewer \
       --assignment code-review \
       --name "<same-short-topic-name>" \
@@ -63,13 +63,13 @@ initialized this run:
     such as `Review` or `Implementation`
   - never include cwd paths, repo names, or git ranges
 
-The review produces its own task-runner run with its
+The review produces its own agent-runner run with its
 own run id. Capture that review run id in this task's
 Notes immediately after launching. Once the review
 finishes, check its **terminal status** first — not
 just its synthesis:
 
-    {{task_runner_cmd}} run status <review-run-id> --output-format json \
+    {{agent_runner_cmd}} run status <review-run-id> --output-format json \
       --field status
 
 The code-review assignment has a final `approval`
@@ -87,10 +87,10 @@ reflects it:
 
 Pull the synthesis and the approval decision record:
 
-    {{task_runner_cmd}} run status <review-run-id> --output-format json \
+    {{agent_runner_cmd}} run status <review-run-id> --output-format json \
       --field tasks | jq -r '.tasks[] | select(.id=="synthesis") | .notes'
 
-    {{task_runner_cmd}} run status <review-run-id> --output-format json \
+    {{agent_runner_cmd}} run status <review-run-id> --output-format json \
       --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
 Paste the reviewer's top-findings synthesis and the
@@ -103,7 +103,7 @@ does not contain X." If `approval` is BLOCKED, copy its
 `feature-implement/apply-review-fixes` knows exactly what must be
 fixed.
 
-This nested task-runner invocation consumes one level
+This nested agent-runner invocation consumes one level
 of nested review (implementer → reviewer). If the
 review launch is rejected by recursion policy, block
 and surface that to the caller instead of continuing.

@@ -11,7 +11,7 @@ import {
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-pi-history-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-pi-history-"));
 }
 
 function writeJsonl(path, records) {

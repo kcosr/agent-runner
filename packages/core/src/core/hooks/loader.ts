@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import {
   hookFilenameCandidates,
+  resolveAgentRunnerConfigDir,
   resolveFirstExistingCandidate,
   resolveNamedHookDir,
-  resolveTaskRunnerConfigDir,
 } from "../../config/runtime-paths.js";
 import { importDefaultOrModule } from "../../util/module-loader.js";
 import type { LoadedAssignment } from "../config/loaded.js";
@@ -101,7 +101,7 @@ export function resolveAssignmentHooks(
   }
 
   const descriptors: ResolvedHookDescriptor[] = [];
-  const configDir = resolveTaskRunnerConfigDir(env);
+  const configDir = resolveAgentRunnerConfigDir(env);
   const pushResolvedDescriptor = (
     phase: HookPhase,
     index: number,

@@ -89,7 +89,7 @@ export function AppShell({
     <div className="app" data-focus-indicators={preferences.visibleFocusIndicators ? "on" : "off"}>
       <div className="shell">
         <aside aria-label="Primary navigation" className="sidebar">
-          <span aria-label="task-runner" className="brand-mark">
+          <span aria-label="agent-runner" className="brand-mark">
             tr
           </span>
           <PrimaryNavButtons

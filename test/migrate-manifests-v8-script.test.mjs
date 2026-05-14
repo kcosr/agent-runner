@@ -108,10 +108,10 @@ test("migrate-manifests-v8 script writes v7 repo capture upgrades", () => {
 
 test("migrate-manifests-v8 script filters to selected repo buckets", () => {
   const root = join(tempDir(), "agent-runner");
-  const taskRunnerPath = writeManifest(root, "task-runner", "run-task-runner", {
+  const agentRunnerPath = writeManifest(root, "agent-runner", "run-agent-runner", {
     schemaVersion: 7,
-    runId: "run-task-runner",
-    cwd: "/repos/task-runner",
+    runId: "run-agent-runner",
+    cwd: "/repos/agent-runner",
   });
   const assistantPath = writeManifest(root, "assistant", "run-assistant", {
     schemaVersion: 7,
@@ -121,19 +121,19 @@ test("migrate-manifests-v8 script filters to selected repo buckets", () => {
 
   const writeRun = execFileSync(
     "node",
-    [SCRIPT_PATH, "--root", root, "--repo", "task-runner", "--write"],
+    [SCRIPT_PATH, "--root", root, "--repo", "agent-runner", "--write"],
     {
       encoding: "utf8",
     },
   );
 
-  assert.match(writeRun, /WRITE\s+.*run-task-runner\/run\.json/);
+  assert.match(writeRun, /WRITE\s+.*run-agent-runner\/run\.json/);
   assert.match(writeRun, /SKIP\s+.*run-assistant\/run\.json: repo bucket assistant not selected/);
-  assert.deepEqual(readManifest(taskRunnerPath), {
+  assert.deepEqual(readManifest(agentRunnerPath), {
     schemaVersion: 8,
-    runId: "run-task-runner",
-    repo: "task-runner",
-    cwd: "/repos/task-runner",
+    runId: "run-agent-runner",
+    repo: "agent-runner",
+    cwd: "/repos/agent-runner",
     archivedAt: null,
   });
   assert.deepEqual(readManifest(assistantPath), {

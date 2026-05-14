@@ -74,7 +74,7 @@ function writePiSession(piHome, cwd, sessionId) {
 }
 
 test("executeRunCommand can initialize an ad-hoc passive run without an agent file", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
       cliVars: {},
@@ -91,7 +91,7 @@ test("executeRunCommand can initialize an ad-hoc passive run without an agent fi
   }));
 
 test("executeRunCommand resolves selected environment vars as run vars", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ configDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ configDir, stateDir }) => {
     writeEnvironment(
       configDir,
       "clone-runtime",
@@ -155,7 +155,7 @@ Explain {{repo_name}}.
   }));
 
 test("executeRunCommand invokes containerized backends with the execution cwd", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ rootDir, configDir }) => {
     const binDir = join(rootDir, "bin");
     const capturePath = join(rootDir, "backend-capture.json");
     mkdirSync(binDir, { recursive: true });
@@ -164,7 +164,7 @@ test("executeRunCommand invokes containerized backends with the execution cwd", 
       `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "agent-runner-run-123") process.exit(1);
 if (cmd === "inspect") {
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true }, Mounts: [] }]));
   process.exit(0);
@@ -187,7 +187,7 @@ export default {
     writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({
       cwd: ctx.cwd,
       processCwd: ctx.processCwd,
-      taskRunnerCwd: ctx.env.TASK_RUNNER_CWD,
+      agentRunnerCwd: ctx.env.AGENT_RUNNER_CWD,
       launcherCommand: ctx.launcher?.command,
       launcherWorkdir: ctx.launcher?.args?.[ctx.launcher.args.indexOf("-w") + 1],
     }, null, 2));
@@ -213,7 +213,7 @@ mode: managed
 engine: docker
 image: alpine:latest
 cwd: /workspace
-containerName: task-runner-run-123
+containerName: agent-runner-run-123
 cleanup:
   policy: terminal
 `,
@@ -236,14 +236,14 @@ cleanup:
     assert.deepEqual(JSON.parse(readFileSync(capturePath, "utf8")), {
       cwd: "/workspace",
       processCwd: process.cwd(),
-      taskRunnerCwd: "/workspace",
+      agentRunnerCwd: "/workspace",
       launcherCommand: "docker",
       launcherWorkdir: "/workspace",
     });
   }));
 
 test("executeRunCommand rejects conflicting assignment and environment var definitions", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ configDir }) => {
     writeEnvironment(
       configDir,
       "clone-runtime",
@@ -302,7 +302,7 @@ Explain the repository.
   }));
 
 test("reconfigureInitializedRun can edit vars introduced by the selected environment", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ configDir }) => {
     writeEnvironment(
       configDir,
       "clone-runtime",
@@ -342,7 +342,7 @@ container: runtime-box
   }));
 
 test("reconfigureInitializedRun preserves environment var constraints", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ configDir }) => {
     writeEnvironment(
       configDir,
       "clone-runtime",
@@ -384,7 +384,7 @@ container: runtime-box
   }));
 
 test("reconfigureInitializedRun preserves group container identity", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ configDir }) => {
     writeEnvironment(
       configDir,
       "group-runtime",
@@ -428,7 +428,7 @@ vars:
   }));
 
 test("executeRunCommand rejects resume-time cli vars before attempting backend execution", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
       cliVars: {},
@@ -460,7 +460,7 @@ test("executeRunCommand rejects resume-time cli vars before attempting backend e
   }));
 
 test("executeRunCommand rejects initialized resume targets with a ready hint", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
       cliVars: {},
@@ -484,7 +484,7 @@ test("executeRunCommand rejects initialized resume targets with a ready hint", a
   }));
 
 test("executeRunCommand allows ready runs to start without a follow-up message", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
       cliVars: {},
@@ -517,7 +517,7 @@ test("executeRunCommand allows ready runs to start without a follow-up message",
   }));
 
 test("executeRunCommand treats ready runs with prior sessions as resumes for message validation", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
       cliVars: {},
@@ -569,7 +569,7 @@ test("executeRunCommand treats ready runs with prior sessions as resumes for mes
   }));
 
 test("executeRunCommand allows empty resume preflight when incomplete tasks remain", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
       cliVars: {},
@@ -614,7 +614,7 @@ test("executeRunCommand allows empty resume preflight when incomplete tasks rema
   }));
 
 test("executeRunCommand requires --backend for ad-hoc bootstrap with a help-worthy error", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     await assert.rejects(
       () =>
         executeRunCommand({
@@ -632,7 +632,7 @@ test("executeRunCommand requires --backend for ad-hoc bootstrap with a help-wort
   }));
 
 test("executeRunCommand rejects passive execution with a command-level error", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     await assert.rejects(
       () =>
         executeRunCommand({
@@ -648,7 +648,7 @@ test("executeRunCommand rejects passive execution with a command-level error", a
   }));
 
 test("executeRunCommand accepts cursor bootstrap session import with a valid store", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ rootDir }) => {
     const sessionId = "cursor-chat-1";
     await withEnv({ HOME: rootDir }, async () => {
       writeCursorStore({
@@ -681,7 +681,7 @@ test("executeRunCommand accepts cursor bootstrap session import with a valid sto
   }));
 
 test("executeRunCommand accepts pi bootstrap session import with a valid history file", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ rootDir }) => {
     const sessionId = "pi-session-1";
     await withEnv({ PI_HOME: rootDir }, async () => {
       writePiSession(rootDir, process.cwd(), sessionId);
@@ -706,7 +706,7 @@ test("executeRunCommand accepts pi bootstrap session import with a valid history
   }));
 
 test("executeRunCommand rejects launcher overrides on resume before backend execution", async () =>
-  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+  withRuntimeRoots("agent-runner-run-command-", async ({ configDir }) => {
     writeLauncher(
       configDir,
       "shared",
@@ -747,7 +747,7 @@ args: [CODING=1]
   }));
 
 test("executeRunCommand rejects explicit parentRunId on resume", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
       cliVars: {},
@@ -778,7 +778,7 @@ test("executeRunCommand rejects explicit parentRunId on resume", async () =>
   }));
 
 test("executeRunCommand ignores env-derived parentRunId on resume", async () =>
-  withRuntimeRoots("task-runner-run-command-", async () => {
+  withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
       cliVars: {},
@@ -795,7 +795,7 @@ test("executeRunCommand ignores env-derived parentRunId on resume", async () =>
 
     await assert.rejects(
       () =>
-        withEnv({ TASK_RUNNER_PARENT_RUN_ID: "env-parent-1" }, () =>
+        withEnv({ AGENT_RUNNER_PARENT_RUN_ID: "env-parent-1" }, () =>
           executeRunCommand({
             initialize: false,
             resumeRun: outcome.runId,

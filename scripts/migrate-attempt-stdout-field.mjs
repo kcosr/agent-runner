@@ -18,14 +18,14 @@ function usage() {
     "",
     "Dry-run by default. Use --write to update attempt logs in place.",
     "Migrates schemaVersion 2 attempts/NN.json files to schemaVersion 3 by removing stdout.",
-    "Pass a state root such as ~/.local/state/task-runner with --root.",
+    "Pass a state root such as ~/.local/state/agent-runner with --root.",
     "Use repeated --repo filters to limit migration to selected repo buckets.",
     "Use repeated --file paths to migrate only specific attempt JSON files.",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  let root = join(homedir(), ".local/state/task-runner");
+  let root = join(homedir(), ".local/state/agent-runner");
   let write = false;
   const repos = [];
   const files = [];

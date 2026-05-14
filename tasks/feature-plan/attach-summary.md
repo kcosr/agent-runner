@@ -11,8 +11,8 @@ Attach the summary file produced by `feature-plan/produce-summary` to this run a
 
 Use:
 
-    {{task_runner_cmd}} attachment add {{run_id}} <summary-path> --name assignment-summary.md
-    {{task_runner_cmd}} attachment list {{run_id}}
+    {{agent_runner_cmd}} attachment add {{run_id}} <summary-path> --name assignment-summary.md
+    {{agent_runner_cmd}} attachment list {{run_id}}
 
 If you are re-running this task after revising the summary, remove any older `assignment-summary.md` attachments first so the run ends with one current copy.
 

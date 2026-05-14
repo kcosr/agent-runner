@@ -1,7 +1,7 @@
+import type { AttachmentListEntry } from "@agent-runner/core/contracts/attachments.js";
+import type { RunDependencyRef, RunDetail, RunSummary } from "@agent-runner/core/contracts/runs.js";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import type { AttachmentListEntry } from "@task-runner/core/contracts/attachments.js";
-import type { RunDependencyRef, RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties, ReactNode } from "react";
 import { ResumeRunDialog } from "../components/resume-run-dialog.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";

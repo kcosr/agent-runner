@@ -1,12 +1,12 @@
-import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
-import type { AttachmentScope } from "@task-runner/core/contracts/attachments.js";
-import type { RunDependencyRef } from "@task-runner/core/contracts/runs.js";
-import { isJsonishPersistable } from "@task-runner/core/core/backends/types.js";
-import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
-import { isNamedLauncherOverride } from "@task-runner/core/core/config/launchers.js";
-import { RunGroupValidationError, validateRunGroupId } from "@task-runner/core/core/run/groups.js";
-import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
-import { trimRunName } from "@task-runner/core/util/run-name.js";
+import type { RunCommandOverrides } from "@agent-runner/core/app/service.js";
+import type { AttachmentScope } from "@agent-runner/core/contracts/attachments.js";
+import type { RunDependencyRef } from "@agent-runner/core/contracts/runs.js";
+import { isJsonishPersistable } from "@agent-runner/core/core/backends/types.js";
+import type { RunListScopeFilter } from "@agent-runner/core/core/commands/service.js";
+import { isNamedLauncherOverride } from "@agent-runner/core/core/config/launchers.js";
+import { RunGroupValidationError, validateRunGroupId } from "@agent-runner/core/core/run/groups.js";
+import type { ScheduleInput } from "@agent-runner/core/core/run/schedule.js";
+import { trimRunName } from "@agent-runner/core/util/run-name.js";
 import type {
   AttachmentsDownloadParams,
   AttachmentsListParams,

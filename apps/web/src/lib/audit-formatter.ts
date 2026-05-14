@@ -1,6 +1,6 @@
-import type { RunAuditEvent } from "@task-runner/core/contracts/events.js";
-import type { RunStatus, RunTaskSummary } from "@task-runner/core/contracts/runs.js";
-import type { ResolvedHookDescriptor } from "@task-runner/core/hooks";
+import type { RunAuditEvent } from "@agent-runner/core/contracts/events.js";
+import type { RunStatus, RunTaskSummary } from "@agent-runner/core/contracts/runs.js";
+import type { ResolvedHookDescriptor } from "@agent-runner/core/hooks";
 
 export type AuditMessagePart =
   | {

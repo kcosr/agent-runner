@@ -1,7 +1,7 @@
 # Tasks
 
 Tasks are the canonical unit of work. Task state is stored in
-`manifest.finalTasks` and is mutated through the `task-runner task ...`
+`manifest.finalTasks` and is mutated through the `agent-runner task ...`
 CLI, never through workspace files.
 
 Task commands operate on run task state only. They do not expose or
@@ -10,8 +10,8 @@ selection, or `backendArgs`; those are runtime fields captured when the
 run is created.
 
 Reusable task definition files are a separate authoring surface under
-`${TASK_RUNNER_CONFIG_DIR}/tasks`. Inspect them with
-`task-runner list tasks` and `task-runner show task <name|path>`. Those
+`${AGENT_RUNNER_CONFIG_DIR}/tasks`. Inspect them with
+`agent-runner list tasks` and `agent-runner show task <name|path>`. Those
 commands read markdown definition source files only; they do not read or
 mutate run task status, notes, or manifests.
 
@@ -50,8 +50,8 @@ runs, the overall status is derived from the task set:
 ### List and show
 
 ```bash
-task-runner task list <run-id>
-task-runner task show <run-id> <task-id>
+agent-runner task list <run-id>
+agent-runner task show <run-id> <task-id>
 ```
 
 Both accept `--output-format json` for machine-readable output.
@@ -59,10 +59,10 @@ Both accept `--output-format json` for machine-readable output.
 ### Update status and notes
 
 ```bash
-task-runner task set <run-id> <task-id> --status in_progress
-task-runner task set <run-id> <task-id> --status completed
-task-runner task set <run-id> <task-id> --status blocked --notes "Reason..."
-task-runner task set <run-id> <task-id> --notes "Replacement notes body"
+agent-runner task set <run-id> <task-id> --status in_progress
+agent-runner task set <run-id> <task-id> --status completed
+agent-runner task set <run-id> <task-id> --status blocked --notes "Reason..."
+agent-runner task set <run-id> <task-id> --notes "Replacement notes body"
 ```
 
 `--status` and `--notes` can be used together or separately, but at least
@@ -71,7 +71,7 @@ one must be provided. `--notes` replaces the entire notes body.
 ### Append notes (non-destructive)
 
 ```bash
-task-runner task append-notes <run-id> <task-id> --text "Observed ..."
+agent-runner task append-notes <run-id> <task-id> --text "Observed ..."
 ```
 
 Preserves existing notes and appends the new text.
@@ -79,7 +79,7 @@ Preserves existing notes and appends the new text.
 ### Add a task
 
 ```bash
-task-runner task add <run-id> --title "New task title" [--body "..."]
+agent-runner task add <run-id> --title "New task title" [--body "..."]
 ```
 
 Generates a new task with a `cli-<shortid>` identifier. Only allowed when
@@ -124,7 +124,7 @@ backend to invoke.
 
 ## Worker workflow template
 
-When a run has tasks, the composed brief includes the task-runner worker
+When a run has tasks, the composed brief includes the agent-runner worker
 workflow template. It teaches the worker to use the task CLI as the work
 interface:
 
@@ -141,7 +141,7 @@ task state.
 
 ## Retry nudges and added tasks
 
-If tasks remain incomplete when an attempt ends, task-runner composes a
+If tasks remain incomplete when an attempt ends, agent-runner composes a
 retry prompt that points the worker back at the task CLI and identifies the
 incomplete tasks.
 

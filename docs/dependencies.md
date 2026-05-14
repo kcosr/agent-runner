@@ -27,11 +27,11 @@ state, transfer attachments, or carry message content between runs.
 ## CLI
 
 ```bash
-task-runner run add-dep    <run-id> --run <dependency-run-id>
-task-runner run add-dep    <run-id> --group <group-id>
-task-runner run remove-dep <run-id> --run <dependency-run-id>
-task-runner run remove-dep <run-id> --group <group-id>
-task-runner run clear-deps <run-id>
+agent-runner run add-dep    <run-id> --run <dependency-run-id>
+agent-runner run add-dep    <run-id> --group <group-id>
+agent-runner run remove-dep <run-id> --run <dependency-run-id>
+agent-runner run remove-dep <run-id> --group <group-id>
+agent-runner run clear-deps <run-id>
 ```
 
 Rules:
@@ -47,12 +47,12 @@ Rules:
 - `remove-dep` errors if the dependency does not exist.
 - `clear-deps` errors if there are no dependencies.
 
-All dependency mutations run under the task-runner global lock so the
+All dependency mutations run under the agent-runner global lock so the
 graph cannot race with itself.
 
 ## Execution gate
 
-When you attempt to run or resume a dependent run, task-runner resolves
+When you attempt to run or resume a dependent run, agent-runner resolves
 its typed `dependencies` refs:
 
 ```ts
@@ -175,7 +175,7 @@ execution controls become available again where appropriate.
 
 ## CLI output
 
-`task-runner run status <run-id> --output-format json` includes the full
+`agent-runner run status <run-id> --output-format json` includes the full
 `RunDetail` with `runGroupId`, `dependencies`, and `dependents`.
-`task-runner list runs` includes `runGroupId` and `dependencyState` so
+`agent-runner list runs` includes `runGroupId` and `dependencyState` so
 scripts can filter runs by group and readiness.

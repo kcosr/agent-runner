@@ -84,7 +84,7 @@ implementation run for plan coverage. Direct reviews use
 ## Resolution at run creation
 
 For each variable declared by the assignment or the selected environment,
-task-runner walks the authored `sources` array from left to right:
+agent-runner walks the authored `sources` array from left to right:
 
 1. `cli` reads `--var key=value`.
 2. `web` reads API/UI-authored vars.
@@ -92,18 +92,18 @@ task-runner walks the authored `sources` array from left to right:
 4. `parent` walks the declared `parentRunId` chain and picks the nearest
    ancestor run that already froze that variable.
 
-If every authored source fails, task-runner then applies `default`, then
+If every authored source fails, agent-runner then applies `default`, then
 `required`, and otherwise omits the variable.
 
 `parent` is a hot-cut source, not a fallback heuristic. Nested
-`task-runner` invocations launched from a worker automatically receive
-`TASK_RUNNER_PARENT_RUN_ID`, so descendant runs can inherit parent vars
+`agent-runner` invocations launched from a worker automatically receive
+`AGENT_RUNNER_PARENT_RUN_ID`, so descendant runs can inherit parent vars
 without repeating `--var` flags.
 
 Parent lineage is separate from run grouping. `parentRunId` is the chain
 used by `sources: [parent]`; `runGroupId` controls group-scoped
 attachments, group filters, and group dependencies. Nested invocations
-also receive `TASK_RUNNER_RUN_GROUP_ID` so children join the same run
+also receive `AGENT_RUNNER_RUN_GROUP_ID` so children join the same run
 group by default, but variable inheritance still follows parent lineage.
 
 Prepare hooks run after the initial resolution pass and can add or mutate
@@ -138,7 +138,7 @@ same way. `default` must already match the declared type.
 
 ## Config-time env interpolation in definitions
 
-Before task-runner validates agent or assignment frontmatter, it resolves
+Before agent-runner validates agent or assignment frontmatter, it resolves
 shell-style env expressions in parsed scalar values:
 
 - `${VAR}` — use `VAR`; fail if it is unset or empty
@@ -173,7 +173,7 @@ reason (`missing`, `empty`, `invalid syntax`, or field-surface mismatch).
 
 ## Injected variables
 
-task-runner always provides these variables in addition to the declared
+agent-runner always provides these variables in addition to the declared
 ones:
 
 | Key | Value |
@@ -181,10 +181,10 @@ ones:
 | `run_id` | the run's short id |
 | `run_group_id` | the selected run group id for the run |
 | `cwd` | the resolved working directory |
-| `config_dir` | the resolved task-runner config root |
-| `state_dir` | the resolved task-runner state root |
+| `config_dir` | the resolved agent-runner config root |
+| `state_dir` | the resolved agent-runner state root |
 | `assignment_name` | the frozen assignment name, when the run has an assignment |
-| `task_runner_cmd` | resolved CLI command for subcommand examples |
+| `agent_runner_cmd` | resolved CLI command for subcommand examples |
 
 These cannot be overridden by `--var`. When a run has no assignment,
 `assignment_name` is omitted, so `{{assignment_name}}` remains
@@ -262,7 +262,7 @@ the initialized run before it has executed.
 ## CLI usage
 
 ```bash
-task-runner run \
+agent-runner run \
   --agent implementer \
   --assignment code-review \
   --var range=main..HEAD \
@@ -272,7 +272,7 @@ task-runner run \
 For a direct review that is not tied to an implementation run:
 
 ```bash
-task-runner run \
+agent-runner run \
   --agent code-reviewer \
   --assignment code-review-direct \
   --var range=unstaged
@@ -288,6 +288,6 @@ parent values.
 
 ## Inspecting resolved variables
 
-- `task-runner run status <run-id> --output-format json` includes
+- `agent-runner run status <run-id> --output-format json` includes
   `runtimeVars` (with env values redacted).
 - `show assignment <name>` renders the declared var schema and defaults.

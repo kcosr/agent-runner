@@ -1,9 +1,9 @@
 {
-  "name": "@task-runner/web",
+  "name": "@agent-runner/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Run dashboard web app for task-runner.",
+  "description": "Run dashboard web app for agent-runner.",
   "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && vite build",
@@ -13,7 +13,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.90.5",
     "@tanstack/react-router": "^1.133.48",
-    "@task-runner/core": "*",
+    "@agent-runner/core": "*",
     "mermaid": "^11.14.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

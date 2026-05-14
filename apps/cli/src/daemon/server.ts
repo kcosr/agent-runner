@@ -50,18 +50,18 @@ import {
   updateRunPinned,
   updateTask,
   validateRunEnvironment,
-} from "@task-runner/core/app/service.js";
-import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+} from "@agent-runner/core/app/service.js";
+import { VALID_STATUSES } from "@agent-runner/core/assignment/model.js";
 import {
   CodexThreadReadProtocolError,
   type CodexThreadStatus,
   adoptCodexActiveThread,
   readCodexThread,
   resolveCodexTransportConfig,
-} from "@task-runner/core/backends/codex.js";
-import { loadCustomBackends, resolveBackend } from "@task-runner/core/backends/registry.js";
-import { isPathArg } from "@task-runner/core/config/runtime-paths.js";
-import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
+} from "@agent-runner/core/backends/codex.js";
+import { loadCustomBackends, resolveBackend } from "@agent-runner/core/backends/registry.js";
+import { isPathArg } from "@agent-runner/core/config/runtime-paths.js";
+import type { RunAttachment } from "@agent-runner/core/contracts/attachments.js";
 import type {
   RunAuditEnvelope,
   RunAuditHistory,
@@ -71,7 +71,7 @@ import type {
   RunTimelineEnvelope,
   RunTimelineEvent,
   RunTimelineHistory,
-} from "@task-runner/core/contracts/events.js";
+} from "@agent-runner/core/contracts/events.js";
 import type {
   QueuedResumeMessage,
   RunAbortReason,
@@ -79,32 +79,32 @@ import type {
   RunDetail,
   RunStatus,
   RunSummary,
-} from "@task-runner/core/contracts/runs.js";
+} from "@agent-runner/core/contracts/runs.js";
 import {
   deriveRunCapabilities,
   isDaemonAutoRunnableReadyRun,
   isTerminalStatus,
   toRunDetail,
   toRunSummary,
-} from "@task-runner/core/contracts/runs.js";
-import type { EffortLevel } from "@task-runner/core/core/backends/types.js";
+} from "@agent-runner/core/contracts/runs.js";
+import type { EffortLevel } from "@agent-runner/core/core/backends/types.js";
 import {
   ConflictError,
   refreshRunSnapshotAfterTaskStateSettles,
-} from "@task-runner/core/core/commands/service.js";
-import { MAX_ATTACHMENT_BYTES } from "@task-runner/core/core/run/attachments.js";
+} from "@agent-runner/core/core/commands/service.js";
+import { MAX_ATTACHMENT_BYTES } from "@agent-runner/core/core/run/attachments.js";
 import {
   applyPreparedBackendSessionHistorySync,
   backendSessionHistorySyncEnabled,
   prepareBackendSessionHistorySync,
   recordBackendSessionSyncError,
-} from "@task-runner/core/core/run/backend-session-sync.js";
+} from "@agent-runner/core/core/run/backend-session-sync.js";
 import {
   deriveDependencyState,
   deriveDependencyStateFromDetails,
   resolveDependencies,
   resolveDependents,
-} from "@task-runner/core/core/run/dependencies.js";
+} from "@agent-runner/core/core/run/dependencies.js";
 import {
   type ListedRunManifest,
   ResumeError,
@@ -116,8 +116,8 @@ import {
   resolveResumeTarget,
   runBackendCwd,
   writeManifest,
-} from "@task-runner/core/core/run/manifest.js";
-import { hasRunnableTasks } from "@task-runner/core/core/run/resume-policy.js";
+} from "@agent-runner/core/core/run/manifest.js";
+import { hasRunnableTasks } from "@agent-runner/core/core/run/resume-policy.js";
 import {
   type RunControllerReconciliationDecision,
   type RunControllerReconciliationReason,
@@ -135,25 +135,25 @@ import {
   appendRunScheduleMissedEvent,
   appendRunScheduleSkippedEvent,
   systemRunEventContext,
-} from "@task-runner/core/core/run/run-events.js";
-import { RunDetachedError, type RunEvent } from "@task-runner/core/core/run/run-loop.js";
+} from "@agent-runner/core/core/run/run-events.js";
+import { RunDetachedError, type RunEvent } from "@agent-runner/core/core/run/run-loop.js";
 import {
   ScheduleValidationError,
   advanceRecurringSchedule,
   deriveScheduleState,
-} from "@task-runner/core/core/run/schedule.js";
+} from "@agent-runner/core/core/run/schedule.js";
 import {
   tryWithTaskStateLockAsync,
   withTaskStateLock,
   withTaskStateLockAsync,
-} from "@task-runner/core/core/run/workspace-state.js";
+} from "@agent-runner/core/core/run/workspace-state.js";
 import {
   debugPerfEnabled,
   debugPerfLog,
   readDebugPerfIntervalMs,
   startDebugPerfTimer,
-} from "@task-runner/core/util/debug-perf.js";
-import { shortId } from "@task-runner/core/util/short-id.js";
+} from "@agent-runner/core/util/debug-perf.js";
+import { shortId } from "@agent-runner/core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { assertDaemonAuthorized, resolveDaemonAuthConfig } from "./auth.js";
 import { deriveAppRuntimeConfig, deriveHttpBaseUrl, listenSocketConfig } from "./config.js";
@@ -280,14 +280,14 @@ const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
 const COMPLETED_TIMELINE_BUFFER_TTL_MS = 5_000;
 const MAX_SCHEDULE_TIMER_DELAY_MS = 2_147_483_647;
 const SCHEDULED_RESUME_MESSAGE = "Resuming after scheduled delay.";
-const TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS_ENV = "TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS";
+const AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS_ENV = "AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS";
 
 function roundMetric(value: number): number {
   return Math.round(value * 1_000) / 1_000;
 }
 
 function daemonFilesystemLocksEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env[TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS_ENV]?.trim().toLowerCase();
+  const raw = env[AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS_ENV]?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
@@ -615,7 +615,7 @@ class SessionSyncManager {
     } catch (error) {
       await this.recordSyncFailure(runId, manifest.workspaceDir, error);
       console.error(
-        `task-runner daemon: backend session history sync failed for run ${runId}: ${formatDaemonError(error)}`,
+        `agent-runner daemon: backend session history sync failed for run ${runId}: ${formatDaemonError(error)}`,
       );
     } finally {
       this.inFlightRunIds.delete(runId);
@@ -1425,7 +1425,7 @@ export async function serveDaemon(
 
   const publishAutoStartRecovery = (runId: string, error: unknown): void => {
     console.error(
-      `task-runner daemon: dependency auto-start failed for run ${runId}: ${formatAutoStartError(error)}`,
+      `agent-runner daemon: dependency auto-start failed for run ${runId}: ${formatAutoStartError(error)}`,
     );
     try {
       publishMutationResult(runId, {
@@ -1434,7 +1434,7 @@ export async function serveDaemon(
       });
     } catch (publishError) {
       console.error(
-        `task-runner daemon: failed to publish dependency auto-start recovery for run ${runId}: ${formatAutoStartError(publishError)}`,
+        `agent-runner daemon: failed to publish dependency auto-start recovery for run ${runId}: ${formatAutoStartError(publishError)}`,
       );
     }
   };
@@ -1531,7 +1531,7 @@ export async function serveDaemon(
   const publishScheduleRecovery = (runId: string, error: unknown): void => {
     const formattedError = formatAutoStartError(error);
     console.error(
-      `task-runner daemon: schedule evaluation failed for run ${runId}: ${formattedError}`,
+      `agent-runner daemon: schedule evaluation failed for run ${runId}: ${formattedError}`,
     );
     const entry = manifestEntriesByRunId.get(runId);
     if (entry) {
@@ -1547,7 +1547,7 @@ export async function serveDaemon(
         );
       } catch (auditError) {
         console.error(
-          `task-runner daemon: failed to publish schedule failure audit for run ${runId}: ${formatAutoStartError(auditError)}`,
+          `agent-runner daemon: failed to publish schedule failure audit for run ${runId}: ${formatAutoStartError(auditError)}`,
         );
       }
     }
@@ -1558,7 +1558,7 @@ export async function serveDaemon(
       });
     } catch (publishError) {
       console.error(
-        `task-runner daemon: failed to publish schedule recovery for run ${runId}: ${formatAutoStartError(publishError)}`,
+        `agent-runner daemon: failed to publish schedule recovery for run ${runId}: ${formatAutoStartError(publishError)}`,
       );
     }
   };
@@ -2234,9 +2234,9 @@ export async function serveDaemon(
     processCwd: manifest.cwd,
     env: {
       ...(process.env as Record<string, string>),
-      TASK_RUNNER_RUN_ID: manifest.runId,
-      TASK_RUNNER_RUN_GROUP_ID: manifest.runGroupId,
-      TASK_RUNNER_CWD: runBackendCwd(manifest),
+      AGENT_RUNNER_RUN_ID: manifest.runId,
+      AGENT_RUNNER_RUN_GROUP_ID: manifest.runGroupId,
+      AGENT_RUNNER_CWD: runBackendCwd(manifest),
     },
     model: manifest.model ?? undefined,
     effort: (manifest.effort as EffortLevel | null) ?? undefined,
@@ -2500,7 +2500,7 @@ export async function serveDaemon(
         await reconcileStartupRunningRun(entry);
       } catch (error) {
         console.error(
-          `task-runner daemon: startup reconciliation failed for run ${entry.manifest.runId}: ${formatDaemonError(error)}`,
+          `agent-runner daemon: startup reconciliation failed for run ${entry.manifest.runId}: ${formatDaemonError(error)}`,
         );
       }
     }
@@ -2958,7 +2958,7 @@ export async function serveDaemon(
         }
         const event: RunTimelineEvent = {
           type: "backend_notice",
-          text: `task-runner: ${err instanceof Error ? err.message : String(err)}\n`,
+          text: `agent-runner: ${err instanceof Error ? err.message : String(err)}\n`,
         };
         publishTimeline(runId, event);
       })
@@ -3097,8 +3097,8 @@ export async function serveDaemon(
       queueScheduleEvaluation?.(runId);
     } catch (error) {
       const errorMessage = resumeAccepted
-        ? `task-runner daemon: failed to drain queued resume messages for run ${runId}: ${formatAutoStartError(error)}`
-        : `task-runner daemon: failed to start queued resume for run ${runId}: ${formatAutoStartError(error)}`;
+        ? `agent-runner daemon: failed to drain queued resume messages for run ${runId}: ${formatAutoStartError(error)}`
+        : `agent-runner daemon: failed to start queued resume for run ${runId}: ${formatAutoStartError(error)}`;
       console.error(errorMessage);
       if (!resumeAccepted) {
         return false;
@@ -3112,7 +3112,7 @@ export async function serveDaemon(
         queueScheduleEvaluation?.(runId);
       } catch (publishError) {
         console.error(
-          `task-runner daemon: failed to publish queued resume recovery for run ${runId}: ${formatAutoStartError(publishError)}`,
+          `agent-runner daemon: failed to publish queued resume recovery for run ${runId}: ${formatAutoStartError(publishError)}`,
         );
       }
     } finally {
@@ -3648,7 +3648,7 @@ export async function serveDaemon(
           void streams.sendIterable(streamId, createReadStream(absolutePath)).catch((error) => {
             if (!(error instanceof WebSocketStreamError && error.code === "STREAM_CLOSED")) {
               console.error(
-                `task-runner daemon: attachment download stream failed for ${streamId}: ${
+                `agent-runner daemon: attachment download stream failed for ${streamId}: ${
                   error instanceof Error ? error.message : String(error)
                 }`,
               );
@@ -4269,7 +4269,7 @@ export async function serveDaemon(
             );
           } catch (error) {
             console.error(
-              `task-runner daemon: failed to record remote detach audit: ${formatDaemonError(error)}`,
+              `agent-runner daemon: failed to record remote detach audit: ${formatDaemonError(error)}`,
             );
           }
           record.detachController.abort();

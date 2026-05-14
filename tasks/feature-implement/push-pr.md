@@ -15,7 +15,7 @@ to a PR before the run can end successfully.
      explicitly by file path (not `git add -A` — that can
      pick up files you didn't intend, including
      runtime-state artifacts under the configured
-     task-runner state dir) and create a final focused
+     agent-runner state dir) and create a final focused
      follow-up commit. Follow the repo's commit-message
      convention from `feature-plan/orient`.
   3. If the repo uses pre-commit hooks, let them run. If

@@ -10,7 +10,7 @@ const SCRIPT_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-migrate-v24-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-migrate-v24-"));
 }
 
 function writeJson(path, value) {
@@ -156,7 +156,7 @@ function managedEnvironment() {
     mode: "managed",
     image: "node:22",
     lifetime: "group",
-    containerName: "task-runner-group",
+    containerName: "agent-runner-group",
     containerId: null,
     workspace: {
       scope: "group",
@@ -172,7 +172,7 @@ function managedEnvironment() {
             kind: "git-clone",
             source: "https://example.test/repo.git",
             baseRef: "origin/main",
-            branch: "task-runner/run-a",
+            branch: "agent-runner/run-a",
           },
           {
             kind: "command",
@@ -254,7 +254,7 @@ test("migrate-manifests-v24 converts legacy workspace lifecycle to top-level lif
         target: "container",
         source: "https://example.test/repo.git",
         baseRef: "origin/main",
-        branch: "task-runner/run-a",
+        branch: "agent-runner/run-a",
         timeoutMs: null,
       },
       {

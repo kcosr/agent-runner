@@ -157,7 +157,7 @@ const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-run-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-run-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -229,7 +229,7 @@ function initGitRepo(baseDir) {
     encoding: "utf8",
     env,
   });
-  execFileSync("git", ["-C", repoDir, "config", "user.name", "Task Runner Tests"], {
+  execFileSync("git", ["-C", repoDir, "config", "user.name", "Agent Runner Tests"], {
     encoding: "utf8",
     env,
   });
@@ -1376,9 +1376,9 @@ Assignment group {{run_group_id}} cwd {{cwd}}.
       assignmentName: "group-work",
       runGroupId: "shared-123",
       env: {
-        TASK_RUNNER_RUN_ID: "stale-run",
-        TASK_RUNNER_RUN_GROUP_ID: "stale-group",
-        TASK_RUNNER_CWD: "stale-cwd",
+        AGENT_RUNNER_RUN_ID: "stale-run",
+        AGENT_RUNNER_RUN_GROUP_ID: "stale-group",
+        AGENT_RUNNER_CWD: "stale-cwd",
       },
     },
   );
@@ -1389,9 +1389,9 @@ Assignment group {{run_group_id}} cwd {{cwd}}.
   assert.equal(outcome.manifest.finalTasks.t1.title, "Group shared-123");
   assert.equal(outcome.manifest.finalTasks.t1.body, `Work in ${expectedCwd} for ${outcome.runId}.`);
   assert.ok(outcome.manifest.brief.includes(`Assignment group shared-123 cwd ${expectedCwd}.`));
-  assert.equal(seenEnv.TASK_RUNNER_RUN_ID, outcome.runId);
-  assert.equal(seenEnv.TASK_RUNNER_RUN_GROUP_ID, "shared-123");
-  assert.equal(seenEnv.TASK_RUNNER_CWD, expectedCwd);
+  assert.equal(seenEnv.AGENT_RUNNER_RUN_ID, outcome.runId);
+  assert.equal(seenEnv.AGENT_RUNNER_RUN_GROUP_ID, "shared-123");
+  assert.equal(seenEnv.AGENT_RUNNER_CWD, expectedCwd);
 });
 
 test("run_group_id defaults to singleton run id for assignment cwd interpolation", async () => {
@@ -2336,7 +2336,7 @@ Work.
 });
 
 async function initBuiltInPlanFeature(baseDir, repoDir, cliVars) {
-  return withEnv({ ...sharedRuntimeEnv(baseDir), TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, async () => {
+  return withEnv({ ...sharedRuntimeEnv(baseDir), AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, async () => {
     const loaded = loadAgentConfig(join(baseDir, "agents", "three", "agent.md"), baseDir);
     const loadedAssignment = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
     const originalCwd = process.cwd();
@@ -2363,7 +2363,7 @@ async function initBuiltInPlanFeature(baseDir, repoDir, cliVars) {
 }
 
 async function initBuiltInPlanImplementFeature(baseDir, repoDir) {
-  return withEnv({ ...sharedRuntimeEnv(baseDir), TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, async () => {
+  return withEnv({ ...sharedRuntimeEnv(baseDir), AGENT_RUNNER_CONFIG_DIR: REPO_ROOT }, async () => {
     const loaded = loadAgentConfig(join(baseDir, "agents", "three", "agent.md"), baseDir);
     const loadedAssignment = loadAssignmentConfig(BUILTIN_PLAN_IMPLEMENT_FEATURE_PATH);
     const originalCwd = process.cwd();
@@ -3134,8 +3134,8 @@ test("codex embedded runs freeze frontmatter transport ahead of client env", asy
   let seenBackendConfig;
   const { outcome } = await withEnv(
     {
-      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/ignored-codex.sock",
-      TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+      AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/ignored-codex.sock",
+      AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
     },
     () =>
       runWithMock(
@@ -3179,8 +3179,8 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
   let seenBackendConfig;
   const { outcome } = await withEnv(
     {
-      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/daemon-env-codex.sock",
-      TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+      AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/daemon-env-codex.sock",
+      AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
     },
     () =>
       runWithMock(
@@ -3339,14 +3339,14 @@ test("codex daemon runs ignore obsolete env-shaped backendConfig keys without hi
   assert.deepEqual(outcome.manifest.backendConfig, seenBackendConfig);
 });
 
-test("codex embedded runs reject malformed TASK_RUNNER_CODEX_WS_URL before freezing transport", async () => {
+test("codex embedded runs reject malformed AGENT_RUNNER_CODEX_WS_URL before freezing transport", async () => {
   const dir = tempDir();
   writeAgent(dir, "codex-agent", CODEX_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
   let invoked = false;
   await assert.rejects(
-    withEnv({ TASK_RUNNER_CODEX_WS_URL: "https://example.com/socket" }, () =>
+    withEnv({ AGENT_RUNNER_CODEX_WS_URL: "https://example.com/socket" }, () =>
       runWithMock(
         dir,
         async () => {
@@ -3370,14 +3370,14 @@ test("codex embedded runs reject malformed TASK_RUNNER_CODEX_WS_URL before freez
   assert.equal(invoked, false);
 });
 
-test("codex embedded runs reject malformed TASK_RUNNER_CODEX_UDS_PATH before freezing transport", async () => {
+test("codex embedded runs reject malformed AGENT_RUNNER_CODEX_UDS_PATH before freezing transport", async () => {
   const dir = tempDir();
   writeAgent(dir, "codex-agent", CODEX_AGENT);
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
   let invoked = false;
   await assert.rejects(
-    withEnv({ TASK_RUNNER_CODEX_UDS_PATH: "relative.sock" }, () =>
+    withEnv({ AGENT_RUNNER_CODEX_UDS_PATH: "relative.sock" }, () =>
       runWithMock(
         dir,
         async () => {
@@ -3410,8 +3410,8 @@ test("codex embedded runs reject conflicting Codex transport env before freezing
   await assert.rejects(
     withEnv(
       {
-        TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
-        TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        AGENT_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
+        AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
       },
       () =>
         runWithMock(
@@ -3432,7 +3432,7 @@ test("codex embedded runs reject conflicting Codex transport env before freezing
           { agentName: "codex-agent", backendId: "codex" },
         ),
     ),
-    /TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set/,
+    /AGENT_RUNNER_CODEX_UDS_PATH and AGENT_RUNNER_CODEX_WS_URL cannot both be set/,
   );
   assert.equal(invoked, false);
 });
@@ -3450,7 +3450,7 @@ test("codex connected mode mirrors embedded mode for the same websocket transpor
   };
 
   let embeddedBackendConfig;
-  const embedded = await withEnv({ TASK_RUNNER_CODEX_WS_URL: sharedTransport.transport.url }, () =>
+  const embedded = await withEnv({ AGENT_RUNNER_CODEX_WS_URL: sharedTransport.transport.url }, () =>
     runWithMock(
       dir,
       async (ctx) => {
@@ -3476,7 +3476,7 @@ test("codex connected mode mirrors embedded mode for the same websocket transpor
   );
 
   let connectedBackendConfig;
-  const connected = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
+  const connected = await withEnv({ AGENT_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
     runWithMock(
       dir,
       async (ctx) => {
@@ -4062,7 +4062,7 @@ args: [mutated]
   writeFileSync(manifestPath, `${JSON.stringify(mutated, null, 2)}\n`);
 
   const reset = await withSharedRuntimeEnv(dir, () =>
-    withEnv({ TASK_RUNNER_RUN_GROUP_ID: "env-g2" }, () => resetRun(initialized.workspaceDir)),
+    withEnv({ AGENT_RUNNER_RUN_GROUP_ID: "env-g2" }, () => resetRun(initialized.workspaceDir)),
   );
   assert.equal(reset.manifest.cwd, frozenCwd);
   assert.deepEqual(reset.manifest.launcher, frozenLauncher);

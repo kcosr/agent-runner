@@ -56,7 +56,7 @@ function writeEnvironment(baseDir, name, body) {
 }
 
 test("CLI list tasks renders text and json task definition lists", () =>
-  withRuntimeRoots("task-runner-task-def-cli-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-task-def-cli-", ({ rootDir, configDir }) => {
     const orientPath = writeTask(
       configDir,
       "orient",
@@ -97,7 +97,7 @@ Review module boundaries.
   }));
 
 test("CLI show task renders text and json task definition details", () =>
-  withRuntimeRoots("task-runner-task-def-cli-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-task-def-cli-", ({ rootDir, configDir }) => {
     const taskPath = writeTask(
       configDir,
       "deploy/check",
@@ -145,7 +145,7 @@ Verify deployment status.
   }));
 
 test("CLI list tasks warns and skips invalid config-root task definitions", () =>
-  withRuntimeRoots("task-runner-task-def-cli-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-task-def-cli-", ({ rootDir, configDir }) => {
     writeTask(
       configDir,
       "good",
@@ -173,7 +173,7 @@ Bad body.
     assertCliOk(result);
     assert.equal(result.stdout, "  good\n");
     assert.ok(result.stderr.includes(badPath));
-    assert.match(result.stderr, /task-runner: warning: Invalid task config/);
+    assert.match(result.stderr, /agent-runner: warning: Invalid task config/);
     assert.match(result.stderr, /must match canonical id "review\/bad"/);
     assert.match(result.stderr, /definition skipped/);
 
@@ -192,7 +192,7 @@ Bad body.
   }));
 
 test("CLI show task reports usage and missing task failures", () =>
-  withRuntimeRoots("task-runner-task-def-cli-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-task-def-cli-", ({ rootDir, configDir }) => {
     const missingTarget = runCli(["show", "task"], { cwd: rootDir });
     assert.equal(missingTarget.status, 3);
     assert.equal(missingTarget.stdout, "");
@@ -222,7 +222,7 @@ test("CLI show task reports usage and missing task failures", () =>
   }));
 
 test("CLI definition renderer handles existing agent, assignment, launcher, and environment details", () =>
-  withRuntimeRoots("task-runner-task-def-cli-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-task-def-cli-", ({ rootDir, configDir }) => {
     const agentPath = writeAgent(
       configDir,
       "renderer-agent",

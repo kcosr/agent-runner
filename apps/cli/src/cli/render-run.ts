@@ -1,6 +1,6 @@
-import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
-import type { RunCompletionSummary } from "@task-runner/core/core/run/status.js";
-import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
+import { resolveAgentRunnerCommand } from "@agent-runner/core/agent-runner-command.js";
+import type { RunEvent } from "@agent-runner/core/core/run/run-loop.js";
+import type { RunCompletionSummary } from "@agent-runner/core/core/run/status.js";
 
 interface RenderedRunChunk {
   stream: "stdout" | "stderr";
@@ -22,10 +22,10 @@ function hasIncompleteTasks(summary: RunCompletionSummary): boolean {
 function appendResumeHint(
   lines: string[],
   summary: RunCompletionSummary,
-  taskRunnerCmd: string,
+  agentRunnerCmd: string,
   intro: string,
 ): void {
-  const resumeCmd = `${taskRunnerCmd} run --resume-run ${summary.runId}`;
+  const resumeCmd = `${agentRunnerCmd} run --resume-run ${summary.runId}`;
   if (hasIncompleteTasks(summary)) {
     lines.push(intro);
     lines.push(`  ${resumeCmd}`);
@@ -55,7 +55,7 @@ function renderBannerLines(event: {
 }
 
 function renderSummary(summary: RunCompletionSummary): string {
-  const taskRunnerCmd = resolveTaskRunnerCommand();
+  const agentRunnerCmd = resolveAgentRunnerCommand();
   const lines: string[] = [];
   lines.push("");
   lines.push("── summary ──");
@@ -72,7 +72,7 @@ function renderSummary(summary: RunCompletionSummary): string {
     }
     lines.push("");
     lines.push("To execute this run:");
-    lines.push(`  ${taskRunnerCmd} run --resume-run ${summary.runId}`);
+    lines.push(`  ${agentRunnerCmd} run --resume-run ${summary.runId}`);
     return `${lines.join("\n")}\n`;
   }
 
@@ -84,7 +84,7 @@ function renderSummary(summary: RunCompletionSummary): string {
     lines.push(`Total attempts: ${summary.totalAttemptCount}`);
     lines.push(`Sessions: ${summary.totalSessionCount}`);
     lines.push("");
-    appendResumeHint(lines, summary, taskRunnerCmd, "Run was interrupted by the user. To resume:");
+    appendResumeHint(lines, summary, agentRunnerCmd, "Run was interrupted by the user. To resume:");
     return `${lines.join("\n")}\n`;
   }
 
@@ -108,7 +108,7 @@ function renderSummary(summary: RunCompletionSummary): string {
   }
 
   lines.push("");
-  appendResumeHint(lines, summary, taskRunnerCmd, "To continue this run:");
+  appendResumeHint(lines, summary, agentRunnerCmd, "To continue this run:");
 
   return `${lines.join("\n")}\n`;
 }
@@ -116,19 +116,19 @@ function renderSummary(summary: RunCompletionSummary): string {
 export function renderRunEvent(event: RunEvent): RenderedRunChunk[] {
   switch (event.type) {
     case "run_initialized": {
-      const taskRunnerCmd = resolveTaskRunnerCommand();
+      const agentRunnerCmd = resolveAgentRunnerCommand();
       const lines = renderBannerLines({
         ...event,
-        header: `task-runner: initialized ${event.passive ? "passive " : ""}agent=${event.agentName} run=${event.runId}`,
+        header: `agent-runner: initialized ${event.passive ? "passive " : ""}agent=${event.agentName} run=${event.runId}`,
       });
       if (event.passive) {
-        lines.push(`             brief=${taskRunnerCmd} run brief ${event.runId}`);
+        lines.push(`             brief=${agentRunnerCmd} run brief ${event.runId}`);
         lines.push(
-          `             drive with: ${taskRunnerCmd} task set ${event.runId} <task-id> ...`,
+          `             drive with: ${agentRunnerCmd} task set ${event.runId} <task-id> ...`,
         );
       } else {
-        lines.push(`             brief=${taskRunnerCmd} run brief ${event.runId}`);
-        lines.push(`             ready with: ${taskRunnerCmd} run ready ${event.runId}`);
+        lines.push(`             brief=${agentRunnerCmd} run brief ${event.runId}`);
+        lines.push(`             ready with: ${agentRunnerCmd} run ready ${event.runId}`);
       }
       return stderr(`${lines.join("\n")}\n`);
     }
@@ -140,7 +140,7 @@ export function renderRunEvent(event: RunEvent): RenderedRunChunk[] {
       const suffix = event.sessionIndex === null ? "" : ` (session ${event.sessionIndex})`;
       const lines = renderBannerLines({
         ...event,
-        header: `task-runner: agent=${event.agentName} run=${event.runId}${suffix}`,
+        header: `agent-runner: agent=${event.agentName} run=${event.runId}${suffix}`,
       });
       return stderr(`${lines.join("\n")}\n\n`);
     }
@@ -156,12 +156,12 @@ export function renderRunEvent(event: RunEvent): RenderedRunChunk[] {
       return stderr(event.text);
     case "retrying":
       return stderr(
-        `\ntask-runner: retrying — ${event.incompleteCount} incomplete, ${event.invalidStatusCount} invalid status${event.invalidStatusCount === 1 ? "" : "es"}\n\n`,
+        `\nagent-runner: retrying — ${event.incompleteCount} incomplete, ${event.invalidStatusCount} invalid status${event.invalidStatusCount === 1 ? "" : "es"}\n\n`,
       );
     case "run_aborted":
-      return stderr("\ntask-runner: interrupted by user; stopping.\n");
+      return stderr("\nagent-runner: interrupted by user; stopping.\n");
     case "resume_rejected":
-      return stderr("task-runner: backend rejected the resume session; stopping.\n");
+      return stderr("agent-runner: backend rejected the resume session; stopping.\n");
     case "run_finished":
       return stderr(renderSummary(event.summary));
   }

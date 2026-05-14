@@ -199,7 +199,7 @@ function homeFromEnv(env: Record<string, string>): string {
 export function opencodeDataDir(
   env: Record<string, string> = process.env as Record<string, string>,
 ): string {
-  const explicit = env.TASK_RUNNER_OPENCODE_DATA_DIR?.trim() || env.OPENCODE_DATA_DIR?.trim();
+  const explicit = env.AGENT_RUNNER_OPENCODE_DATA_DIR?.trim() || env.OPENCODE_DATA_DIR?.trim();
   if (explicit) return resolve(explicit);
   const xdgData = env.XDG_DATA_HOME?.trim() || join(homeFromEnv(env), ".local", "share");
   return resolve(xdgData, "opencode");
@@ -709,7 +709,7 @@ export const opencodeBackend: Backend = {
   validateSessionId: validateOpenCodeSession,
   resolveSessionHistorySource: resolveOpenCodeSessionHistorySource,
   readSessionHistory: readOpenCodeSessionHistory,
-  taskRunnerPromptMatchesSyncedTurn: ({ prompt, turn }) =>
+  agentRunnerPromptMatchesSyncedTurn: ({ prompt, turn }) =>
     prompt === unquoteOpenCodeStoredPrompt(turn.userText ?? ""),
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const args = buildOpenCodeArgs(ctx);
@@ -726,7 +726,7 @@ export const opencodeBackend: Backend = {
     });
 
     const result = await runProcess({
-      command: ctx.env.TASK_RUNNER_OPENCODE_BIN ?? "opencode",
+      command: ctx.env.AGENT_RUNNER_OPENCODE_BIN ?? "opencode",
       args,
       launcher: ctx.launcher,
       cwd: ctx.processCwd ?? ctx.cwd,

@@ -58,7 +58,7 @@ function writeLauncher(baseDir, name, body, ext = ".yaml") {
 }
 
 test("definitions discovery reads from the config root and remains read-only", () =>
-  withRuntimeRoots("task-runner-def-test-", ({ configDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-def-test-", ({ configDir, stateDir }) => {
     writeAgent(configDir, "alpha", AGENT_BODY);
     writeAssignment(configDir, "work-a", ASSIGNMENT_BODY);
 
@@ -77,7 +77,7 @@ test("definitions discovery reads from the config root and remains read-only", (
   }));
 
 test("definitions discovery does not fall back to cwd-local definitions", () =>
-  withRuntimeRoots("task-runner-def-test-", ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-def-test-", ({ rootDir }) => {
     writeAgent(rootDir, "local-only", AGENT_BODY);
     writeAssignment(rootDir, "local-work", ASSIGNMENT_BODY);
 
@@ -86,7 +86,7 @@ test("definitions discovery does not fall back to cwd-local definitions", () =>
   }));
 
 test("definitions discovery returns sorted names from the config root", () =>
-  withRuntimeRoots("task-runner-def-test-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-def-test-", ({ configDir }) => {
     writeAgent(configDir, "zeta", AGENT_BODY);
     writeAgent(configDir, "alpha", AGENT_BODY);
     writeAssignment(configDir, "work-z", ASSIGNMENT_BODY);
@@ -116,7 +116,7 @@ args: [host, --]
   }));
 
 test("show-style agent and assignment loads resolve bare names from the config root", () =>
-  withRuntimeRoots("task-runner-def-test-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-def-test-", ({ rootDir, configDir }) => {
     writeAgent(configDir, "demo", AGENT_BODY);
     writeAssignment(configDir, "demo", ASSIGNMENT_BODY);
 
@@ -131,7 +131,7 @@ test("show-style agent and assignment loads resolve bare names from the config r
   }));
 
 test("show-style direct path loads remain supported", () =>
-  withRuntimeRoots("task-runner-def-test-", ({ configDir }) => {
+  withRuntimeRoots("agent-runner-def-test-", ({ configDir }) => {
     writeAgent(configDir, "demo", AGENT_BODY);
     writeAssignment(configDir, "demo", ASSIGNMENT_BODY);
     writeLauncher(
@@ -154,7 +154,7 @@ args: [FOO=bar]
   }));
 
 test("show-style bare-name loads accept slashful canonical ids for nested agents and assignments", () =>
-  withRuntimeRoots("task-runner-def-test-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-def-test-", ({ rootDir, configDir }) => {
     writeAgent(
       configDir,
       "reviewers/code",
@@ -196,7 +196,7 @@ Nested assignment.
   }));
 
 test("assignment var schema accepts `sources` and rejects legacy or malformed source definitions", () =>
-  withRuntimeRoots("task-runner-def-test-", ({ configDir, rootDir }) => {
+  withRuntimeRoots("agent-runner-def-test-", ({ configDir, rootDir }) => {
     writeAssignment(
       configDir,
       "sources-valid",
@@ -282,7 +282,7 @@ Empty.
   }));
 
 test("missing bare-name loads report config-root searched paths", () =>
-  withRuntimeRoots("task-runner-def-test-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-def-test-", ({ rootDir, configDir }) => {
     assert.throws(
       () => loadAgentConfig("nope", rootDir),
       (error) => {

@@ -54,7 +54,7 @@ MIME type is resolved from the filename extension with a fallback of
 ### Add
 
 ```bash
-task-runner attachment add <run-id> <path> \
+agent-runner attachment add <run-id> <path> \
   [--name "override-name.txt"] \
   [--mime-type "text/plain"]
 ```
@@ -72,9 +72,9 @@ sent.
 ### List
 
 ```bash
-task-runner attachment list <run-id>
-task-runner attachment list <run-id> --scope run
-task-runner attachment list <run-id> --scope group
+agent-runner attachment list <run-id>
+agent-runner attachment list <run-id> --scope run
+agent-runner attachment list <run-id> --scope group
 ```
 
 `attachment list` defaults to `--scope group`.
@@ -90,7 +90,7 @@ method.
 ### Download
 
 ```bash
-task-runner attachment download <run-id> <attachment-id> <output-path>
+agent-runner attachment download <run-id> <attachment-id> <output-path>
 ```
 
 If `<output-path>` ends with `/`, it is treated as a directory and the
@@ -105,7 +105,7 @@ after the destination file is created, the CLI removes the partial file.
 ### Remove
 
 ```bash
-task-runner attachment remove <run-id> <attachment-id>
+agent-runner attachment remove <run-id> <attachment-id>
 ```
 
 Removes the file and its per-attachment directory, then removes the empty

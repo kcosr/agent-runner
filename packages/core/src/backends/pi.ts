@@ -523,7 +523,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
   waitForExit: () => Promise<PiProcessResult>;
 }> {
   return new Promise((resolve, reject) => {
-    const command = process.env.TASK_RUNNER_PI_BIN ?? "pi";
+    const command = process.env.AGENT_RUNNER_PI_BIN ?? "pi";
     const launched = buildSpawnCommand({
       command,
       args: buildPiArgs(ctx),

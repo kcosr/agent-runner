@@ -31,7 +31,7 @@ const CODEX_THREAD_STATUS = {
 };
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-daemon-recovery-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-daemon-recovery-"));
 }
 
 function writeAgent(baseDir, name, backend) {

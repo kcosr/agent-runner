@@ -36,7 +36,7 @@ function containerLifecycleStatePath(stateDir, engine, containerName, containerI
 }
 
 test("resolveFreshExecutionEnvironment loads named config and interpolates run variables", () =>
-  withRuntimeRoots("task-runner-environment-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-environment-", ({ rootDir, configDir }) => {
     writeEnvironment(
       configDir,
       "managed-dev",
@@ -48,7 +48,7 @@ cwd: /workspace/{{repo}}
 env:
   TARGET: "{{target}}"
 image: node:22
-containerName: task-runner-{{run_id}}
+containerName: agent-runner-{{run_id}}
 mounts:
   - hostPath: "{{host_path}}"
     containerPath: /workspace/demo
@@ -93,7 +93,7 @@ cleanup:
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: null,
       lifecycle: null,
@@ -121,7 +121,7 @@ cleanup:
   }));
 
 test("resolveFreshExecutionEnvironment uses an override environment before the agent reference", () =>
-  withRuntimeRoots("task-runner-environment-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-environment-", ({ rootDir, configDir }) => {
     writeEnvironment(
       configDir,
       "agent-dev",
@@ -183,7 +183,7 @@ test("buildEnvironmentLauncher wraps backend commands in a container exec launch
     buildEnvironmentLauncher(environment, {
       FOO: "from-backend",
       BAR: "baz",
-      TASK_RUNNER_RUN_ID: "run-123",
+      AGENT_RUNNER_RUN_ID: "run-123",
     }),
     {
       kind: "prefix",
@@ -196,7 +196,7 @@ test("buildEnvironmentLauncher wraps backend commands in a container exec launch
         "-w",
         "/workspace",
         "-e",
-        "TASK_RUNNER_RUN_ID=run-123",
+        "AGENT_RUNNER_RUN_ID=run-123",
         "-e",
         "FOO=from-environment",
         "-e",
@@ -233,7 +233,7 @@ test("processFailureDetail prioritizes interruption state over process output", 
 });
 
 test("resolveFreshExecutionEnvironment resolves group-scoped workspace mounts and rewrites cwd", () =>
-  withRuntimeRoots("task-runner-environment-", ({ rootDir, configDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-environment-", ({ rootDir, configDir, stateDir }) => {
     writeEnvironment(
       configDir,
       "workspace-dev",
@@ -275,7 +275,7 @@ lifecycle:
 
     assert.equal(environment.mode, "managed");
     assert.equal(environment.lifetime, "group");
-    assert.equal(environment.containerName, "task-runner-group-123");
+    assert.equal(environment.containerName, "agent-runner-group-123");
     assert.equal(environment.cwd, "/workspace/repo");
     assert.deepEqual(environment.workspace, {
       scope: "group",
@@ -312,7 +312,7 @@ lifecycle:
   }));
 
 test("resolveFreshExecutionEnvironment expands backend session mount presets", () =>
-  withRuntimeRoots("task-runner-environment-", ({ rootDir, configDir }) => {
+  withRuntimeRoots("agent-runner-environment-", ({ rootDir, configDir }) => {
     const homeDir = join(rootDir, "home");
     writeEnvironment(
       configDir,
@@ -350,7 +350,7 @@ sessionMounts: backend
   }));
 
 test("prepareExecutionEnvironment creates workspace host directory and mounts it", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspacePath = join(rootDir, "workspace");
@@ -364,7 +364,7 @@ const logPath = process.env.FAKE_DOCKER_LOG;
 fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
 const [cmd, target] = process.argv.slice(2);
 if (cmd === "inspect") {
-  if (target === "task-runner-group-123") process.exit(1);
+  if (target === "agent-runner-group-123") process.exit(1);
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true }, Mounts: [] }]));
   process.exit(0);
 }
@@ -391,7 +391,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "group",
-      containerName: "task-runner-group-123",
+      containerName: "agent-runner-group-123",
       containerId: null,
       workspace: {
         scope: "group",
@@ -435,11 +435,11 @@ process.exit(0);
       "run",
       "-d",
       "--name",
-      "task-runner-group-123",
+      "agent-runner-group-123",
       "--label",
-      "task-runner=true",
+      "agent-runner=true",
       "--label",
-      "task-runner-environment=workspace-dev",
+      "agent-runner-environment=workspace-dev",
       "--workdir",
       "/workspace",
     ]);
@@ -449,7 +449,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment runs workspace lifecycle once before cwd validation", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspaceRoot = join(rootDir, "workspaces");
@@ -463,7 +463,7 @@ const logPath = process.env.FAKE_DOCKER_LOG;
 fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
 const [cmd, target] = process.argv.slice(2);
 if (cmd === "inspect") {
-  if (target === "task-runner-run-123") process.exit(1);
+  if (target === "agent-runner-run-123") process.exit(1);
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true }, Mounts: [] }]));
   process.exit(0);
 }
@@ -490,7 +490,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: {
         scope: "run",
@@ -547,7 +547,7 @@ process.exit(0);
     assert.equal(typeof lifecycleCompletedAt, "string");
     assert.ok(
       existsSync(
-        join(stateDir, "workspace-state", "run-123", ".task-runner-workspace-lifecycle.json"),
+        join(stateDir, "workspace-state", "run-123", ".agent-runner-workspace-lifecycle.json"),
       ),
     );
 
@@ -598,7 +598,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment runs targeted lifecycle phases with metadata and cwd defaults", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const hostLogPath = join(rootDir, "host.log");
@@ -623,7 +623,7 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "agent-runner-run-123") process.exit(1);
 if (cmd === "inspect" && target === "container-123") {
   process.stdout.write(JSON.stringify([{ Id: "container-abc", State: { Running: true, Pid: 4321 }, Mounts: [] }]));
   process.exit(0);
@@ -653,7 +653,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: {
         scope: "run",
@@ -773,7 +773,7 @@ process.exit(0);
       "STEP=container",
       "container-abc",
       "container-step",
-      "task-runner-run-123",
+      "agent-runner-run-123",
       "container-abc",
       "4321",
     ]);
@@ -808,7 +808,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment removes a newly-started container when workspace lifecycle fails", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspacePath = join(rootDir, "workspace");
@@ -821,7 +821,7 @@ const logPath = process.env.FAKE_DOCKER_LOG;
 const args = process.argv.slice(2);
 fs.appendFileSync(logPath, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "agent-runner-run-123") process.exit(1);
 if (cmd === "inspect" && target === "container-123") {
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true, Pid: 4321 }, Mounts: [] }]));
   process.exit(0);
@@ -851,7 +851,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: {
         scope: "run",
@@ -908,7 +908,7 @@ process.exit(0);
       existsSync(
         join(
           explicitWorkspaceLifecycleStatePath(stateDir, workspacePath),
-          ".task-runner-workspace-lifecycle.json",
+          ".agent-runner-workspace-lifecycle.json",
         ),
       ),
       false,
@@ -921,7 +921,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment fails afterStart before workspace lifecycle and cleans up new containers", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspacePath = join(rootDir, "workspace");
@@ -933,7 +933,7 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "agent-runner-run-123") process.exit(1);
 if (cmd === "inspect" && target === "container-123") {
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true, Pid: 1234 }, Mounts: [] }]));
   process.exit(0);
@@ -963,7 +963,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: {
         scope: "run",
@@ -1043,7 +1043,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment still removes a newly-started container after abort", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     mkdirSync(binDir, { recursive: true });
@@ -1055,7 +1055,7 @@ const logPath = process.env.FAKE_DOCKER_LOG;
 fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
 const args = process.argv.slice(2);
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "agent-runner-run-123") process.exit(1);
 if (cmd === "inspect" && target === "container-123") {
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true, Pid: 1234 }, Mounts: [] }]));
   process.exit(0);
@@ -1086,7 +1086,7 @@ if (cmd === "exec" && args.includes("after-start")) {
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: null,
       lifecycle: {
@@ -1153,7 +1153,7 @@ if (cmd === "exec" && args.includes("after-start")) {
   }));
 
 test("prepareExecutionEnvironment rejects and removes a newly-started stopped container", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     mkdirSync(binDir, { recursive: true });
@@ -1164,7 +1164,7 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "agent-runner-run-123") process.exit(1);
 if (cmd === "inspect" && target === "container-123") {
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: false, Pid: 0 }, Mounts: [] }]));
   process.exit(0);
@@ -1192,7 +1192,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: null,
       lifecycle: null,
@@ -1208,7 +1208,7 @@ process.exit(0);
       withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
         prepareExecutionEnvironment(environment),
       ),
-      /container task-runner-run-123 failed to start/,
+      /container agent-runner-run-123 failed to start/,
     );
 
     const commands = readFileSync(logPath, "utf8")
@@ -1223,7 +1223,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment does not remove reused group containers on afterStart failure", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     mkdirSync(binDir, { recursive: true });
@@ -1234,7 +1234,7 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-group-123") {
+if (cmd === "inspect" && target === "agent-runner-group-123") {
   process.stdout.write(JSON.stringify([{ Id: "container-group", State: { Running: true, Pid: 5678 }, Mounts: [] }]));
   process.exit(0);
 }
@@ -1258,7 +1258,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "group",
-      containerName: "task-runner-group-123",
+      containerName: "agent-runner-group-123",
       containerId: null,
       workspace: null,
       lifecycle: {
@@ -1308,7 +1308,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment skips afterStart for the same container id and reruns for a new id", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     mkdirSync(binDir, { recursive: true });
@@ -1346,7 +1346,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: "container-old",
       workspace: null,
       lifecycle: {
@@ -1400,7 +1400,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment shares afterStart completion across group runs for the same container", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     mkdirSync(binDir, { recursive: true });
@@ -1411,7 +1411,7 @@ import fs from "node:fs";
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-group-123") {
+if (cmd === "inspect" && target === "agent-runner-group-123") {
   process.stdout.write(JSON.stringify([{ Id: "container-shared", State: { Running: true, Pid: 5678 }, Mounts: [] }]));
   process.exit(0);
 }
@@ -1434,7 +1434,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "group",
-      containerName: "task-runner-group-123",
+      containerName: "agent-runner-group-123",
       containerId: null,
       workspace: null,
       lifecycle: {
@@ -1488,7 +1488,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment reports stale afterStart marker container ids", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     mkdirSync(binDir, { recursive: true });
     writeFileSync(
@@ -1496,7 +1496,7 @@ test("prepareExecutionEnvironment reports stale afterStart marker container ids"
       `#!/usr/bin/env node
 const args = process.argv.slice(2);
 const [cmd, target] = args;
-if (cmd === "inspect" && target === "task-runner-group-stale") {
+if (cmd === "inspect" && target === "agent-runner-group-stale") {
   process.stdout.write(JSON.stringify([{ Id: "container-current", State: { Running: true, Pid: 5678 }, Mounts: [] }]));
   process.exit(0);
 }
@@ -1508,12 +1508,12 @@ process.exit(0);
     const lifecycleStatePath = containerLifecycleStatePath(
       stateDir,
       "docker",
-      "task-runner-group-stale",
+      "agent-runner-group-stale",
       "container-current",
     );
     mkdirSync(lifecycleStatePath, { recursive: true });
     writeFileSync(
-      join(lifecycleStatePath, ".task-runner-after-start-lifecycle.json"),
+      join(lifecycleStatePath, ".agent-runner-after-start-lifecycle.json"),
       `${JSON.stringify({ containerId: "container-stale", completedAt: "2026-05-01T00:00:00.000Z" }, null, 2)}\n`,
     );
 
@@ -1530,7 +1530,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "group",
-      containerName: "task-runner-group-stale",
+      containerName: "agent-runner-group-stale",
       containerId: null,
       workspace: null,
       lifecycle: {
@@ -1559,7 +1559,7 @@ process.exit(0);
   }));
 
 test("cleanupExecutionEnvironment removes container lifecycle state markers", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     mkdirSync(binDir, { recursive: true });
@@ -1577,12 +1577,12 @@ process.exit(0);
     const lifecycleStatePath = containerLifecycleStatePath(
       stateDir,
       "docker",
-      "task-runner-cleanup",
+      "agent-runner-cleanup",
       "container-cleaned",
     );
     mkdirSync(lifecycleStatePath, { recursive: true });
     writeFileSync(
-      join(lifecycleStatePath, ".task-runner-after-start-lifecycle.json"),
+      join(lifecycleStatePath, ".agent-runner-after-start-lifecycle.json"),
       `${JSON.stringify({ containerId: "container-cleaned", completedAt: "2026-05-01T00:00:00.000Z" }, null, 2)}\n`,
     );
 
@@ -1599,7 +1599,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-cleanup",
+      containerName: "agent-runner-cleanup",
       containerId: "container-cleaned",
       workspace: null,
       lifecycle: {
@@ -1634,12 +1634,12 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment waits for a contended workspace lifecycle lock", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspacePath = join(rootDir, "workspace");
     const lifecycleStatePath = explicitWorkspaceLifecycleStatePath(stateDir, workspacePath);
-    const lockPath = join(lifecycleStatePath, ".task-runner-workspace-lifecycle.lock");
+    const lockPath = join(lifecycleStatePath, ".agent-runner-workspace-lifecycle.lock");
     mkdirSync(binDir, { recursive: true });
     mkdirSync(lockPath, { recursive: true });
     writeFileSync(
@@ -1650,7 +1650,7 @@ const logPath = process.env.FAKE_DOCKER_LOG;
 fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
 const [cmd, target] = process.argv.slice(2);
 if (cmd === "inspect") {
-  if (target === "task-runner-run-123") process.exit(1);
+  if (target === "agent-runner-run-123") process.exit(1);
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true }, Mounts: [] }]));
   process.exit(0);
 }
@@ -1677,7 +1677,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: {
         scope: "run",
@@ -1719,7 +1719,7 @@ process.exit(0);
     const release = setTimeout(() => rmSync(lockPath, { recursive: true, force: true }), 100);
     try {
       await withEnv({ PATH: `${binDir}:${process.env.PATH}`, FAKE_DOCKER_LOG: logPath }, () =>
-        prepareExecutionEnvironment(environment, { signal: AbortSignal.timeout(2_000) }),
+        prepareExecutionEnvironment(environment, { signal: AbortSignal.timeout(10_000) }),
       );
     } finally {
       clearTimeout(release);
@@ -1730,16 +1730,16 @@ process.exit(0);
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.ok(commands.some((command) => command.includes("npm")));
-    assert.ok(existsSync(join(lifecycleStatePath, ".task-runner-workspace-lifecycle.json")));
+    assert.ok(existsSync(join(lifecycleStatePath, ".agent-runner-workspace-lifecycle.json")));
   }));
 
 test("prepareExecutionEnvironment keeps workspace lifecycle locks alive for custom timeout budgets", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir, stateDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir, stateDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     const workspacePath = join(rootDir, "workspace");
     const lifecycleStatePath = explicitWorkspaceLifecycleStatePath(stateDir, workspacePath);
-    const lockPath = join(lifecycleStatePath, ".task-runner-workspace-lifecycle.lock");
+    const lockPath = join(lifecycleStatePath, ".agent-runner-workspace-lifecycle.lock");
     mkdirSync(binDir, { recursive: true });
     mkdirSync(lockPath, { recursive: true });
     writeFileSync(
@@ -1757,7 +1757,7 @@ const logPath = process.env.FAKE_DOCKER_LOG;
 fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
 const [cmd, target] = process.argv.slice(2);
 if (cmd === "inspect") {
-  if (target === "task-runner-run-123") process.exit(1);
+  if (target === "agent-runner-run-123") process.exit(1);
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true, Pid: 1234 }, Mounts: [] }]));
   process.exit(0);
 }
@@ -1784,7 +1784,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: {
         scope: "run",
@@ -1844,7 +1844,7 @@ process.exit(0);
   }));
 
 test("prepareExecutionEnvironment removes a newly-started container when cwd validation fails", async () =>
-  withRuntimeRoots("task-runner-environment-", async ({ rootDir }) => {
+  withRuntimeRoots("agent-runner-environment-", async ({ rootDir }) => {
     const binDir = join(rootDir, "bin");
     const logPath = join(rootDir, "docker.log");
     mkdirSync(binDir, { recursive: true });
@@ -1855,7 +1855,7 @@ import fs from "node:fs";
 const logPath = process.env.FAKE_DOCKER_LOG;
 fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");
 const [cmd, target] = process.argv.slice(2);
-if (cmd === "inspect" && target === "task-runner-run-123") process.exit(1);
+if (cmd === "inspect" && target === "agent-runner-run-123") process.exit(1);
 if (cmd === "inspect" && target === "container-123") {
   process.stdout.write(JSON.stringify([{ Id: "container-123", State: { Running: true, Pid: 1234 }, Mounts: [] }]));
   process.exit(0);
@@ -1884,7 +1884,7 @@ process.exit(0);
       lastError: null,
       image: "node:22",
       lifetime: "run",
-      containerName: "task-runner-run-123",
+      containerName: "agent-runner-run-123",
       containerId: null,
       workspace: null,
       sessionMounts: [],

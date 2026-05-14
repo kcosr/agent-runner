@@ -45,7 +45,7 @@ import {
   updateRunPinned,
   updateTask,
   validateRunEnvironment,
-} from "@task-runner/core/app/service.js";
+} from "@agent-runner/core/app/service.js";
 import {
   AgentConfigError,
   AgentNotFoundError,
@@ -58,26 +58,26 @@ import {
   LauncherNotFoundError,
   TaskConfigError,
   TaskNotFoundError,
-} from "@task-runner/core/config/loader.js";
+} from "@agent-runner/core/config/loader.js";
 import {
   isPathArg,
+  resolveAgentRunnerConfigDir,
+  resolveAgentRunnerStateDir,
   resolveInputPath,
-  resolveTaskRunnerConfigDir,
-  resolveTaskRunnerStateDir,
-} from "@task-runner/core/config/runtime-paths.js";
-import type { RunDependencyRef } from "@task-runner/core/contracts/runs.js";
+} from "@agent-runner/core/config/runtime-paths.js";
+import type { RunDependencyRef } from "@agent-runner/core/contracts/runs.js";
 import {
   CommandError,
   type RunListFilter,
   isCommandError,
-} from "@task-runner/core/core/commands/service.js";
-import { HookRuntimeError } from "@task-runner/core/core/hooks/runtime.js";
-import { AttachmentError } from "@task-runner/core/core/run/attachments.js";
-import { ExecutionEnvironmentError } from "@task-runner/core/core/run/execution-environments.js";
-import { RunGroupValidationError, validateRunGroupId } from "@task-runner/core/core/run/groups.js";
-import { RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
-import { ReconfigureLockedFieldError } from "@task-runner/core/core/run/reconfigure.js";
-import { readParentRunIdFromEnv } from "@task-runner/core/core/run/recursion-guard.js";
+} from "@agent-runner/core/core/commands/service.js";
+import { HookRuntimeError } from "@agent-runner/core/core/hooks/runtime.js";
+import { AttachmentError } from "@agent-runner/core/core/run/attachments.js";
+import { ExecutionEnvironmentError } from "@agent-runner/core/core/run/execution-environments.js";
+import { RunGroupValidationError, validateRunGroupId } from "@agent-runner/core/core/run/groups.js";
+import { RunNotFoundError } from "@agent-runner/core/core/run/manifest.js";
+import { ReconfigureLockedFieldError } from "@agent-runner/core/core/run/reconfigure.js";
+import { readParentRunIdFromEnv } from "@agent-runner/core/core/run/recursion-guard.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -87,18 +87,18 @@ import {
   RecursionDepthError,
   type RunEvent,
   VarResolutionError,
-} from "@task-runner/core/core/run/run-loop.js";
+} from "@agent-runner/core/core/run/run-loop.js";
 import {
   type ScheduleInput,
   ScheduleValidationError,
-} from "@task-runner/core/core/run/schedule.js";
+} from "@agent-runner/core/core/run/schedule.js";
 import {
   BackendConfigError,
   ResumeError,
   RunCommandError,
   UnknownBackendError,
-} from "@task-runner/core/run-command.js";
-import { normalizeRunNameMutation } from "@task-runner/core/util/run-name.js";
+} from "@agent-runner/core/run-command.js";
+import { normalizeRunNameMutation } from "@agent-runner/core/util/run-name.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import { renderRunEvent } from "./cli/render-run.js";
 import {
@@ -145,13 +145,13 @@ import { type ResolvedHostMode, resolveHostMode, resolveListenUrl } from "./daem
 import { SshTunnelSetupError, openSshTunnel } from "./daemon/connect-host.js";
 import { DaemonHttpError, daemonGetRunAuditHistory } from "./daemon/http-client.js";
 import {
+  AGENT_RUNNER_DAEMON_TOKEN_ENV,
   type DaemonInfo,
   RPC_ERROR_COMMAND,
-  TASK_RUNNER_DAEMON_TOKEN_ENV,
 } from "./daemon/protocol.js";
 import { serveDaemon } from "./daemon/server.js";
 
-const HELP = `Usage: task-runner <run|init|serve|status|task|attachment|list|show> [options] [args]
+const HELP = `Usage: agent-runner <run|init|serve|status|task|attachment|list|show> [options] [args]
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
@@ -164,7 +164,7 @@ Commands:
   run environment validate <id>
                           Validate or prepare the run execution environment.
   run environment cleanup <id>
-                          Cleanup a task-runner-managed environment.
+                          Clean up an agent-runner-managed environment.
   run reconfigure <id>    Patch vars/message for an initialized run.
   run queue-message <id> <text>
                           Queue a follow-up message for a live run.
@@ -210,7 +210,7 @@ Commands:
                           Use --run-id <id|path> to overwrite an
                           existing initialized run in place.
   serve                   Start the local daemon server.
-  status                  Print the current task-runner environment status.
+  status                  Print the current agent-runner environment status.
   task list <id>          List tasks for a run in stable task order.
   task show <id> <task>   Show one task snapshot for a run.
   task set <id> <task>    Update a task's status and/or notes.
@@ -244,15 +244,15 @@ Task command options:
 
 Host selection:
   --connect <ws-url>      Route the command through the daemon host.
-                          Also honored from TASK_RUNNER_CONNECT.
+                          Also honored from AGENT_RUNNER_CONNECT.
   --connect-host <host>   Create an invocation-scoped SSH local forward
                           before connecting to the daemon. Also honored
-                          from TASK_RUNNER_CONNECT_HOST.
+                          from AGENT_RUNNER_CONNECT_HOST.
   --connect-local-port    Override the local loopback port used for the
                           SSH forward. Also honored from
-                          TASK_RUNNER_CONNECT_LOCAL_PORT.
+                          AGENT_RUNNER_CONNECT_LOCAL_PORT.
   --listen <ws-url>       (serve only) Listen URL for the daemon host.
-                          Also honored from TASK_RUNNER_LISTEN. The same
+                          Also honored from AGENT_RUNNER_LISTEN. The same
                           listener serves HTTP/SSE under /api/.
 
 Execution options:
@@ -323,11 +323,11 @@ function errorMessage(err: unknown): string {
 }
 
 function daemonUnavailableHint(connectUrl: string): string {
-  return `task-runner: cannot connect to daemon at ${connectUrl}\nHint: task-runner serve --listen ${connectUrl}\n`;
+  return `agent-runner: cannot connect to daemon at ${connectUrl}\nHint: agent-runner serve --listen ${connectUrl}\n`;
 }
 
 function daemonAuthHint(connectUrl: string): string {
-  return `task-runner: cannot connect to daemon at ${connectUrl}\nHint: set ${TASK_RUNNER_DAEMON_TOKEN_ENV} to the daemon's bearer token.\n`;
+  return `agent-runner: cannot connect to daemon at ${connectUrl}\nHint: set ${AGENT_RUNNER_DAEMON_TOKEN_ENV} to the daemon's bearer token.\n`;
 }
 
 function isDaemonAuthFailureMessage(message: string): boolean {
@@ -349,7 +349,7 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
   }
 
   if (err instanceof DaemonRpcError && err.code === RPC_ERROR_COMMAND) {
-    process.stderr.write(`task-runner: ${err.message}\n`);
+    process.stderr.write(`agent-runner: ${err.message}\n`);
     process.exit(3);
   }
 
@@ -378,7 +378,7 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof HookRuntimeError ||
     err instanceof RunGroupValidationError
   ) {
-    process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
+    process.stderr.write(`agent-runner: ${errorMessage(err)}\n`);
     process.exit(3);
   }
 
@@ -392,7 +392,7 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     process.exit(3);
   }
 
-  process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
+  process.stderr.write(`agent-runner: ${errorMessage(err)}\n`);
   process.exit(4);
 }
 
@@ -615,9 +615,9 @@ function renderDetachedRun(runId: string, outputFormat: ParsedArgs["outputFormat
     return;
   }
 
-  process.stdout.write(`task-runner: detached run ${runId}\n`);
-  process.stdout.write(`Resume later with: task-runner run --resume-run ${runId} "..."\n`);
-  process.stdout.write(`Check status with: task-runner run status ${runId}\n`);
+  process.stdout.write(`agent-runner: detached run ${runId}\n`);
+  process.stdout.write(`Resume later with: agent-runner run --resume-run ${runId} "..."\n`);
+  process.stdout.write(`Check status with: agent-runner run status ${runId}\n`);
 }
 
 function terminalExitCode(status: string): number {
@@ -652,19 +652,19 @@ async function withDaemonClient<T>(
 
 async function runServe(parsed: ParsedArgs): Promise<never> {
   if (parsed.connect !== undefined) {
-    process.stderr.write("task-runner: serve does not accept --connect\n");
+    process.stderr.write("agent-runner: serve does not accept --connect\n");
     process.exit(3);
   }
   if (parsed.connectHost !== undefined) {
-    process.stderr.write("task-runner: serve does not accept --connect-host\n");
+    process.stderr.write("agent-runner: serve does not accept --connect-host\n");
     process.exit(3);
   }
   if (parsed.connectLocalPort !== undefined) {
-    process.stderr.write("task-runner: serve does not accept --connect-local-port\n");
+    process.stderr.write("agent-runner: serve does not accept --connect-local-port\n");
     process.exit(3);
   }
   if (parsed.positionals.length > 0) {
-    process.stderr.write("task-runner: serve takes no positional arguments\n");
+    process.stderr.write("agent-runner: serve takes no positional arguments\n");
     process.exit(3);
   }
   const listenUrl = resolveListenUrl(parsed.listen);
@@ -684,8 +684,8 @@ async function runServe(parsed: ParsedArgs): Promise<never> {
   process.on("SIGTERM", () => {
     void shutdown(0);
   });
-  process.stderr.write(`task-runner: serving on ${server.listenUrl}\n`);
-  process.stderr.write(`task-runner: http api on ${new URL("/api/", server.httpBaseUrl)}\n`);
+  process.stderr.write(`agent-runner: serving on ${server.listenUrl}\n`);
+  process.stderr.write(`agent-runner: http api on ${new URL("/api/", server.httpBaseUrl)}\n`);
   // Keep the process alive until SIGINT closes the daemon.
   // eslint-disable-next-line @typescript-eslint/no-empty-function
   return await new Promise<never>(() => {});
@@ -697,24 +697,24 @@ async function runSystemStatus(parsed: ParsedArgs, connect?: DaemonConnectContex
       throw new CommandError("status does not support --field");
     }
     if (parsed.positionals.length > 0) {
-      process.stderr.write("task-runner: status takes no positional arguments\n");
-      process.stderr.write("Usage: task-runner status [--output-format text|json]\n");
+      process.stderr.write("agent-runner: status takes no positional arguments\n");
+      process.stderr.write("Usage: agent-runner status [--output-format text|json]\n");
       process.exit(3);
     }
 
     const result =
       connect === undefined
         ? {
-            configDir: resolveTaskRunnerConfigDir(),
-            stateDir: resolveTaskRunnerStateDir(),
+            configDir: resolveAgentRunnerConfigDir(),
+            stateDir: resolveAgentRunnerStateDir(),
             hostMode: "embedded" as const,
             connectUrl: null,
             daemon: null,
           }
         : await withDaemonClient(connect, (client) =>
             client.call<DaemonInfo>("daemon.info").then((daemon) => ({
-              configDir: resolveTaskRunnerConfigDir(),
-              stateDir: resolveTaskRunnerStateDir(),
+              configDir: resolveAgentRunnerConfigDir(),
+              stateDir: resolveAgentRunnerStateDir(),
               hostMode: "daemon" as const,
               connectUrl: connect.connectUrl,
               daemon,
@@ -737,21 +737,21 @@ async function runRunStatus(parsed: ParsedArgs, connect?: DaemonConnectContext):
     const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowFields: true });
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run status only supports <run-id>, --connect, --output-format, and --field (got ${unsupported.join(", ")})\n`,
+        `agent-runner: run status only supports <run-id>, --connect, --output-format, and --field (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
     const target = normalizeRunIdTarget(parsed.positionals[0], "run status");
     if (!target) {
-      process.stderr.write("task-runner: run status requires a run id\n");
+      process.stderr.write("agent-runner: run status requires a run id\n");
       process.stderr.write(
-        "Usage: task-runner run status <id> [--output-format json] [--field name]...\n",
+        "Usage: agent-runner run status <id> [--output-format json] [--field name]...\n",
       );
       process.exit(3);
     }
     if (parsed.positionals.length > 1) {
       process.stderr.write(
-        `task-runner: run status takes exactly one run id; got "${parsed.positionals[1]}"\n`,
+        `agent-runner: run status takes exactly one run id; got "${parsed.positionals[1]}"\n`,
       );
       process.exit(3);
     }
@@ -785,21 +785,21 @@ async function runRunAudit(parsed: ParsedArgs, connect?: DaemonConnectContext): 
     const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowLimit: true });
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run audit only supports <run-id>, --connect, --output-format, and --limit (got ${unsupported.join(", ")})\n`,
+        `agent-runner: run audit only supports <run-id>, --connect, --output-format, and --limit (got ${unsupported.join(", ")})\n`,
       );
       process.exit(1);
     }
     const target = normalizeRunIdTarget(parsed.positionals[0], "run audit");
     if (!target) {
-      process.stderr.write("task-runner: run audit requires a run id\n");
+      process.stderr.write("agent-runner: run audit requires a run id\n");
       process.stderr.write(
-        "Usage: task-runner run audit <id> [--output-format json] [--limit <n>]\n",
+        "Usage: agent-runner run audit <id> [--output-format json] [--limit <n>]\n",
       );
       process.exit(1);
     }
     if (parsed.positionals.length > 1) {
       process.stderr.write(
-        `task-runner: run audit takes exactly one run id; got "${parsed.positionals[1]}"\n`,
+        `agent-runner: run audit takes exactly one run id; got "${parsed.positionals[1]}"\n`,
       );
       process.exit(1);
     }
@@ -818,11 +818,11 @@ async function runRunAudit(parsed: ParsedArgs, connect?: DaemonConnectContext): 
     process.exit(0);
   } catch (err) {
     if (err instanceof RunNotFoundError) {
-      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.stderr.write(`agent-runner: ${err.message}\n`);
       process.exit(2);
     }
     if (err instanceof DaemonHttpError && err.status === 404) {
-      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.stderr.write(`agent-runner: ${err.message}\n`);
       process.exit(2);
     }
     exitCommandFailure(err, connect?.connectUrl);
@@ -840,19 +840,19 @@ async function runRunBrief(parsed: ParsedArgs, connect?: DaemonConnectContext): 
     const unsupported = unsupportedFlagsForGroupedCommand(parsed);
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run brief only supports <run-id> and --connect (got ${unsupported.join(", ")})\n`,
+        `agent-runner: run brief only supports <run-id> and --connect (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
     const target = normalizeRunIdTarget(parsed.positionals[0], "run brief");
     if (!target) {
-      process.stderr.write("task-runner: run brief requires a run id\n");
-      process.stderr.write("Usage: task-runner run brief <id>\n");
+      process.stderr.write("agent-runner: run brief requires a run id\n");
+      process.stderr.write("Usage: agent-runner run brief <id>\n");
       process.exit(3);
     }
     if (parsed.positionals.length > 1) {
       process.stderr.write(
-        `task-runner: run brief takes exactly one run id; got "${parsed.positionals[1]}"\n`,
+        `agent-runner: run brief takes exactly one run id; got "${parsed.positionals[1]}"\n`,
       );
       process.exit(3);
     }
@@ -941,25 +941,25 @@ async function runEnvironmentCommand(
     const action = parsed.positionals[0];
     const target = normalizeRunIdTarget(parsed.positionals[1], "run environment");
     if (action !== "status" && action !== "validate" && action !== "cleanup") {
-      process.stderr.write("task-runner: run environment requires status, validate, or cleanup\n");
-      process.stderr.write("Usage: task-runner run environment <status|validate|cleanup> <id>\n");
+      process.stderr.write("agent-runner: run environment requires status, validate, or cleanup\n");
+      process.stderr.write("Usage: agent-runner run environment <status|validate|cleanup> <id>\n");
       process.exit(3);
     }
     if (!target) {
-      process.stderr.write(`task-runner: run environment ${action} requires a run id\n`);
-      process.stderr.write("Usage: task-runner run environment <status|validate|cleanup> <id>\n");
+      process.stderr.write(`agent-runner: run environment ${action} requires a run id\n`);
+      process.stderr.write("Usage: agent-runner run environment <status|validate|cleanup> <id>\n");
       process.exit(3);
     }
     if (parsed.positionals.length > 2) {
       process.stderr.write(
-        `task-runner: run environment ${action} takes exactly one run id; got "${parsed.positionals[2]}"\n`,
+        `agent-runner: run environment ${action} takes exactly one run id; got "${parsed.positionals[2]}"\n`,
       );
       process.exit(3);
     }
     const unsupported = unsupportedFlagsForGroupedCommand(parsed);
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run environment ${action} only supports <run-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        `agent-runner: run environment ${action} only supports <run-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
@@ -1003,23 +1003,23 @@ async function runQueueMessageCommand(
     const unsupported = unsupportedFlagsForGroupedCommand(parsed);
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run queue-message only supports <run-id-or-path>, message text, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        `agent-runner: run queue-message only supports <run-id-or-path>, message text, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
     const target = normalizeTarget(parsed.positionals[0]);
     if (!target) {
-      process.stderr.write("task-runner: run queue-message requires a run id or path\n");
+      process.stderr.write("agent-runner: run queue-message requires a run id or path\n");
       process.stderr.write(
-        "Usage: task-runner run queue-message <run-id-or-path> <message text> [--output-format json]\n",
+        "Usage: agent-runner run queue-message <run-id-or-path> <message text> [--output-format json]\n",
       );
       process.exit(3);
     }
     const message = queuedMessageText(parsed);
     if (message === undefined) {
-      process.stderr.write("task-runner: run queue-message requires message text\n");
+      process.stderr.write("agent-runner: run queue-message requires message text\n");
       process.stderr.write(
-        "Usage: task-runner run queue-message <run-id-or-path> <message text> [--output-format json]\n",
+        "Usage: agent-runner run queue-message <run-id-or-path> <message text> [--output-format json]\n",
       );
       process.exit(3);
     }
@@ -1052,21 +1052,21 @@ async function runQueuedMessagesCommand(
     const unsupported = unsupportedFlagsForGroupedCommand(parsed);
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run queued-messages only supports <run-id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        `agent-runner: run queued-messages only supports <run-id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
     const target = normalizeTarget(parsed.positionals[0]);
     if (!target) {
-      process.stderr.write("task-runner: run queued-messages requires a run id or path\n");
+      process.stderr.write("agent-runner: run queued-messages requires a run id or path\n");
       process.stderr.write(
-        "Usage: task-runner run queued-messages <run-id-or-path> [--output-format json]\n",
+        "Usage: agent-runner run queued-messages <run-id-or-path> [--output-format json]\n",
       );
       process.exit(3);
     }
     if (parsed.positionals.length > 1) {
       process.stderr.write(
-        `task-runner: run queued-messages takes exactly one run id or path; got "${parsed.positionals[1]}"\n`,
+        `agent-runner: run queued-messages takes exactly one run id or path; got "${parsed.positionals[1]}"\n`,
       );
       process.exit(3);
     }
@@ -1098,29 +1098,29 @@ async function runRemoveQueuedMessageCommand(
     const unsupported = unsupportedFlagsForGroupedCommand(parsed);
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run remove-queued-message only supports <run-id-or-path>, <message-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        `agent-runner: run remove-queued-message only supports <run-id-or-path>, <message-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
     const target = normalizeTarget(parsed.positionals[0]);
     if (!target) {
-      process.stderr.write("task-runner: run remove-queued-message requires a run id or path\n");
+      process.stderr.write("agent-runner: run remove-queued-message requires a run id or path\n");
       process.stderr.write(
-        "Usage: task-runner run remove-queued-message <run-id-or-path> <message-id> [--output-format json]\n",
+        "Usage: agent-runner run remove-queued-message <run-id-or-path> <message-id> [--output-format json]\n",
       );
       process.exit(3);
     }
     const messageId = parsed.positionals[1];
     if (messageId === undefined) {
-      process.stderr.write("task-runner: run remove-queued-message requires a message id\n");
+      process.stderr.write("agent-runner: run remove-queued-message requires a message id\n");
       process.stderr.write(
-        "Usage: task-runner run remove-queued-message <run-id-or-path> <message-id> [--output-format json]\n",
+        "Usage: agent-runner run remove-queued-message <run-id-or-path> <message-id> [--output-format json]\n",
       );
       process.exit(3);
     }
     if (parsed.positionals.length > 2) {
       process.stderr.write(
-        `task-runner: run remove-queued-message takes exactly two positionals; got extra "${parsed.positionals[2]}"\n`,
+        `agent-runner: run remove-queued-message takes exactly two positionals; got extra "${parsed.positionals[2]}"\n`,
       );
       process.exit(3);
     }
@@ -1179,15 +1179,15 @@ async function runReconfigureCommand(
     });
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: run reconfigure only supports <run-id>, --var, --message-file, positional message, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        `agent-runner: run reconfigure only supports <run-id>, --var, --message-file, positional message, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
     const target = normalizeRunIdTarget(parsed.positionals[0], "run reconfigure");
     if (!target) {
-      process.stderr.write("task-runner: run reconfigure requires a run id\n");
+      process.stderr.write("agent-runner: run reconfigure requires a run id\n");
       process.stderr.write(
-        "Usage: task-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>] [--output-format text|json]\n",
+        "Usage: agent-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>] [--output-format text|json]\n",
       );
       process.exit(3);
     }
@@ -1207,12 +1207,12 @@ async function runReconfigureCommand(
     if (parsed.outputFormat === "json") {
       writeJson(run);
     } else {
-      process.stdout.write(`task-runner: reconfigured run ${run.runId}\n`);
+      process.stdout.write(`agent-runner: reconfigured run ${run.runId}\n`);
     }
     process.exit(0);
   } catch (err) {
     if (err instanceof RunNotFoundError) {
-      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.stderr.write(`agent-runner: ${err.message}\n`);
       process.exit(2);
     }
     exitCommandFailure(err, connect?.connectUrl);
@@ -1224,10 +1224,10 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
   const definitionDescriptor = getDefinitionListDescriptor(kindArg);
   if (definitionDescriptor === undefined && kindArg !== "runs") {
     process.stderr.write(
-      `task-runner: list requires a kind: agents, assignments, launchers, environments, tasks, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `agent-runner: list requires a kind: agents, assignments, launchers, environments, tasks, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner list <agents|assignments|launchers|environments|tasks|runs> [--cwd <path> | --repo <name> | --global | --group-id <group-id>] [--include-archived] [--output-format json]\n",
+      "Usage: agent-runner list <agents|assignments|launchers|environments|tasks|runs> [--cwd <path> | --repo <name> | --global | --group-id <group-id>] [--include-archived] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -1236,7 +1236,7 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
     if (kindArg === "runs") {
       if (parsed.positionals.length > 0) {
         process.stderr.write(
-          `task-runner: list runs takes no positional args; got "${parsed.positionals[0]}"\n`,
+          `agent-runner: list runs takes no positional args; got "${parsed.positionals[0]}"\n`,
         );
         process.exit(3);
       }
@@ -1246,7 +1246,7 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
       });
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: list runs only supports --cwd, --repo, --global, --group-id, --connect, --include-archived, and --output-format (got ${unsupported.join(", ")})\n`,
+          `agent-runner: list runs only supports --cwd, --repo, --global, --group-id, --connect, --include-archived, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
@@ -1270,7 +1270,7 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
     const unsupported = unsupportedFlagsForGroupedCommand(parsed);
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: list ${kindArg} only supports --connect and --output-format (got ${unsupported.join(", ")})\n`,
+        `agent-runner: list ${kindArg} only supports --connect and --output-format (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
@@ -1300,7 +1300,7 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
       writeJson(result);
     } else {
       for (const warning of result.warnings) {
-        process.stderr.write(`task-runner: warning: ${warning}\n`);
+        process.stderr.write(`agent-runner: warning: ${warning}\n`);
       }
       process.stdout.write(
         renderDefinitionList({
@@ -1321,19 +1321,19 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
   const definitionDescriptor = getDefinitionShowDescriptor(kindArg);
   if (definitionDescriptor === undefined) {
     process.stderr.write(
-      `task-runner: show requires a kind: agent, assignment, launcher, environment, or task${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `agent-runner: show requires a kind: agent, assignment, launcher, environment, or task${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment|launcher|environment|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
+      "Usage: agent-runner show <agent|assignment|launcher|environment|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
 
   const target = parsed.positionals[0];
   if (!target) {
-    process.stderr.write(`task-runner: show ${kindArg} requires a name or path\n`);
+    process.stderr.write(`agent-runner: show ${kindArg} requires a name or path\n`);
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment|launcher|environment|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
+      "Usage: agent-runner show <agent|assignment|launcher|environment|task> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -1342,13 +1342,13 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
     const unsupported = unsupportedFlagsForGroupedCommand(parsed);
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: show ${kindArg} only supports <name|path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        `agent-runner: show ${kindArg} only supports <name|path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
     if (parsed.positionals.length > 1) {
       process.stderr.write(
-        `task-runner: show ${kindArg} takes exactly one name or path; got "${parsed.positionals[1]}"\n`,
+        `agent-runner: show ${kindArg} takes exactly one name or path; got "${parsed.positionals[1]}"\n`,
       );
       process.exit(3);
     }
@@ -1557,7 +1557,7 @@ async function runTaskCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
       return runTaskAdd(parsed, connect);
     default:
       process.stderr.write(
-        `task-runner: task command requires a subcommand: list | show | set | append-notes | add (got "${parsed.subcommand ?? ""}")\n`,
+        `agent-runner: task command requires a subcommand: list | show | set | append-notes | add (got "${parsed.subcommand ?? ""}")\n`,
       );
       process.exit(3);
   }
@@ -1595,19 +1595,19 @@ async function runAttachmentCommand(
       const [runArg, extra] = parsed.positionals;
       const target = normalizeTarget(runArg);
       if (!target) {
-        process.stderr.write("task-runner: attachment list requires <run-id-or-path>\n");
+        process.stderr.write("agent-runner: attachment list requires <run-id-or-path>\n");
         process.exit(3);
       }
       if (extra !== undefined) {
         process.stderr.write(
-          `task-runner: attachment list takes exactly one positional (<run-id-or-path>); got extra "${extra}"\n`,
+          `agent-runner: attachment list takes exactly one positional (<run-id-or-path>); got extra "${extra}"\n`,
         );
         process.exit(3);
       }
       const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowAttachmentScope: true });
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: attachment list only supports <run-id-or-path>, --scope, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+          `agent-runner: attachment list only supports <run-id-or-path>, --scope, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
@@ -1640,13 +1640,13 @@ async function runAttachmentCommand(
       const target = normalizeTarget(runArg);
       if (!target || !sourceArg) {
         process.stderr.write(
-          "task-runner: attachment add requires <run-id-or-path> <source-file>\n",
+          "agent-runner: attachment add requires <run-id-or-path> <source-file>\n",
         );
         process.exit(3);
       }
       if (extra !== undefined) {
         process.stderr.write(
-          `task-runner: attachment add takes exactly two positionals (<run-id-or-path> <source-file>); got extra "${extra}"\n`,
+          `agent-runner: attachment add takes exactly two positionals (<run-id-or-path> <source-file>); got extra "${extra}"\n`,
         );
         process.exit(3);
       }
@@ -1656,7 +1656,7 @@ async function runAttachmentCommand(
       });
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: attachment add only supports <run-id-or-path>, <source-file>, --name, --mime-type, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+          `agent-runner: attachment add only supports <run-id-or-path>, <source-file>, --name, --mime-type, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
@@ -1695,20 +1695,20 @@ async function runAttachmentCommand(
       const target = normalizeTarget(runArg);
       if (!target || !attachmentId) {
         process.stderr.write(
-          "task-runner: attachment remove requires <run-id-or-path> <attachment-id>\n",
+          "agent-runner: attachment remove requires <run-id-or-path> <attachment-id>\n",
         );
         process.exit(3);
       }
       if (extra !== undefined) {
         process.stderr.write(
-          `task-runner: attachment remove takes exactly two positionals (<run-id-or-path> <attachment-id>); got extra "${extra}"\n`,
+          `agent-runner: attachment remove takes exactly two positionals (<run-id-or-path> <attachment-id>); got extra "${extra}"\n`,
         );
         process.exit(3);
       }
       const unsupported = unsupportedFlagsForGroupedCommand(parsed);
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: attachment remove only supports <run-id-or-path>, <attachment-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+          `agent-runner: attachment remove only supports <run-id-or-path>, <attachment-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
@@ -1738,20 +1738,20 @@ async function runAttachmentCommand(
       const target = normalizeTarget(runArg);
       if (!target || !attachmentId || !outputPath) {
         process.stderr.write(
-          "task-runner: attachment download requires <run-id-or-path> <attachment-id> <output-path>\n",
+          "agent-runner: attachment download requires <run-id-or-path> <attachment-id> <output-path>\n",
         );
         process.exit(3);
       }
       if (extra !== undefined) {
         process.stderr.write(
-          `task-runner: attachment download takes exactly three positionals (<run-id-or-path> <attachment-id> <output-path>); got extra "${extra}"\n`,
+          `agent-runner: attachment download takes exactly three positionals (<run-id-or-path> <attachment-id> <output-path>); got extra "${extra}"\n`,
         );
         process.exit(3);
       }
       const unsupported = unsupportedFlagsForGroupedCommand(parsed);
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: attachment download only supports <run-id-or-path>, <attachment-id>, <output-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+          `agent-runner: attachment download only supports <run-id-or-path>, <attachment-id>, <output-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
@@ -1779,7 +1779,7 @@ async function runAttachmentCommand(
     }
     default:
       process.stderr.write(
-        `task-runner: attachment command requires a subcommand: add | list | remove | download (got "${parsed.subcommand ?? ""}")\n`,
+        `agent-runner: attachment command requires a subcommand: add | list | remove | download (got "${parsed.subcommand ?? ""}")\n`,
       );
       process.exit(3);
   }
@@ -1789,19 +1789,19 @@ async function runResetCommand(parsed: ParsedArgs, connect?: DaemonConnectContex
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
-    process.stderr.write("task-runner: run reset requires <id-or-path>\n");
+    process.stderr.write("agent-runner: run reset requires <id-or-path>\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run reset takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+      `agent-runner: run reset takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run reset only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run reset only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -1818,7 +1818,7 @@ async function runResetCommand(parsed: ParsedArgs, connect?: DaemonConnectContex
     if (parsed.outputFormat === "json") {
       writeJson({ runId: result.runId, status: result.status });
     } else {
-      process.stdout.write(`task-runner: reset run ${result.runId} to initialized state\n`);
+      process.stdout.write(`agent-runner: reset run ${result.runId} to initialized state\n`);
     }
     process.exit(0);
   } catch (err) {
@@ -1830,19 +1830,19 @@ async function runReadyCommand(parsed: ParsedArgs, connect?: DaemonConnectContex
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
-    process.stderr.write("task-runner: run ready requires <id-or-path>\n");
+    process.stderr.write("agent-runner: run ready requires <id-or-path>\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run ready takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+      `agent-runner: run ready takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
   const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowScheduleInitFlags: true });
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ready only supports <id-or-path>, --connect, --output-format, and --schedule-* flags (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run ready only supports <id-or-path>, --connect, --output-format, and --schedule-* flags (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -1879,24 +1879,24 @@ async function runScheduleCommand(
       : "set";
   const target = normalizeTarget(action === "set" ? actionOrRunArg : runArg);
   if (!target) {
-    process.stderr.write("task-runner: run schedule requires <id-or-path>\n");
+    process.stderr.write("agent-runner: run schedule requires <id-or-path>\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run schedule takes at most two positionals; got extra "${extra}"\n`,
+      `agent-runner: run schedule takes at most two positionals; got extra "${extra}"\n`,
     );
     process.exit(3);
   }
   const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowRunScheduleFlags: true });
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run schedule only supports <id-or-path>, enable|disable|clear, --connect, --output-format, and schedule flags (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run schedule only supports <id-or-path>, enable|disable|clear, --connect, --output-format, and schedule flags (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
   if (action !== "set" && hasRunScheduleFlags(parsed)) {
-    process.stderr.write(`task-runner: run schedule ${action} does not accept schedule flags\n`);
+    process.stderr.write(`agent-runner: run schedule ${action} does not accept schedule flags\n`);
     process.exit(3);
   }
 
@@ -1957,19 +1957,19 @@ async function runDeleteCommand(
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
-    process.stderr.write("task-runner: run delete requires <id-or-path>\n");
+    process.stderr.write("agent-runner: run delete requires <id-or-path>\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run delete takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+      `agent-runner: run delete takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run delete only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run delete only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -2004,19 +2004,19 @@ async function runArchiveToggleCommand(
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
-    process.stderr.write(`task-runner: run ${verb} requires <id-or-path>\n`);
+    process.stderr.write(`agent-runner: run ${verb} requires <id-or-path>\n`);
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+      `agent-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ${verb} only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run ${verb} only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -2055,21 +2055,21 @@ async function runSetNameCommand(
   const [runArg, nameArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
-    process.stderr.write("task-runner: run set-name requires <id-or-path>\n");
+    process.stderr.write("agent-runner: run set-name requires <id-or-path>\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run set-name takes exactly two positionals (<id-or-path> <name>) unless --clear is used; got extra "${extra}"\n`,
+      `agent-runner: run set-name takes exactly two positionals (<id-or-path> <name>) unless --clear is used; got extra "${extra}"\n`,
     );
     process.exit(3);
   }
   if (parsed.clear && nameArg !== undefined) {
-    process.stderr.write("task-runner: run set-name does not accept both <name> and --clear\n");
+    process.stderr.write("agent-runner: run set-name does not accept both <name> and --clear\n");
     process.exit(3);
   }
   if (!parsed.clear && nameArg === undefined) {
-    process.stderr.write("task-runner: run set-name requires <name> or --clear\n");
+    process.stderr.write("agent-runner: run set-name requires <name> or --clear\n");
     process.exit(3);
   }
   let nextName: string | null;
@@ -2079,14 +2079,14 @@ async function runSetNameCommand(
       clear: parsed.clear === true,
     });
   } catch {
-    process.stderr.write("task-runner: run set-name: <name> cannot be empty\n");
+    process.stderr.write("agent-runner: run set-name: <name> cannot be empty\n");
     process.exit(3);
   }
 
   const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowClear: true });
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run set-name only supports <id-or-path>, <name> or --clear, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run set-name only supports <id-or-path>, <name> or --clear, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -2123,25 +2123,25 @@ async function runNoteCommand(
   const target = normalizeTarget(runArg);
   if (!target) {
     process.stderr.write(
-      `task-runner: run ${verb} requires <id-or-path>${verb === "set-note" ? " <text>" : ""}\n`,
+      `agent-runner: run ${verb} requires <id-or-path>${verb === "set-note" ? " <text>" : ""}\n`,
     );
     process.exit(3);
   }
 
   if (verb === "set-note") {
     if (noteArg === undefined) {
-      process.stderr.write("task-runner: run set-note requires <id-or-path> <text>\n");
+      process.stderr.write("agent-runner: run set-note requires <id-or-path> <text>\n");
       process.exit(3);
     }
     if (extra !== undefined) {
       process.stderr.write(
-        `task-runner: run set-note takes exactly two positionals (<id-or-path> <text>); got extra "${extra}"\n`,
+        `agent-runner: run set-note takes exactly two positionals (<id-or-path> <text>); got extra "${extra}"\n`,
       );
       process.exit(3);
     }
   } else if (noteArg !== undefined) {
     process.stderr.write(
-      `task-runner: run clear-note takes exactly one positional (<id-or-path>); got extra "${noteArg}"\n`,
+      `agent-runner: run clear-note takes exactly one positional (<id-or-path>); got extra "${noteArg}"\n`,
     );
     process.exit(3);
   }
@@ -2149,7 +2149,7 @@ async function runNoteCommand(
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ${verb} only supports <id-or-path>${verb === "set-note" ? ", <text>" : ""}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run ${verb} only supports <id-or-path>${verb === "set-note" ? ", <text>" : ""}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -2186,12 +2186,12 @@ async function runPinnedCommand(
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
-    process.stderr.write(`task-runner: run ${verb} requires <id-or-path>\n`);
+    process.stderr.write(`agent-runner: run ${verb} requires <id-or-path>\n`);
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+      `agent-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
@@ -2199,7 +2199,7 @@ async function runPinnedCommand(
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ${verb} only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run ${verb} only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -2237,7 +2237,7 @@ async function runBackendSessionCommand(
   const target = normalizeTarget(runArg);
   if (!target) {
     process.stderr.write(
-      `task-runner: run ${verb} requires <id-or-path>${verb === "set-backend-session" ? " <session-id>" : ""}\n`,
+      `agent-runner: run ${verb} requires <id-or-path>${verb === "set-backend-session" ? " <session-id>" : ""}\n`,
     );
     process.exit(3);
   }
@@ -2245,23 +2245,23 @@ async function runBackendSessionCommand(
   if (verb === "set-backend-session") {
     if (backendSessionArg === undefined) {
       process.stderr.write(
-        "task-runner: run set-backend-session requires <id-or-path> <session-id>\n",
+        "agent-runner: run set-backend-session requires <id-or-path> <session-id>\n",
       );
       process.exit(3);
     }
     if (extra !== undefined) {
       process.stderr.write(
-        `task-runner: run set-backend-session takes exactly two positionals (<id-or-path> <session-id>); got extra "${extra}"\n`,
+        `agent-runner: run set-backend-session takes exactly two positionals (<id-or-path> <session-id>); got extra "${extra}"\n`,
       );
       process.exit(3);
     }
     if (backendSessionArg.trim().length === 0) {
-      process.stderr.write("task-runner: run set-backend-session: <session-id> cannot be empty\n");
+      process.stderr.write("agent-runner: run set-backend-session: <session-id> cannot be empty\n");
       process.exit(3);
     }
   } else if (backendSessionArg !== undefined) {
     process.stderr.write(
-      `task-runner: run clear-backend-session takes exactly one positional (<id-or-path>); got extra "${backendSessionArg}"\n`,
+      `agent-runner: run clear-backend-session takes exactly one positional (<id-or-path>); got extra "${backendSessionArg}"\n`,
     );
     process.exit(3);
   }
@@ -2269,7 +2269,7 @@ async function runBackendSessionCommand(
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ${verb} only supports <id-or-path>${verb === "set-backend-session" ? ", <session-id>" : ""}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run ${verb} only supports <id-or-path>${verb === "set-backend-session" ? ", <session-id>" : ""}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -2279,7 +2279,7 @@ async function runBackendSessionCommand(
     if (verb === "set-backend-session") {
       const backendSessionId = backendSessionArg;
       if (backendSessionId === undefined) {
-        throw new Error("task-runner: internal error: missing backend session id");
+        throw new Error("agent-runner: internal error: missing backend session id");
       }
       result =
         connect === undefined
@@ -2332,26 +2332,26 @@ async function runGroupCommand(
   const target = normalizeTarget(runArg);
   if (!target || (verb === "set-group" && !groupArg)) {
     process.stderr.write(
-      `task-runner: run ${verb} requires <id-or-path>${verb === "set-group" ? " <group-id>" : ""}\n`,
+      `agent-runner: run ${verb} requires <id-or-path>${verb === "set-group" ? " <group-id>" : ""}\n`,
     );
     process.exit(3);
   }
   if (verb === "clear-group" && groupArg !== undefined) {
     process.stderr.write(
-      `task-runner: run clear-group takes exactly one positional (<id-or-path>); got extra "${groupArg}"\n`,
+      `agent-runner: run clear-group takes exactly one positional (<id-or-path>); got extra "${groupArg}"\n`,
     );
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run set-group takes exactly two positionals (<id-or-path> <group-id>); got extra "${extra}"\n`,
+      `agent-runner: run set-group takes exactly two positionals (<id-or-path> <group-id>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ${verb} only supports ${verb === "set-group" ? "<id-or-path>, <group-id>" : "<id-or-path>"}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run ${verb} only supports ${verb === "set-group" ? "<id-or-path>, <group-id>" : "<id-or-path>"}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -2391,20 +2391,20 @@ async function runDependencyCommand(
   const target = normalizeTarget(runArg);
   if (!target) {
     process.stderr.write(
-      `task-runner: run ${verb} requires <id-or-path>${verb === "clear-deps" ? "" : " --run <dependency-run-id> or --group <group-id>"}\n`,
+      `agent-runner: run ${verb} requires <id-or-path>${verb === "clear-deps" ? "" : " --run <dependency-run-id> or --group <group-id>"}\n`,
     );
     process.exit(3);
   }
   if (verb === "clear-deps") {
     if (extra !== undefined) {
       process.stderr.write(
-        `task-runner: run clear-deps takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+        `agent-runner: run clear-deps takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
       );
       process.exit(3);
     }
   } else if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+      `agent-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
@@ -2414,18 +2414,18 @@ async function runDependencyCommand(
   });
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ${verb} only supports ${verb === "clear-deps" ? "<id-or-path>" : "<id-or-path>, --run or --group"}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `agent-runner: run ${verb} only supports ${verb === "clear-deps" ? "<id-or-path>" : "<id-or-path>, --run or --group"}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
   const refCount =
     Number(parsed.dependencyRun !== undefined) + Number(parsed.dependencyGroupId !== undefined);
   if (verb !== "clear-deps" && refCount !== 1) {
-    process.stderr.write(`task-runner: run ${verb} requires exactly one of --run or --group\n`);
+    process.stderr.write(`agent-runner: run ${verb} requires exactly one of --run or --group\n`);
     process.exit(3);
   }
   if (verb === "clear-deps" && refCount !== 0) {
-    process.stderr.write("task-runner: run clear-deps does not accept --run or --group\n");
+    process.stderr.write("agent-runner: run clear-deps does not accept --run or --group\n");
     process.exit(3);
   }
   const dependency: RunDependencyRef | undefined =
@@ -2480,12 +2480,12 @@ async function runTaskList(parsed: ParsedArgs, connect?: DaemonConnectContext): 
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
-    process.stderr.write("task-runner: task list requires <run-id>\n");
+    process.stderr.write("agent-runner: task list requires <run-id>\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: task list takes exactly one positional (<run-id>); got extra "${extra}"\n`,
+      `agent-runner: task list takes exactly one positional (<run-id>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
@@ -2514,12 +2514,12 @@ async function runTaskShow(parsed: ParsedArgs, connect?: DaemonConnectContext): 
   const [runArg, taskId, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target || !taskId) {
-    process.stderr.write("task-runner: task show requires <run-id> <task-id>\n");
+    process.stderr.write("agent-runner: task show requires <run-id> <task-id>\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: task show takes exactly two positionals (<run-id> <task-id>); got extra "${extra}"\n`,
+      `agent-runner: task show takes exactly two positionals (<run-id> <task-id>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
@@ -2548,7 +2548,7 @@ async function runTaskSet(parsed: ParsedArgs, connect?: DaemonConnectContext): P
   const [runArg, taskId] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target || !taskId) {
-    process.stderr.write("task-runner: task set requires <run-id> <task-id>\n");
+    process.stderr.write("agent-runner: task set requires <run-id> <task-id>\n");
     process.exit(3);
   }
 
@@ -2573,7 +2573,7 @@ async function runTaskSet(parsed: ParsedArgs, connect?: DaemonConnectContext): P
       writeJson(task);
     } else {
       process.stdout.write(
-        `task-runner: updated ${task.id} (status=${task.status}) in run ${target}\n`,
+        `agent-runner: updated ${task.id} (status=${task.status}) in run ${target}\n`,
       );
     }
     process.exit(0);
@@ -2589,11 +2589,11 @@ async function runTaskAppendNotes(
   const [runArg, taskId] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target || !taskId) {
-    process.stderr.write("task-runner: task append-notes requires <run-id> <task-id>\n");
+    process.stderr.write("agent-runner: task append-notes requires <run-id> <task-id>\n");
     process.exit(3);
   }
   if (parsed.taskAppendText === undefined) {
-    process.stderr.write("task-runner: task append-notes requires --text\n");
+    process.stderr.write("agent-runner: task append-notes requires --text\n");
     process.exit(3);
   }
 
@@ -2614,7 +2614,7 @@ async function runTaskAppendNotes(
       writeJson(task);
     } else {
       process.stdout.write(
-        `task-runner: updated ${task.id} (status=${task.status}) in run ${target}\n`,
+        `agent-runner: updated ${task.id} (status=${task.status}) in run ${target}\n`,
       );
     }
     process.exit(0);
@@ -2627,17 +2627,17 @@ async function runTaskAdd(parsed: ParsedArgs, connect?: DaemonConnectContext): P
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
-    process.stderr.write("task-runner: task add requires <run-id>\n");
+    process.stderr.write("agent-runner: task add requires <run-id>\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: task add takes exactly one positional (<run-id>); got extra "${extra}"\n`,
+      `agent-runner: task add takes exactly one positional (<run-id>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
   if (parsed.taskTitle === undefined) {
-    process.stderr.write("task-runner: task add requires --title\n");
+    process.stderr.write("agent-runner: task add requires --title\n");
     process.exit(3);
   }
 
@@ -2657,7 +2657,9 @@ async function runTaskAdd(parsed: ParsedArgs, connect?: DaemonConnectContext): P
     if (parsed.outputFormat === "json") {
       writeJson(task);
     } else {
-      process.stdout.write(`task-runner: added task ${task.id} "${task.title}" to run ${target}\n`);
+      process.stdout.write(
+        `agent-runner: added task ${task.id} "${task.title}" to run ${target}\n`,
+      );
     }
     process.exit(0);
   } catch (err) {
@@ -2674,12 +2676,12 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
     sigintCount++;
     if (sigintCount === 1) {
       process.stderr.write(
-        "\ntask-runner: caught Ctrl+C — interrupting backend (Ctrl+C again to force-exit)\n",
+        "\nagent-runner: caught Ctrl+C — interrupting backend (Ctrl+C again to force-exit)\n",
       );
       abortController.abort();
       return;
     }
-    process.stderr.write("\ntask-runner: forced exit\n");
+    process.stderr.write("\nagent-runner: forced exit\n");
     process.exit(130);
   };
   process.on("SIGINT", onSigint);
@@ -2769,13 +2771,13 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
       err instanceof InvalidBackendSessionError ||
       err instanceof ScheduleValidationError
     ) {
-      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.stderr.write(`agent-runner: ${err.message}\n`);
       if (err instanceof RunCommandError && err.showHelp) {
         process.stderr.write(HELP);
       }
       process.exit(3);
     }
-    process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+    process.stderr.write(`agent-runner: ${(err as Error).message}\n`);
     process.exit(4);
   }
 }
@@ -2841,7 +2843,7 @@ async function runExecuteCommandDaemon(
     let cancelPromise: Promise<void> | undefined;
     const exitWithCancelFailure = (): never => {
       process.stderr.write(
-        `task-runner: Ctrl+C cancel request failed: ${cancelFailed}. Remote run may still be active.\n`,
+        `agent-runner: Ctrl+C cancel request failed: ${cancelFailed}. Remote run may still be active.\n`,
       );
       process.exit(1);
     };
@@ -2865,10 +2867,10 @@ async function runExecuteCommandDaemon(
       sigintCount++;
       if (sigintCount === 1) {
         process.stderr.write(
-          "\ntask-runner: caught Ctrl+C — requesting daemon cancel (Ctrl+C again to force-exit)\n",
+          "\nagent-runner: caught Ctrl+C — requesting daemon cancel (Ctrl+C again to force-exit)\n",
         );
       } else {
-        process.stderr.write("\ntask-runner: forced exit\n");
+        process.stderr.write("\nagent-runner: forced exit\n");
         process.exit(130);
       }
       abortRequested = true;
@@ -2925,12 +2927,12 @@ async function runExecuteCommandDaemon(
       }
       if (cancelRequested && terminalStatus !== "aborted") {
         process.stderr.write(
-          `task-runner: Ctrl+C requested daemon cancel, but interruption was not confirmed (final status: ${terminalStatus}). Remote run may still be active.\n`,
+          `agent-runner: Ctrl+C requested daemon cancel, but interruption was not confirmed (final status: ${terminalStatus}). Remote run may still be active.\n`,
         );
         process.exit(1);
       }
       if (!terminalStatus) {
-        process.stderr.write("task-runner: daemon run ended without a terminal status\n");
+        process.stderr.write("agent-runner: daemon run ended without a terminal status\n");
         process.exit(4);
       }
       process.exit(terminalExitCode(terminalStatus));
@@ -2950,7 +2952,7 @@ async function main(): Promise<void> {
   try {
     parsed = parseArgs(process.argv);
   } catch (err) {
-    process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+    process.stderr.write(`agent-runner: ${(err as Error).message}\n`);
     process.stderr.write(HELP);
     process.exit(3);
   }
@@ -2962,11 +2964,11 @@ async function main(): Promise<void> {
 
   if (parsed.detach) {
     if (parsed.command === "init") {
-      process.stderr.write("task-runner: init does not accept --detach\n");
+      process.stderr.write("agent-runner: init does not accept --detach\n");
       process.exit(3);
     }
     if (parsed.command !== "run") {
-      process.stderr.write("task-runner: --detach is only valid with `run` in daemon mode\n");
+      process.stderr.write("agent-runner: --detach is only valid with `run` in daemon mode\n");
       process.exit(3);
     }
   }
@@ -2976,12 +2978,12 @@ async function main(): Promise<void> {
   }
 
   if (parsed.listen !== undefined) {
-    process.stderr.write("task-runner: --listen is only valid with `serve`\n");
+    process.stderr.write("agent-runner: --listen is only valid with `serve`\n");
     process.exit(3);
   }
 
   if (parsed.includeArchived && !(parsed.command === "list" && parsed.subcommand === "runs")) {
-    process.stderr.write("task-runner: --include-archived is only valid with `list runs`\n");
+    process.stderr.write("agent-runner: --include-archived is only valid with `list runs`\n");
     process.exit(3);
   }
 
@@ -2995,11 +2997,11 @@ async function main(): Promise<void> {
     if (resolvedHostMode.mode === "daemon") {
       daemonConnect = {
         ...resolvedHostMode,
-        authHeaders: bearerAuthHeader(process.env[TASK_RUNNER_DAEMON_TOKEN_ENV]),
+        authHeaders: bearerAuthHeader(process.env[AGENT_RUNNER_DAEMON_TOKEN_ENV]),
       };
     }
   } catch (err) {
-    process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
+    process.stderr.write(`agent-runner: ${errorMessage(err)}\n`);
     process.exit(3);
   }
 
@@ -3010,7 +3012,7 @@ async function main(): Promise<void> {
     !daemonConnect
   ) {
     process.stderr.write(
-      "task-runner: --detach requires daemon-connected run execution (--connect or TASK_RUNNER_CONNECT)\n",
+      "agent-runner: --detach requires daemon-connected run execution (--connect or AGENT_RUNNER_CONNECT)\n",
     );
     process.exit(3);
   }
@@ -3125,7 +3127,7 @@ async function main(): Promise<void> {
   }
 
   if (parsed.command !== "run" && parsed.command !== "init") {
-    process.stderr.write(`task-runner: unknown command "${parsed.command}"\n`);
+    process.stderr.write(`agent-runner: unknown command "${parsed.command}"\n`);
     process.stderr.write(HELP);
     process.exit(3);
   }
@@ -3142,6 +3144,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
+  process.stderr.write(`agent-runner: ${errorMessage(err)}\n`);
   process.exit(4);
 });

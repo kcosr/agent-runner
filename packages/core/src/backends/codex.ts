@@ -4,6 +4,7 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
+import { resolveAgentRunnerCommand } from "../agent-runner-command.js";
 import type {
   Backend,
   BackendConfigResolutionContext,
@@ -21,14 +22,13 @@ import type {
 } from "../core/backends/types.js";
 import { isAbsoluteUdsSocketPath, isWsOrWssUrl } from "../core/backends/types.js";
 import {
-  TASK_RUNNER_CALL_DEPTH_ENV,
-  TASK_RUNNER_CWD_ENV,
-  TASK_RUNNER_MAX_CALL_DEPTH_ENV,
-  TASK_RUNNER_PARENT_RUN_ID_ENV,
-  TASK_RUNNER_RUN_GROUP_ID_ENV,
-  TASK_RUNNER_RUN_ID_ENV,
+  AGENT_RUNNER_CALL_DEPTH_ENV,
+  AGENT_RUNNER_CWD_ENV,
+  AGENT_RUNNER_MAX_CALL_DEPTH_ENV,
+  AGENT_RUNNER_PARENT_RUN_ID_ENV,
+  AGENT_RUNNER_RUN_GROUP_ID_ENV,
+  AGENT_RUNNER_RUN_ID_ENV,
 } from "../core/run/recursion-guard.js";
-import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { buildSpawnCommand } from "../util/spawn.js";
 import {
   composePersistedTranscript,
@@ -159,7 +159,7 @@ function openStdioTransport(
   launcher: BackendInvokeContext["launcher"],
   onRawStdoutLine: BackendInvokeContext["onRawStdoutLine"],
 ): Transport {
-  const binary = process.env.TASK_RUNNER_CODEX_BIN ?? "codex";
+  const binary = process.env.AGENT_RUNNER_CODEX_BIN ?? "codex";
   const launched = buildSpawnCommand({
     command: binary,
     args: buildCodexAppServerArgs(unrestricted, resolvedBackendArgs),
@@ -950,10 +950,10 @@ function parseCodexBackendConfig(
 }
 
 function codexTransportFromEnv(env: Record<string, string>): CodexTransportConfig | undefined {
-  const udsPath = env.TASK_RUNNER_CODEX_UDS_PATH?.trim();
-  const wsUrl = env.TASK_RUNNER_CODEX_WS_URL?.trim();
+  const udsPath = env.AGENT_RUNNER_CODEX_UDS_PATH?.trim();
+  const wsUrl = env.AGENT_RUNNER_CODEX_WS_URL?.trim();
   if (udsPath && wsUrl) {
-    throw new Error("TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set");
+    throw new Error("AGENT_RUNNER_CODEX_UDS_PATH and AGENT_RUNNER_CODEX_WS_URL cannot both be set");
   }
   if (udsPath) {
     return {
@@ -1031,8 +1031,8 @@ async function openInitializedCodexClient(ctx: BackendInvokeContext): Promise<{
   const client = createClient(transport);
   await client.call("initialize", {
     clientInfo: {
-      name: "task-runner",
-      title: "task-runner",
+      name: "agent-runner",
+      title: "agent-runner",
       version: "0.1.0",
     },
     capabilities: { experimentalApi: true },
@@ -1229,8 +1229,8 @@ export async function adoptCodexActiveThread(
     client.notify((method, params) => handleNotification(state, method, params));
     await client.call("initialize", {
       clientInfo: {
-        name: "task-runner",
-        title: "task-runner",
+        name: "agent-runner",
+        title: "agent-runner",
         version: "0.1.0",
       },
       capabilities: { experimentalApi: true },
@@ -1339,12 +1339,12 @@ export async function adoptCodexActiveThread(
 }
 
 const CODEX_LINEAGE_ENV_CONFIG_KEYS = [
-  TASK_RUNNER_CALL_DEPTH_ENV,
-  TASK_RUNNER_MAX_CALL_DEPTH_ENV,
-  TASK_RUNNER_PARENT_RUN_ID_ENV,
-  TASK_RUNNER_RUN_GROUP_ID_ENV,
-  TASK_RUNNER_RUN_ID_ENV,
-  TASK_RUNNER_CWD_ENV,
+  AGENT_RUNNER_CALL_DEPTH_ENV,
+  AGENT_RUNNER_MAX_CALL_DEPTH_ENV,
+  AGENT_RUNNER_PARENT_RUN_ID_ENV,
+  AGENT_RUNNER_RUN_GROUP_ID_ENV,
+  AGENT_RUNNER_RUN_ID_ENV,
+  AGENT_RUNNER_CWD_ENV,
 ] as const;
 
 function buildCodexLineageConfigOverrides(env: Record<string, string>): Record<string, string> {
@@ -1661,8 +1661,8 @@ export async function setCodexThreadName(ctx: {
 
     await client.call("initialize", {
       clientInfo: {
-        name: "task-runner",
-        title: "task-runner",
+        name: "agent-runner",
+        title: "agent-runner",
         version: "0.1.0",
       },
       capabilities: { experimentalApi: true },
@@ -1734,8 +1734,8 @@ export const codexBackend: Backend = {
       // 1. initialize (request/response)
       await client.call("initialize", {
         clientInfo: {
-          name: "task-runner",
-          title: "task-runner",
+          name: "agent-runner",
+          title: "agent-runner",
           version: "0.1.0",
         },
         capabilities: { experimentalApi: true },
@@ -1904,14 +1904,14 @@ export const codexBackend: Backend = {
       // Detect a turn that codex marked `interrupted` without any
       // input from us. This happens when another client connected to
       // the same codex thread (e.g. a developer using the codex CLI
-      // alongside task-runner) cancels the turn from the side. The
+      // alongside agent-runner) cancels the turn from the side. The
       // run loop should treat this as a clean abort, not as a
       // failure that triggers another retry.
       if (isExternalInterrupt(state.turnStatus, timedOut, aborted || abortRequested)) {
         aborted = true;
-        const taskRunnerCmd = resolveTaskRunnerCommand();
+        const agentRunnerCmd = resolveAgentRunnerCommand();
         emitBackendNotice(
-          `\ncodex: turn was interrupted externally (e.g. cancelled from another client connected to the same thread); marking the run aborted instead of retrying. Resume with \`${taskRunnerCmd} run --resume-run <id>\` when ready.\n`,
+          `\ncodex: turn was interrupted externally (e.g. cancelled from another client connected to the same thread); marking the run aborted instead of retrying. Resume with \`${agentRunnerCmd} run --resume-run <id>\` when ready.\n`,
         );
       }
     } catch (err) {

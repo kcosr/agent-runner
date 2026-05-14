@@ -10,7 +10,7 @@ const SCRIPT_PATH = resolvePath(
 );
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-migrate-run-events-v2-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-migrate-run-events-v2-"));
 }
 
 function writeRunEvents(root, repo, runId, lines) {
@@ -31,7 +31,7 @@ function readRunEvents(path) {
 
 test("migrate-run-events-v2 script dry-runs mixed legacy rows, skips malformed lines, and honors repo filters", () => {
   const root = tempDir();
-  const selectedPath = writeRunEvents(root, "task-runner", "run-1", [
+  const selectedPath = writeRunEvents(root, "agent-runner", "run-1", [
     JSON.stringify({
       schemaVersion: 1,
       recordedAt: "2026-04-21T12:41:02.000Z",
@@ -64,7 +64,7 @@ test("migrate-run-events-v2 script dry-runs mixed legacy rows, skips malformed l
     }),
   ]);
 
-  const stdout = execFileSync("node", [SCRIPT_PATH, "--root", root, "--repo", "task-runner"], {
+  const stdout = execFileSync("node", [SCRIPT_PATH, "--root", root, "--repo", "agent-runner"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -114,7 +114,7 @@ test("migrate-run-events-v2 script dry-runs mixed legacy rows, skips malformed l
 
 test("migrate-run-events-v2 script writes legacy rows as canonical schemaVersion 2 with monotonic cursors", () => {
   const root = tempDir();
-  const runEventsPath = writeRunEvents(root, "task-runner", "run-1", [
+  const runEventsPath = writeRunEvents(root, "agent-runner", "run-1", [
     JSON.stringify({
       schemaVersion: 1,
       recordedAt: "2026-04-21T12:41:02.000Z",
@@ -174,7 +174,7 @@ test("migrate-run-events-v2 script writes legacy rows as canonical schemaVersion
 
 test("migrate-run-events-v2 script reports canonical schemaVersion 2 files as no-op", () => {
   const root = tempDir();
-  const runEventsPath = writeRunEvents(root, "task-runner", "run-1", [
+  const runEventsPath = writeRunEvents(root, "agent-runner", "run-1", [
     JSON.stringify({
       schemaVersion: 2,
       recordedAt: "2026-04-21T12:41:02.000Z",

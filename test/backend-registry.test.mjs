@@ -12,7 +12,7 @@ import {
 } from "../packages/core/dist/backends/registry.js";
 
 function tempConfigDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-backends-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-backends-"));
 }
 
 function writeBackend(configDir, name, filename, source) {
@@ -50,7 +50,7 @@ test("registry: unknown backend throws UnknownBackendError", () => {
 
 test("registry: missing custom backends root keeps built-ins", async () => {
   const configDir = tempConfigDir();
-  await loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir });
+  await loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir });
   const known = knownBackends();
   assert.ok(known.includes("claude"));
   assert.equal(known.includes("my-agent"), false);
@@ -81,7 +81,7 @@ test("registry: loads custom backend default export", async () => {
     };`,
   );
 
-  await loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir });
+  await loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir });
   const backend = resolveBackend("my-agent");
   assert.equal(backend.id, "my-agent");
   assert.equal(backend.launcherMode, "direct");
@@ -94,7 +94,7 @@ test("registry: rejects custom backend directory with no candidate module", asyn
   mkdirSync(join(configDir, "backends", "empty-agent"), { recursive: true });
 
   await assert.rejects(
-    () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+    () => loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir }),
     (err) =>
       err instanceof BackendConfigError &&
       err.backendName === "empty-agent" &&
@@ -127,7 +127,7 @@ test("registry: loads the first backend filename candidate by priority", async (
     };`,
   );
 
-  await loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir });
+  await loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir });
   const backend = resolveBackend("priority-agent");
   assert.match(backend.sourcePath, /backend\.ts$/);
   const result = await backend.invoke({
@@ -179,7 +179,7 @@ for (const [ext, source] of [
     const name = `agent-${ext}`;
     writeBackend(configDir, name, `backend.${ext}`, source);
 
-    await loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir });
+    await loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir });
     assert.equal(resolveBackend(name).id, name);
     assert.ok(knownBackends().includes(name));
   });
@@ -195,7 +195,7 @@ test("registry: rejects custom backend id mismatch", async () => {
   );
 
   await assert.rejects(
-    () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+    () => loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir }),
     (err) =>
       err instanceof BackendConfigError &&
       err.backendName === "actual-name" &&
@@ -219,7 +219,7 @@ for (const methodName of ["resolveSessionHistorySource", "readSessionHistory"]) 
     );
 
     await assert.rejects(
-      () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+      () => loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir }),
       (err) =>
         err instanceof BackendConfigError &&
         err.backendName === `${methodName}-agent` &&
@@ -239,7 +239,7 @@ test("registry: import failure includes backend name and module path", async () 
   );
 
   await assert.rejects(
-    () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+    () => loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir }),
     (err) =>
       err instanceof BackendConfigError &&
       err.backendName === "broken-import" &&
@@ -259,7 +259,7 @@ test("registry: rejects custom backend using a reserved built-in name", async ()
   );
 
   await assert.rejects(
-    () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+    () => loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir }),
     (err) =>
       err instanceof BackendConfigError &&
       err.backendName === "codex" &&
@@ -277,7 +277,7 @@ test("registry: rejects named-only custom backend modules", async () => {
   );
 
   await assert.rejects(
-    () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+    () => loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir }),
     (err) =>
       err instanceof BackendConfigError &&
       err.backendName === "named-only" &&
@@ -299,15 +299,15 @@ test("registry: validates custom backend optional fields", async () => {
       supportsBootstrapSessionImport: "yes",
       resolveConfig: {},
       launcherApplies: true,
-      taskRunnerPromptMatchesSyncedTurn: true,
-      taskRunnerAttemptTimingMatchesSyncedTurn: true,
+      agentRunnerPromptMatchesSyncedTurn: true,
+      agentRunnerAttemptTimingMatchesSyncedTurn: true,
       renameSession: true,
       launcherMode: "maybe"
     };`,
   );
 
   await assert.rejects(
-    () => loadCustomBackends({ TASK_RUNNER_CONFIG_DIR: configDir }),
+    () => loadCustomBackends({ AGENT_RUNNER_CONFIG_DIR: configDir }),
     (err) =>
       err instanceof BackendConfigError &&
       err.backendName === "bad-options" &&
@@ -316,8 +316,8 @@ test("registry: validates custom backend optional fields", async () => {
       /supportsBootstrapSessionImport must be a boolean/.test(err.message) &&
       /resolveConfig must be a function/.test(err.message) &&
       /launcherApplies must be a function/.test(err.message) &&
-      /taskRunnerPromptMatchesSyncedTurn must be a function/.test(err.message) &&
-      /taskRunnerAttemptTimingMatchesSyncedTurn must be a function/.test(err.message) &&
+      /agentRunnerPromptMatchesSyncedTurn must be a function/.test(err.message) &&
+      /agentRunnerAttemptTimingMatchesSyncedTurn must be a function/.test(err.message) &&
       /renameSession must be a function/.test(err.message) &&
       /launcherMode must be "applies" or "direct"/.test(err.message),
   );

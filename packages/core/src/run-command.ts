@@ -1,3 +1,4 @@
+import { resolveAgentRunnerCommand } from "./agent-runner-command.js";
 import {
   BackendConfigError,
   UnknownBackendError,
@@ -25,7 +26,6 @@ import { readParentRunIdFromEnv } from "./core/run/recursion-guard.js";
 import { hasRunnableTasks, missingResumeInputMessage } from "./core/run/resume-policy.js";
 import type { RunAuditEnvelope } from "./core/run/run-events.js";
 import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./core/run/run-loop.js";
-import { resolveTaskRunnerCommand } from "./task-runner-command.js";
 
 export class RunCommandError extends Error {
   constructor(
@@ -58,10 +58,10 @@ export interface ExecuteRunCommandOptions {
 }
 
 function passiveRunError(agentName: string, runId?: string): string {
-  const taskRunnerCmd = resolveTaskRunnerCommand();
+  const agentRunnerCmd = resolveAgentRunnerCommand();
   const hint = runId
-    ? `${taskRunnerCmd} task set ${runId} <task-id> --status in_progress\n  ${taskRunnerCmd} status ${runId}`
-    : `${taskRunnerCmd} init --agent <passive-agent> --assignment <...>\n  ${taskRunnerCmd} task set <run-id> <task-id> --status in_progress`;
+    ? `${agentRunnerCmd} task set ${runId} <task-id> --status in_progress\n  ${agentRunnerCmd} status ${runId}`
+    : `${agentRunnerCmd} init --agent <passive-agent> --assignment <...>\n  ${agentRunnerCmd} task set <run-id> <task-id> --status in_progress`;
   return `cannot run passive agent "${agentName}" — passive agents are driven externally via task commands. Use:\n  ${hint}`;
 }
 
@@ -71,7 +71,7 @@ function validateResumeOverrides(
 ): string | null {
   const webVars = opts.webVars ?? {};
   if (manifest.archivedAt !== null) {
-    return `cannot resume archived run ${manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${manifest.runId}`;
+    return `cannot resume archived run ${manifest.runId} — unarchive it first with ${resolveAgentRunnerCommand()} run unarchive ${manifest.runId}`;
   }
 
   const priorReady = manifest.status === "ready" && manifest.sessions.length === 0;
@@ -116,7 +116,7 @@ function validateResumeOverrides(
     return passiveRunError(manifest.agent.name, manifest.runId);
   }
   if (manifest.status === "initialized") {
-    return `cannot execute initialized run ${manifest.runId} — promote it first with ${resolveTaskRunnerCommand()} run ready ${manifest.runId}`;
+    return `cannot execute initialized run ${manifest.runId} — promote it first with ${resolveAgentRunnerCommand()} run ready ${manifest.runId}`;
   }
 
   if (priorReady) {

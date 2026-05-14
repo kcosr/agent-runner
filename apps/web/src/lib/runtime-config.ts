@@ -1,7 +1,7 @@
 import {
   type AppRuntimeConfig,
   appRuntimeConfigSchema,
-} from "@task-runner/core/contracts/app-config.js";
+} from "@agent-runner/core/contracts/app-config.js";
 import { createContext, useContext } from "react";
 
 export class RuntimeConfigError extends Error {

@@ -43,7 +43,7 @@ Work.
 const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-status-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-status-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -308,7 +308,7 @@ test("renderRunStatus shows effective status separately from lifecycle status", 
   assert.match(text, /Status: running/);
   assert.match(text, /Lifecycle status: initialized/);
   assert.match(text, /Drive this run externally:/);
-  assert.match(text, /task-runner run brief/);
+  assert.match(text, /agent-runner run brief/);
 });
 
 test("renderRunStatus shows ready promotion and execution hints separately", async () => {
@@ -334,8 +334,11 @@ test("renderRunStatus shows ready promotion and execution hints separately", asy
     }),
   );
   assert.match(initializedText, /To promote this run for execution:/);
-  assert.match(initializedText, new RegExp(`task-runner run ready ${outcome.runId}`));
-  assert.doesNotMatch(initializedText, new RegExp(`task-runner run --resume-run ${outcome.runId}`));
+  assert.match(initializedText, new RegExp(`agent-runner run ready ${outcome.runId}`));
+  assert.doesNotMatch(
+    initializedText,
+    new RegExp(`agent-runner run --resume-run ${outcome.runId}`),
+  );
 
   const readyText = renderRunStatus(
     toRunDetail({
@@ -354,7 +357,7 @@ test("renderRunStatus shows ready promotion and execution hints separately", asy
     }),
   );
   assert.match(readyText, /To execute this run:/);
-  assert.match(readyText, new RegExp(`task-runner run --resume-run ${outcome.runId}`));
+  assert.match(readyText, new RegExp(`agent-runner run --resume-run ${outcome.runId}`));
 });
 
 test("renderSystemStatus prints embedded-mode environment details", () => {
@@ -409,7 +412,7 @@ test("renderRunStatus shows archive metadata and the unarchive hint", async () =
 
   const text = renderRunStatus(archivedDetail);
   assert.match(text, /Archived: 2026-04-12T18:00:00.000Z/);
-  assert.match(text, /task-runner run unarchive/);
+  assert.match(text, /agent-runner run unarchive/);
 });
 
 test("run status CLI reports unreadable manifest snapshots as clean unexpected failures", async () => {
@@ -424,7 +427,7 @@ test("run status CLI reports unreadable manifest snapshots as clean unexpected f
   try {
     const result = runCliExpectFail(["run", "status", outcome.runId], { cwd: dir });
     assert.equal(result.status, 4);
-    assert.match(result.stderr, /task-runner:/);
+    assert.match(result.stderr, /agent-runner:/);
   } finally {
     chmodSync(runJsonPath, 0o600);
   }
@@ -544,7 +547,7 @@ test("top-level status rejects unexpected run-id positionals", () => {
   const result = runCliExpectFail(["status", "abc123"]);
   assert.equal(result.status, 3);
   assert.match(result.stderr, /status takes no positional arguments/);
-  assert.match(result.stderr, /Usage: task-runner status \[--output-format text\|json\]/);
+  assert.match(result.stderr, /Usage: agent-runner status \[--output-format text\|json\]/);
 });
 
 test("top-level status rejects --field", () => {

@@ -1,6 +1,9 @@
-import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
-import type { RunTimelineAttempt, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
-import type { RunDetail, RunSessionSummary } from "@task-runner/core/contracts/runs.js";
+import type { RunAttachment } from "@agent-runner/core/contracts/attachments.js";
+import type {
+  RunTimelineAttempt,
+  RunTimelineHistory,
+} from "@agent-runner/core/contracts/events.js";
+import type { RunDetail, RunSessionSummary } from "@agent-runner/core/contracts/runs.js";
 import { describe, expect, it } from "vitest";
 import { type RunChatAssistantRow, deriveRunChatRows } from "./run-chat.js";
 
@@ -67,12 +70,12 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
     runId: "run-1",
     parentRunId: null,
     runGroupId: "run-1",
-    repo: "task-runner",
+    repo: "agent-runner",
     status: "success",
     effectiveStatus: "success",
     archivedAt: null,
     isLive: false,
-    workspaceDir: "/tmp/task-runner/run-1",
+    workspaceDir: "/tmp/agent-runner/run-1",
     agent: {
       name: "implementer",
       sourcePath: null,
@@ -85,7 +88,7 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
     note: null,
     pinned: false,
     backendSessionId: null,
-    cwd: "/tmp/task-runner",
+    cwd: "/tmp/agent-runner",
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-28T10:00:00.000Z",

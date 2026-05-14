@@ -8,9 +8,9 @@ function usage() {
   return [
     "Usage: node scripts/task-list-markdown.mjs [run-id]",
     "",
-    "Renders `task-runner task list <run-id> --output-format json` as Markdown.",
-    "Uses `task-runner` from PATH by default.",
-    "Set TASK_RUNNER_BIN to override the executable path.",
+    "Renders `agent-runner task list <run-id> --output-format json` as Markdown.",
+    "Uses `agent-runner` from PATH by default.",
+    "Set AGENT_RUNNER_BIN to override the executable path.",
   ].join("\n");
 }
 
@@ -59,18 +59,18 @@ async function main() {
     exit(2);
   }
 
-  const taskRunnerBin = env.TASK_RUNNER_BIN?.trim() || "task-runner";
+  const agentRunnerBin = env.AGENT_RUNNER_BIN?.trim() || "agent-runner";
 
   let rawJson;
   try {
-    rawJson = execFileSync(taskRunnerBin, ["task", "list", runId, "--output-format", "json"], {
+    rawJson = execFileSync(agentRunnerBin, ["task", "list", runId, "--output-format", "json"], {
       encoding: "utf8",
     });
   } catch (error) {
     if (typeof error.stderr === "string" && error.stderr.length > 0) {
       stderr.write(error.stderr);
     } else {
-      stderr.write(`task-list-markdown: failed to run ${taskRunnerBin}: ${error.message}\n`);
+      stderr.write(`task-list-markdown: failed to run ${agentRunnerBin}: ${error.message}\n`);
     }
     exit(error.status ?? 1);
   }
@@ -79,7 +79,7 @@ async function main() {
   try {
     tasks = JSON.parse(rawJson);
   } catch (error) {
-    stderr.write(`task-list-markdown: invalid JSON from ${taskRunnerBin}: ${error.message}\n`);
+    stderr.write(`task-list-markdown: invalid JSON from ${agentRunnerBin}: ${error.message}\n`);
     exit(1);
   }
 

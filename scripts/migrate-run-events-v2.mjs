@@ -11,14 +11,14 @@ function usage() {
     "",
     "Dry-run by default. Use --write to rewrite run-events.jsonl files in place.",
     "Migrates schemaVersion 1 run audit rows to schemaVersion 2 with canonical per-run cursors.",
-    "Pass a state root such as ~/.local/state/task-runner with --root.",
+    "Pass a state root such as ~/.local/state/agent-runner with --root.",
     "Use repeated --repo filters to limit migration to selected repo buckets.",
     "Malformed or unparseable rows are skipped and reported; they do not fail migration.",
   ].join("\n");
 }
 
 function parseArgs(argv) {
-  let root = join(homedir(), ".local/state/task-runner");
+  let root = join(homedir(), ".local/state/agent-runner");
   let write = false;
   const repos = [];
 
@@ -264,7 +264,7 @@ function main() {
   try {
     options = parseArgs(process.argv.slice(2));
   } catch (error) {
-    process.stderr.write(`task-runner migrate: ${error.message}\n`);
+    process.stderr.write(`agent-runner migrate: ${error.message}\n`);
     process.stderr.write(`${usage()}\n`);
     process.exit(2);
   }
@@ -279,7 +279,7 @@ function main() {
       }
     }
   } catch (error) {
-    process.stderr.write(`task-runner migrate: failed to scan ${runsRoot}: ${error.message}\n`);
+    process.stderr.write(`agent-runner migrate: failed to scan ${runsRoot}: ${error.message}\n`);
     process.exit(1);
   }
 

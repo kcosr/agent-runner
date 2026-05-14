@@ -7,7 +7,7 @@ import { buildClaudeArgs, claudeBackend } from "../packages/core/dist/backends/c
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-claude-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-claude-"));
 }
 
 function writeFakeClaudeBin(baseDir) {
@@ -75,7 +75,7 @@ test("claude backend captures raw stdout before lenient stream-json parsing", as
   const events = [];
 
   try {
-    const result = await withEnv({ TASK_RUNNER_CLAUDE_BIN: command }, () =>
+    const result = await withEnv({ AGENT_RUNNER_CLAUDE_BIN: command }, () =>
       claudeBackend.invoke({
         prompt: "Inspect the repo",
         cwd: dir,

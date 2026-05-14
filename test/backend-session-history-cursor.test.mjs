@@ -22,7 +22,7 @@ import {
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-cursor-history-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-cursor-history-"));
 }
 
 function validationContext(cwd, sessionId) {

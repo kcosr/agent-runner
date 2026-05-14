@@ -39,7 +39,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-runname-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-runname-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -242,13 +242,13 @@ test("run name: init persists the name and execute-after-init replays it", async
 });
 
 test("run name: parseArgs accepts --name", () => {
-  const parsed = parseArgs(["node", "task-runner", "run", "--agent", "x", "--name", "my-run"]);
+  const parsed = parseArgs(["node", "agent-runner", "run", "--agent", "x", "--name", "my-run"]);
   assert.equal(parsed.name, "my-run");
 });
 
 test("run name: parseArgs rejects empty --name", () => {
   assert.throws(
-    () => parseArgs(["node", "task-runner", "run", "--agent", "x", "--name", ""]),
+    () => parseArgs(["node", "agent-runner", "run", "--agent", "x", "--name", ""]),
     /--name cannot be empty/,
   );
 });

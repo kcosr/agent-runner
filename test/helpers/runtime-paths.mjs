@@ -46,13 +46,13 @@ export function makeRuntimeRoots(prefix, options = {}) {
     configDir,
     stateDir,
     env: {
-      TASK_RUNNER_CONFIG_DIR: configDir,
-      TASK_RUNNER_STATE_DIR: stateDir,
-      TASK_RUNNER_CMD: "task-runner",
-      TASK_RUNNER_CONNECT: undefined,
-      TASK_RUNNER_LISTEN: undefined,
-      TASK_RUNNER_PARENT_RUN_ID: undefined,
-      TASK_RUNNER_RUN_GROUP_ID: undefined,
+      AGENT_RUNNER_CONFIG_DIR: configDir,
+      AGENT_RUNNER_STATE_DIR: stateDir,
+      AGENT_RUNNER_CMD: "agent-runner",
+      AGENT_RUNNER_CONNECT: undefined,
+      AGENT_RUNNER_LISTEN: undefined,
+      AGENT_RUNNER_PARENT_RUN_ID: undefined,
+      AGENT_RUNNER_RUN_GROUP_ID: undefined,
     },
     cleanup,
   };
@@ -76,13 +76,13 @@ export function withRuntimeRoots(prefix, fn, options = {}) {
 
 export function sharedRuntimeEnv(baseDir) {
   return {
-    TASK_RUNNER_CONFIG_DIR: baseDir,
-    TASK_RUNNER_STATE_DIR: baseDir,
-    TASK_RUNNER_CMD: "task-runner",
-    TASK_RUNNER_CONNECT: undefined,
-    TASK_RUNNER_LISTEN: undefined,
-    TASK_RUNNER_PARENT_RUN_ID: undefined,
-    TASK_RUNNER_RUN_GROUP_ID: undefined,
+    AGENT_RUNNER_CONFIG_DIR: baseDir,
+    AGENT_RUNNER_STATE_DIR: baseDir,
+    AGENT_RUNNER_CMD: "agent-runner",
+    AGENT_RUNNER_CONNECT: undefined,
+    AGENT_RUNNER_LISTEN: undefined,
+    AGENT_RUNNER_PARENT_RUN_ID: undefined,
+    AGENT_RUNNER_RUN_GROUP_ID: undefined,
   };
 }
 

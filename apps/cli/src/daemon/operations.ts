@@ -45,7 +45,7 @@ import type {
   updateRunPinned,
   updateTask,
   validateRunEnvironment,
-} from "@task-runner/core/app/service.js";
+} from "@agent-runner/core/app/service.js";
 import type {
   CliRunsStartParams,
   DaemonInfo,

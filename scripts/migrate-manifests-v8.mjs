@@ -15,7 +15,7 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  let root = join(homedir(), ".local/state/task-runner");
+  let root = join(homedir(), ".local/state/agent-runner");
   let write = false;
   const repos = [];
 
@@ -126,7 +126,7 @@ function main() {
   try {
     options = parseArgs(process.argv.slice(2));
   } catch (error) {
-    process.stderr.write(`task-runner migrate: ${error.message}\n`);
+    process.stderr.write(`agent-runner migrate: ${error.message}\n`);
     process.stderr.write(`${usage()}\n`);
     process.exit(2);
   }
@@ -141,7 +141,7 @@ function main() {
       }
     }
   } catch (error) {
-    process.stderr.write(`task-runner migrate: failed to scan ${runsRoot}: ${error.message}\n`);
+    process.stderr.write(`agent-runner migrate: failed to scan ${runsRoot}: ${error.message}\n`);
     process.exit(1);
   }
 

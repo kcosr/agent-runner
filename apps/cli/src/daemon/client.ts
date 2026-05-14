@@ -4,15 +4,15 @@ import { pipeline } from "node:stream/promises";
 import type {
   AttachmentScope,
   RunAttachmentDownloadResult,
-} from "@task-runner/core/contracts/attachments.js";
-import type { RunAuditEvent, RunTimelineEvent } from "@task-runner/core/contracts/events.js";
+} from "@agent-runner/core/contracts/attachments.js";
+import type { RunAuditEvent, RunTimelineEvent } from "@agent-runner/core/contracts/events.js";
 import {
   runAuditEventSchema,
   runDetailSchema,
   runSummarySchema,
   runTimelineEventSchema,
-} from "@task-runner/core/contracts/run-schemas.js";
-import { resolveAttachmentOutputPath } from "@task-runner/core/core/run/attachments.js";
+} from "@agent-runner/core/contracts/run-schemas.js";
+import { resolveAttachmentOutputPath } from "@agent-runner/core/core/run/attachments.js";
 import WebSocket from "ws";
 import { z } from "zod";
 import type {

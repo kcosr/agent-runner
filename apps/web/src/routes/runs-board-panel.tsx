@@ -1,6 +1,6 @@
+import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EmptyPanel } from "../components/empty-states.js";
 import type { RunCardMotion } from "../components/run-card.js";

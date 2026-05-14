@@ -1,20 +1,20 @@
 {
-  "name": "task-runner",
+  "name": "agent-runner",
   "version": "0.1.0",
   "type": "module",
-  "description": "CLI and local daemon host for task-runner.",
+  "description": "CLI and local daemon host for agent-runner.",
   "license": "MIT",
   "files": ["dist/"],
   "bin": {
-    "task-runner": "./dist/cli.js"
+    "agent-runner": "./dist/cli.js"
   },
   "scripts": {
     "build": "npm run build:dist && node ../../scripts/copy-web-assets.mjs",
     "build:dist": "tsc -b",
-    "prepack": "npm run build -w @task-runner/core && npm run build -w @task-runner/web && npm run build:dist && node ../../scripts/copy-web-assets.mjs"
+    "prepack": "npm run build -w @agent-runner/core && npm run build -w @agent-runner/web && npm run build:dist && node ../../scripts/copy-web-assets.mjs"
   },
   "dependencies": {
-    "@task-runner/core": "*",
+    "@agent-runner/core": "*",
     "ws": "^8.20.0",
     "zod": "^3.23.8"
   }

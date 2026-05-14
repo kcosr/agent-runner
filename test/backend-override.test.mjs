@@ -50,7 +50,7 @@ Work.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-backend-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-backend-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -114,21 +114,21 @@ async function runIn(baseDir, agentName, overrides) {
 }
 
 test("parseArgs: --backend accepts built-in and custom backend names", () => {
-  const a = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "claude"]);
+  const a = parseArgs(["node", "agent-runner", "run", "--agent", "x", "--backend", "claude"]);
   assert.equal(a.backend, "claude");
-  const b = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "codex"]);
+  const b = parseArgs(["node", "agent-runner", "run", "--agent", "x", "--backend", "codex"]);
   assert.equal(b.backend, "codex");
-  const c = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "cursor"]);
+  const c = parseArgs(["node", "agent-runner", "run", "--agent", "x", "--backend", "cursor"]);
   assert.equal(c.backend, "cursor");
-  const d = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "pi"]);
+  const d = parseArgs(["node", "agent-runner", "run", "--agent", "x", "--backend", "pi"]);
   assert.equal(d.backend, "pi");
-  const e = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "my-agent"]);
+  const e = parseArgs(["node", "agent-runner", "run", "--agent", "x", "--backend", "my-agent"]);
   assert.equal(e.backend, "my-agent");
 });
 
 test("parseArgs: --backend rejects empty values", () => {
   assert.throws(
-    () => parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "   "]),
+    () => parseArgs(["node", "agent-runner", "run", "--agent", "x", "--backend", "   "]),
     /--backend cannot be empty/,
   );
 });

@@ -16,7 +16,7 @@ import {
 } from "../packages/core/dist/core/run/attachments.js";
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-attachments-core-"));
+  return mkdtempSync(join(tmpdir(), "agent-runner-attachments-core-"));
 }
 
 function manifest(workspaceDir, attachments = []) {

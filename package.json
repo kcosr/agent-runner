@@ -1,14 +1,14 @@
 {
-  "name": "task-runner-workspace",
+  "name": "agent-runner-workspace",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Workspace root for the task-runner monorepo.",
+  "description": "Workspace root for the agent-runner monorepo.",
   "license": "MIT",
   "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "setup": "npm install",
-    "build": "npm run build -w @task-runner/core && npm run build -w @task-runner/web && npm run build -w task-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
+    "build": "npm run build -w @agent-runner/core && npm run build -w @agent-runner/web && npm run build -w agent-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
     "lint": "biome lint --error-on-warnings .",
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",
@@ -18,7 +18,7 @@
     "check:knip": "knip",
     "lint-staged": "lint-staged",
     "test:node": "node --test \"test/**/*.test.mjs\"",
-    "test:web": "npm run test -w @task-runner/web",
+    "test:web": "npm run test -w @agent-runner/web",
     "test:all:local": "node scripts/run-tests-concurrently.mjs",
     "test:all": "node scripts/run-verification.mjs test",
     "check": "node scripts/run-verification.mjs check",
@@ -26,7 +26,7 @@
     "prepack": "npm run build",
     "prepare": "husky install",
     "clean": "rimraf apps/*/dist packages/*/dist apps/*/tsconfig.tsbuildinfo packages/*/tsconfig.tsbuildinfo",
-    "task-runner": "node apps/cli/dist/cli.js"
+    "agent-runner": "node apps/cli/dist/cli.js"
   },
   "lint-staged": {
     "!dist/**/*.{ts,tsx,js,jsx,mjs,cjs,json}": [
