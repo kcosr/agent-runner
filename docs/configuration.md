@@ -24,6 +24,16 @@ explicitly:
 node scripts/migrate-task-runner-to-agent-runner.mjs --write
 ```
 
+Stop `agent-runner serve` or any legacy `task-runner serve` process before
+`--write`. The script refuses to write when `AGENT_RUNNER_CONNECT`,
+`AGENT_RUNNER_LISTEN`, `TASK_RUNNER_CONNECT`, or `TASK_RUNNER_LISTEN` is set
+unless `--allow-running-daemon` is passed. Conflict checks run before any root
+move, and file rewrites use temp-file rename, but this is a one-way rename
+utility rather than a rollback tool; take a backup or filesystem snapshot before
+writing production state. The `--bashrc` option rewrites one bash-compatible rc
+file only, so zsh/fish/profile exports need their own explicit path or a manual
+edit after validation.
+
 Use `--home`, `--state-root`, `--target-state-root`, `--config-root`,
 `--target-config-root`, `--bashrc`, or `--skip-bashrc` to target a staged
 fixture or to split state/config migration from shell environment updates.

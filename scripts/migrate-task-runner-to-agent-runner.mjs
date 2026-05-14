@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
 import {
+  cpSync,
   existsSync,
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -14,13 +17,19 @@ import { basename, dirname, join, resolve } from "node:path";
 const REPLACEMENTS = [
   ["TASK_RUNNER", "AGENT_RUNNER"],
   ["task_runner_cmd", "agent_runner_cmd"],
-  ["task_runner", "agent_runner"],
   ["TaskRunner", "AgentRunner"],
   ["Task Runner", "Agent Runner"],
   ["taskRunner", "agentRunner"],
   ["@task-runner", "@agent-runner"],
   ["x-task-runner", "x-agent-runner"],
   ["task-runner", "agent-runner"],
+];
+
+const DAEMON_ENV_VARS = [
+  "AGENT_RUNNER_CONNECT",
+  "AGENT_RUNNER_LISTEN",
+  "TASK_RUNNER_CONNECT",
+  "TASK_RUNNER_LISTEN",
 ];
 
 function usage() {
@@ -38,6 +47,7 @@ function usage() {
     "  --target-config-root <path>   Agent Runner config root (default: <home>/.config/agent-runner)",
     "  --bashrc <path>               Shell rc file to rewrite (default: <home>/.bashrc)",
     "  --skip-bashrc                 Do not inspect or rewrite the shell rc file",
+    "  --allow-running-daemon        Bypass daemon env var preflight for --write",
     "  --write                       Apply changes; omitted means dry-run",
     "  -h, --help                    Show this help",
   ].join("\n");
@@ -58,6 +68,7 @@ function parseArgs(argv) {
     targetConfigRoot: null,
     bashrc: null,
     skipBashrc: false,
+    allowRunningDaemon: false,
     write: false,
   };
 
@@ -69,6 +80,10 @@ function parseArgs(argv) {
     }
     if (arg === "--skip-bashrc") {
       parsed.skipBashrc = true;
+      continue;
+    }
+    if (arg === "--allow-running-daemon") {
+      parsed.allowRunningDaemon = true;
       continue;
     }
     if (arg === "--home") {
@@ -128,6 +143,33 @@ function isTextBuffer(buffer) {
   return !buffer.includes(0);
 }
 
+function writeTextAtomic(path, text) {
+  const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
+  try {
+    writeFileSync(tmpPath, text, "utf8");
+    renameSync(tmpPath, path);
+  } catch (error) {
+    try {
+      if (existsSync(tmpPath)) unlinkSync(tmpPath);
+    } catch {
+      // Best effort cleanup; preserve the original write error.
+    }
+    throw error;
+  }
+}
+
+function moveDirectory(source, target) {
+  try {
+    renameSync(source, target);
+    return;
+  } catch (error) {
+    if (error?.code !== "EXDEV") throw error;
+  }
+
+  cpSync(source, target, { recursive: true, errorOnExist: true, force: false });
+  rmSync(source, { recursive: true, force: false });
+}
+
 function collectEntries(root) {
   const entries = [];
   function visit(path) {
@@ -166,7 +208,7 @@ function rewriteFile(path, write, counters) {
   process.stdout.write(
     `${write ? "WRITE" : "DRY"}  ${path}: ${write ? "rewrote" : "would rewrite"} content\n`,
   );
-  if (write) writeFileSync(path, rewritten);
+  if (write) writeTextAtomic(path, rewritten);
 }
 
 function rewriteTree(root, write, counters) {
@@ -195,33 +237,57 @@ function rewriteTree(root, write, counters) {
   visit(root);
 }
 
-function migrateRoot({ label, source, target }, options, counters, conflicts) {
+function planRoot({ label, source, target }) {
+  const conflicts = [];
+
   if (source === target) {
     conflicts.push(`${label}: source and target roots are the same path (${source})`);
-    return;
+    return {
+      label,
+      source,
+      target,
+      sourceExists: false,
+      targetExists: false,
+      scanRoot: null,
+      conflicts,
+    };
   }
 
   const sourceExists = existsSync(source);
   const targetExists = existsSync(target);
   if (sourceExists && targetExists) {
     conflicts.push(`${label}: ${source} and ${target} both exist`);
-    return;
+    return { label, source, target, sourceExists, targetExists, scanRoot: null, conflicts };
   }
   if (!sourceExists && !targetExists) {
-    process.stdout.write(`SKIP  ${label}: neither ${source} nor ${target} exists\n`);
-    return;
+    return { label, source, target, sourceExists, targetExists, scanRoot: null, conflicts };
   }
 
   const scanRoot = sourceExists ? source : target;
   conflicts.push(...preflightRenameConflicts(scanRoot).map((conflict) => `${label}: ${conflict}`));
-  if (conflicts.length > 0) return;
+  return { label, source, target, sourceExists, targetExists, scanRoot, conflicts };
+}
+
+function preflightDaemon(options) {
+  if (!options.write || options.allowRunningDaemon) return [];
+  return DAEMON_ENV_VARS.filter((name) => process.env[name]?.trim()).map(
+    (name) => `daemon: ${name} is set; stop the Agent Runner daemon or pass --allow-running-daemon`,
+  );
+}
+
+function migrateRoot(plan, options, counters) {
+  const { label, source, target, sourceExists, scanRoot } = plan;
+  if (!scanRoot) {
+    process.stdout.write(`SKIP  ${label}: neither ${source} nor ${target} exists\n`);
+    return;
+  }
 
   if (sourceExists) {
     counters.rootsMoved += 1;
     process.stdout.write(
       `${options.write ? "WRITE" : "DRY"}  ${label}: ${options.write ? "moved" : "would move"} ${source} -> ${target}\n`,
     );
-    if (options.write) renameSync(source, target);
+    if (options.write) moveDirectory(source, target);
   }
 
   rewriteTree(sourceExists && options.write ? target : scanRoot, options.write, counters);
@@ -246,26 +312,17 @@ function migrateBashrc(path, options, counters) {
   process.stdout.write(
     `${options.write ? "WRITE" : "DRY"}  bashrc: ${options.write ? "rewrote" : "would rewrite"} ${path}\n`,
   );
-  if (options.write) writeFileSync(path, rewritten);
+  if (options.write) writeTextAtomic(path, rewritten);
 }
 
 function run(argv) {
   const options = parseArgs(argv);
   const counters = { rootsMoved: 0, pathsRenamed: 0, filesRewritten: 0, skippedBinary: 0 };
-  const conflicts = [];
-
-  migrateRoot(
-    { label: "state", source: options.stateRoot, target: options.targetStateRoot },
-    options,
-    counters,
-    conflicts,
-  );
-  migrateRoot(
-    { label: "config", source: options.configRoot, target: options.targetConfigRoot },
-    options,
-    counters,
-    conflicts,
-  );
+  const rootPlans = [
+    planRoot({ label: "state", source: options.stateRoot, target: options.targetStateRoot }),
+    planRoot({ label: "config", source: options.configRoot, target: options.targetConfigRoot }),
+  ];
+  const conflicts = [...rootPlans.flatMap((plan) => plan.conflicts), ...preflightDaemon(options)];
 
   if (conflicts.length > 0) {
     for (const conflict of conflicts) {
@@ -276,6 +333,7 @@ function run(argv) {
     return;
   }
 
+  for (const plan of rootPlans) migrateRoot(plan, options, counters);
   migrateBashrc(options.bashrc, options, counters);
   process.stdout.write(
     `SUMMARY mode=${options.write ? "write" : "dry-run"} rootsMoved=${counters.rootsMoved} pathsRenamed=${counters.pathsRenamed} filesRewritten=${counters.filesRewritten} skippedBinary=${counters.skippedBinary}\n`,

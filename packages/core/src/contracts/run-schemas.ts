@@ -591,6 +591,7 @@ export const runTimelineAttemptSchema: z.ZodType<RunTimelineAttempt> = z.object(
   timedOut: z.boolean(),
   live: z.boolean(),
   provenance: z.union([
+    // On-disk schema discriminator intentionally preserved across the Agent Runner rename.
     z.object({ kind: z.literal("task_runner") }),
     z.object({
       kind: z.literal("backend_session"),

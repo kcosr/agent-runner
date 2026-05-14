@@ -110,6 +110,7 @@ export interface RunResetSeed {
 }
 
 export type RunHistoryProvenance =
+  // On-disk schema discriminator intentionally preserved across the Agent Runner rename.
   | { kind: "task_runner" }
   | {
       kind: "backend_session";

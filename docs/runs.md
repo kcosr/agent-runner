@@ -100,13 +100,16 @@ the next session. Attempts are backend invocations within a session.
 are monotonic across the run, while `attemptIndexInSession` is zero-based
 within its session.
 
-Task-runner-created attempts and sessions carry
+Agent-runner-created attempts and sessions carry
 `provenance: { kind: "task_runner" }`. Attempts and sessions imported
 from a backend-owned session history carry `kind: "backend_session"` plus
 the backend name, backend session id, backend turn id, import/sync
 timestamps, sync mode, and source descriptor. Imported backend turns are
 inserted into the same monotonic attempt/session sequence, so later
 agent-runner-owned resume attempts allocate after the imported history.
+The `task_runner` provenance literal is an intentionally preserved manifest
+schema value from before the Agent Runner rename, not a user-facing product
+name.
 
 ## Backend session history
 

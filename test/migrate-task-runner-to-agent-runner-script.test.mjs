@@ -8,9 +8,23 @@ import { test } from "node:test";
 const SCRIPT_PATH = resolvePath(
   new URL("../scripts/migrate-task-runner-to-agent-runner.mjs", import.meta.url).pathname,
 );
+const DAEMON_ENV_VARS = [
+  "AGENT_RUNNER_CONNECT",
+  "AGENT_RUNNER_LISTEN",
+  "TASK_RUNNER_CONNECT",
+  "TASK_RUNNER_LISTEN",
+];
 
 function tempHome() {
   return mkdtempSync(join(tmpdir(), "agent-runner-rename-migrate-"));
+}
+
+function migrationEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  for (const name of DAEMON_ENV_VARS) {
+    if (!(name in extra)) delete env[name];
+  }
+  return env;
 }
 
 function writeText(path, text) {
@@ -33,6 +47,20 @@ function seedLegacyHome(home) {
         commandVar: "{{task_runner_cmd}}",
         env: "TASK_RUNNER_STATE_DIR",
         display: "TaskRunner",
+        sessions: [
+          {
+            sessionIndex: 0,
+            provenance: { kind: "task_runner" },
+          },
+        ],
+        attemptRecords: [
+          {
+            attempt: 0,
+            sessionIndex: 0,
+            attemptIndexInSession: 0,
+            provenance: { kind: "task_runner" },
+          },
+        ],
       },
       null,
       2,
@@ -52,7 +80,10 @@ test("migrate-task-runner-to-agent-runner dry-runs without changing legacy data"
   const home = tempHome();
   seedLegacyHome(home);
 
-  const stdout = execFileSync("node", [SCRIPT_PATH, "--home", home], { encoding: "utf8" });
+  const stdout = execFileSync("node", [SCRIPT_PATH, "--home", home], {
+    encoding: "utf8",
+    env: migrationEnv(),
+  });
 
   assert.match(
     stdout,
@@ -79,6 +110,7 @@ test("migrate-task-runner-to-agent-runner writes renamed roots, paths, and conte
 
   const stdout = execFileSync("node", [SCRIPT_PATH, "--home", home, "--write"], {
     encoding: "utf8",
+    env: migrationEnv(),
   });
 
   assert.match(stdout, /WRITE\s+state: moved/);
@@ -102,6 +134,8 @@ test("migrate-task-runner-to-agent-runner writes renamed roots, paths, and conte
   assert.match(manifest, /"commandVar": "{{agent_runner_cmd}}"/);
   assert.match(manifest, /"env": "AGENT_RUNNER_STATE_DIR"/);
   assert.match(manifest, /"display": "AgentRunner"/);
+  assert.match(manifest, /"kind": "task_runner"/);
+  assert.doesNotMatch(manifest, /"kind": "agent_runner"/);
 
   const agent = readText(join(home, ".config/agent-runner/agents/agent-runner-agent.md"));
   assert.match(agent, /agent-runner/);
@@ -121,6 +155,7 @@ test("migrate-task-runner-to-agent-runner blocks conflicting target roots before
 
   const result = spawnSync("node", [SCRIPT_PATH, "--home", home, "--write", "--skip-bashrc"], {
     encoding: "utf8",
+    env: migrationEnv(),
   });
 
   assert.equal(result.status, 1);
@@ -133,4 +168,38 @@ test("migrate-task-runner-to-agent-runner blocks conflicting target roots before
     readText(join(home, ".local/state/task-runner/runs/task-runner/run-a/run.json")),
     /task-runner/,
   );
+});
+
+test("migrate-task-runner-to-agent-runner preflights all roots before moving state", () => {
+  const home = tempHome();
+  seedLegacyHome(home);
+  writeText(join(home, ".config/agent-runner/existing.txt"), "existing\n");
+
+  const result = spawnSync("node", [SCRIPT_PATH, "--home", home, "--write", "--skip-bashrc"], {
+    encoding: "utf8",
+    env: migrationEnv(),
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /CONFLICT config:/);
+  assert.match(result.stderr, /Migration aborted before writing changes/);
+  assert.equal(existsSync(join(home, ".local/state/task-runner")), true);
+  assert.equal(existsSync(join(home, ".local/state/agent-runner")), false);
+  assert.equal(existsSync(join(home, ".config/task-runner")), true);
+});
+
+test("migrate-task-runner-to-agent-runner blocks write while daemon env is active", () => {
+  const home = tempHome();
+  seedLegacyHome(home);
+
+  const result = spawnSync("node", [SCRIPT_PATH, "--home", home, "--write", "--skip-bashrc"], {
+    encoding: "utf8",
+    env: migrationEnv({ TASK_RUNNER_CONNECT: "http://127.0.0.1:4773" }),
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /CONFLICT daemon: TASK_RUNNER_CONNECT is set/);
+  assert.match(result.stderr, /Migration aborted before writing changes/);
+  assert.equal(existsSync(join(home, ".local/state/task-runner")), true);
+  assert.equal(existsSync(join(home, ".local/state/agent-runner")), false);
 });

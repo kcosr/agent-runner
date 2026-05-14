@@ -205,13 +205,15 @@ and group-scoped container lifetimes. Manifest schema version 20 adds
 frozen execution environment state for host or containerized execution.
 Manifest schema version 19 adds
 backend-session history provenance and
-sync state. Task-runner-owned records carry
+sync state. Agent-runner-owned records carry
 `provenance.kind: "task_runner"`. Backend-imported records carry
 `provenance.kind: "backend_session"` plus backend name, backend session
 id, backend turn id, import/sync timestamps, mode (`bootstrap` or
 `sync`), and source descriptor. `manifest.backendSessionSync` stores the
 last resolved source, cursor, imported turn ids, open turn ids, last sync
 timestamp, and last error.
+The `task_runner` literal is preserved as a manifest schema discriminator
+until a future schema migration explicitly changes it.
 
 If the run started from an assignment file, agent-runner also stores
 `assignment-seed.md` as an immutable audit snapshot. Runs created by
