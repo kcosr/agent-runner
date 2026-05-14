@@ -147,6 +147,7 @@
 ### Added
 
 - Added copy buttons to dashboard Markdown code blocks.
+  ([#149](https://github.com/kcosr/task-runner/pull/149))
 - Added a bundled `generic` Codex agent with empty role instructions for
   assignment-owned workflow prompts.
   ([#147](https://github.com/kcosr/task-runner/pull/147))
@@ -223,6 +224,7 @@
 
 - Dashboard list rows now show relative-only timestamps for started and ended
   sort modes, matching the existing updated sort-mode display.
+  ([#149](https://github.com/kcosr/task-runner/pull/149))
 - Updated `plan-implement-feature` to recommend the `generic` agent and to
   carry the hybrid planning/implementation role discipline in the assignment
   instructions without duplicating the concrete task list.
