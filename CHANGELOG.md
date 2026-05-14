@@ -9,6 +9,7 @@
   web storage keys, and runner-injected template variables. Existing
   TaskRunner state/config data must be migrated explicitly; old env vars,
   package names, commands, and template variables are not dual-read.
+  ([#150](https://github.com/kcosr/agent-runner/pull/150))
 - Manifest schema version is now `24`. Managed container lifecycle state now
   lives at `executionEnvironment.lifecycle`, and authored environment config
   uses top-level `lifecycle.afterStart` / `lifecycle.onWorkspaceCreate`;
