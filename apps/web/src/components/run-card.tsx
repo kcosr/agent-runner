@@ -1,4 +1,4 @@
-import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type { RunSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 import { useQuery } from "@tanstack/react-query";
 import type { CSSProperties, FocusEvent, MouseEvent, PointerEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";

@@ -1,4 +1,8 @@
-import type { RunCapabilities, RunStatus, RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type {
+  RunCapabilities,
+  RunStatus,
+  RunSummary,
+} from "@kcosr/agent-runner-core/contracts/runs.js";
 import { describe, expect, it } from "vitest";
 import { getRunActionMenuItems } from "./run-action-menu.js";
 

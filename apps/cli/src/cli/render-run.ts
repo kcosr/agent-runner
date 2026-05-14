@@ -1,6 +1,6 @@
-import { resolveAgentRunnerCommand } from "@agent-runner/core/agent-runner-command.js";
-import type { RunEvent } from "@agent-runner/core/core/run/run-loop.js";
-import type { RunCompletionSummary } from "@agent-runner/core/core/run/status.js";
+import { resolveAgentRunnerCommand } from "@kcosr/agent-runner-core/agent-runner-command.js";
+import type { RunEvent } from "@kcosr/agent-runner-core/core/run/run-loop.js";
+import type { RunCompletionSummary } from "@kcosr/agent-runner-core/core/run/status.js";
 
 interface RenderedRunChunk {
   stream: "stdout" | "stderr";

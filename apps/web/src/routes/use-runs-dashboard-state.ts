@@ -8,8 +8,8 @@ import type {
   RunPinnedResult,
   RunStatus,
   RunSummary,
-} from "@agent-runner/core/contracts/runs.js";
-import { deriveDependencyStateFromDetails } from "@agent-runner/core/core/run/dependencies.js";
+} from "@kcosr/agent-runner-core/contracts/runs.js";
+import { deriveDependencyStateFromDetails } from "@kcosr/agent-runner-core/core/run/dependencies.js";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";

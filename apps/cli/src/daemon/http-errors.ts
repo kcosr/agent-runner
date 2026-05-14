@@ -7,20 +7,20 @@ import {
   LauncherNotFoundError,
   TaskConfigError,
   TaskNotFoundError as TaskDefinitionNotFoundError,
-} from "@agent-runner/core/config/loader.js";
+} from "@kcosr/agent-runner-core/config/loader.js";
 import {
   CommandError,
   ConflictError,
   QueuedResumeMessageNotFoundError,
   TaskNotFoundError,
-} from "@agent-runner/core/core/commands/service.js";
-import { HookRuntimeError } from "@agent-runner/core/core/hooks/runtime.js";
+} from "@kcosr/agent-runner-core/core/commands/service.js";
+import { HookRuntimeError } from "@kcosr/agent-runner-core/core/hooks/runtime.js";
 import {
   AttachmentError,
   AttachmentNotFoundError,
-} from "@agent-runner/core/core/run/attachments.js";
-import { ResumeError, RunNotFoundError } from "@agent-runner/core/core/run/manifest.js";
-import { ReconfigureLockedFieldError } from "@agent-runner/core/core/run/reconfigure.js";
+} from "@kcosr/agent-runner-core/core/run/attachments.js";
+import { ResumeError, RunNotFoundError } from "@kcosr/agent-runner-core/core/run/manifest.js";
+import { ReconfigureLockedFieldError } from "@kcosr/agent-runner-core/core/run/reconfigure.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -28,13 +28,13 @@ import {
   LockedFieldError,
   RecursionDepthError,
   VarResolutionError,
-} from "@agent-runner/core/core/run/run-loop.js";
-import { ScheduleValidationError } from "@agent-runner/core/core/run/schedule.js";
+} from "@kcosr/agent-runner-core/core/run/run-loop.js";
+import { ScheduleValidationError } from "@kcosr/agent-runner-core/core/run/schedule.js";
 import {
   BackendConfigError,
   RunCommandError,
   UnknownBackendError,
-} from "@agent-runner/core/run-command.js";
+} from "@kcosr/agent-runner-core/run-command.js";
 import { RequestValidationError } from "./request-parsing.js";
 
 interface HttpErrorEnvelope {

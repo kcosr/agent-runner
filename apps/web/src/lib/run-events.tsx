@@ -1,4 +1,4 @@
-import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
+import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import { type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
 import { queryClient, runQueryKeys } from "./query.js";
 import {

@@ -1,4 +1,4 @@
-import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
+import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import {
   AGENT_RUNNER_CONNECT_ENV,
   AGENT_RUNNER_CONNECT_HOST_ENV,

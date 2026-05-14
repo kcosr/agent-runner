@@ -5,10 +5,17 @@
   "type": "module",
   "description": "Workspace root for the agent-runner monorepo.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/kcosr/agent-runner.git"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
   "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "setup": "npm install",
-    "build": "npm run build -w @agent-runner/core && npm run build -w @agent-runner/web && npm run build -w agent-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
+    "build": "npm run build -w @kcosr/agent-runner-core && npm run build -w @kcosr/agent-runner-web && npm run build -w @kcosr/agent-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
     "lint": "biome lint --error-on-warnings .",
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",
@@ -18,7 +25,7 @@
     "check:knip": "knip",
     "lint-staged": "lint-staged",
     "test:node": "node --test \"test/**/*.test.mjs\"",
-    "test:web": "npm run test -w @agent-runner/web",
+    "test:web": "npm run test -w @kcosr/agent-runner-web",
     "test:all:local": "node scripts/run-tests-concurrently.mjs",
     "test:all": "node scripts/run-verification.mjs test",
     "check": "node scripts/run-verification.mjs check",

@@ -1,4 +1,4 @@
-import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type { RunSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 
 const DASHBOARD_SORT_FIELDS = ["startedAt", "updatedAt", "endedAt"] as const;
 export type DashboardSortField = (typeof DASHBOARD_SORT_FIELDS)[number];

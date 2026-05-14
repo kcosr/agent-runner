@@ -1,4 +1,4 @@
-import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
+import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { useEffect, useState } from "react";

@@ -1,20 +1,31 @@
 {
-  "name": "agent-runner",
+  "name": "@kcosr/agent-runner",
   "version": "0.1.0",
   "type": "module",
   "description": "CLI and local daemon host for agent-runner.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/kcosr/agent-runner.git",
+    "directory": "apps/cli"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": ["dist/"],
   "bin": {
     "agent-runner": "./dist/cli.js"
   },
   "scripts": {
     "build": "npm run build:dist && node ../../scripts/copy-web-assets.mjs",
-    "build:dist": "tsc -b",
-    "prepack": "npm run build -w @agent-runner/core && npm run build -w @agent-runner/web && npm run build:dist && node ../../scripts/copy-web-assets.mjs"
+    "build:dist": "rimraf dist tsconfig.tsbuildinfo && tsc -b",
+    "prepack": "npm run build -w @kcosr/agent-runner-core && npm run build -w @kcosr/agent-runner-web && npm run build:dist && node ../../scripts/copy-web-assets.mjs"
   },
   "dependencies": {
-    "@agent-runner/core": "*",
+    "@kcosr/agent-runner-core": "0.1.0",
     "ws": "^8.20.0",
     "zod": "^3.23.8"
   }

@@ -1,5 +1,9 @@
-import type { AttachmentListEntry } from "@agent-runner/core/contracts/attachments.js";
-import type { RunDependencyRef, RunDetail, RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type { AttachmentListEntry } from "@kcosr/agent-runner-core/contracts/attachments.js";
+import type {
+  RunDependencyRef,
+  RunDetail,
+  RunSummary,
+} from "@kcosr/agent-runner-core/contracts/runs.js";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";

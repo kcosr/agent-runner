@@ -1,20 +1,23 @@
-import type { DefinitionDetail, RunCommandOverrides } from "@agent-runner/core/app/service.js";
-import type { DefinitionEntry } from "@agent-runner/core/config/loader.js";
+import type {
+  DefinitionDetail,
+  RunCommandOverrides,
+} from "@kcosr/agent-runner-core/app/service.js";
+import type { DefinitionEntry } from "@kcosr/agent-runner-core/config/loader.js";
 import type {
   AttachmentListEntry,
   RunAttachment,
   RunAttachmentRemoveResult,
-} from "@agent-runner/core/contracts/attachments.js";
+} from "@kcosr/agent-runner-core/contracts/attachments.js";
 import type {
   RunAuditEnvelope,
   RunAuditHistory,
   RunTimelineEvent,
   RunTimelineHistory,
-} from "@agent-runner/core/contracts/events.js";
+} from "@kcosr/agent-runner-core/contracts/events.js";
 import type {
   RunInputSurfaceParams,
   RunInputSurfaceResult,
-} from "@agent-runner/core/contracts/run-input-surface.js";
+} from "@kcosr/agent-runner-core/contracts/run-input-surface.js";
 import type {
   QueueResumeMessageResult,
   RemoveQueuedResumeMessageResult,
@@ -29,10 +32,10 @@ import type {
   RunPinnedResult,
   RunSummary,
   RunTaskSummary,
-} from "@agent-runner/core/contracts/runs.js";
-import type { DefinitionListResult } from "@agent-runner/core/core/commands/service.js";
-import type { RunListFilter } from "@agent-runner/core/core/commands/service.js";
-import type { ScheduleInput } from "@agent-runner/core/core/run/schedule.js";
+} from "@kcosr/agent-runner-core/contracts/runs.js";
+import type { DefinitionListResult } from "@kcosr/agent-runner-core/core/commands/service.js";
+import type { RunListFilter } from "@kcosr/agent-runner-core/core/commands/service.js";
+import type { ScheduleInput } from "@kcosr/agent-runner-core/core/run/schedule.js";
 
 type TaskDefinitionDetail = Extract<DefinitionDetail, { kind: "task" }>;
 type RunEventChannel = "run_summary" | "run_detail" | "run_timeline" | "run_audit";

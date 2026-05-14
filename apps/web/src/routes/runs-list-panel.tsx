@@ -1,4 +1,4 @@
-import type { RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type { RunSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";

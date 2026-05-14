@@ -1,19 +1,27 @@
 {
-  "name": "@agent-runner/web",
+  "name": "@kcosr/agent-runner-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Run dashboard web app for agent-runner.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/kcosr/agent-runner.git",
+    "directory": "apps/web"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "build": "rimraf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json --noEmit && vite build",
     "dev": "vite",
     "test": "vitest run"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.5",
     "@tanstack/react-router": "^1.133.48",
-    "@agent-runner/core": "*",
+    "@kcosr/agent-runner-core": "0.1.0",
     "mermaid": "^11.14.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

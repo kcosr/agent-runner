@@ -1,4 +1,4 @@
-import type { RunStatus, RunSummary } from "@agent-runner/core/contracts/runs.js";
+import type { RunStatus, RunSummary } from "@kcosr/agent-runner-core/contracts/runs.js";
 import type { KeyboardEvent, MouseEvent } from "react";
 import type { DashboardStructuredFilters } from "../lib/settings.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";

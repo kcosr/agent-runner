@@ -1,4 +1,7 @@
-import type { RunAuditHistory, RunTimelineHistory } from "@agent-runner/core/contracts/events.js";
+import type {
+  RunAuditHistory,
+  RunTimelineHistory,
+} from "@kcosr/agent-runner-core/contracts/events.js";
 import { describe, expect, it } from "vitest";
 import { applyAuditEnvelope } from "./run-audit.js";
 import { applyEnvelope } from "./run-timeline.js";

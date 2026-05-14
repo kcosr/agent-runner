@@ -44,13 +44,16 @@ test("deriveRepoKey falls back to unknown outside git", () => {
 
 test("deriveRepoKey ignores inherited git hook environment when probing outside git", () => {
   const dir = mkdtempSync(join(tmpdir(), "agent-runner-runtime-paths-hook-"));
+  const repoDir = join(dir, "repo");
+  mkdirSync(repoDir);
+  execFileSync("git", ["init", "--initial-branch=main", repoDir], { encoding: "utf8" });
   const originalGitDir = process.env.GIT_DIR;
   const originalGitWorkTree = process.env.GIT_WORK_TREE;
 
-  process.env.GIT_DIR = execFileSync("git", ["rev-parse", "--absolute-git-dir"], {
+  process.env.GIT_DIR = execFileSync("git", ["-C", repoDir, "rev-parse", "--absolute-git-dir"], {
     encoding: "utf8",
   }).trim();
-  process.env.GIT_WORK_TREE = process.cwd();
+  process.env.GIT_WORK_TREE = repoDir;
 
   try {
     assert.equal(deriveRepoKey(dir), UNKNOWN_REPO_KEY);

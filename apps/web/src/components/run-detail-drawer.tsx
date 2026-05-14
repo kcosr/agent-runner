@@ -1,8 +1,8 @@
 import type {
   AttachmentListEntry,
   RunAttachment,
-} from "@agent-runner/core/contracts/attachments.js";
-import type { RunAuditEvent } from "@agent-runner/core/contracts/events.js";
+} from "@kcosr/agent-runner-core/contracts/attachments.js";
+import type { RunAuditEvent } from "@kcosr/agent-runner-core/contracts/events.js";
 import type {
   RunDependencyDetail,
   RunDependencyRef,
@@ -11,7 +11,7 @@ import type {
   RunSchedule,
   RunSessionSummary,
   RunSummary,
-} from "@agent-runner/core/contracts/runs.js";
+} from "@kcosr/agent-runner-core/contracts/runs.js";
 import type { UseQueryResult } from "@tanstack/react-query";
 import {
   type ChangeEvent,

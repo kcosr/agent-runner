@@ -1,7 +1,7 @@
 import type {
   RunInputField,
   RunInputSurface,
-} from "@agent-runner/core/contracts/run-input-surface.js";
+} from "@kcosr/agent-runner-core/contracts/run-input-surface.js";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";

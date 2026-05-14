@@ -1,8 +1,8 @@
-import type { AppRuntimeConfig } from "@agent-runner/core/contracts/app-config.js";
+import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import type {
   RunTimelineEnvelope,
   RunTimelineHistory,
-} from "@agent-runner/core/contracts/events.js";
+} from "@kcosr/agent-runner-core/contracts/events.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "./api-client.js";
 import { useDaemonAuthToken } from "./settings.js";

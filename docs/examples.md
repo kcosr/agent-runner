@@ -24,7 +24,7 @@ full workflow prompt and the agent should only provide runtime settings.
 ### `implementer`
 
 - Path: `agents/implementer/agent.md`
-- Backend: `codex` (model `gpt-5.4`, `effort: high`, `unrestricted: true`)
+- Backend: `codex` (model `gpt-5.5`, `effort: high`, `unrestricted: true`)
 
 Senior staff engineer persona. Reads code deeply, cites file paths and
 line numbers, follows repo conventions, and prefers first-attempt
@@ -34,7 +34,7 @@ and marks infeasible tasks as `blocked` rather than silently adapting.
 ### `planner`
 
 - Path: `agents/planner/agent.md`
-- Backend: `codex` (`unrestricted: true`)
+- Backend: `codex` (model `gpt-5.5`, `effort: high`, `unrestricted: true`)
 
 Gathers feature requirements, identifies ambiguity along contract
 dimensions (CLI, API, schema, UI, refactoring), scans for reusable code,
@@ -44,7 +44,7 @@ validation steps. Designed to drive the `plan-feature` assignment.
 ### `code-reviewer`
 
 - Path: `agents/code-reviewer/agent.md`
-- Backend: `claude` (model `claude-opus-4-6`, `effort: high`,
+- Backend: `claude` (model `claude-opus-4-7`, `effort: xhigh`,
   `unrestricted: true`)
 
 Review-only persona. Produces severity-tagged findings

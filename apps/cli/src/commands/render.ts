@@ -1,12 +1,12 @@
-import { resolveAgentRunnerCommand } from "@agent-runner/core/agent-runner-command.js";
-import type { DefinitionDetail } from "@agent-runner/core/app/service.js";
+import { resolveAgentRunnerCommand } from "@kcosr/agent-runner-core/agent-runner-command.js";
+import type { DefinitionDetail } from "@kcosr/agent-runner-core/app/service.js";
 import type {
   AttachmentListEntry,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
-} from "@agent-runner/core/contracts/attachments.js";
-import type { RunAuditHistory } from "@agent-runner/core/contracts/events.js";
+} from "@kcosr/agent-runner-core/contracts/attachments.js";
+import type { RunAuditHistory } from "@kcosr/agent-runner-core/contracts/events.js";
 import type {
   QueueResumeMessageResult,
   QueuedResumeMessage,
@@ -18,7 +18,7 @@ import type {
   RunNoteResult,
   RunPinnedResult,
   RunSessionSummary,
-} from "@agent-runner/core/contracts/runs.js";
+} from "@kcosr/agent-runner-core/contracts/runs.js";
 import type {
   DefinitionListResult,
   RunArchiveResult,
@@ -27,8 +27,8 @@ import type {
   RunListResult,
   TaskDetailsResult,
   TaskListResult,
-} from "@agent-runner/core/core/commands/service.js";
-import { formatSchedule } from "@agent-runner/core/core/run/schedule.js";
+} from "@kcosr/agent-runner-core/core/commands/service.js";
+import { formatSchedule } from "@kcosr/agent-runner-core/core/run/schedule.js";
 import type { HostMode } from "../daemon/config.js";
 import type { DaemonInfo } from "../daemon/protocol.js";
 

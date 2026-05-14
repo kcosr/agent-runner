@@ -50,18 +50,18 @@ import {
   updateRunPinned,
   updateTask,
   validateRunEnvironment,
-} from "@agent-runner/core/app/service.js";
-import { VALID_STATUSES } from "@agent-runner/core/assignment/model.js";
+} from "@kcosr/agent-runner-core/app/service.js";
+import { VALID_STATUSES } from "@kcosr/agent-runner-core/assignment/model.js";
 import {
   CodexThreadReadProtocolError,
   type CodexThreadStatus,
   adoptCodexActiveThread,
   readCodexThread,
   resolveCodexTransportConfig,
-} from "@agent-runner/core/backends/codex.js";
-import { loadCustomBackends, resolveBackend } from "@agent-runner/core/backends/registry.js";
-import { isPathArg } from "@agent-runner/core/config/runtime-paths.js";
-import type { RunAttachment } from "@agent-runner/core/contracts/attachments.js";
+} from "@kcosr/agent-runner-core/backends/codex.js";
+import { loadCustomBackends, resolveBackend } from "@kcosr/agent-runner-core/backends/registry.js";
+import { isPathArg } from "@kcosr/agent-runner-core/config/runtime-paths.js";
+import type { RunAttachment } from "@kcosr/agent-runner-core/contracts/attachments.js";
 import type {
   RunAuditEnvelope,
   RunAuditHistory,
@@ -71,7 +71,7 @@ import type {
   RunTimelineEnvelope,
   RunTimelineEvent,
   RunTimelineHistory,
-} from "@agent-runner/core/contracts/events.js";
+} from "@kcosr/agent-runner-core/contracts/events.js";
 import type {
   QueuedResumeMessage,
   RunAbortReason,
@@ -79,32 +79,32 @@ import type {
   RunDetail,
   RunStatus,
   RunSummary,
-} from "@agent-runner/core/contracts/runs.js";
+} from "@kcosr/agent-runner-core/contracts/runs.js";
 import {
   deriveRunCapabilities,
   isDaemonAutoRunnableReadyRun,
   isTerminalStatus,
   toRunDetail,
   toRunSummary,
-} from "@agent-runner/core/contracts/runs.js";
-import type { EffortLevel } from "@agent-runner/core/core/backends/types.js";
+} from "@kcosr/agent-runner-core/contracts/runs.js";
+import type { EffortLevel } from "@kcosr/agent-runner-core/core/backends/types.js";
 import {
   ConflictError,
   refreshRunSnapshotAfterTaskStateSettles,
-} from "@agent-runner/core/core/commands/service.js";
-import { MAX_ATTACHMENT_BYTES } from "@agent-runner/core/core/run/attachments.js";
+} from "@kcosr/agent-runner-core/core/commands/service.js";
+import { MAX_ATTACHMENT_BYTES } from "@kcosr/agent-runner-core/core/run/attachments.js";
 import {
   applyPreparedBackendSessionHistorySync,
   backendSessionHistorySyncEnabled,
   prepareBackendSessionHistorySync,
   recordBackendSessionSyncError,
-} from "@agent-runner/core/core/run/backend-session-sync.js";
+} from "@kcosr/agent-runner-core/core/run/backend-session-sync.js";
 import {
   deriveDependencyState,
   deriveDependencyStateFromDetails,
   resolveDependencies,
   resolveDependents,
-} from "@agent-runner/core/core/run/dependencies.js";
+} from "@kcosr/agent-runner-core/core/run/dependencies.js";
 import {
   type ListedRunManifest,
   ResumeError,
@@ -116,8 +116,8 @@ import {
   resolveResumeTarget,
   runBackendCwd,
   writeManifest,
-} from "@agent-runner/core/core/run/manifest.js";
-import { hasRunnableTasks } from "@agent-runner/core/core/run/resume-policy.js";
+} from "@kcosr/agent-runner-core/core/run/manifest.js";
+import { hasRunnableTasks } from "@kcosr/agent-runner-core/core/run/resume-policy.js";
 import {
   type RunControllerReconciliationDecision,
   type RunControllerReconciliationReason,
@@ -135,25 +135,25 @@ import {
   appendRunScheduleMissedEvent,
   appendRunScheduleSkippedEvent,
   systemRunEventContext,
-} from "@agent-runner/core/core/run/run-events.js";
-import { RunDetachedError, type RunEvent } from "@agent-runner/core/core/run/run-loop.js";
+} from "@kcosr/agent-runner-core/core/run/run-events.js";
+import { RunDetachedError, type RunEvent } from "@kcosr/agent-runner-core/core/run/run-loop.js";
 import {
   ScheduleValidationError,
   advanceRecurringSchedule,
   deriveScheduleState,
-} from "@agent-runner/core/core/run/schedule.js";
+} from "@kcosr/agent-runner-core/core/run/schedule.js";
 import {
   tryWithTaskStateLockAsync,
   withTaskStateLock,
   withTaskStateLockAsync,
-} from "@agent-runner/core/core/run/workspace-state.js";
+} from "@kcosr/agent-runner-core/core/run/workspace-state.js";
 import {
   debugPerfEnabled,
   debugPerfLog,
   readDebugPerfIntervalMs,
   startDebugPerfTimer,
-} from "@agent-runner/core/util/debug-perf.js";
-import { shortId } from "@agent-runner/core/util/short-id.js";
+} from "@kcosr/agent-runner-core/util/debug-perf.js";
+import { shortId } from "@kcosr/agent-runner-core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { assertDaemonAuthorized, resolveDaemonAuthConfig } from "./auth.js";
 import { deriveAppRuntimeConfig, deriveHttpBaseUrl, listenSocketConfig } from "./config.js";

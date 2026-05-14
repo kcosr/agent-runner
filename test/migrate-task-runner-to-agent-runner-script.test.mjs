@@ -129,7 +129,7 @@ test("migrate-task-runner-to-agent-runner writes renamed roots, paths, and conte
     join(home, ".local/state/agent-runner/runs/agent-runner/run-a/run.json"),
   );
   assert.match(manifest, /"repo": "agent-runner"/);
-  assert.match(manifest, /"packageName": "@agent-runner\/core"/);
+  assert.match(manifest, /"packageName": "@kcosr\/agent-runner-core"/);
   assert.match(manifest, /"header": "x-agent-runner-attachment-name"/);
   assert.match(manifest, /"commandVar": "{{agent_runner_cmd}}"/);
   assert.match(manifest, /"env": "AGENT_RUNNER_STATE_DIR"/);
@@ -140,7 +140,7 @@ test("migrate-task-runner-to-agent-runner writes renamed roots, paths, and conte
   const agent = readText(join(home, ".config/agent-runner/agents/agent-runner-agent.md"));
   assert.match(agent, /agent-runner/);
   assert.match(agent, /AGENT_RUNNER_CONFIG_DIR/);
-  assert.match(agent, /@agent-runner\/core/);
+  assert.match(agent, /@kcosr\/agent-runner-core/);
   assert.doesNotMatch(agent, /task-runner|TASK_RUNNER|@task-runner/);
   assert.equal(
     readText(join(home, ".bashrc")),

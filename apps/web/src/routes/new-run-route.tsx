@@ -1,4 +1,4 @@
-import type { RunInputField } from "@agent-runner/core/contracts/run-input-surface.js";
+import type { RunInputField } from "@kcosr/agent-runner-core/contracts/run-input-surface.js";
 import { useEffect, useRef } from "react";
 import { AppShell, TopbarPrimaryNav } from "../components/app-shell.js";
 import { useNewRunState } from "./use-new-run-state.js";
