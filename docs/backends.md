@@ -446,23 +446,98 @@ an agent-runner lifecycle mode, not an invokable subprocess backend.
 
 ## `passive`
 
-The passive backend is a null-object backend. It never invokes an
-external process. Passive runs can be initialized (`agent-runner init`) or
-driven by an outer tool, and all task state is mutated through the task
-CLI. Calling `run --resume-run` on a passive run is rejected.
+The passive backend is a null-object backend: it never invokes an
+external process. A passive run exists so that work driven somewhere
+else — an interactive coding tool, a human operator, or an outer
+orchestrator — still gets a durable manifest, task checklist,
+attachments, dependencies, and audit trail.
+
+Use passive mode when agent-runner should *track* a run but not *drive*
+it. This is the sidecar pattern: you keep working in Claude Code,
+Cursor, Codex, or similar, and report progress into agent-runner
+through the task CLI.
+
+### Lifecycle
+
+A passive run has no run/retry loop and no backend attempts. Its
+lifecycle is driven entirely by task state:
+
+1. Create it with `agent-runner init --backend passive ...`. The run
+   starts in `initialized`.
+2. Fetch the worker handoff with `agent-runner run brief <run-id>` and
+   do the work in whatever tool you are using.
+3. Report progress through the task CLI as you go.
+4. The overall run status is *derived* from the task set, not from a
+   backend exit code (see [Derived status](#derived-status) below).
+
+`agent-runner run --resume-run` is rejected for passive runs — there is
+no backend session to resume. The `ready` promotion and ready-start
+path also do not apply; a passive run is worked directly from
+`initialized`.
 
 `backendArgs.passive.extraArgs` is accepted by the agent schema but
-resolves to an empty frozen argv list because there is no backend process.
+resolves to an empty frozen argv list because there is no backend
+process.
 
-Passive-only metadata mutations:
+### Driving a passive run
 
 ```bash
-agent-runner run set-backend-session <id> <session-id>
-agent-runner run clear-backend-session <id>
+agent-runner init \
+  --backend passive \
+  --assignment plan-feature \
+  --name "Web dashboard" \
+  "Design the dashboard work"
+
+agent-runner run brief <run-id>
+agent-runner task list <run-id>
+agent-runner task set <run-id> <task-id> --status in_progress
+agent-runner task append-notes <run-id> <task-id> --text "Observed ..."
+agent-runner task set <run-id> <task-id> --status completed
 ```
 
-These let an external driver record the session id it is tracking
-without perturbing task state.
+Task mutation on a passive run is allowed in every lifecycle state
+except `running`, including adding tasks unless `tasks` is locked. See
+[tasks.md](tasks.md#passive-runs) for the full mutation-rule table.
+
+### Derived status
+
+A passive run's overall status is computed from its tasks:
+
+- all tasks `completed` → `success`
+- all tasks `completed` or `blocked`, with at least one `blocked` →
+  `blocked`
+- otherwise → `initialized` (still waiting for work)
+
+There is no `exhausted` or retry outcome for passive runs because
+agent-runner never invokes a backend on their behalf.
+
+### External session tracking
+
+An external driver often does have a backend session of its own — a
+Claude session id, a Codex thread id, the conversation it is running
+the work in. Passive runs can record that id as metadata:
+
+```bash
+agent-runner run set-backend-session   <id|path> <session-id>
+agent-runner run clear-backend-session <id|path>
+```
+
+Both are passive-only mutations and reject non-passive runs. Setting a
+session id:
+
+- stores the supplied id as `manifest.backendSessionId` so read
+  surfaces, the daemon, and the web dashboard can show which external
+  conversation a run corresponds to;
+- clears any imported backend-session sync state
+  (`manifest.backendSessionSync`) and drops previously imported
+  session-history attempt logs, because the tracked session changed;
+- emits a `run.backend_session_updated` audit event.
+
+The session id must be a bare id, not a path — values containing `/`,
+`\`, or `..` are rejected — and setting the same id twice is a no-op.
+What it does *not* do: it never touches task state, and it does not
+make a passive run resumable. Passive runs are still driven only
+through the task CLI.
 
 ## Environment variables
 

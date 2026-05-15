@@ -254,6 +254,14 @@
   websocket and UDS runs detach on graceful shutdown and can be
   re-adopted or finalized from Codex thread state on daemon startup.
   ([#146](https://github.com/kcosr/task-runner/pull/146))
+- Restructured `README.md` as a landing page: a plain-language
+  introduction in place of the internal-contract bullet list, a slimmed
+  quickstart covering the core workflows, and a "Beyond the basics"
+  table that points advanced topics (launchers, hooks, containers,
+  scheduling, connected mode) to their dedicated docs pages.
+- Expanded the passive-backend documentation in `docs/backends.md` with
+  the full external-driver workflow: lifecycle, task-derived run status,
+  and `run set-backend-session` / `clear-backend-session` semantics.
 
 ### Fixed
 
