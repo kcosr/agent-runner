@@ -340,6 +340,54 @@ selection with `--environment <name|path>`. The resolved environment is
 frozen on the run manifest and reset seed; resume and reset do not
 re-read current environment files.
 
+Generic `mounts` bind extra host paths into a managed container — auth
+stores, caches, sockets — separately from the working `workspace` mount.
+Same-absolute-path mounts are the recommended default because they
+preserve backend `cwd` semantics and keep host-side session-history
+readers working. `mode: existing` environments cannot add mounts to an
+already-running container; their `expectedMounts` are validation-only.
+
+```yaml
+mounts:
+  - hostPath: /home/me/.cache/agent-tools
+    containerPath: /home/me/.cache/agent-tools
+    mode: rw
+```
+
+Runtime engine behavior uses structured fields, with raw arg arrays as an
+explicit escape hatch:
+
+```yaml
+engine: podman            # docker (default) or podman
+network: default          # default, none, host, bridge, or a named network
+security:
+  userns: keep-id         # keep-id or host
+  selinuxLabel: disable   # disable, shared, or private
+  readOnlyRootFilesystem: false
+  capDrop: []
+  capAdd: []
+extraRunArgs: []          # appended to managed container creation
+extraExecArgs: []         # appended to docker/podman exec
+```
+
+For managed environments, `cleanup.policy` controls container removal.
+With the default `terminal` policy, agent-runner removes a `lifetime: run`
+container once the run reaches a terminal status, and a `lifetime: group`
+container once no initialized, ready, or running run in the group still
+references it. `policy: manual` leaves removal to
+`agent-runner run environment cleanup`.
+
+On resume, managed mode revalidates the container and may recreate it
+from the frozen config if it is missing; existing mode revalidates the
+external container and fails clearly rather than recreating it. `run
+reset` stops and removes an owned managed container before restoring the
+initialized seed, and deleting an archived run attempts cleanup of any
+owned managed container first. Externally managed (`mode: existing`)
+containers are never stopped or removed by agent-runner.
+
+Inspect and act on a run's environment with `agent-runner run
+environment status|validate|cleanup` (see [cli.md](cli.md)).
+
 Container execution is limited to subprocess-backed backends and the
 built-in `direct` launcher. Passive runs, Codex websocket/UDS
 transports, and non-direct launchers reject container environments.

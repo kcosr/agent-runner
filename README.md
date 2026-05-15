@@ -259,7 +259,6 @@ The rest are focused topic pages:
 | [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
 | [docs/backends.md](docs/backends.md) | Built-in backends, selection, per-backend notes |
 | [docs/custom-backends.md](docs/custom-backends.md) | Authoring a custom backend module |
-| [docs/container-lifecycle.md](docs/container-lifecycle.md) | Container execution environment and lifecycle design |
 | [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
 | [docs/daemon.md](docs/daemon.md) | Control plane, HTTP/SSE, JSON-RPC |

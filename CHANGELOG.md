@@ -268,11 +268,14 @@
 - Split the custom-backend authoring guide into a dedicated
   `docs/custom-backends.md`; `docs/backends.md` now focuses on selecting
   and configuring the built-in backends.
+- Removed the `docs/container-lifecycle.md` design document. Its
+  user-facing reference content (generic mounts, runtime engine and
+  security options, cleanup policy, and container lifecycle behavior)
+  now lives in the execution environment section of
+  `docs/agents-and-assignments.md`.
 
 ### Fixed
 
-- Removed a dangling reference to an off-repo private file from the
-  header of `docs/container-lifecycle.md`.
 - Codex backend sessions now inject task-runner lineage and recursion
   guard env into thread config for shell tools, so websocket and UDS
   sessions preserve lineage without forwarding arbitrary process or
