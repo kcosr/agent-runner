@@ -201,7 +201,7 @@ topic has a focused doc:
 | Queued messages | Queue resume messages for a live run | [docs/resume.md](docs/resume.md) |
 | Hooks | Deterministic checks around attempts and task transitions | [docs/hooks.md](docs/hooks.md) |
 | Launchers | Wrap subprocess backends (e.g. SSH into a worker) | [docs/backends.md](docs/backends.md) |
-| Custom backends | Author your own backend module | [docs/backends.md](docs/backends.md) |
+| Custom backends | Author your own backend module | [docs/custom-backends.md](docs/custom-backends.md) |
 | Container environments | Run inside a managed container | [docs/container-lifecycle.md](docs/container-lifecycle.md) |
 | Connected mode | Route CLI commands through the daemon, optionally over SSH | [docs/daemon.md](docs/daemon.md) |
 | Attachments & dependencies | File handoff and run-ordering gates | [docs/attachments.md](docs/attachments.md), [docs/dependencies.md](docs/dependencies.md) |
@@ -256,7 +256,8 @@ The rest are focused topic pages:
 | [docs/resume.md](docs/resume.md) | Resume rules, ready-start, retry nudges |
 | [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
 | [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
-| [docs/backends.md](docs/backends.md) | Built-in and custom backends |
+| [docs/backends.md](docs/backends.md) | Built-in backends, selection, per-backend notes |
+| [docs/custom-backends.md](docs/custom-backends.md) | Authoring a custom backend module |
 | [docs/container-lifecycle.md](docs/container-lifecycle.md) | Container execution environment and lifecycle design |
 | [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |

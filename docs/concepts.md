@@ -23,10 +23,10 @@ An agent is a markdown file with YAML frontmatter. The frontmatter declares
 separate `backendArgs` for extra argv tokens. The body is the agent's role
 instructions.
 
-Bundled examples live under `agents/`. Custom backend modules live under
-`${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`
-and are trusted local code loaded without sandboxing. See
-[agents-and-assignments.md](agents-and-assignments.md) for the full schema.
+Bundled examples live under `agents/`. See
+[agents-and-assignments.md](agents-and-assignments.md) for the full agent
+schema, and [custom-backends.md](custom-backends.md) for authoring a
+backend that is not one of the built-ins.
 
 ## Assignments
 
@@ -128,7 +128,8 @@ A backend is the runtime that actually executes the worker:
 - `passive` — no backend invocation; the run is driven externally through
   the task CLI
 
-See [backends.md](backends.md).
+See [backends.md](backends.md), and [custom-backends.md](custom-backends.md)
+for authoring your own.
 
 ## Attachments and dependencies
 

@@ -265,6 +265,9 @@
 - Split the hook reference into a dedicated `docs/hooks.md`,
   consolidating hook documentation that was previously spread across
   `docs/agents-and-assignments.md` and `docs/design.md`.
+- Split the custom-backend authoring guide into a dedicated
+  `docs/custom-backends.md`; `docs/backends.md` now focuses on selecting
+  and configuring the built-in backends.
 
 ### Fixed
 
