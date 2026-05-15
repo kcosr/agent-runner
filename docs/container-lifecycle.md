@@ -1,9 +1,8 @@
 # Container Lifecycle Design
 
 This document describes first-class container lifecycle management for
-agent-runner. It is based on the current manifest-canonical run model, the
-existing launcher and backend contracts, and the container lifecycle notes in
-`/home/kevin/assistant/agent-runner-container-lifecycle-design-notes.md`.
+agent-runner. It is based on the current manifest-canonical run model and
+the existing launcher and backend contracts.
 
 ## Summary
 

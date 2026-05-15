@@ -199,12 +199,12 @@ row links to the section that documents it:
 |---|---|---|
 | Hooks | Deterministic checks around attempts and task transitions | [docs/hooks.md](docs/hooks.md) |
 | Custom backends | Author your own backend module | [docs/custom-backends.md](docs/custom-backends.md) |
-| Container environments | Run inside a managed container | [docs/container-lifecycle.md](docs/container-lifecycle.md) |
-| Attachments | File handoff between runs | [docs/attachments.md](docs/attachments.md) |
-| Dependencies | Gate a run until upstream runs succeed | [docs/dependencies.md](docs/dependencies.md) |
+| Launchers | Wrap subprocess backends (e.g. SSH into a worker) | [docs/agents-and-assignments.md (Launcher definitions)](docs/agents-and-assignments.md#launcher-definitions) |
+| Container environments | Run inside a managed container | [docs/agents-and-assignments.md (Execution environment definitions)](docs/agents-and-assignments.md#execution-environment-definitions) |
 | Scheduling | One-time and recurring (cron) runs | [docs/runs.md (Scheduled runs)](docs/runs.md#scheduled-runs) |
 | Queued messages | Queue resume messages for a live run | [docs/resume.md (Queued resume messages)](docs/resume.md#queued-resume-messages) |
-| Launchers | Wrap subprocess backends (e.g. SSH into a worker) | [docs/agents-and-assignments.md (Launcher definitions)](docs/agents-and-assignments.md#launcher-definitions) |
+| Attachments | File handoff between runs | [docs/attachments.md](docs/attachments.md) |
+| Dependencies | Gate a run until upstream runs succeed | [docs/dependencies.md](docs/dependencies.md) |
 | Connected mode | Route CLI commands through the daemon, optionally over SSH | [docs/daemon.md (CLI clients)](docs/daemon.md#cli-clients-embedded-vs-connected) |
 
 CLI commands either run **embedded** against shared filesystem state,

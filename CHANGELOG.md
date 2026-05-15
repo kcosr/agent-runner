@@ -271,6 +271,8 @@
 
 ### Fixed
 
+- Removed a dangling reference to an off-repo private file from the
+  header of `docs/container-lifecycle.md`.
 - Codex backend sessions now inject task-runner lineage and recursion
   guard env into thread config for shell tools, so websocket and UDS
   sessions preserve lineage without forwarding arbitrary process or
