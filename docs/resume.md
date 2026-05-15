@@ -118,6 +118,11 @@ On resume, the brief sent to the backend is composed as follows:
 3. The follow-up message is appended, or the implicit continue message is
    used if incomplete tasks remain.
 
+For ready-start (running a `ready` run with zero prior attempts), the
+stored `manifest.brief` is reused verbatim.
+
+## Queued resume messages
+
 Queued resume messages are separate daemon-owned pending intent for live
 runs. `agent-runner run queue-message <id|path> <text>` appends a
 message while a run is live, `agent-runner run queued-messages <id|path>`
@@ -128,9 +133,6 @@ session with those message texts joined by a blank line in one follow-up
 prompt. The messages are removed from the manifest only after that resume
 start is accepted, so a failed automatic resume keeps the queue available
 for retry or manual cleanup.
-
-For ready-start (running a `ready` run with zero prior attempts), the
-stored `manifest.brief` is reused verbatim.
 
 ## Backend session history sync
 

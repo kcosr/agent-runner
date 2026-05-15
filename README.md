@@ -193,18 +193,19 @@ same daemon and is not a standalone app. See
 ## Beyond the basics
 
 agent-runner has a deeper feature set than the quickstart shows. Each
-topic has a focused doc:
+row links to the section that documents it:
 
-| Topic | What it does | Doc |
+| Topic | What it does | Where it's documented |
 |---|---|---|
-| Scheduling | One-time and recurring (cron) runs | [docs/runs.md](docs/runs.md) |
-| Queued messages | Queue resume messages for a live run | [docs/resume.md](docs/resume.md) |
 | Hooks | Deterministic checks around attempts and task transitions | [docs/hooks.md](docs/hooks.md) |
-| Launchers | Wrap subprocess backends (e.g. SSH into a worker) | [docs/backends.md](docs/backends.md) |
 | Custom backends | Author your own backend module | [docs/custom-backends.md](docs/custom-backends.md) |
 | Container environments | Run inside a managed container | [docs/container-lifecycle.md](docs/container-lifecycle.md) |
-| Connected mode | Route CLI commands through the daemon, optionally over SSH | [docs/daemon.md](docs/daemon.md) |
-| Attachments & dependencies | File handoff and run-ordering gates | [docs/attachments.md](docs/attachments.md), [docs/dependencies.md](docs/dependencies.md) |
+| Attachments | File handoff between runs | [docs/attachments.md](docs/attachments.md) |
+| Dependencies | Gate a run until upstream runs succeed | [docs/dependencies.md](docs/dependencies.md) |
+| Scheduling | One-time and recurring (cron) runs | [docs/runs.md (Scheduled runs)](docs/runs.md#scheduled-runs) |
+| Queued messages | Queue resume messages for a live run | [docs/resume.md (Queued resume messages)](docs/resume.md#queued-resume-messages) |
+| Launchers | Wrap subprocess backends (e.g. SSH into a worker) | [docs/agents-and-assignments.md (Launcher definitions)](docs/agents-and-assignments.md#launcher-definitions) |
+| Connected mode | Route CLI commands through the daemon, optionally over SSH | [docs/daemon.md (CLI clients)](docs/daemon.md#cli-clients-embedded-vs-connected) |
 
 CLI commands either run **embedded** against shared filesystem state,
 or route through the daemon with `--connect <ws-url>` (or
