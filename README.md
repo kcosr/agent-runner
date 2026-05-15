@@ -200,7 +200,7 @@ row links to the section that documents it:
 | Hooks | Deterministic checks around attempts and task transitions | [docs/hooks.md](docs/hooks.md) |
 | Custom backends | Author your own backend module | [docs/custom-backends.md](docs/custom-backends.md) |
 | Launchers | Wrap subprocess backends (e.g. SSH into a worker) | [docs/agents-and-assignments.md (Launcher definitions)](docs/agents-and-assignments.md#launcher-definitions) |
-| Container environments | Run inside a managed container | [docs/agents-and-assignments.md (Execution environment definitions)](docs/agents-and-assignments.md#execution-environment-definitions) |
+| Container environments | Run inside a managed container | [docs/execution-environments.md](docs/execution-environments.md) |
 | Scheduling | One-time and recurring (cron) runs | [docs/runs.md (Scheduled runs)](docs/runs.md#scheduled-runs) |
 | Queued messages | Queue resume messages for a live run | [docs/resume.md (Queued resume messages)](docs/resume.md#queued-resume-messages) |
 | Attachments | File handoff between runs | [docs/attachments.md](docs/attachments.md) |
@@ -259,6 +259,7 @@ The rest are focused topic pages:
 | [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
 | [docs/backends.md](docs/backends.md) | Built-in backends, selection, per-backend notes |
 | [docs/custom-backends.md](docs/custom-backends.md) | Authoring a custom backend module |
+| [docs/execution-environments.md](docs/execution-environments.md) | Container execution environments — definition and lifecycle |
 | [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
 | [docs/daemon.md](docs/daemon.md) | Control plane, HTTP/SSE, JSON-RPC |
