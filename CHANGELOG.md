@@ -262,6 +262,9 @@
 - Expanded the passive-backend documentation in `docs/backends.md` with
   the full external-driver workflow: lifecycle, task-derived run status,
   and `run set-backend-session` / `clear-backend-session` semantics.
+- Split the hook reference into a dedicated `docs/hooks.md`,
+  consolidating hook documentation that was previously spread across
+  `docs/agents-and-assignments.md` and `docs/design.md`.
 
 ### Fixed
 

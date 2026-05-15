@@ -310,26 +310,9 @@ Phase behavior:
   edit while preserving the hook's own accepted side effects such as
   notes, pins, attachments, or task patches.
 
-The built-in `command` hook supports:
-
-- `mode: status` — zero exit is success, non-zero blocks/rejects
-- `mode: json` — zero exit plus JSON stdout returning the full hook
-  result payload; malformed JSON is a runtime error
-
-The built-in `require-children-success` hook is task-transition only. It
-checks direct child runs by `parentRunId` inside core state and rejects
-completion until every direct child is `success`. Target task selection
-is handled natively by task-local placement or task-transition
-`when.taskId` / `when.taskIds`, not by builtin-local config.
-
-The built-in `git-worktree` hook runs in `prepare` and `beforeAttempt`.
-It creates or reuses a worktree, switches the run cwd to that path, and
-in `prepare` also projects `worktree_path` into runtime vars.
-
-Declarative `when` support remains narrow: attempt-phase hooks support
-`when.sessionIndex` and `when.attemptIndexInSession`, while task-transition
-hooks support `when.taskId`, `when.taskIds`, `when.fromStatus`,
-`when.toStatus`, and `when.source`.
+The built-in hooks (`command`, `require-children-success`,
+`git-worktree`), hook source resolution, and the deliberately narrow
+`when` filter surface are described in [hooks.md](hooks.md).
 
 ## Task state model
 

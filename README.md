@@ -199,7 +199,7 @@ topic has a focused doc:
 |---|---|---|
 | Scheduling | One-time and recurring (cron) runs | [docs/runs.md](docs/runs.md) |
 | Queued messages | Queue resume messages for a live run | [docs/resume.md](docs/resume.md) |
-| Hooks | Deterministic checks around attempts and task transitions | [docs/agents-and-assignments.md](docs/agents-and-assignments.md) |
+| Hooks | Deterministic checks around attempts and task transitions | [docs/hooks.md](docs/hooks.md) |
 | Launchers | Wrap subprocess backends (e.g. SSH into a worker) | [docs/backends.md](docs/backends.md) |
 | Custom backends | Author your own backend module | [docs/backends.md](docs/backends.md) |
 | Container environments | Run inside a managed container | [docs/container-lifecycle.md](docs/container-lifecycle.md) |
@@ -249,6 +249,7 @@ The rest are focused topic pages:
 |---|---|
 | [docs/concepts.md](docs/concepts.md) | Mental model — agents, assignments, runs, briefs |
 | [docs/agents-and-assignments.md](docs/agents-and-assignments.md) | Definition format, locked fields, prompt composition |
+| [docs/hooks.md](docs/hooks.md) | Hook phases, built-in hooks, the authoring API |
 | [docs/tasks.md](docs/tasks.md) | Task model, status values, task CLI, mutation rules |
 | [docs/runs.md](docs/runs.md) | Workspace layout, manifest, lifecycle, capabilities |
 | [docs/variables.md](docs/variables.md) | Typed vars, resolution, interpolation, redaction |

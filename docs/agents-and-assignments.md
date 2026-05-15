@@ -413,7 +413,7 @@ Task definitions must match:
 - `body`: optional free-form markdown
 - `hooks`: optional task-local `taskTransition` hook entries using the
   same `builtin` / `name` / `path`, `when`, and `with` authoring shape
-  as root `hooks.taskTransition[]`
+  as root `hooks.taskTransition[]` (see [hooks.md](hooks.md))
 
 Assignments may also mix reusable task refs with inline task objects:
 
@@ -539,93 +539,15 @@ coerced, or `${...}` is used on a disabled object or array surface,
 definition loading fails with a config error that names the config path
 and env var.
 
-## Assignment hooks
+## Hooks
 
-Assignments can declare hook arrays under these phases:
+Assignments and individual tasks can declare hooks — deterministic,
+user-authored code that runs at fixed points in a run's lifecycle. The
+`hooks:` block in the frontmatter schema above declares them by phase,
+and `tasks[].hooks[]` declares task-local `taskTransition` hooks.
 
-- `prepare`
-- `beforeAttempt`
-- `afterAttempt`
-- `afterExit`
-- `taskTransition`
-
-Each hook entry must select exactly one source:
-
-```yaml
-hooks:
-  prepare:
-    - builtin: git-worktree
-      with:
-        repo: "{{cwd}}"
-        from: main
-        branch: feature-review
-        path: "{{cwd}}/.worktrees/feature-review"
-    - name: freeze-prepare
-      with:
-        mode: strict
-    - path: ./hooks/seed-context.mts
-```
-
-Resolution rules:
-
-- `builtin` loads one of the first-party hooks shipped by core.
-- `name` resolves from `${AGENT_RUNNER_CONFIG_DIR}/hooks/<name>/hook.(ts|mts|js|mjs)`.
-- `path` resolves relative to the authored `assignment.md`.
-- Raw `.ts` / `.mts` hook files load directly through the runtime's
-  `jiti` loader. Hook authors do not need a separate build step.
-
-Supported `when` filters are intentionally narrow:
-
-- attempt phases (`beforeAttempt`, `afterAttempt`, `afterExit`) support
-  `when.sessionIndex` and `when.attemptIndexInSession`, each as one integer or
-  an array of integers. Session index `0` is the first execution session;
-  attempt-in-session `0` is the first backend attempt within that
-  execution session.
-- `taskTransition` supports:
-  - `when.taskId`
-  - `when.taskIds`
-  - `when.fromStatus`
-  - `when.toStatus`
-  - `when.source`
-
-Task-local `tasks[].hooks[]` are always `taskTransition` hooks scoped to
-the enclosing task. They do not use a nested `taskTransition:` key under
-the task.
-
-Prepare hooks run once during fresh `run` / `init`, before the first
-manifest write. Their resolved descriptor, config, mutated prompts, vars,
-cwd, and hook state are then frozen into the manifest. Resume and reset
-reuse that frozen prepare output instead of re-reading the current hook
-source.
-
-Hook mutation boundaries:
-
-- `prepare` may mutate run config (`cwd`, backend/model/effort,
-  timeout/unrestricted, prompts, locked fields), runtime vars, hook
-  state, note/pin metadata, task patches, and attachments. Backend args
-  are resolved from the final selected backend after prepare changes.
-- non-prepare phases may mutate run config, hook state, note/pin
-  metadata, task patches, and attachments, but not runtime vars.
-- task-transition hooks run transactionally around `task set`,
-  `task append-notes`, `task add`, and the run loop's own task writes.
-  If a task-transition hook rejects, the requested task edit rolls back,
-  but the hook's own accepted side effects such as notes, pins,
-  attachments, or task patches still persist.
-
-Built-in hooks:
-
-- `git-worktree` runs in `prepare` and `beforeAttempt`. It ensures a git
-  worktree, switches the run `cwd` to that path, and in `prepare` also
-  projects `worktree_path` into runtime vars.
-- `command` runs in every phase. `mode: status` treats exit code `0` as
-  success and a non-zero exit code as block/reject. `mode: json`
-  requires exit code `0` and parses a full hook result from stdout;
-  malformed JSON is a runtime error.
-- `require-children-success` runs in `taskTransition`. It guards
-  completion until all direct child runs of the current run are
-  `success`. Scope it with task-local placement or native
-  `when.taskId` / `when.taskIds`, and set `requireAny: true` only when
-  the task must refuse completion until at least one child run exists.
+See [hooks.md](hooks.md) for phases, source resolution, `when` filters,
+built-in hooks, mutation boundaries, and the hook-authoring API.
 
 ## Locked fields
 
@@ -741,37 +663,6 @@ agent-runner show task <name|path>
 
 These surfaces render parsed frontmatter, interpolation hooks, task lists,
 and reusable task definition title/body/hooks for human review.
-
-## Authoring hook modules
-
-First-party and custom hooks share the public authoring surface exported
-from `@kcosr/agent-runner-core/hooks`:
-
-```ts
-import { defineHook, type PrepareHookContext } from "@kcosr/agent-runner-core/hooks";
-
-export default defineHook({
-  name: "freeze-prepare",
-  prepare(ctx: PrepareHookContext) {
-    return {
-      action: "continue",
-      mutate: {
-        state: { prepared: true },
-        note: `prepared in ${ctx.run.cwd}`,
-      },
-    };
-  },
-});
-```
-
-Use `defineHook(...)` for type inference and return one of:
-
-- `action: "continue"` to keep going
-- `action: "reinvoke"` with `followUpPrompt` to rewrite the next prompt
-- `action: "block"` with `reason` to stop the run
-
-Task-transition hooks return `{ accept: true }` or
-`{ accept: false, reason }` instead.
 
 ## Authoring tips
 
