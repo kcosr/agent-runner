@@ -155,7 +155,6 @@ clients, HTTP + SSE for browser clients, and the bundled web dashboard from
 
 ## Where to go next
 
-- [design.md](design.md) — canonical design, schema, lifecycle, repo layout
 - [cli.md](cli.md) — full command/flag reference
 - [configuration.md](configuration.md) — env vars, state roots, XDG
 - [examples.md](examples.md) — bundled agents and assignments

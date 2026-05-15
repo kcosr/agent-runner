@@ -272,6 +272,9 @@
   focused `docs/execution-environments.md` reference covering the
   environment definition schema, workspace and lifecycle configuration,
   engine and mount options, and container runtime behavior.
+- Removed `docs/design.md`, which had become an ~880-line restatement of
+  the focused topic docs. Its non-goals list moved to `docs/scope.md`,
+  and onboarding now points at `docs/concepts.md` and the topic docs.
 
 ### Fixed
 

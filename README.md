@@ -264,7 +264,6 @@ The rest are focused topic pages:
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
 | [docs/daemon.md](docs/daemon.md) | Control plane, HTTP/SSE, JSON-RPC |
 | [docs/web-dashboard.md](docs/web-dashboard.md) | Bundled browser UI |
-| [docs/design.md](docs/design.md) | Canonical design, schema, lifecycle rules |
 | [docs/examples.md](docs/examples.md) | Bundled agents and assignments |
 
 ## Exit codes

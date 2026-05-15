@@ -5,8 +5,8 @@ This file is a lightweight, internal onboarding note for agents working in this 
 ## Start Here
 
 - Read `README.md` for the CLI surface, workflow model, and run/assignment semantics.
-- Read `docs/design.md` for the manifest-canonical design, lifecycle rules, and resume policy.
-- Read `docs/scope.md` for product scope and direction. When triaging feature requirements, raise likely scope concerns before planning or implementing.
+- Read `docs/concepts.md` for the mental model, then the focused topic docs under `docs/` for specifics — manifest and run lifecycle in `docs/runs.md`, resume policy in `docs/resume.md`, task model in `docs/tasks.md`.
+- Read `docs/scope.md` for product scope, non-goals, and direction. When triaging feature requirements, raise likely scope concerns before planning or implementing.
 - Primary entry points are `apps/cli/src/cli.ts`, `packages/core/src/core/run/run-loop.ts`, and `packages/core/src/core/run/manifest.ts`.
 - Task parsing/rendering lives in `packages/core/src/assignment/*`; config loading lives in `packages/core/src/config/*`; backend adapters live in `packages/core/src/backends/*`; daemon transports live in `apps/cli/src/daemon/*`.
 - Built-in agents and assignments live in `agents/` and `assignments/`.
