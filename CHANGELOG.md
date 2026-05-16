@@ -159,6 +159,10 @@
 
 ### Added
 
+- Added example skills under `examples/skills/`
+  (`agent-runner-seed-plan-run`, `agent-runner-seed-plan-implement-run`)
+  for the coding agent that drives agent-runner, with copy instructions
+  in the README quickstart and `docs/examples.md`.
 - Added `scripts/migrate-task-runner-to-agent-runner.mjs`, a dry-run-by-default
   migration utility for local TaskRunner state/config paths, embedded old-name
   references, and shell rc env exports.
@@ -238,6 +242,8 @@
 
 ### Changed
 
+- The README intro now shows web dashboard screenshots (board, list,
+  and mobile views) as a clickable thumbnail table.
 - Dashboard list rows now show relative-only timestamps for started and ended
   sort modes, matching the existing updated sort-mode display.
   ([#149](https://github.com/kcosr/task-runner/pull/149))

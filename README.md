@@ -18,6 +18,14 @@ notes, and an audit trail of how the run got there. When a run ends you
 get a structured pass/fail result and [exit code](#exit-codes), not a
 chat log to re-read.
 
+An optional local daemon serves a web dashboard for live run state —
+the runs board, run detail, and a mobile layout. Click a screenshot for
+the full image.
+
+| Board view | List view | Mobile |
+|:--:|:--:|:--:|
+| [<img src="docs/images/kanban.png" width="320" alt="Run board">](docs/images/kanban.png) | [<img src="docs/images/list.png" width="320" alt="Run list">](docs/images/list.png) | [<img src="docs/images/mobile.png" width="150" alt="Mobile run view">](docs/images/mobile.png) |
+
 ## Why
 
 If you've used a coding agent for any non-trivial task, you've seen
@@ -167,6 +175,19 @@ such as creating git worktrees, pushing branches, opening pull requests,
 or merging after approval. Read what an agent or assignment does before
 you run it, and treat the bundled set as a starting point for
 definitions of your own rather than a required path.
+
+The repository also ships example skills under `examples/skills/` for
+the coding agent that drives agent-runner — they seed `plan-feature` and
+`plan-implement-feature` runs. Copy them into your coding agent's skills
+directory (for example `.agents/skills/`) to make them available:
+
+```bash
+mkdir -p .agents/skills
+cp -R examples/skills/* .agents/skills/
+```
+
+The same caveat applies — read a skill before using it and adapt it to
+your own setup.
 
 ### Run an agent against an assignment
 

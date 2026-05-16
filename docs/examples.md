@@ -283,3 +283,15 @@ Or with bare names if you've installed them under
 ```bash
 agent-runner run --agent implementer --assignment repo-orientation
 ```
+
+## Example skills
+
+`examples/skills/` holds skills for the coding agent that drives
+agent-runner — not agent-runner definitions themselves:
+
+- `agent-runner-seed-plan-run` — seeds a `plan-feature` run
+- `agent-runner-seed-plan-implement-run` — seeds a `plan-implement-feature` run
+
+Copy them into your coding agent's skills directory (for example
+`.agents/skills/`) to use them. Like the bundled agents and assignments,
+they are examples — read and adapt them to your own setup.
