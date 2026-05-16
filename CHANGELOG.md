@@ -159,7 +159,7 @@
 
 ### Added
 
-- Added example skills under `examples/skills/`
+- Added skills under `skills/`
   (`agent-runner-seed-plan-run`, `agent-runner-seed-plan-implement-run`)
   for the coding agent that drives agent-runner, with copy instructions
   in the README quickstart and `docs/examples.md`.

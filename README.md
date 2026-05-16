@@ -180,14 +180,14 @@ or merging after approval. Read what an agent or assignment does before
 you run it, and treat the bundled set as a starting point for
 definitions of your own rather than a required path.
 
-The repository also ships example skills under `examples/skills/` for
-the coding agent that drives agent-runner — they seed `plan-feature` and
+The repository also ships skills under `skills/` for the coding agent
+that drives agent-runner — they seed `plan-feature` and
 `plan-implement-feature` runs. Copy them into your coding agent's skills
 directory (for example `.agents/skills/`) to make them available:
 
 ```bash
 mkdir -p .agents/skills
-cp -R examples/skills/* .agents/skills/
+cp -R skills/* .agents/skills/
 ```
 
 The same caveat applies — read a skill before using it and adapt it to

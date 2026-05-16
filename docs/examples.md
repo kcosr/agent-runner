@@ -284,10 +284,10 @@ Or with bare names if you've installed them under
 agent-runner run --agent implementer --assignment repo-orientation
 ```
 
-## Example skills
+## Skills
 
-`examples/skills/` holds skills for the coding agent that drives
-agent-runner — not agent-runner definitions themselves:
+`skills/` holds skills for the coding agent that drives agent-runner —
+not agent-runner definitions themselves:
 
 - `agent-runner-seed-plan-run` — seeds a `plan-feature` run
 - `agent-runner-seed-plan-implement-run` — seeds a `plan-implement-feature` run
