@@ -244,16 +244,29 @@ and report progress through the task CLI; agent-runner keeps the
 durable record. See [docs/backends.md](docs/backends.md) for the full
 passive / external-driver workflow.
 
-### Browser dashboard
+### Use the local daemon
+
+For the live dashboard and run state shared across terminals, export the
+[recommended environment](#standalone-cli-or-local-daemon) and start one
+daemon:
 
 ```bash
 agent-runner serve
-# Open the printed HTTP base URL in a browser.
+# Serves the daemon and web dashboard; open the printed HTTP URL.
 ```
 
-`agent-runner serve` starts the local daemon; the web UI talks to that
-same daemon and is not a standalone app. See
-[docs/web-dashboard.md](docs/web-dashboard.md).
+Leave that running. In another terminal — with the same environment
+exported — ordinary commands route through that daemon (via
+`AGENT_RUNNER_CONNECT`), so the dashboard and every CLI client stay in
+sync:
+
+```bash
+agent-runner run --agent implementer --assignment repo-orientation
+agent-runner run status <run-id>
+```
+
+Run only one daemon. The web UI talks to that same daemon and is not a
+standalone app. See [docs/web-dashboard.md](docs/web-dashboard.md).
 
 ## Beyond the basics
 
@@ -471,6 +484,12 @@ agent-runner today.
   Child definitions could override individual fields, append tasks,
   or redact inherited locks, avoiding today's copy-paste when you
   want a family of related agents/assignments that share a base.
+
+## Related project
+
+[agent-pack](https://github.com/kcosr/agent-pack) is a lighter, more
+standalone context and task management tool that borrows and improves on
+concepts from agent-runner.
 
 ## Acknowledgements
 
