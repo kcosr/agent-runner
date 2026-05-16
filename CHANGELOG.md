@@ -242,6 +242,10 @@
 
 ### Changed
 
+- Cleaned up the README and reference docs for current CLI behavior,
+  backend-free smoke checks, skills installation, environment-variable
+  placement, and renamed Agent Runner terminology.
+  ([#152](https://github.com/kcosr/agent-runner/pull/152))
 - The README intro now shows web dashboard screenshots (board, list,
   and mobile views) as a clickable thumbnail table.
 - Dashboard list rows now show relative-only timestamps for started and ended
