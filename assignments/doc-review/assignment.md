@@ -179,7 +179,7 @@ tasks:
       sections that don't connect to anything?
 
       Also check cross-references: if README.md says "see
-      docs/design.md" does that file exist and cover what
+      docs/architecture.md" does that file exist and cover what
       was claimed? If multiple docs cover the same thing,
       is the relationship between them clear (which one is
       canonical)?

@@ -159,6 +159,10 @@
 
 ### Added
 
+- Added skills under `skills/`
+  (`agent-runner-seed-plan-run`, `agent-runner-seed-plan-implement-run`)
+  for the coding agent that drives agent-runner, with copy instructions
+  in the README quickstart and `docs/examples.md`.
 - Added `scripts/migrate-task-runner-to-agent-runner.mjs`, a dry-run-by-default
   migration utility for local TaskRunner state/config paths, embedded old-name
   references, and shell rc env exports.
@@ -238,6 +242,12 @@
 
 ### Changed
 
+- Cleaned up the README and reference docs for current CLI behavior,
+  backend-free smoke checks, skills installation, environment-variable
+  placement, and renamed Agent Runner terminology.
+  ([#152](https://github.com/kcosr/agent-runner/pull/152))
+- The README intro now shows web dashboard screenshots (board, list,
+  and mobile views) as a clickable thumbnail table.
 - Dashboard list rows now show relative-only timestamps for started and ended
   sort modes, matching the existing updated sort-mode display.
   ([#149](https://github.com/kcosr/task-runner/pull/149))
@@ -254,9 +264,35 @@
   websocket and UDS runs detach on graceful shutdown and can be
   re-adopted or finalized from Codex thread state on daemon startup.
   ([#146](https://github.com/kcosr/task-runner/pull/146))
+- Restructured `README.md` as a landing page: a plain-language
+  introduction in place of the internal-contract bullet list, a slimmed
+  quickstart covering the core workflows, and a "Beyond the basics"
+  table that links advanced topics (launchers, hooks, containers,
+  scheduling, connected mode) to the doc sections that cover them.
+- Expanded the passive-backend documentation in `docs/backends.md` with
+  the full external-driver workflow: lifecycle, task-derived run status,
+  and `run set-backend-session` / `clear-backend-session` semantics.
+- Split the hook reference into a dedicated `docs/hooks.md`,
+  consolidating hook documentation that was previously spread across
+  `docs/agents-and-assignments.md` and `docs/design.md`.
+- Split the custom-backend authoring guide into a dedicated
+  `docs/custom-backends.md`; `docs/backends.md` now focuses on selecting
+  and configuring the built-in backends.
+- Replaced the `docs/container-lifecycle.md` design document with a
+  focused `docs/execution-environments.md` reference covering the
+  environment definition schema, workspace and lifecycle configuration,
+  engine and mount options, and container runtime behavior.
+- Removed `docs/design.md`, which had become an ~880-line restatement of
+  the focused topic docs. Its non-goals list moved to `docs/scope.md`,
+  and onboarding now points at `docs/concepts.md` and the topic docs.
+- The README quickstart now copies bundled definitions into the config
+  directory so they resolve by name, and a new section covers
+  standalone-CLI versus local-daemon setup.
 
 ### Fixed
 
+- The web dashboard sidebar brand mark now reads `ar`; it still showed
+  `tr` from the former TaskRunner name.
 - Codex backend sessions now inject task-runner lineage and recursion
   guard env into thread config for shell tools, so websocket and UDS
   sessions preserve lineage without forwarding arbitrary process or

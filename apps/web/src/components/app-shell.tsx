@@ -90,7 +90,7 @@ export function AppShell({
       <div className="shell">
         <aside aria-label="Primary navigation" className="sidebar">
           <span aria-label="agent-runner" className="brand-mark">
-            tr
+            ar
           </span>
           <PrimaryNavButtons
             activeSection={activeSection}

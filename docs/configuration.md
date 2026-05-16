@@ -118,12 +118,47 @@ cannot find a git dir fall into an `unknown` bucket.
 
 ## Environment variables
 
+### Where to put env vars
+
+Environment variables apply only to the process that starts
+agent-runner. Put exports in the startup file for the shell, terminal,
+service, or wrapper that will actually run the CLI or daemon.
+
+For interactive shells:
+
+```bash
+# Bash interactive shells
+echo 'export AGENT_RUNNER_CONNECT=ws://127.0.0.1:4773/' >> ~/.bashrc
+
+# Zsh interactive shells
+echo 'export AGENT_RUNNER_CONNECT=ws://127.0.0.1:4773/' >> ~/.zshrc
+```
+
+For Fish:
+
+```fish
+set -Ux AGENT_RUNNER_CONNECT ws://127.0.0.1:4773/
+```
+
+For supervised daemons, put daemon-side variables such as
+`AGENT_RUNNER_LISTEN`, `AGENT_RUNNER_DAEMON_AUTH_ENABLED`, and
+`AGENT_RUNNER_DAEMON_TOKEN` in the service manager environment, not only
+in your interactive shell. For a systemd user service, that usually means
+`Environment=` lines in the unit file or an `EnvironmentFile=` loaded by
+the unit, followed by `systemctl --user daemon-reload` and a service
+restart.
+
+Keep client-side variables in the clients' environment too. For example,
+`AGENT_RUNNER_CONNECT` must be present in each terminal, wrapper script,
+or remote command that should route CLI calls through the daemon.
+
 ### Paths
 
 | Variable | Effect |
 |----------|--------|
 | `AGENT_RUNNER_CONFIG_DIR` | Override config dir |
 | `AGENT_RUNNER_STATE_DIR` | Override state dir |
+| `AGENT_RUNNER_CMD` | Command string injected into generated instructions and child-run templates when agent-runner needs to tell a worker how to call the CLI; defaults to the first executable `agent-runner` on `PATH`, then `agent-runner` |
 | `XDG_CONFIG_HOME` | Standard XDG config root |
 | `XDG_STATE_HOME` | Standard XDG state root |
 | `HOME` | Home directory (affects `~` expansion) |

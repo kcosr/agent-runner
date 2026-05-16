@@ -14,6 +14,15 @@ agent-runner is not an interactive coding environment. It does not aim to replac
 
 In practice it is used either as a sidecar to those interactive tools, or as a runner driven by an outer system that needs durable state, structured handoffs, and audited outcomes.
 
+## Non-goals
+
+agent-runner deliberately does not pursue:
+
+- a remote multi-user control plane
+- workspace-file task editing as a first-class workflow
+- backward-compatibility shims for removed manifest or CLI contracts
+- automatic proof that a worker really performed a task
+
 ## Feature triage heuristic
 
 Feature requests that push agent-runner toward being a richer in-product

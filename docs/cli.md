@@ -20,7 +20,7 @@ All commands accept `--help` / `-h`.
 | `list agents\|assignments\|launchers\|environments\|tasks\|runs` | Enumerate definitions and runs |
 | `show agent\|assignment\|launcher\|environment\|task` | Render a single definition |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
-| `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
+| `run schedule`, `run schedule enable\|disable\|clear` | Schedule mutations |
 | `run set-name\|set-backend-session\|clear-backend-session` | Metadata mutations |
 | `run set-group\|clear-group` | Run group mutations |
 | `run add-dep\|remove-dep\|clear-deps` | Dependency graph mutations |
@@ -82,7 +82,9 @@ agent-runner run \
 Flags:
 
 - `--agent <name|path>` — bare name resolved under the config dir, or a
-  direct path to `agent.md`.
+  direct path to `agent.md`. If omitted, `--backend <id>` is required and
+  agent-runner synthesizes an ad-hoc agent from the backend/model/effort
+  overrides.
 - `--assignment <name|path>` — same resolution as `--agent`. Optional; a
   run without an assignment is a "chat" run with no tasks.
 - `--cwd <path>` — override the run cwd. Fresh-run precedence is
@@ -143,15 +145,15 @@ Assignment task refs follow the same explicit loader model:
 
 ## `init`
 
-Same inputs as `run` (except no `--detach`, `--max-retries`,
-`--timeout-sec`), but the backend is never invoked. Used for passive
-runs or to inspect a run before executing it.
+Same inputs as `run` except no `--detach`, but the backend is never
+invoked. Used for passive runs or to inspect a run before executing it.
 
 ```bash
 agent-runner init \
-  --agent <name|path> \
-  --assignment <name|path> \
+  [--agent <name|path>] \
+  [--assignment <name|path>] \
   [--cwd <path>] [--backend <id>] [--model <id>] [--effort <level>] \
+  [--timeout-sec <n>] [--max-retries <n>] \
   [--unrestricted] [--name <name>] [--group-id <group-id>] [--var key=value ...] \
   [--add-task <title> ...] [--backend-session-id <id>] \
   [--run-id <id|path>] \
@@ -161,6 +163,10 @@ agent-runner init \
   [--message-file <path>] \
   [<message tokens...>]
 ```
+
+If `--agent` is omitted, `--backend <id>` is required so the run can use
+an ad-hoc agent. `--assignment` is optional; omitting it creates a chat
+run with no initial tasks.
 
 `init` does not dump the worker brief to stdout — fetch it with
 `agent-runner run brief <run-id>`.
@@ -399,9 +405,9 @@ values from the initialized run.
 ### Execution environment
 
 ```bash
-agent-runner run environment status <id|path>
-agent-runner run environment validate <id|path>
-agent-runner run environment cleanup <id|path>
+agent-runner run environment status <id>
+agent-runner run environment validate <id>
+agent-runner run environment cleanup <id>
 ```
 
 `status` prints the frozen execution environment state from the run
@@ -415,6 +421,23 @@ Exit codes are `0` for success, `2` when the run id is not found, `3`
 for invalid input/lifecycle/var/lock/prepare failures, and `4` for
 unexpected runtime errors.
 
+### Queued resume messages
+
+```bash
+agent-runner run queue-message <id|path> <message text>
+agent-runner run queued-messages <id|path>
+agent-runner run remove-queued-message <id|path> <message-id>
+```
+
+Queued resume messages are daemon-owned pending follow-ups for live runs.
+`queue-message` appends message text, `queued-messages` lists the current
+queue, and `remove-queued-message` deletes one queued message. When a
+managed run finishes with queued messages still present, the daemon starts
+the next resume session with those messages joined by a blank line.
+
+All three commands accept `--connect` and `--output-format text|json`.
+The target may be a run id or workspace path.
+
 ### Schedule
 
 ```bash
@@ -427,11 +450,11 @@ agent-runner run schedule disable <id|path>
 agent-runner run schedule clear <id|path>
 ```
 
-The default `run schedule` action is `set`; `run schedule set <id|path>
-...` is also accepted. Set requires exactly one of `--at`, `--delay`, or
-`--cron`. `--timezone`, `--mode`, and `--continue-on-failure` are valid
-only with `--cron`. `clear` removes one-time schedules only; recurring
-schedules must be disabled.
+`run schedule <id|path> ...` sets or replaces the schedule and requires
+exactly one of `--at`, `--delay`, or `--cron`. There is no explicit
+`set` subcommand. `--timezone`, `--mode`, and `--continue-on-failure`
+are valid only with `--cron`. `clear` removes one-time schedules only;
+recurring schedules must be disabled.
 
 One-time schedules stay subject to `AGENT_RUNNER_MIN_SCHEDULE_DELAY_SEC`.
 Recurring schedules are validated with `AGENT_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
@@ -493,6 +516,7 @@ typed ref for add/remove: exactly one of `--run` or `--group`. See
 Recognized by the CLI:
 
 - `AGENT_RUNNER_CONFIG_DIR`, `AGENT_RUNNER_STATE_DIR`
+- `AGENT_RUNNER_CMD`
 - `AGENT_RUNNER_LISTEN`, `AGENT_RUNNER_CONNECT`,
   `AGENT_RUNNER_CONNECT_HOST`, `AGENT_RUNNER_CONNECT_LOCAL_PORT`
 - `AGENT_RUNNER_PARENT_RUN_ID`, `AGENT_RUNNER_RUN_ID`,

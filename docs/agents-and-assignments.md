@@ -238,111 +238,15 @@ they remain literal.
 
 ## Execution environment definitions
 
-An environment file is YAML only, not markdown:
+An agent can run the backend inside a container instead of the host
+process by referencing a named execution environment with
+`executionEnvironment: <name>`; fresh `run` / `init` can override it with
+`--environment <name|path>`. Environment definitions are a separate YAML
+definition type under `${AGENT_RUNNER_CONFIG_DIR}/environments/`.
 
-```yaml
-schemaVersion: 1
-name: dev-container
-kind: container
-mode: managed
-engine: podman
-image: node:22
-lifetime: group
-cwd: "{{workspace_host_path}}"
-vars:
-  repo_source:
-    sources: [cli, web]
-    required: true
-  base_ref:
-    sources: [cli, web]
-    default: main
-workspace:
-  scope: group
-  hostRoot: "{{state_dir}}/workspaces"
-  containerPath: /workspace
-  mode: rw
-  create: true
-lifecycle:
-  onWorkspaceCreate:
-    - kind: git-clone
-      target: container
-      source: "{{repo_source}}"
-      baseRef: "{{base_ref}}"
-      branch: "agent-runner/{{run_id}}"
-    - kind: command
-      target: container
-      command: npm
-      args: [install]
-sessionMounts: backend
-cleanup:
-  policy: terminal
-```
-
-The `workspace` block is the preferred way to mount a run working
-directory into a managed container. `scope: run` creates/reuses a host
-path for one run; `scope: group` creates/reuses one host path for all
-runs in the run group. When `hostPath` is omitted, agent-runner derives it
-from `hostRoot` plus the run id or run group id. If `cwd` resolves inside
-the workspace host path, agent-runner rewrites it to the matching
-container path before invoking the backend. With `create: true`,
-agent-runner creates the host directory before starting the container.
-Managed environments can interpolate `workspace_host_path` and
-`workspace_container_path` after the workspace has been resolved.
-Environment `vars` use the same schema and approved sources as
-assignment vars. The selected environment's vars are merged with the
-assignment vars for the run and then frozen into `runtimeVars`; duplicate
-names must have identical definitions.
-
-`lifecycle.afterStart` runs after a managed container is started or
-reused and inspected, before workspace setup and backend `cwd`
-validation. `lifecycle.onWorkspaceCreate` runs once per host workspace;
-a `git-clone` step clones `source` into the workspace root and checks
-out `branch` from `baseRef`, while a `command` step runs an arbitrary
-host or container command with optional `args` and `env`. Completion is
-guarded by host-side state next to the workspace, so later runs reusing
-the same group workspace skip the workspace lifecycle without dirtying
-the mounted workspace. Readiness is expressed as ordinary command steps.
-`mode: existing` environments reject lifecycle phases.
-
-`sessionMounts` expands built-in backend session stores into same-path
-read-write mounts. `sessionMounts: backend` mounts the selected backend's
-known store. A list such as `sessionMounts: [codex, pi]` mounts explicit
-stores. Presets are `claude`, `codex`, `cursor`, `opencode`, and `pi`.
-These mounts are for backend session sync and are separate from the
-working `workspace` mount and generic `mounts`.
-
-`lifetime: group` gives managed containers a stable group-scoped
-container name and skips automatic terminal cleanup while another run in
-the group can still use the same environment. Group-scoped runs cannot be
-moved to another group after creation because the workspace and container
-identity are already frozen.
-
-Existing-container definitions attach to an externally managed
-container:
-
-```yaml
-schemaVersion: 1
-name: external-dev
-kind: container
-mode: existing
-engine: docker
-container: devbox
-cwd: "{{cwd}}"
-expectedMounts:
-  - hostPath: "{{cwd}}"
-    containerPath: "{{cwd}}"
-    mode: rw
-```
-
-Agents reference environments with `executionEnvironment:
-dev-container`. Fresh `run` and `init` calls may override the agent
-selection with `--environment <name|path>`. The resolved environment is
-frozen on the run manifest and reset seed; resume and reset do not
-re-read current environment files.
-
-Container execution is limited to subprocess-backed backends and the
-built-in `direct` launcher. Passive runs, Codex websocket/UDS
-transports, and non-direct launchers reject container environments.
+See [execution-environments.md](execution-environments.md) for the
+definition schema (managed and existing modes), workspace and lifecycle
+configuration, engine and mount options, and container runtime behavior.
 
 ## Assignment definition
 
@@ -413,7 +317,7 @@ Task definitions must match:
 - `body`: optional free-form markdown
 - `hooks`: optional task-local `taskTransition` hook entries using the
   same `builtin` / `name` / `path`, `when`, and `with` authoring shape
-  as root `hooks.taskTransition[]`
+  as root `hooks.taskTransition[]` (see [hooks.md](hooks.md))
 
 Assignments may also mix reusable task refs with inline task objects:
 
@@ -539,93 +443,15 @@ coerced, or `${...}` is used on a disabled object or array surface,
 definition loading fails with a config error that names the config path
 and env var.
 
-## Assignment hooks
+## Hooks
 
-Assignments can declare hook arrays under these phases:
+Assignments and individual tasks can declare hooks — deterministic,
+user-authored code that runs at fixed points in a run's lifecycle. The
+`hooks:` block in the frontmatter schema above declares them by phase,
+and `tasks[].hooks[]` declares task-local `taskTransition` hooks.
 
-- `prepare`
-- `beforeAttempt`
-- `afterAttempt`
-- `afterExit`
-- `taskTransition`
-
-Each hook entry must select exactly one source:
-
-```yaml
-hooks:
-  prepare:
-    - builtin: git-worktree
-      with:
-        repo: "{{cwd}}"
-        from: main
-        branch: feature-review
-        path: "{{cwd}}/.worktrees/feature-review"
-    - name: freeze-prepare
-      with:
-        mode: strict
-    - path: ./hooks/seed-context.mts
-```
-
-Resolution rules:
-
-- `builtin` loads one of the first-party hooks shipped by core.
-- `name` resolves from `${AGENT_RUNNER_CONFIG_DIR}/hooks/<name>/hook.(ts|mts|js|mjs)`.
-- `path` resolves relative to the authored `assignment.md`.
-- Raw `.ts` / `.mts` hook files load directly through the runtime's
-  `jiti` loader. Hook authors do not need a separate build step.
-
-Supported `when` filters are intentionally narrow:
-
-- attempt phases (`beforeAttempt`, `afterAttempt`, `afterExit`) support
-  `when.sessionIndex` and `when.attemptIndexInSession`, each as one integer or
-  an array of integers. Session index `0` is the first execution session;
-  attempt-in-session `0` is the first backend attempt within that
-  execution session.
-- `taskTransition` supports:
-  - `when.taskId`
-  - `when.taskIds`
-  - `when.fromStatus`
-  - `when.toStatus`
-  - `when.source`
-
-Task-local `tasks[].hooks[]` are always `taskTransition` hooks scoped to
-the enclosing task. They do not use a nested `taskTransition:` key under
-the task.
-
-Prepare hooks run once during fresh `run` / `init`, before the first
-manifest write. Their resolved descriptor, config, mutated prompts, vars,
-cwd, and hook state are then frozen into the manifest. Resume and reset
-reuse that frozen prepare output instead of re-reading the current hook
-source.
-
-Hook mutation boundaries:
-
-- `prepare` may mutate run config (`cwd`, backend/model/effort,
-  timeout/unrestricted, prompts, locked fields), runtime vars, hook
-  state, note/pin metadata, task patches, and attachments. Backend args
-  are resolved from the final selected backend after prepare changes.
-- non-prepare phases may mutate run config, hook state, note/pin
-  metadata, task patches, and attachments, but not runtime vars.
-- task-transition hooks run transactionally around `task set`,
-  `task append-notes`, `task add`, and the run loop's own task writes.
-  If a task-transition hook rejects, the requested task edit rolls back,
-  but the hook's own accepted side effects such as notes, pins,
-  attachments, or task patches still persist.
-
-Built-in hooks:
-
-- `git-worktree` runs in `prepare` and `beforeAttempt`. It ensures a git
-  worktree, switches the run `cwd` to that path, and in `prepare` also
-  projects `worktree_path` into runtime vars.
-- `command` runs in every phase. `mode: status` treats exit code `0` as
-  success and a non-zero exit code as block/reject. `mode: json`
-  requires exit code `0` and parses a full hook result from stdout;
-  malformed JSON is a runtime error.
-- `require-children-success` runs in `taskTransition`. It guards
-  completion until all direct child runs of the current run are
-  `success`. Scope it with task-local placement or native
-  `when.taskId` / `when.taskIds`, and set `requireAny: true` only when
-  the task must refuse completion until at least one child run exists.
+See [hooks.md](hooks.md) for phases, source resolution, `when` filters,
+built-in hooks, mutation boundaries, and the hook-authoring API.
 
 ## Locked fields
 
@@ -741,37 +567,6 @@ agent-runner show task <name|path>
 
 These surfaces render parsed frontmatter, interpolation hooks, task lists,
 and reusable task definition title/body/hooks for human review.
-
-## Authoring hook modules
-
-First-party and custom hooks share the public authoring surface exported
-from `@kcosr/agent-runner-core/hooks`:
-
-```ts
-import { defineHook, type PrepareHookContext } from "@kcosr/agent-runner-core/hooks";
-
-export default defineHook({
-  name: "freeze-prepare",
-  prepare(ctx: PrepareHookContext) {
-    return {
-      action: "continue",
-      mutate: {
-        state: { prepared: true },
-        note: `prepared in ${ctx.run.cwd}`,
-      },
-    };
-  },
-});
-```
-
-Use `defineHook(...)` for type inference and return one of:
-
-- `action: "continue"` to keep going
-- `action: "reinvoke"` with `followUpPrompt` to rewrite the next prompt
-- `action: "block"` with `reason` to stop the run
-
-Task-transition hooks return `{ accept: true }` or
-`{ accept: false, reason }` instead.
 
 ## Authoring tips
 

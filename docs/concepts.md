@@ -23,10 +23,10 @@ An agent is a markdown file with YAML frontmatter. The frontmatter declares
 separate `backendArgs` for extra argv tokens. The body is the agent's role
 instructions.
 
-Bundled examples live under `agents/`. Custom backend modules live under
-`${AGENT_RUNNER_CONFIG_DIR}/backends/<backend-name>/backend.(ts|mts|js|mjs)`
-and are trusted local code loaded without sandboxing. See
-[agents-and-assignments.md](agents-and-assignments.md) for the full schema.
+Bundled examples live under `agents/`. See
+[agents-and-assignments.md](agents-and-assignments.md) for the full agent
+schema, and [custom-backends.md](custom-backends.md) for authoring a
+backend that is not one of the built-ins.
 
 ## Assignments
 
@@ -44,14 +44,17 @@ See [agents-and-assignments.md](agents-and-assignments.md).
 
 ## Runs
 
-A run is a frozen execution record at:
+A run is a persisted execution record at:
 
 ```text
 ${AGENT_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ```
 
-The canonical record is `run.json`. If the run was created from an assignment
-file, an immutable `assignment-seed.md` snapshot is also stored for audit.
+The canonical record is `run.json`. Some inputs are frozen at creation
+time, while task state, lifecycle status, notes, attempts, and audit
+metadata evolve as the run proceeds. If the run was created from an
+assignment file, an immutable `assignment-seed.md` snapshot is also stored
+for audit.
 
 Lifecycle states:
 
@@ -128,7 +131,8 @@ A backend is the runtime that actually executes the worker:
 - `passive` — no backend invocation; the run is driven externally through
   the task CLI
 
-See [backends.md](backends.md).
+See [backends.md](backends.md), and [custom-backends.md](custom-backends.md)
+for authoring your own.
 
 ## Attachments and dependencies
 
@@ -154,7 +158,6 @@ clients, HTTP + SSE for browser clients, and the bundled web dashboard from
 
 ## Where to go next
 
-- [design.md](design.md) — canonical design, schema, lifecycle, repo layout
 - [cli.md](cli.md) — full command/flag reference
 - [configuration.md](configuration.md) — env vars, state roots, XDG
 - [examples.md](examples.md) — bundled agents and assignments
