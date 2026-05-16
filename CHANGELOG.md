@@ -275,6 +275,9 @@
 - Removed `docs/design.md`, which had become an ~880-line restatement of
   the focused topic docs. Its non-goals list moved to `docs/scope.md`,
   and onboarding now points at `docs/concepts.md` and the topic docs.
+- The README quickstart now copies bundled definitions into the config
+  directory so they resolve by name, and a new section covers
+  standalone-CLI versus local-daemon setup.
 
 ### Fixed
 

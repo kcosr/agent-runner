@@ -74,6 +74,32 @@ Three definitions and one record:
 Start with [docs/concepts.md](docs/concepts.md) for the full mental
 model.
 
+## Standalone CLI or local daemon
+
+agent-runner works as a standalone CLI with no daemon. Commands run
+*embedded* — they read and write run state directly on the filesystem,
+so a single terminal needs nothing else running.
+
+A local daemon is optional. `agent-runner serve` adds the browser
+dashboard and broadcasts run changes in real time, so multiple terminals
+and the web UI stay in sync. The recommended local setup runs one daemon
+and points the CLI at it:
+
+```bash
+export AGENT_RUNNER_LISTEN=ws://127.0.0.1:4773/
+export AGENT_RUNNER_CONNECT=ws://127.0.0.1:4773/
+export AGENT_RUNNER_MAX_CALL_DEPTH=2
+```
+
+`AGENT_RUNNER_LISTEN` is the address `agent-runner serve` binds;
+`AGENT_RUNNER_CONNECT` routes CLI commands through that daemon so its
+projections and the dashboard stay current. `AGENT_RUNNER_MAX_CALL_DEPTH=2`
+raises the recursion cap one level so a run can launch a nested
+`agent-runner` run, which is useful for orchestration. With
+`AGENT_RUNNER_CONNECT` exported, keep `agent-runner serve` running —
+connected commands fail fast if the daemon is unreachable. For pure
+standalone use, leave `AGENT_RUNNER_CONNECT` unset.
+
 ## Scope and direction
 
 agent-runner is an orchestration and state-tracking layer for agent
@@ -117,15 +143,28 @@ npx @kcosr/agent-runner <args>
 
 ## Quickstart
 
-These commands assume you are running from the repository root, where
-`./agents` and `./assignments` are available.
+### Set up your config directory
+
+Named definitions — agents, assignments, and tasks — live in your config
+directory (`~/.config/agent-runner/` by default). Copy the bundled
+definitions there from the repository root so you can refer to them by
+name from any directory:
+
+```bash
+mkdir -p ~/.config/agent-runner
+cp -R agents assignments tasks ~/.config/agent-runner/
+```
+
+`--agent implementer` and `--assignment repo-orientation` now resolve by
+name, and the same directory is where you author your own definitions. A
+`--agent` / `--assignment` value is instead treated as a file path when
+it is absolute or starts with `./` or `../`, so you can still point at a
+definition outside the config directory.
 
 ### Run an agent against an assignment
 
 ```bash
-agent-runner run \
-  --agent ./agents/implementer/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md
+agent-runner run --agent implementer --assignment repo-orientation
 ```
 
 The runner executes the backend, inspects task state after each turn,
@@ -146,9 +185,7 @@ agent-runner task show <run-id> <task-id>
 ### Prepare a run without executing it
 
 ```bash
-agent-runner init \
-  --agent ./agents/implementer/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md
+agent-runner init --agent implementer --assignment repo-orientation
 
 agent-runner run ready <run-id>
 agent-runner run --resume-run <run-id>
@@ -206,12 +243,6 @@ row links to the section that documents it:
 | Attachments | File handoff between runs | [docs/attachments.md](docs/attachments.md) |
 | Dependencies | Gate a run until upstream runs succeed | [docs/dependencies.md](docs/dependencies.md) |
 | Connected mode | Route CLI commands through the daemon, optionally over SSH | [docs/daemon.md (CLI clients)](docs/daemon.md#cli-clients-embedded-vs-connected) |
-
-CLI commands either run **embedded** against shared filesystem state,
-or route through the daemon with `--connect <ws-url>` (or
-`AGENT_RUNNER_CONNECT`). Connected mode lets the daemon broadcast
-changes in real time, which is how the browser UI stays live as
-commands mutate runs.
 
 ## Command index
 
@@ -310,8 +341,7 @@ The rest are focused topic pages:
 | `AGENT_RUNNER_MAX_CALL_DEPTH` | Recursion cap (default `1`) |
 
 See [docs/configuration.md](docs/configuration.md) for XDG resolution
-and full details, including the dry-run-first migration script for
-local data created before the Agent Runner rename.
+and full details.
 
 ## Bundled definitions
 
