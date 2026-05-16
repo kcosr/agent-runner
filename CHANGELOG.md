@@ -281,6 +281,8 @@
 
 ### Fixed
 
+- The web dashboard sidebar brand mark now reads `ar`; it still showed
+  `tr` from the former TaskRunner name.
 - Codex backend sessions now inject task-runner lineage and recursion
   guard env into thread config for shell tools, so websocket and UDS
   sessions preserve lineage without forwarding arbitrary process or
