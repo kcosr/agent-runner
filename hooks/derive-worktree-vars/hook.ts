@@ -1,5 +1,7 @@
 import { basename, dirname, resolve } from "node:path";
 
+// Keep this hook free of agent-runner package imports: users copy bundled
+// config into ~/.config/agent-runner before the package is published.
 interface PrepareHookContext {
   vars: Record<string, unknown>;
   run: {
