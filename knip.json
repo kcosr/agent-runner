@@ -8,9 +8,9 @@
         "scripts/copy-web-assets.mjs",
         "scripts/migrate-agent-seeds.mjs",
         "scripts/task-list-markdown.mjs",
-        "assignments/plan-feature/hooks/derive-worktree-vars.ts"
+        "hooks/derive-worktree-vars/hook.ts"
       ],
-      "project": ["scripts/**/*.mjs", "test/**/*.mjs", "assignments/**/*.ts"]
+      "project": ["scripts/**/*.mjs", "test/**/*.mjs", "hooks/**/*.ts"]
     },
     "apps/cli": {
       "project": ["src/**/*.ts"]

@@ -48,7 +48,7 @@ ${XDG_CONFIG_HOME}/agent-runner
 ~/.config/agent-runner
 ```
 
-Contains named agent and assignment definitions:
+Contains named definitions and trusted extension code:
 
 ```text
 ${AGENT_RUNNER_CONFIG_DIR}/

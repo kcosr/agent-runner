@@ -1822,7 +1822,7 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
     assert.deepEqual(loaded.config.vars.worktree_base_ref?.sources, ["cli", "web"]);
     assert.equal(loaded.config.vars.worktree_base_ref?.required, false);
     assert.equal(loaded.config.vars.worktree_base_ref?.default, "origin/main");
-    assert.equal(loaded.config.hooks.prepare[0]?.path, "hooks/derive-worktree-vars.ts");
+    assert.equal(loaded.config.hooks.prepare[0]?.name, "derive-worktree-vars");
     assert.match(loaded.instructions, /`{{cwd}}`/);
     assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
     assert.match(loaded.config.callerInstructions ?? "", /--var worktree_slug=<git-safe-slug>/);

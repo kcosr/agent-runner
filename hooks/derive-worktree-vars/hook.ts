@@ -1,5 +1,13 @@
 import { basename, dirname, resolve } from "node:path";
-import { type PrepareHookContext, defineHook } from "../../../packages/core/src/hooks.ts";
+
+// Keep this hook free of agent-runner package imports: users copy bundled
+// config into ~/.config/agent-runner before the package is published.
+interface PrepareHookContext {
+  vars: Record<string, unknown>;
+  run: {
+    cwd: string;
+  };
+}
 
 const WORKTREE_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const WORKTREE_BASE_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
@@ -26,7 +34,7 @@ function assertWorktreeBaseRef(ctx: PrepareHookContext): void {
   }
 }
 
-export default defineHook({
+export default {
   name: "derive-worktree-vars",
   prepare(ctx: PrepareHookContext) {
     const worktreeSlug = readWorktreeSlug(ctx);
@@ -44,4 +52,4 @@ export default defineHook({
       },
     };
   },
-});
+};
