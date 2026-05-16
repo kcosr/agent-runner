@@ -23,7 +23,7 @@ vars:
       receive a shell-safe ref value.
 hooks:
   prepare:
-    - path: hooks/derive-worktree-vars.ts
+    - name: derive-worktree-vars
 maxRetries: 4
 callerInstructions: |
   This assignment turns a free-form feature description into an

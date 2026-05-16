@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -155,6 +156,7 @@ const BUILTIN_PLAN_IMPLEMENT_FEATURE_PATH = resolvePath(
 const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
   new URL("../assignments/plan-feature/template.md", import.meta.url).pathname,
 );
+const BUNDLED_CONFIG_ROOTS = ["agents", "assignments", "tasks", "hooks"];
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "agent-runner-run-"));
@@ -241,6 +243,12 @@ function initGitRepo(baseDir) {
   execFileSync("git", ["-C", repoDir, "add", "README.md"], { encoding: "utf8", env });
   execFileSync("git", ["-C", repoDir, "commit", "-m", "seed"], { encoding: "utf8", env });
   return repoDir;
+}
+
+function copyBundledConfig(targetDir) {
+  for (const root of BUNDLED_CONFIG_ROOTS) {
+    cpSync(join(REPO_ROOT, root), join(targetDir, root), { recursive: true });
+  }
 }
 
 function writeAgentAndAssignment(baseDir) {
@@ -1653,6 +1661,41 @@ Work.
   });
 
   assert.equal(resumedCwd, join(dir, "prepared"));
+});
+
+test("copied bundled plan-feature config loads its named prepare hook without config-local npm install", async () => {
+  const dir = tempDir();
+  copyBundledConfig(dir);
+  const repoDir = join(dir, "target-repo");
+  mkdirSync(repoDir, { recursive: true });
+
+  const { outcome } = await runWithMock(
+    dir,
+    async () => {
+      throw new Error("backend should not be invoked during init");
+    },
+    {},
+    {
+      agentName: "planner",
+      assignmentName: "plan-feature",
+      backendId: "codex",
+      callerCwd: repoDir,
+      cliVars: {
+        worktree_slug: "copied-hook",
+      },
+      initialize: true,
+    },
+  );
+
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(outcome.manifest.status, "initialized");
+  assert.ok(
+    outcome.manifest.resolvedHooks.some(
+      (descriptor) => descriptor.source.name === "derive-worktree-vars",
+    ),
+  );
+  assert.equal(outcome.manifest.runtimeVars.repo_root, repoDir);
+  assert.equal(outcome.manifest.runtimeVars.worktree_path, join(dir, "target-repo-copied-hook"));
 });
 
 test("command builtin json prepare hooks can mutate note, pin, attachments, vars, and state", async () => {

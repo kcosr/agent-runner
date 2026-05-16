@@ -291,6 +291,9 @@
 
 ### Fixed
 
+- Bundled `plan-feature` now uses a copied named hook instead of an
+  assignment-local repo-relative hook import, so the quickstart
+  `~/.config/agent-runner` copy works before package publication.
 - The web dashboard sidebar brand mark now reads `ar`; it still showed
   `tr` from the former TaskRunner name.
 - Codex backend sessions now inject task-runner lineage and recursion

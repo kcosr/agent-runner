@@ -163,14 +163,15 @@ npx @kcosr/agent-runner <args>
 
 ### Set up your config directory
 
-Named definitions — agents, assignments, and tasks — live in your config
-directory (`~/.config/agent-runner/` by default). Copy the bundled
-definitions there from the repository root so you can refer to them by
-name from any directory:
+Named definitions and trusted extension code — agents, assignments,
+tasks, and hooks — live in your config directory
+(`~/.config/agent-runner/` by default). Copy the bundled definitions
+there from the repository root so you can refer to them by name from any
+directory:
 
 ```bash
 mkdir -p ~/.config/agent-runner
-cp -R agents assignments tasks ~/.config/agent-runner/
+cp -R agents assignments tasks hooks ~/.config/agent-runner/
 ```
 
 `--agent implementer` and `--assignment repo-orientation` now resolve by

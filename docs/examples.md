@@ -1,9 +1,9 @@
 # Examples
 
-This repo ships a small library of reusable agents, assignments, and
-shared task definitions under `agents/`, `assignments/`, and `tasks/`.
-Every agent and assignment is a plain markdown file you can copy, read,
-or pass directly via `--agent` / `--assignment`.
+This repo ships a small library of reusable agents, assignments, shared
+task definitions, and named hooks under `agents/`, `assignments/`,
+`tasks/`, and `hooks/`. Every agent and assignment is a plain markdown
+file you can copy, read, or pass directly via `--agent` / `--assignment`.
 
 These definitions are shaped to this project's own development workflow,
 and several perform real side effects — creating git worktrees, pushing
