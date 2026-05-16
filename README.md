@@ -450,3 +450,12 @@ agent-runner today.
   Child definitions could override individual fields, append tasks,
   or redact inherited locks, avoiding today's copy-paste when you
   want a family of related agents/assignments that share a base.
+
+## Acknowledgements
+
+agent-runner referenced these projects during early design and for
+style bootstrapping:
+
+- [earendil-works/pi](https://github.com/earendil-works/pi)
+- [pingdotgg/t3code](https://github.com/pingdotgg/t3code)
+- [openai/codex](https://github.com/openai/codex)
