@@ -161,6 +161,13 @@ name, and the same directory is where you author your own definitions. A
 it is absolute or starts with `./` or `../`, so you can still point at a
 definition outside the config directory.
 
+The bundled definitions are working examples shaped to this project's
+own development workflow — several assignments perform real side effects
+such as creating git worktrees, pushing branches, opening pull requests,
+or merging after approval. Read what an agent or assignment does before
+you run it, and treat the bundled set as a starting point for
+definitions of your own rather than a required path.
+
 ### Run an agent against an assignment
 
 ```bash

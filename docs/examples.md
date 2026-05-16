@@ -5,6 +5,12 @@ shared task definitions under `agents/`, `assignments/`, and `tasks/`.
 Every agent and assignment is a plain markdown file you can copy, read,
 or pass directly via `--agent` / `--assignment`.
 
+These definitions are shaped to this project's own development workflow,
+and several perform real side effects — creating git worktrees, pushing
+branches, opening pull requests, merging after approval. Read an agent
+or assignment before you run it, and copy it as a starting point for a
+definition of your own rather than assuming it matches your workflow.
+
 Bundled agents use built-in backends. Agents can also select a custom
 backend by name and provide backend-owned `backendConfig.<name>` plus
 separate `backendArgs.<name>.extraArgs` tokens. Custom backend modules
