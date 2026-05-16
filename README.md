@@ -18,9 +18,13 @@ notes, and an audit trail of how the run got there. When a run ends you
 get a structured pass/fail result and [exit code](#exit-codes), not a
 chat log to re-read.
 
+Want to keep working with the agent outside agent-runner? Copy the
+backend session id from the run's detail pane in the dashboard and
+resume the conversation directly in the underlying tool — Claude,
+Codex, and the other backends keep their own native sessions.
+
 An optional local daemon serves a web dashboard for live run state —
-the runs board, run detail, and a mobile layout. Click a screenshot for
-the full image.
+the runs board, run detail, and a mobile layout.
 
 | Board view | List view | Mobile |
 |:--:|:--:|:--:|
