@@ -44,14 +44,17 @@ See [agents-and-assignments.md](agents-and-assignments.md).
 
 ## Runs
 
-A run is a frozen execution record at:
+A run is a persisted execution record at:
 
 ```text
 ${AGENT_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ```
 
-The canonical record is `run.json`. If the run was created from an assignment
-file, an immutable `assignment-seed.md` snapshot is also stored for audit.
+The canonical record is `run.json`. Some inputs are frozen at creation
+time, while task state, lifecycle status, notes, attempts, and audit
+metadata evolve as the run proceeds. If the run was created from an
+assignment file, an immutable `assignment-seed.md` snapshot is also stored
+for audit.
 
 Lifecycle states:
 

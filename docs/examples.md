@@ -293,5 +293,5 @@ not agent-runner definitions themselves:
 - `agent-runner-seed-plan-implement-run` — seeds a `plan-implement-feature` run
 
 Copy them into your coding agent's skills directory (for example
-`.agents/skills/`) to use them. Like the bundled agents and assignments,
+`~/.agents/skills/`) to use them. Like the bundled agents and assignments,
 they are examples — read and adapt them to your own setup.

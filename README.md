@@ -74,7 +74,7 @@ transitions — see [Beyond the basics](#beyond-the-basics).
 
 ## How it works
 
-Three definitions and one record:
+Two definitions and one record:
 
 - An **agent** supplies the backend, model, and role instructions.
 - An **assignment** supplies a reusable task list and work context.
@@ -102,6 +102,12 @@ export AGENT_RUNNER_LISTEN=ws://127.0.0.1:4773/
 export AGENT_RUNNER_CONNECT=ws://127.0.0.1:4773/
 export AGENT_RUNNER_MAX_CALL_DEPTH=2
 ```
+
+For persistence, put those exports in the startup file for the shell or
+service that launches agent-runner: `~/.bashrc` for interactive Bash,
+`~/.zshrc` for Zsh, `~/.config/fish/config.fish` for Fish, or a systemd
+user service / environment file when `agent-runner serve` is supervised.
+See [docs/configuration.md](docs/configuration.md#where-to-put-env-vars).
 
 `AGENT_RUNNER_LISTEN` is the address `agent-runner serve` binds;
 `AGENT_RUNNER_CONNECT` routes CLI commands through that daemon so its
@@ -183,15 +189,27 @@ definitions of your own rather than a required path.
 The repository also ships skills under `skills/` for the coding agent
 that drives agent-runner — they seed `plan-feature` and
 `plan-implement-feature` runs. Copy them into your coding agent's skills
-directory (for example `.agents/skills/`) to make them available:
+directory (for example `~/.agents/skills/`) to make them available:
 
 ```bash
-mkdir -p .agents/skills
-cp -R skills/* .agents/skills/
+mkdir -p ~/.agents/skills
+cp -R skills/* ~/.agents/skills/
 ```
 
 The same caveat applies — read a skill before using it and adapt it to
 your own setup.
+
+### Smoke-check without a backend
+
+```bash
+agent-runner init --backend passive --assignment test --name smoke
+agent-runner run brief <run-id>
+agent-runner task list <run-id>
+```
+
+This does not invoke Claude, Codex, or any other backend. `init` prints
+the new run id; use it in the follow-up commands to confirm definition
+loading, run creation, brief rendering, and task-state reads.
 
 ### Run an agent against an assignment
 
@@ -199,9 +217,11 @@ your own setup.
 agent-runner run --agent implementer --assignment repo-orientation
 ```
 
-The runner executes the backend, inspects task state after each turn,
-retries incomplete work, and exits with a [status code](#exit-codes)
-reflecting the outcome.
+This requires the selected backend from `agents/implementer/agent.md` to
+be installed and authenticated. The runner executes that backend,
+inspects task state after each turn, retries incomplete work, and exits
+with a [status code](#exit-codes) reflecting the outcome. The text output
+prints the new run id; use that id with the inspection commands below.
 
 ### Inspect a run
 
@@ -306,7 +326,7 @@ row links to the section that documents it:
 | `run reconfigure` | Patch vars/message on an unarchived initialized run |
 | `run queue-message\|queued-messages\|remove-queued-message` | Manage queued resume messages for live runs |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
-| `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
+| `run schedule`, `run schedule enable\|disable\|clear` | Schedule mutations |
 | `run set-name` | Set/clear persisted display name |
 | `run set-note\|clear-note` | Set/clear persisted human note metadata |
 | `run pin\|unpin` | Set/clear persisted pin metadata |
@@ -329,6 +349,7 @@ The rest are focused topic pages:
 | [docs/hooks.md](docs/hooks.md) | Hook phases, built-in hooks, the authoring API |
 | [docs/tasks.md](docs/tasks.md) | Task model, status values, task CLI, mutation rules |
 | [docs/runs.md](docs/runs.md) | Workspace layout, manifest, lifecycle, capabilities |
+| [docs/scope.md](docs/scope.md) | Product scope, non-goals, and feature triage stance |
 | [docs/variables.md](docs/variables.md) | Typed vars, resolution, interpolation, redaction |
 | [docs/resume.md](docs/resume.md) | Resume rules, ready-start, retry nudges |
 | [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
@@ -359,6 +380,7 @@ The rest are focused topic pages:
 |----------|--------|
 | `AGENT_RUNNER_CONFIG_DIR` | Agent/assignment definitions root |
 | `AGENT_RUNNER_STATE_DIR` | Run workspaces root |
+| `AGENT_RUNNER_CMD` | CLI command string injected into generated worker instructions and child-run templates |
 | `AGENT_RUNNER_CONNECT` | Route client commands through a daemon |
 | `AGENT_RUNNER_CONNECT_HOST` | SSH host used to create an invocation-scoped local forward for connected commands |
 | `AGENT_RUNNER_CONNECT_LOCAL_PORT` | Loopback port for the `AGENT_RUNNER_CONNECT_HOST` SSH forward |

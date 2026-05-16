@@ -211,9 +211,9 @@ resume and reset do not re-read current environment files.
 agent-runner list environments
 agent-runner show environment <name|path>
 
-agent-runner run environment status <id|path>
-agent-runner run environment validate <id|path>
-agent-runner run environment cleanup <id|path>
+agent-runner run environment status <id>
+agent-runner run environment validate <id>
+agent-runner run environment cleanup <id>
 ```
 
 `status` prints the frozen environment state from the run manifest;

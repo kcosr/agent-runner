@@ -105,7 +105,7 @@ export default backend;
 ## Resumable sessions
 
 For resumable backends, return a stable non-null `sessionId` from
-`invoke()`. Task-runner persists it as the run's backend session id and
+`invoke()`. agent-runner persists it as the run's backend session id and
 passes it back as `ctx.resumeSessionId` on resume. Implement
 `validateSessionId(ctx)` when the backend can cheaply verify imported
 `--backend-session-id` values before the first invocation. Set
@@ -116,7 +116,7 @@ self-validating enough to import safely.
 
 Backends can opt into backend-owned session history import by implementing
 both `resolveSessionHistorySource(ctx)` and `readSessionHistory(ctx)`.
-Task-runner calls them for `--backend-session-id` bootstrap import and
+agent-runner calls them for `--backend-session-id` bootstrap import and
 before `agent-runner run --resume-run <id>` allocates a new session or
 attempt.
 
