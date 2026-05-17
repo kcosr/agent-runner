@@ -10,6 +10,25 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (() => {
+        try {
+          const storedPreferences = window.localStorage.getItem(
+            "agent-runner:web:dashboard-preferences",
+          );
+          const themeMode = storedPreferences ? JSON.parse(storedPreferences)?.themeMode : "auto";
+
+          if (themeMode === "light" || themeMode === "dark") {
+            document.documentElement.dataset.theme = themeMode;
+            return;
+          }
+
+          delete document.documentElement.dataset.theme;
+        } catch {
+          delete document.documentElement.dataset.theme;
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

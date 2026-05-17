@@ -10814,6 +10814,26 @@ describe("web app", () => {
 
   it("defines forced theme selectors alongside automatic dark mode", () => {
     const css = readFileSync(join(process.cwd(), "src", "run-dashboard.css"), "utf8");
+    const normalizeDeclarations = (declarations: string | undefined) =>
+      declarations
+        ?.split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean) ?? [];
+    const forcedDarkRootDeclarations = /:root\[data-theme="dark"\]\s*\{([\s\S]*?)\n\}/.exec(
+      css,
+    )?.[1];
+    const automaticDarkRootDeclarations =
+      /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*:root:not\(\[data-theme="light"\]\)\s*\{([\s\S]*?)\n\s*\}\s*\}/.exec(
+        css,
+      )?.[1];
+    const forcedDarkScrollbarDeclarations =
+      /:root\[data-theme="dark"\] ::-webkit-scrollbar-thumb,\s*:root\[data-theme="dark"\]::-webkit-scrollbar-thumb\s*\{([\s\S]*?)\n\s*\}/.exec(
+        css,
+      )?.[1];
+    const automaticDarkScrollbarDeclarations =
+      /:root:not\(\[data-theme="light"\]\) ::-webkit-scrollbar-thumb,\s*:root:not\(\[data-theme="light"\]\)::-webkit-scrollbar-thumb\s*\{([\s\S]*?)\n\s*\}/.exec(
+        css,
+      )?.[1];
 
     expect(css).toContain(':root[data-theme="dark"]');
     expect(css).toContain(':root:not([data-theme="light"])');
@@ -10822,6 +10842,23 @@ describe("web app", () => {
     );
     expect(css).toContain(':root[data-theme="dark"]::-webkit-scrollbar-thumb');
     expect(css).toContain(':root:not([data-theme="light"])::-webkit-scrollbar-thumb');
+    expect(normalizeDeclarations(forcedDarkRootDeclarations)).toEqual(
+      normalizeDeclarations(automaticDarkRootDeclarations),
+    );
+    expect(normalizeDeclarations(forcedDarkScrollbarDeclarations)).toEqual(
+      normalizeDeclarations(automaticDarkScrollbarDeclarations),
+    );
+  });
+
+  it("bootstraps a stored forced theme before the app module loads", () => {
+    const indexHtml = readFileSync(join(process.cwd(), "index.html"), "utf8");
+    const bootstrapIndex = indexHtml.indexOf("agent-runner:web:dashboard-preferences");
+    const appModuleIndex = indexHtml.indexOf('<script type="module" src="/src/main.tsx"></script>');
+
+    expect(bootstrapIndex).toBeGreaterThan(-1);
+    expect(bootstrapIndex).toBeLessThan(appModuleIndex);
+    expect(indexHtml).toContain("document.documentElement.dataset.theme = themeMode");
+    expect(indexHtml).toContain("delete document.documentElement.dataset.theme");
   });
 
   it("keeps the run-section tab strip tall enough to render clipped labels", () => {
