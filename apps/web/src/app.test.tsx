@@ -19,6 +19,7 @@ import { App } from "./app.js";
 import { DAEMON_TOKEN_STORAGE_KEY } from "./lib/daemon-token.js";
 import { queryClient, runQueryKeys } from "./lib/query.js";
 import { runBelongsInListCache } from "./lib/run-list-cache.js";
+import { PREFERENCES_STORAGE_KEY } from "./lib/settings.js";
 import { router } from "./router.js";
 import attachmentMermaidMarkdown from "./test/fixtures/attachment-mermaid.md?raw";
 
@@ -10834,6 +10835,14 @@ describe("web app", () => {
       /:root:not\(\[data-theme="light"\]\) ::-webkit-scrollbar-thumb,\s*:root:not\(\[data-theme="light"\]\)::-webkit-scrollbar-thumb\s*\{([\s\S]*?)\n\s*\}/.exec(
         css,
       )?.[1];
+    const forcedDarkScrollbarHoverDeclarations =
+      /:root\[data-theme="dark"\] ::-webkit-scrollbar-thumb:hover,\s*:root\[data-theme="dark"\]::-webkit-scrollbar-thumb:hover\s*\{([\s\S]*?)\n\s*\}/.exec(
+        css,
+      )?.[1];
+    const automaticDarkScrollbarHoverDeclarations =
+      /:root:not\(\[data-theme="light"\]\) ::-webkit-scrollbar-thumb:hover,\s*:root:not\(\[data-theme="light"\]\)::-webkit-scrollbar-thumb:hover\s*\{([\s\S]*?)\n\s*\}/.exec(
+        css,
+      )?.[1];
 
     expect(css).toContain(':root[data-theme="dark"]');
     expect(css).toContain(':root:not([data-theme="light"])');
@@ -10842,23 +10851,42 @@ describe("web app", () => {
     );
     expect(css).toContain(':root[data-theme="dark"]::-webkit-scrollbar-thumb');
     expect(css).toContain(':root:not([data-theme="light"])::-webkit-scrollbar-thumb');
+    expect(forcedDarkRootDeclarations).toBeDefined();
+    expect(automaticDarkRootDeclarations).toBeDefined();
+    expect(forcedDarkScrollbarDeclarations).toBeDefined();
+    expect(automaticDarkScrollbarDeclarations).toBeDefined();
+    expect(forcedDarkScrollbarHoverDeclarations).toBeDefined();
+    expect(automaticDarkScrollbarHoverDeclarations).toBeDefined();
     expect(normalizeDeclarations(forcedDarkRootDeclarations)).toEqual(
       normalizeDeclarations(automaticDarkRootDeclarations),
     );
     expect(normalizeDeclarations(forcedDarkScrollbarDeclarations)).toEqual(
       normalizeDeclarations(automaticDarkScrollbarDeclarations),
     );
+    expect(normalizeDeclarations(forcedDarkScrollbarHoverDeclarations)).toEqual(
+      normalizeDeclarations(automaticDarkScrollbarHoverDeclarations),
+    );
   });
 
   it("bootstraps a stored forced theme before the app module loads", () => {
     const indexHtml = readFileSync(join(process.cwd(), "index.html"), "utf8");
-    const bootstrapIndex = indexHtml.indexOf("agent-runner:web:dashboard-preferences");
+    const scriptMatches = [
+      ...indexHtml.matchAll(/<script(?<attributes>[^>]*)>(?<body>[\s\S]*?)<\/script>/g),
+    ];
+    const bootstrapScript = scriptMatches.find((match) =>
+      (match.groups?.body ?? "").includes(PREFERENCES_STORAGE_KEY),
+    );
+    const bootstrapAttributes = bootstrapScript?.groups?.attributes ?? "";
+    const bootstrapBody = bootstrapScript?.groups?.body ?? "";
+    const bootstrapIndex = bootstrapScript?.index ?? -1;
     const appModuleIndex = indexHtml.indexOf('<script type="module" src="/src/main.tsx"></script>');
 
-    expect(bootstrapIndex).toBeGreaterThan(-1);
+    expect(bootstrapScript).toBeDefined();
+    expect(bootstrapAttributes).not.toMatch(/\b(?:async|defer)\b/);
+    expect(bootstrapAttributes).not.toMatch(/\btype\s*=\s*["']module["']/);
     expect(bootstrapIndex).toBeLessThan(appModuleIndex);
-    expect(indexHtml).toContain("document.documentElement.dataset.theme = themeMode");
-    expect(indexHtml).toContain("delete document.documentElement.dataset.theme");
+    expect(bootstrapBody).toContain("document.documentElement.dataset.theme = themeMode");
+    expect(bootstrapBody).toContain("delete document.documentElement.dataset.theme");
   });
 
   it("keeps the run-section tab strip tall enough to render clipped labels", () => {

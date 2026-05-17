@@ -13,6 +13,7 @@
     <script>
       (() => {
         try {
+          // Keep this key in sync with PREFERENCES_STORAGE_KEY in src/lib/settings.tsx.
           const storedPreferences = window.localStorage.getItem(
             "agent-runner:web:dashboard-preferences",
           );
