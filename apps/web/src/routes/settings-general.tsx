@@ -10,13 +10,14 @@ import {
   type DashboardPreferenceKey,
   type DashboardSortDirection,
   type DashboardSortField,
+  type DashboardThemeMode,
   useDaemonAuthToken,
   useDashboardPreferences,
 } from "../lib/settings.js";
 
 type TogglePreferenceKey = Exclude<
   DashboardPreferenceKey,
-  "sortDirection" | "sortField" | "structuredFilters"
+  "sortDirection" | "sortField" | "structuredFilters" | "themeMode"
 >;
 
 interface PreferenceRowDefinition {
@@ -60,6 +61,12 @@ const SORT_DIRECTION_OPTIONS: { label: string; value: DashboardSortDirection }[]
   { label: "Oldest first", value: "asc" },
 ];
 
+const THEME_MODE_OPTIONS: { label: string; value: DashboardThemeMode }[] = [
+  { label: "Auto", value: "auto" },
+  { label: "Light", value: "light" },
+  { label: "Dark", value: "dark" },
+];
+
 const DISPLAY_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
   {
     key: "visibleFocusIndicators",
@@ -83,7 +90,8 @@ export function SettingsGeneralRoute() {
   const allDefaults =
     preferenceRows.every(({ key }) => preferences[key] === DEFAULT_DASHBOARD_PREFERENCES[key]) &&
     preferences.sortField === DEFAULT_DASHBOARD_PREFERENCES.sortField &&
-    preferences.sortDirection === DEFAULT_DASHBOARD_PREFERENCES.sortDirection;
+    preferences.sortDirection === DEFAULT_DASHBOARD_PREFERENCES.sortDirection &&
+    preferences.themeMode === DEFAULT_DASHBOARD_PREFERENCES.themeMode;
 
   function renderPreferenceRow({ description, key, title }: PreferenceRowDefinition) {
     const checked = preferences[key];
@@ -225,6 +233,33 @@ export function SettingsGeneralRoute() {
         description="Persisted dashboard display preferences that apply across the app shell."
         title="Display preferences"
       >
+        <SettingsRow
+          action={
+            <SettingsResetButton
+              disabled={preferences.themeMode === DEFAULT_DASHBOARD_PREFERENCES.themeMode}
+              onClick={() => resetPreference("themeMode")}
+              settingLabel="Theme mode"
+            />
+          }
+          control={
+            <select
+              aria-label="Theme mode"
+              className="settings-select"
+              onChange={(event) =>
+                updatePreferences({ themeMode: event.target.value as DashboardThemeMode })
+              }
+              value={preferences.themeMode}
+            >
+              {THEME_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          }
+          description="Auto follows the operating system or browser color-scheme preference."
+          title="Theme mode"
+        />
         {DISPLAY_PREFERENCE_ROWS.map(renderPreferenceRow)}
       </SettingsSection>
     </SettingsPage>

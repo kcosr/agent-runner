@@ -159,6 +159,9 @@
 
 ### Added
 
+- Added a web dashboard theme mode setting with Auto, Light, and Dark options
+  that persists per browser from Settings -> General.
+  ([#154](https://github.com/kcosr/agent-runner/pull/154))
 - Added skills under `skills/`
   (`agent-runner-seed-plan-run`, `agent-runner-seed-plan-implement-run`)
   for the coding agent that drives agent-runner, with copy instructions

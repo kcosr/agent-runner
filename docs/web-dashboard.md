@@ -100,9 +100,10 @@ across reloads, and the repo/agent/backend badges plus the run-group
 chip on run cards act as shortcuts that apply, replace, or clear those
 exact-match filters.
 
-Dashboard preferences also persist `showPinnedOnly`. The toolbar and
-Settings > General expose the same toggle, and both stay synchronized
-through the shared preferences store.
+Dashboard preferences also persist `showPinnedOnly` and theme mode.
+The toolbar and Settings > General expose the pinned-only toggle, and
+Settings > General exposes the Auto/Light/Dark theme mode setting.
+These controls stay synchronized through the shared preferences store.
 
 ### Board
 
@@ -412,6 +413,7 @@ Preferences are persisted to `localStorage` and include:
 - Show pinned runs only.
 - Structured filters (repo, agent, backend, run group).
 - Visible focus indicators.
+- Theme mode (`auto`, `light`, or `dark`).
 - Detail drawer width.
 
 ## Development
