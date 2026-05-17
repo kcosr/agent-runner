@@ -76,6 +76,15 @@ function SettingsProbe() {
       >
         Enable visible focus indicators
       </button>
+      <button onClick={() => updatePreferences({ themeMode: "dark" })} type="button">
+        Enable dark theme
+      </button>
+      <button onClick={() => updatePreferences({ themeMode: "light" })} type="button">
+        Enable light theme
+      </button>
+      <button onClick={() => updatePreferences({ themeMode: "auto" })} type="button">
+        Enable auto theme
+      </button>
       <button
         onClick={() =>
           updateViewState({
@@ -111,6 +120,9 @@ function SettingsProbe() {
       </button>
       <button onClick={() => resetPreference("visibleFocusIndicators")} type="button">
         Reset focus indicators
+      </button>
+      <button onClick={() => resetPreference("themeMode")} type="button">
+        Reset theme
       </button>
       <button onClick={() => resetPreferences()} type="button">
         Reset all preferences
@@ -149,10 +161,12 @@ function renderSettingsProbe() {
 describe("DashboardSettingsProvider", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    delete document.documentElement.dataset.theme;
   });
 
   afterEach(() => {
     cleanup();
+    delete document.documentElement.dataset.theme;
   });
 
   it("boots with default persisted preferences and default collapsed-column view state", () => {
@@ -170,6 +184,7 @@ describe("DashboardSettingsProvider", () => {
         sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: false,
+        themeMode: "auto",
         structuredFilters: {
           repo: null,
           agent: null,
@@ -235,6 +250,7 @@ describe("DashboardSettingsProvider", () => {
         sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: true,
+        themeMode: "auto",
         structuredFilters: {
           repo: null,
           agent: null,
@@ -387,6 +403,45 @@ describe("DashboardSettingsProvider", () => {
     expect(screen.getByTestId("preferences")).toHaveTextContent('"visibleFocusIndicators":false');
   });
 
+  it("hydrates, applies, and resets the persisted theme mode", () => {
+    window.localStorage.setItem(
+      "agent-runner:web:dashboard-preferences",
+      JSON.stringify({ themeMode: "dark" }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"themeMode":"dark"');
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable light theme" }));
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"themeMode":"light"');
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable auto theme" }));
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"themeMode":"auto"');
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable dark theme" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset theme" }));
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"themeMode":"auto"');
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+  });
+
+  it("falls back to Auto for malformed stored theme mode values", () => {
+    window.localStorage.setItem(
+      "agent-runner:web:dashboard-preferences",
+      JSON.stringify({ themeMode: "system" }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"themeMode":"auto"');
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+  });
+
   it("hydrates the persisted audit sort preference", () => {
     window.localStorage.setItem(
       "agent-runner:web:dashboard-preferences",
@@ -422,6 +477,7 @@ describe("DashboardSettingsProvider", () => {
         sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: true,
+        themeMode: "auto",
         structuredFilters: {
           repo: null,
           agent: null,
@@ -464,6 +520,7 @@ describe("DashboardSettingsProvider", () => {
         sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: false,
+        themeMode: "auto",
         structuredFilters: {
           repo: null,
           agent: null,
@@ -492,6 +549,7 @@ describe("DashboardSettingsProvider", () => {
         sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: false,
+        themeMode: "auto",
         structuredFilters: {
           repo: null,
           agent: null,

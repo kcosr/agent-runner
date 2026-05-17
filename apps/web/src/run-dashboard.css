@@ -1,5 +1,5 @@
 /* ─── tokens ──────────────────────────────────────────
-   Light by default; .dark overrides via prefers-color-scheme.
+   Light by default; Auto follows prefers-color-scheme.
    Mostly neutrals; color is reserved for status badges,
    primary action, and focus ring. No decorative color.
 ─────────────────────────────────────────────────────── */
@@ -45,8 +45,34 @@
   --mono: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
+  --card: #0d0d0d;
+  --card-foreground: #f5f5f5;
+  --muted: rgba(255, 255, 255, 0.04);
+  --muted-foreground: #9b9b9b;
+  --accent: rgba(255, 255, 255, 0.04);
+  --secondary: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --input: rgba(255, 255, 255, 0.08);
+  --primary: oklch(0.588 0.217 264);
+  --ring: oklch(0.588 0.217 264);
+
+  --info-foreground: #93c5fd;
+  --success-foreground: #6ee7b7;
+  --warning-foreground: #fcd34d;
+  --destructive-foreground: #fca5a5;
+
+  --status-tint-alpha: 0.16;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.02);
+  --shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.5);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --background: #0a0a0a;
     --foreground: #f5f5f5;
@@ -149,12 +175,22 @@ pre {
   background: rgba(0, 0, 0, 0.25);
 }
 @media (prefers-color-scheme: dark) {
-  ::-webkit-scrollbar-thumb {
+  :root:not([data-theme="light"]) ::-webkit-scrollbar-thumb,
+  :root:not([data-theme="light"])::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.1);
   }
-  ::-webkit-scrollbar-thumb:hover {
+  :root:not([data-theme="light"]) ::-webkit-scrollbar-thumb:hover,
+  :root:not([data-theme="light"])::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.18);
   }
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb,
+:root[data-theme="dark"]::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover,
+:root[data-theme="dark"]::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* ─── shell ──────────────────────────────────────────── */

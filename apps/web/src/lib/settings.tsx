@@ -15,6 +15,8 @@ import {
 
 export type { DashboardSortDirection, DashboardSortField };
 
+export type DashboardThemeMode = "auto" | "light" | "dark";
+
 export interface DashboardPreferences {
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
@@ -26,6 +28,7 @@ export interface DashboardPreferences {
   sortDirection: DashboardSortDirection;
   auditNewestFirst: boolean;
   visibleFocusIndicators: boolean;
+  themeMode: DashboardThemeMode;
   structuredFilters: DashboardStructuredFilters;
 }
 
@@ -91,6 +94,7 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   sortDirection: "desc",
   auditNewestFirst: false,
   visibleFocusIndicators: false,
+  themeMode: "auto",
   structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
 };
 
@@ -231,8 +235,21 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.visibleFocusIndicators === "boolean"
         ? record.visibleFocusIndicators
         : DEFAULT_DASHBOARD_PREFERENCES.visibleFocusIndicators,
+    themeMode:
+      record.themeMode === "auto" || record.themeMode === "light" || record.themeMode === "dark"
+        ? record.themeMode
+        : DEFAULT_DASHBOARD_PREFERENCES.themeMode,
     structuredFilters: parseStoredStructuredFilters(record.structuredFilters),
   };
+}
+
+function applyDashboardThemeMode(themeMode: DashboardThemeMode) {
+  if (themeMode === "auto") {
+    delete document.documentElement.dataset.theme;
+    return;
+  }
+
+  document.documentElement.dataset.theme = themeMode;
 }
 
 function parseStoredStructuredFilters(value: unknown): DashboardStructuredFilters {
@@ -326,6 +343,13 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
   useEffect(() => {
     window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
   }, [preferences]);
+
+  useEffect(() => {
+    applyDashboardThemeMode(preferences.themeMode);
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, [preferences.themeMode]);
 
   useEffect(() => {
     window.localStorage.setItem(

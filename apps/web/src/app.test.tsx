@@ -50,6 +50,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   sortDirection: "desc",
   auditNewestFirst: false,
   visibleFocusIndicators: false,
+  themeMode: "auto",
   structuredFilters: {
     repo: null,
     agent: null,
@@ -1746,6 +1747,7 @@ describe("web app", () => {
   beforeEach(() => {
     queryClient.clear();
     window.localStorage.clear();
+    delete document.documentElement.dataset.theme;
     MockEventSource.instances = [];
     initializeMermaid.mockClear();
     renderMermaid.mockClear();
@@ -1758,6 +1760,7 @@ describe("web app", () => {
 
   afterEach(async () => {
     cleanup();
+    delete document.documentElement.dataset.theme;
     queryClient.clear();
     vi.unstubAllGlobals();
     await router.navigate({ to: "/" });
@@ -8901,6 +8904,7 @@ describe("web app", () => {
       sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: true,
+      themeMode: "auto",
       structuredFilters: {
         repo: null,
         agent: null,
@@ -10638,8 +10642,10 @@ describe("web app", () => {
       screen.getByRole("combobox", { name: "Board sort field" }),
       "updatedAt",
     );
+    await user.selectOptions(screen.getByRole("combobox", { name: "Theme mode" }), "dark");
     await user.click(screen.getByRole("checkbox", { name: "Visible focus indicators" }));
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
 
     await user.click(screen.getByRole("button", { name: "Restore defaults" }));
 
@@ -10648,8 +10654,10 @@ describe("web app", () => {
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
     expect(screen.getByRole("combobox", { name: "Board sort field" })).toHaveValue("startedAt");
     expect(screen.getByRole("combobox", { name: "Board sort direction" })).toHaveValue("desc");
+    expect(screen.getByRole("combobox", { name: "Theme mode" })).toHaveValue("auto");
     expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).not.toBeChecked();
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "off");
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
     expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
 
     await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
@@ -10693,6 +10701,7 @@ describe("web app", () => {
       sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: false,
+      themeMode: "auto",
       structuredFilters: {
         repo: null,
         agent: null,
@@ -10736,6 +10745,7 @@ describe("web app", () => {
       sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: false,
+      themeMode: "auto",
       structuredFilters: {
         repo: null,
         agent: null,
@@ -10743,6 +10753,51 @@ describe("web app", () => {
         runGroupId: null,
       },
     });
+  });
+
+  it("persists and resets theme mode from settings", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    await screen.findByRole("heading", { name: "General" });
+
+    const themeMode = screen.getByRole("combobox", { name: "Theme mode" });
+    expect(themeMode).toHaveValue("auto");
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+    expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
+
+    await user.selectOptions(themeMode, "dark");
+    expect(themeMode).toHaveValue("dark");
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(screen.getByRole("button", { name: "Restore defaults" })).toBeEnabled();
+
+    let stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual(
+      expect.objectContaining({ themeMode: "dark" }),
+    );
+
+    await user.selectOptions(themeMode, "light");
+    expect(themeMode).toHaveValue("light");
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+
+    stored = window.localStorage.getItem("agent-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual(
+      expect.objectContaining({ themeMode: "light" }),
+    );
+
+    await user.selectOptions(themeMode, "auto");
+    expect(themeMode).toHaveValue("auto");
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+
+    await user.selectOptions(themeMode, "dark");
+    await user.click(screen.getByRole("button", { name: "Reset Theme mode to default" }));
+    expect(themeMode).toHaveValue("auto");
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
+    expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
   });
 
   it("keeps selected-card styling independent from focus-indicator suppression", () => {
@@ -10755,6 +10810,18 @@ describe("web app", () => {
     expect(css).toMatch(
       /\n\.card\.selected\s*\{\s*border-color:\s*var\(--ring\);\s*box-shadow:\s*0 0 0 1px var\(--ring\), var\(--shadow-card\);\s*\}/s,
     );
+  });
+
+  it("defines forced theme selectors alongside automatic dark mode", () => {
+    const css = readFileSync(join(process.cwd(), "src", "run-dashboard.css"), "utf8");
+
+    expect(css).toContain(':root[data-theme="dark"]');
+    expect(css).toContain(':root:not([data-theme="light"])');
+    expect(css).toMatch(
+      /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*:root:not\(\[data-theme="light"\]\)\s*\{/s,
+    );
+    expect(css).toContain(':root[data-theme="dark"]::-webkit-scrollbar-thumb');
+    expect(css).toContain(':root:not([data-theme="light"])::-webkit-scrollbar-thumb');
   });
 
   it("keeps the run-section tab strip tall enough to render clipped labels", () => {
@@ -10848,6 +10915,7 @@ describe("web app", () => {
         sortField: "changedAt",
         sortDirection: "newest",
         visibleFocusIndicators: "sure",
+        themeMode: "system",
       }),
     );
 
@@ -10918,6 +10986,8 @@ describe("web app", () => {
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Board sort field" })).toHaveValue("startedAt");
     expect(screen.getByRole("combobox", { name: "Board sort direction" })).toHaveValue("desc");
+    expect(screen.getByRole("combobox", { name: "Theme mode" })).toHaveValue("auto");
+    expect(document.documentElement).not.toHaveAttribute("data-theme");
   });
 
   it("collapses and expands a board column on desktop", async () => {
