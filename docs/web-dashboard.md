@@ -431,7 +431,8 @@ npm run dev
 
 The dev server listens on port 4174 and proxies `/api` and
 `/app-config.json` to `AGENT_RUNNER_WEB_PROXY_TARGET` (default
-`http://127.0.0.1:4773`).
+`http://127.0.0.1:4773`). When `AGENT_RUNNER_WEB_BASE_PATH` is set, the
+dev server also proxies the same config and API paths under that prefix.
 
 Build and tests:
 

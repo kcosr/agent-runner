@@ -56,6 +56,20 @@ test("daemon config derives web runtime paths from AGENT_RUNNER_WEB_BASE_PATH", 
       }),
     /AGENT_RUNNER_WEB_BASE_PATH must be an absolute path/,
   );
+  for (const value of [
+    "/agent-runner/../other",
+    "/agent_runner",
+    "/agent runner",
+    '/agent-runner" onmouseover="alert(1)',
+  ]) {
+    assert.throws(
+      () =>
+        resolveWebBasePath({
+          AGENT_RUNNER_WEB_BASE_PATH: value,
+        }),
+      /AGENT_RUNNER_WEB_BASE_PATH must contain only alphanumeric or hyphenated path segments/,
+    );
+  }
 });
 
 test("daemon config keeps logical and effective connect URLs aligned when connect-host is absent", () => {

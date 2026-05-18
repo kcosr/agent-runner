@@ -795,6 +795,27 @@ interface DaemonServerHandle {
   close(): Promise<void>;
 }
 
+function stripWebBasePath(pathname: string, webBasePath: string): string {
+  if (webBasePath === "/") {
+    return pathname;
+  }
+  if (pathname === webBasePath) {
+    return "/";
+  }
+  const prefix = `${webBasePath}/`;
+  return pathname.startsWith(prefix) ? pathname.slice(webBasePath.length) : pathname;
+}
+
+function requestUrlWithPathname(
+  rawUrl: string | undefined,
+  httpBaseUrl: string,
+  pathname: string,
+): string {
+  const url = new URL(rawUrl ?? "/", httpBaseUrl);
+  url.pathname = pathname;
+  return `${url.pathname}${url.search}`;
+}
+
 export async function serveDaemon(
   listenUrl: string,
   handlers: Partial<DaemonHandlers> = {},
@@ -3337,41 +3358,51 @@ export async function serveDaemon(
 
   const httpServer = createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", httpBaseUrl).pathname;
+    const routedPathname = stripWebBasePath(pathname, appRuntimeConfig.webBasePath);
 
-    if (pathname === "/app-config.json") {
+    if (routedPathname === "/app-config.json") {
       res.setHeader("cache-control", "no-cache");
       res.setHeader("content-type", "application/json; charset=utf-8");
       res.end(JSON.stringify(appRuntimeConfig));
       return;
     }
 
-    if (pathname === "/api" || pathname.startsWith("/api/")) {
+    if (routedPathname === "/api" || routedPathname.startsWith("/api/")) {
       try {
         assertDaemonAuthorized(daemonAuth, req.headers.authorization);
       } catch (err) {
         sendError(res, err);
         return;
       }
-      void handleHttpRequest(req, res, {
-        operations,
-        httpBaseUrl,
-        subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
-        subscribeRunDetail: (runId, publish) => subscribeRunDetail(res, runId, publish).unsubscribe,
-        subscribeRunAudit: (runId, publish) => {
-          const subscription = subscribeRunAudit(res, runId, publish);
-          replayAudit(runId, publish);
-          return subscription.unsubscribe;
-        },
-        subscribeRunTimeline: (runId, publish) => {
-          const subscription = subscribeRunTimeline(res, runId, publish);
-          replayTimeline(runId, publish);
-          return subscription.unsubscribe;
-        },
-      });
+      void (async () => {
+        const originalUrl = req.url;
+        req.url = requestUrlWithPathname(req.url, httpBaseUrl, routedPathname);
+        try {
+          await handleHttpRequest(req, res, {
+            operations,
+            httpBaseUrl,
+            subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
+            subscribeRunDetail: (runId, publish) =>
+              subscribeRunDetail(res, runId, publish).unsubscribe,
+            subscribeRunAudit: (runId, publish) => {
+              const subscription = subscribeRunAudit(res, runId, publish);
+              replayAudit(runId, publish);
+              return subscription.unsubscribe;
+            },
+            subscribeRunTimeline: (runId, publish) => {
+              const subscription = subscribeRunTimeline(res, runId, publish);
+              replayTimeline(runId, publish);
+              return subscription.unsubscribe;
+            },
+          });
+        } finally {
+          req.url = originalUrl;
+        }
+      })();
       return;
     }
 
-    serveFrontendRequest(req, res, pathname, { webBasePath: appRuntimeConfig.webBasePath });
+    serveFrontendRequest(req, res, routedPathname, { webBasePath: appRuntimeConfig.webBasePath });
   });
   const wsServer = new WebSocketServer({
     server: httpServer,

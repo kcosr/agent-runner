@@ -1,4 +1,8 @@
-import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
+import {
+  type AppRuntimeConfig,
+  appRuntimeConfigForWebBasePath,
+  normalizeWebBasePath,
+} from "@kcosr/agent-runner-core/contracts/app-config.js";
 import {
   AGENT_RUNNER_CONNECT_ENV,
   AGENT_RUNNER_CONNECT_HOST_ENV,
@@ -149,25 +153,12 @@ export function deriveHttpBaseUrl(listenUrl: string): string {
 }
 
 export function resolveWebBasePath(env: NodeJS.ProcessEnv = process.env): string {
-  const raw = nonEmpty(env[AGENT_RUNNER_WEB_BASE_PATH_ENV]);
-  if (!raw || raw === "/") {
-    return "/";
-  }
-  if (!raw.startsWith("/") || raw.includes("?") || raw.includes("#")) {
-    throw new Error(
-      `${AGENT_RUNNER_WEB_BASE_PATH_ENV} must be an absolute path like /agent-runner`,
-    );
-  }
-  const trimmed = raw.replace(/^\/+|\/+$/g, "");
-  return trimmed ? `/${trimmed}` : "/";
+  return normalizeWebBasePath(
+    nonEmpty(env[AGENT_RUNNER_WEB_BASE_PATH_ENV]),
+    AGENT_RUNNER_WEB_BASE_PATH_ENV,
+  );
 }
 
 export function deriveAppRuntimeConfig(env: NodeJS.ProcessEnv = process.env): AppRuntimeConfig {
-  const webBasePath = resolveWebBasePath(env);
-  const prefix = webBasePath === "/" ? "" : webBasePath;
-  return {
-    webBasePath,
-    apiBasePath: `${prefix}/api`,
-    runSummaryEventsPath: `${prefix}/api/events/run-summaries`,
-  };
+  return appRuntimeConfigForWebBasePath(resolveWebBasePath(env));
 }

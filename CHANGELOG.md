@@ -160,7 +160,9 @@
 ### Added
 
 - Added `AGENT_RUNNER_WEB_BASE_PATH` so `agent-runner serve` can expose the
-  bundled web dashboard from a reverse-proxy subpath such as `/agent-runner`.
+  bundled web dashboard from a reverse-proxy subpath such as
+  `/agent-runner`, including prefixed daemon HTTP routes for pass-through
+  proxies.
 - Added a web dashboard theme mode setting with Auto, Light, and Dark options
   that persists per browser from Settings -> General.
   ([#154](https://github.com/kcosr/agent-runner/pull/154))

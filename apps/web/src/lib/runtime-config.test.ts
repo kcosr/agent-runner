@@ -48,6 +48,25 @@ describe("runtime config", () => {
     await expect(loadRuntimeConfig()).rejects.toBeInstanceOf(RuntimeConfigError);
   });
 
+  it("rejects runtime config paths that do not match the web base path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              webBasePath: "/agent-runner",
+              apiBasePath: "https://example.test/api",
+              runSummaryEventsPath: "/api/events/run-summaries",
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    await expect(loadRuntimeConfig()).rejects.toBeInstanceOf(RuntimeConfigError);
+  });
+
   it("rejects malformed runtime config JSON", async () => {
     vi.stubGlobal(
       "fetch",

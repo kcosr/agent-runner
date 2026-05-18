@@ -185,7 +185,9 @@ When `agent-runner serve` is mounted below a reverse-proxy subpath, set
 `AGENT_RUNNER_WEB_BASE_PATH` in the daemon environment to that external
 path. The value must be an absolute path such as `/agent-runner`; the
 daemon uses it for the browser router, generated asset URLs, and web API
-paths returned by `/app-config.json`.
+paths returned by `/app-config.json`. The daemon accepts both strip-prefix
+proxy routing (`/agent-runner/*` forwarded as `/*`) and pass-through
+prefix routing (`/agent-runner/*` forwarded unchanged).
 
 Daemon auth is a single shared-token control-plane guard. It protects
 `/api/*`, SSE, and WebSocket JSON-RPC access, but it is not multi-user

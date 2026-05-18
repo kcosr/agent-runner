@@ -2247,7 +2247,19 @@ test("daemon serve exposes web runtime config for a mounted base path", async ()
         const body = await response.text();
         assert.equal(response.status, 200);
         assert.match(body, /window\.__AGENT_RUNNER_WEB_BASE_PATH__="\/agent-runner"/);
-        assert.match(body, /src="\/agent-runner\/assets\/[^"]+\.js"/);
+        const assetPath = body.match(/\/agent-runner\/assets\/[^"]+\.js/)?.[0];
+        assert.ok(assetPath, "expected prefixed built asset path in served index.html");
+
+        const prefixedConfig = await httpJson(httpBaseUrl, "/agent-runner/app-config.json");
+        assert.equal(prefixedConfig.status, 200);
+        assert.deepEqual(prefixedConfig.body, appConfig.body);
+
+        const prefixedAsset = await fetch(new URL(assetPath, httpBaseUrl));
+        assert.equal(prefixedAsset.status, 200);
+
+        const prefixedApi = await httpJson(httpBaseUrl, "/agent-runner/api/daemon");
+        assert.equal(prefixedApi.status, 200);
+        assert.equal(prefixedApi.body.daemon.listenUrl, listenUrl);
       } finally {
         await server.close();
       }

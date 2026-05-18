@@ -51,6 +51,7 @@ export function makeRuntimeRoots(prefix, options = {}) {
       AGENT_RUNNER_CMD: "agent-runner",
       AGENT_RUNNER_CONNECT: undefined,
       AGENT_RUNNER_LISTEN: undefined,
+      AGENT_RUNNER_WEB_BASE_PATH: undefined,
       AGENT_RUNNER_PARENT_RUN_ID: undefined,
       AGENT_RUNNER_RUN_GROUP_ID: undefined,
     },
@@ -81,6 +82,7 @@ export function sharedRuntimeEnv(baseDir) {
     AGENT_RUNNER_CMD: "agent-runner",
     AGENT_RUNNER_CONNECT: undefined,
     AGENT_RUNNER_LISTEN: undefined,
+    AGENT_RUNNER_WEB_BASE_PATH: undefined,
     AGENT_RUNNER_PARENT_RUN_ID: undefined,
     AGENT_RUNNER_RUN_GROUP_ID: undefined,
   };

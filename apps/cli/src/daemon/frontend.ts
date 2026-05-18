@@ -2,6 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { webPathPrefix } from "@kcosr/agent-runner-core/contracts/app-config.js";
 
 const WEB_ROOT_PATH = fileURLToPath(new URL("../web/", import.meta.url));
 
@@ -105,15 +106,18 @@ function sendBuffer(
 }
 
 function htmlWithWebBasePath(body: Buffer, webBasePath: string): Buffer {
-  const prefix = webBasePath === "/" ? "" : webBasePath;
+  const prefix = webPathPrefix(webBasePath);
   if (!prefix) {
     return body;
   }
   const html = body.toString("utf8");
-  const injected = `<script>window.__AGENT_RUNNER_WEB_BASE_PATH__=${JSON.stringify(webBasePath)};</script>`;
-  const withInjectedBasePath = html.includes("</head>")
-    ? html.replace("</head>", `${injected}</head>`)
-    : `${injected}${html}`;
+  const serializedWebBasePath = JSON.stringify(webBasePath).replaceAll("<", "\\u003c");
+  const injected = `<script>window.__AGENT_RUNNER_WEB_BASE_PATH__=${serializedWebBasePath};</script>`;
+  const headCloseIndex = html.lastIndexOf("</head>");
+  const withInjectedBasePath =
+    headCloseIndex === -1
+      ? `${injected}${html}`
+      : `${html.slice(0, headCloseIndex)}${injected}${html.slice(headCloseIndex)}`;
   return Buffer.from(
     withInjectedBasePath
       .replaceAll('src="/assets/', `src="${prefix}/assets/`)

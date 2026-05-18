@@ -415,10 +415,13 @@ routes.
 
 ### App config
 
-- `GET /app-config.json` → `{ apiBasePath, runSummaryEventsPath }`
+- `GET /app-config.json` → `{ webBasePath, apiBasePath, runSummaryEventsPath }`
 
 The web UI fetches this before initialization. Per-run detail, audit,
 and timeline paths are derived from `apiBasePath` and the active run id.
+When `AGENT_RUNNER_WEB_BASE_PATH` is set, the daemon also accepts the
+configured prefix on HTTP routes, for example
+`/agent-runner/app-config.json` and `/agent-runner/api/runs`.
 
 ## WebSocket JSON-RPC
 
