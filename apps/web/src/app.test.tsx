@@ -3135,7 +3135,7 @@ describe("web app", () => {
     const createSelectionButtons = screen.getAllByRole("button", {
       name: "Create task from selection",
     });
-    const createSelectionButton = createSelectionButtons[0];
+    const createSelectionButton = createSelectionButtons[createSelectionButtons.length - 1];
     if (!createSelectionButton) {
       throw new Error("Create task from selection button was not rendered");
     }
@@ -3259,8 +3259,18 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp("/runs/run-1");
     await user.click(await screen.findByRole("button", { name: /foo.ts/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Select line 2" }));
-    fireEvent.click(screen.getByRole("button", { name: "Select line 3" }), { shiftKey: true });
+    const selectedStart = await screen.findByText("const b = 2;");
+    const selectedEnd = screen.getByText("const c = a + b;");
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: selectedStart.firstChild,
+      focusNode: selectedEnd.firstChild,
+      toString: () => "const b = 2;\nconst c = a + b;",
+    } as Selection);
+    const sourcePreview = selectedStart.closest(".files-source");
+    if (!sourcePreview) {
+      throw new Error("Source preview was not available");
+    }
+    fireEvent.mouseUp(sourcePreview);
 
     await user.click(screen.getByRole("button", { name: "Create task from selection" }));
     await user.type(screen.getByLabelText("Instruction"), "Refactor this block.");

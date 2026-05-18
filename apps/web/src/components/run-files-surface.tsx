@@ -19,6 +19,7 @@ type FileViewMode = "rendered-markdown" | "source";
 interface SourceSelection {
   anchorLine: number;
   endLine: number;
+  selectedText?: string;
   startLine: number;
 }
 
@@ -59,6 +60,19 @@ function isSelectionInside(container: HTMLElement, selection: Selection): boolea
   );
 }
 
+function selectionLineNumber(container: HTMLElement, node: Node | null): number | null {
+  let element = node instanceof Element ? node : node?.parentElement;
+  while (element && element !== container) {
+    const lineNumber = element.getAttribute("data-line-number");
+    if (lineNumber) {
+      const parsed = Number.parseInt(lineNumber, 10);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    element = element.parentElement;
+  }
+  return null;
+}
+
 export function RunFilesSurface({
   canCreateTask,
   onSwitchToTasks,
@@ -81,6 +95,7 @@ export function RunFilesSurface({
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
   const [createdMessage, setCreatedMessage] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const sourceRef = useRef<HTMLDivElement | null>(null);
   const trimmedSearch = debouncedSearch.trim();
   const searchActive = trimmedSearch.length > 0;
 
@@ -150,7 +165,9 @@ export function RunFilesSurface({
   const entriesError = searchActive ? searchQuery.error : directoryQuery.error;
   const selectedFile = fileQuery.data;
   const selectedSourceText =
-    selectedFile && sourceSelection ? lineRangeText(selectedFile, sourceSelection) : "";
+    selectedFile && sourceSelection
+      ? (sourceSelection.selectedText ?? lineRangeText(selectedFile, sourceSelection))
+      : "";
   const selectedReference = useMemo<TaskReference | null>(() => {
     if (!selectedFile) {
       return null;
@@ -206,6 +223,28 @@ export function RunFilesSurface({
         };
       }
       return { anchorLine: lineNumber, endLine: lineNumber, startLine: lineNumber };
+    });
+  }
+
+  function captureSourceSelection(event: MouseEvent<HTMLDivElement>) {
+    if (event.target instanceof Element && event.target.closest(".files-source__gutter")) {
+      return;
+    }
+    const source = sourceRef.current;
+    const selection = window.getSelection();
+    if (!source || !selection || !isSelectionInside(source, selection)) {
+      return;
+    }
+    const anchorLine = selectionLineNumber(source, selection.anchorNode);
+    const focusLine = selectionLineNumber(source, selection.focusNode);
+    if (!anchorLine || !focusLine) {
+      return;
+    }
+    setSourceSelection({
+      anchorLine,
+      endLine: Math.max(anchorLine, focusLine),
+      selectedText: selection.toString().trim(),
+      startLine: Math.min(anchorLine, focusLine),
     });
   }
 
@@ -339,13 +378,15 @@ export function RunFilesSurface({
                 </button>
               </div>
               {viewMode === "rendered-markdown" ? (
-                <div
-                  className="files-rendered markdown"
-                  onKeyUp={captureRenderedSelection}
-                  onMouseUp={captureRenderedSelection}
-                  ref={previewRef}
-                >
-                  <MarkdownContent text={selectedFile.text} />
+                <>
+                  <div
+                    className="files-rendered markdown"
+                    onKeyUp={captureRenderedSelection}
+                    onMouseUp={captureRenderedSelection}
+                    ref={previewRef}
+                  >
+                    <MarkdownContent text={selectedFile.text} />
+                  </div>
                   {renderedSelection ? (
                     <button
                       className="btn btn-primary files-selection-action"
@@ -355,9 +396,14 @@ export function RunFilesSurface({
                       Create task from selection
                     </button>
                   ) : null}
-                </div>
+                </>
               ) : (
-                <div className="files-source" aria-label={`Source for ${selectedFile.path}`}>
+                <div
+                  className="files-source"
+                  aria-label={`Source for ${selectedFile.path}`}
+                  onMouseUp={captureSourceSelection}
+                  ref={sourceRef}
+                >
                   {selectedFile.text.split(/\r?\n/).map((line, index) => {
                     const lineNumber = index + 1;
                     const selected =
@@ -367,6 +413,7 @@ export function RunFilesSurface({
                     return (
                       <div
                         className={selected ? "files-source__line selected" : "files-source__line"}
+                        data-line-number={lineNumber}
                         key={lineNumber}
                       >
                         <button
