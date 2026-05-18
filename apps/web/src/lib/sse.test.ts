@@ -3,6 +3,7 @@ import { subscribeToRunSummaryEvents } from "./sse.js";
 
 const config = {
   apiBasePath: "/api",
+  webBasePath: "/",
   runSummaryEventsPath: "/api/events/run-summaries",
 };
 

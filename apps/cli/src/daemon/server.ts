@@ -802,6 +802,7 @@ export async function serveDaemon(
   await loadCustomBackends();
 
   const daemonAuth = resolveDaemonAuthConfig();
+  const appRuntimeConfig = deriveAppRuntimeConfig();
   const { host, port, path } = listenSocketConfig(listenUrl);
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const startedAt = new Date().toISOString();
@@ -3340,7 +3341,7 @@ export async function serveDaemon(
     if (pathname === "/app-config.json") {
       res.setHeader("cache-control", "no-cache");
       res.setHeader("content-type", "application/json; charset=utf-8");
-      res.end(JSON.stringify(deriveAppRuntimeConfig()));
+      res.end(JSON.stringify(appRuntimeConfig));
       return;
     }
 
@@ -3370,7 +3371,7 @@ export async function serveDaemon(
       return;
     }
 
-    serveFrontendRequest(req, res, pathname);
+    serveFrontendRequest(req, res, pathname, { webBasePath: appRuntimeConfig.webBasePath });
   });
   const wsServer = new WebSocketServer({
     server: httpServer,

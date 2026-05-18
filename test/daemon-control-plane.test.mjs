@@ -2165,6 +2165,7 @@ test("daemon serve exposes app config, keeps /api precedence, and falls back to 
         const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
         assert.equal(appConfig.status, 200);
         assert.deepEqual(appConfig.body, {
+          webBasePath: "/",
           apiBasePath: "/api",
           runSummaryEventsPath: "/api/events/run-summaries",
         });
@@ -2223,6 +2224,34 @@ test("daemon serve reads packaged web assets from the CLI dist layout", async ()
     } finally {
       await server.close();
     }
+  });
+});
+
+test("daemon serve exposes web runtime config for a mounted base path", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv({ AGENT_RUNNER_WEB_BASE_PATH: "/agent-runner/" }, async () => {
+    await withSeededFrontendDist(async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
+        assert.equal(appConfig.status, 200);
+        assert.deepEqual(appConfig.body, {
+          webBasePath: "/agent-runner",
+          apiBasePath: "/agent-runner/api",
+          runSummaryEventsPath: "/agent-runner/api/events/run-summaries",
+        });
+
+        const response = await fetch(new URL("/", httpBaseUrl));
+        const body = await response.text();
+        assert.equal(response.status, 200);
+        assert.match(body, /window\.__AGENT_RUNNER_WEB_BASE_PATH__="\/agent-runner"/);
+        assert.match(body, /src="\/agent-runner\/assets\/[^"]+\.js"/);
+      } finally {
+        await server.close();
+      }
+    });
   });
 });
 
@@ -7707,6 +7736,7 @@ test("daemon bearer auth protects HTTP, SSE, and WebSocket while leaving public 
 
           const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
           assert.equal(appConfig.status, 200);
+          assert.equal(appConfig.body.webBasePath, "/");
           assert.equal(appConfig.body.apiBasePath, "/api");
           assert.equal(appConfig.headers.get("www-authenticate"), null);
 

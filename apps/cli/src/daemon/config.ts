@@ -4,6 +4,7 @@ import {
   AGENT_RUNNER_CONNECT_HOST_ENV,
   AGENT_RUNNER_CONNECT_LOCAL_PORT_ENV,
   AGENT_RUNNER_LISTEN_ENV,
+  AGENT_RUNNER_WEB_BASE_PATH_ENV,
   DEFAULT_DAEMON_URL,
 } from "./protocol.js";
 
@@ -147,9 +148,26 @@ export function deriveHttpBaseUrl(listenUrl: string): string {
   return parsed.toString();
 }
 
-export function deriveAppRuntimeConfig(): AppRuntimeConfig {
+export function resolveWebBasePath(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = nonEmpty(env[AGENT_RUNNER_WEB_BASE_PATH_ENV]);
+  if (!raw || raw === "/") {
+    return "/";
+  }
+  if (!raw.startsWith("/") || raw.includes("?") || raw.includes("#")) {
+    throw new Error(
+      `${AGENT_RUNNER_WEB_BASE_PATH_ENV} must be an absolute path like /agent-runner`,
+    );
+  }
+  const trimmed = raw.replace(/^\/+|\/+$/g, "");
+  return trimmed ? `/${trimmed}` : "/";
+}
+
+export function deriveAppRuntimeConfig(env: NodeJS.ProcessEnv = process.env): AppRuntimeConfig {
+  const webBasePath = resolveWebBasePath(env);
+  const prefix = webBasePath === "/" ? "" : webBasePath;
   return {
-    apiBasePath: "/api",
-    runSummaryEventsPath: "/api/events/run-summaries",
+    webBasePath,
+    apiBasePath: `${prefix}/api`,
+    runSummaryEventsPath: `${prefix}/api/events/run-summaries`,
   };
 }

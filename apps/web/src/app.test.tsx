@@ -37,6 +37,7 @@ vi.mock("mermaid", () => ({
 
 const APP_CONFIG = {
   apiBasePath: "/api",
+  webBasePath: "/",
   runSummaryEventsPath: "/api/events/run-summaries",
 };
 

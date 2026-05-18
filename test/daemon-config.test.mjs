@@ -2,11 +2,13 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { bearerAuthHeader, resolveDaemonAuthConfig } from "../apps/cli/dist/daemon/auth.js";
 import {
+  deriveAppRuntimeConfig,
   deriveHttpBaseUrl,
   listenSocketConfig,
   resolveConnectUrl,
   resolveHostMode,
   resolveListenUrl,
+  resolveWebBasePath,
 } from "../apps/cli/dist/daemon/config.js";
 
 test("daemon config accepts non-loopback listen URLs", () => {
@@ -23,6 +25,37 @@ test("daemon config accepts non-loopback listen URLs", () => {
 test("daemon config accepts non-loopback connect URLs", () => {
   const connectUrl = resolveConnectUrl("ws://example.com:6123/control");
   assert.equal(connectUrl, "ws://example.com:6123/control");
+});
+
+test("daemon config derives web runtime paths from AGENT_RUNNER_WEB_BASE_PATH", () => {
+  assert.deepEqual(deriveAppRuntimeConfig({}), {
+    webBasePath: "/",
+    apiBasePath: "/api",
+    runSummaryEventsPath: "/api/events/run-summaries",
+  });
+  assert.equal(
+    resolveWebBasePath({
+      AGENT_RUNNER_WEB_BASE_PATH: "/agent-runner/",
+    }),
+    "/agent-runner",
+  );
+  assert.deepEqual(
+    deriveAppRuntimeConfig({
+      AGENT_RUNNER_WEB_BASE_PATH: "/agent-runner/",
+    }),
+    {
+      webBasePath: "/agent-runner",
+      apiBasePath: "/agent-runner/api",
+      runSummaryEventsPath: "/agent-runner/api/events/run-summaries",
+    },
+  );
+  assert.throws(
+    () =>
+      resolveWebBasePath({
+        AGENT_RUNNER_WEB_BASE_PATH: "agent-runner",
+      }),
+    /AGENT_RUNNER_WEB_BASE_PATH must be an absolute path/,
+  );
 });
 
 test("daemon config keeps logical and effective connect URLs aligned when connect-host is absent", () => {

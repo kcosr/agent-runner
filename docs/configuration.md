@@ -173,12 +173,19 @@ or remote command that should route CLI calls through the daemon.
 | `AGENT_RUNNER_CONNECT_LOCAL_PORT` | Loopback port to bind for `AGENT_RUNNER_CONNECT_HOST`; defaults to the daemon port from `AGENT_RUNNER_CONNECT` / `--connect` |
 | `AGENT_RUNNER_DAEMON_AUTH_ENABLED` | Enable shared bearer-token daemon access protection when set to `true`, `1`, `yes`, or `on` |
 | `AGENT_RUNNER_DAEMON_TOKEN` | Server token required when daemon auth is enabled; connected CLI clients also read it and send `Authorization: Bearer <token>` |
+| `AGENT_RUNNER_WEB_BASE_PATH` | External mount path for the bundled web dashboard when served behind a reverse proxy, for example `/agent-runner` |
 | `AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks; by default daemon projections skip those locks to avoid stale-lock stalls |
 
 Listen and connect URLs can be overridden on the CLI via `--listen` (on
 `serve`) and `--connect` (on client commands). SSH-assisted connected
 mode uses `--connect-host` and `--connect-local-port`. See
 [daemon.md](daemon.md).
+
+When `agent-runner serve` is mounted below a reverse-proxy subpath, set
+`AGENT_RUNNER_WEB_BASE_PATH` in the daemon environment to that external
+path. The value must be an absolute path such as `/agent-runner`; the
+daemon uses it for the browser router, generated asset URLs, and web API
+paths returned by `/app-config.json`.
 
 Daemon auth is a single shared-token control-plane guard. It protects
 `/api/*`, SSE, and WebSocket JSON-RPC access, but it is not multi-user

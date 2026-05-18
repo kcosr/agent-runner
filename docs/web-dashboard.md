@@ -441,11 +441,15 @@ npm run test     # vitest run
 ```
 
 The production build is bundled and served by `agent-runner serve`; there
-is no standalone web server in the shipped runtime.
+is no standalone web server in the shipped runtime. When the dashboard is
+mounted behind a reverse proxy at a subpath, set
+`AGENT_RUNNER_WEB_BASE_PATH` in the daemon environment, for example
+`AGENT_RUNNER_WEB_BASE_PATH=/agent-runner`.
 
 ## Data flow summary
 
-1. App boots and fetches `/app-config.json` for the API paths.
+1. App boots and fetches `app-config.json` from the configured web base
+   path for the API paths.
 2. Reads the optional Settings -> General daemon token and attaches it as
    an Authorization bearer header on API, attachment, and fetch-backed SSE
    requests.

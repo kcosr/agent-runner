@@ -28,6 +28,11 @@ agent-runner serve [--listen <ws-url>]
   `http`.
 - Graceful shutdown on `SIGINT` (exit 130) and `SIGTERM` (exit 0).
 
+When a reverse proxy exposes the bundled web dashboard from a subpath,
+set `AGENT_RUNNER_WEB_BASE_PATH` to the external mount path, for example
+`/agent-runner`. The daemon returns that path from `/app-config.json` and
+uses it when serving the dashboard HTML.
+
 ## Startup and shutdown recovery
 
 Graceful daemon shutdown still aborts active runs whose controller is

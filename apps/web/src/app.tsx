@@ -1,7 +1,7 @@
 import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { queryClient } from "./lib/query.js";
 import { RunEventsProvider } from "./lib/run-events.js";
 import {
@@ -19,6 +19,12 @@ type BootState =
 
 export function App() {
   const [bootState, setBootState] = useState<BootState>({ status: "loading" });
+  const appRouter = useMemo(() => {
+    if (bootState.status === "ready") {
+      router.update({ basepath: bootState.config.webBasePath });
+    }
+    return router;
+  }, [bootState]);
 
   useEffect(() => {
     let active = true;
@@ -74,7 +80,7 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <DashboardSettingsProvider>
           <RunEventsProvider config={bootState.config}>
-            <RouterProvider router={router} />
+            <RouterProvider router={appRouter} />
           </RunEventsProvider>
         </DashboardSettingsProvider>
       </QueryClientProvider>
