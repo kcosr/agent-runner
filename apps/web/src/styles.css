@@ -982,6 +982,8 @@ body {
     left: 56px;
     z-index: 40;
     flex: initial;
+    width: auto;
+    min-width: 0;
     max-width: none;
     border: 0;
     border-left: 1px solid var(--border);

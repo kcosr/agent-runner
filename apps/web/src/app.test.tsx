@@ -11573,6 +11573,9 @@ describe("web app", () => {
     expect(fullscreenDrawerLayer).not.toBeNull();
     expect(resumeDialogLayer?.[1]).toBe("60");
     expect(fullscreenDrawerLayer?.[1]).toBe("40");
+    expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?right:\s*0;[\s\S]*?left:\s*56px;/);
+    expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?width:\s*auto;/);
+    expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?min-width:\s*0;/);
   });
 
   it("keeps the Chat composer textarea custom and non-resizable", () => {

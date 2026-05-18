@@ -314,6 +314,8 @@
 - Fixed the dashboard Files surface so creating a task from selected Markdown
   preview text opens the dialog reliably, dragged source text selections enable
   task creation, and directories render with a folder icon.
+- Fixed fullscreen selected-run drawers so they clear the normal saved drawer
+  width and fill the main content area beside the sidebar.
 - Bundled `plan-feature` now uses a copied named hook instead of an
   assignment-local repo-relative hook import, so the quickstart
   `~/.config/agent-runner` copy works before package publication.
