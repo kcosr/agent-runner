@@ -11,7 +11,7 @@ import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
 import { type TaskReference, defaultTaskTitle, languageForPath } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
-import { CheckIcon, FileIcon, SearchIcon } from "./icons.js";
+import { CheckIcon, FileIcon, FolderIcon, SearchIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
 
 type FileViewMode = "rendered-markdown" | "source";
@@ -71,6 +71,10 @@ function selectionLineNumber(container: HTMLElement, node: Node | null): number 
     element = element.parentElement;
   }
   return null;
+}
+
+function logFilesDebug(message: string, details: Record<string, unknown>) {
+  console.info("[agent-runner files]", message, details);
 }
 
 export function RunFilesSurface({
@@ -208,50 +212,102 @@ export function RunFilesSurface({
     const selection = window.getSelection();
     if (!preview || !selection || !isSelectionInside(preview, selection)) {
       setRenderedSelection("");
+      logFilesDebug("rendered selection cleared", {
+        hasPreview: Boolean(preview),
+        hasSelection: Boolean(selection),
+        path: selectedFile?.path ?? null,
+      });
       return;
     }
-    setRenderedSelection(selection.toString().trim());
+    const selectedText = selection.toString().trim();
+    setRenderedSelection(selectedText);
+    logFilesDebug("rendered selection captured", {
+      length: selectedText.length,
+      path: selectedFile?.path ?? null,
+    });
   }
 
   function selectLine(lineNumber: number, event: MouseEvent<HTMLButtonElement>) {
     setSourceSelection((current) => {
       if (event.shiftKey && current) {
-        return {
+        const next = {
           anchorLine: current.anchorLine,
           endLine: Math.max(current.anchorLine, lineNumber),
           startLine: Math.min(current.anchorLine, lineNumber),
         };
+        logFilesDebug("source gutter range selected", {
+          endLine: next.endLine,
+          path: selectedFile?.path ?? null,
+          startLine: next.startLine,
+        });
+        return next;
       }
-      return { anchorLine: lineNumber, endLine: lineNumber, startLine: lineNumber };
+      const next = { anchorLine: lineNumber, endLine: lineNumber, startLine: lineNumber };
+      logFilesDebug("source gutter line selected", {
+        lineNumber,
+        path: selectedFile?.path ?? null,
+      });
+      return next;
     });
   }
 
   function captureSourceSelection(event: MouseEvent<HTMLDivElement>) {
     if (event.target instanceof Element && event.target.closest(".files-source__gutter")) {
+      logFilesDebug("source text selection ignored after gutter event", {
+        path: selectedFile?.path ?? null,
+      });
       return;
     }
     const source = sourceRef.current;
     const selection = window.getSelection();
     if (!source || !selection || !isSelectionInside(source, selection)) {
+      logFilesDebug("source text selection ignored", {
+        hasSelection: Boolean(selection),
+        hasSource: Boolean(source),
+        path: selectedFile?.path ?? null,
+      });
       return;
     }
     const anchorLine = selectionLineNumber(source, selection.anchorNode);
     const focusLine = selectionLineNumber(source, selection.focusNode);
     if (!anchorLine || !focusLine) {
+      logFilesDebug("source text selection missing line mapping", {
+        anchorLine,
+        focusLine,
+        path: selectedFile?.path ?? null,
+      });
       return;
     }
+    const selectedText = selection.toString().trim();
     setSourceSelection({
       anchorLine,
       endLine: Math.max(anchorLine, focusLine),
-      selectedText: selection.toString().trim(),
+      selectedText,
+      startLine: Math.min(anchorLine, focusLine),
+    });
+    logFilesDebug("source text selection captured", {
+      endLine: Math.max(anchorLine, focusLine),
+      length: selectedText.length,
+      path: selectedFile?.path ?? null,
       startLine: Math.min(anchorLine, focusLine),
     });
   }
 
   function openCreateTaskDialog(reference: TaskReference | null) {
     if (!canCreateTask || !reference) {
+      logFilesDebug("create task dialog blocked", {
+        canCreateTask,
+        hasReference: Boolean(reference),
+        path: selectedFile?.path ?? null,
+        sourceSelection,
+        viewMode,
+      });
       return;
     }
+    logFilesDebug("create task dialog opening", {
+      path: reference.path,
+      view: reference.view,
+    });
     setDialogReference(reference);
   }
 
@@ -316,7 +372,11 @@ export function RunFilesSurface({
                 onClick={() => openEntry(entry)}
                 type="button"
               >
-                <FileIcon aria-hidden="true" />
+                {entry.kind === "directory" ? (
+                  <FolderIcon aria-hidden="true" />
+                ) : (
+                  <FileIcon aria-hidden="true" />
+                )}
                 <span className="files-list__name">{entry.name}</span>
                 <span className="files-list__meta">
                   {entry.kind === "directory"

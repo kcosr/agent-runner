@@ -408,8 +408,9 @@ updatedAt } }`.
 
 Workspace file routes are scoped to the selected run's `cwd`. Paths are
 cwd-relative and must stay inside that tree after normalization and symlink
-resolution. Search is bounded, skips dependency/metadata directories such as
-`node_modules` and `.git`, and reports truncation through the response flag.
+resolution. Search is bounded, skips dependency directories such as
+`node_modules`, includes dot-directories and common text dotfiles, and reports
+truncation through the response flag.
 Traversal, unsupported file extensions, missing files, unreadable binary
 content, and oversized reads return the normal daemon error envelope; the
 daemon never serves arbitrary absolute paths from these routes.

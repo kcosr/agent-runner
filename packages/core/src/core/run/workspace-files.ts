@@ -63,6 +63,23 @@ const TEXT_EXTENSIONS = new Set([
   ".yml",
 ]);
 
+const TEXT_BASENAMES = new Set([
+  ".babelrc",
+  ".dockerignore",
+  ".editorconfig",
+  ".env",
+  ".env.development",
+  ".env.local",
+  ".env.production",
+  ".env.test",
+  ".eslintrc",
+  ".gitignore",
+  ".npmrc",
+  ".nvmrc",
+  ".prettierrc",
+  ".yarnrc",
+]);
+
 const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
 
 function isContainedBy(root: string, target: string): boolean {
@@ -133,11 +150,15 @@ function isMarkdownPath(path: string): boolean {
 }
 
 function isSupportedTextPath(path: string): boolean {
-  return isMarkdownPath(path) || TEXT_EXTENSIONS.has(extname(path).toLowerCase());
+  return (
+    isMarkdownPath(path) ||
+    TEXT_EXTENSIONS.has(extname(path).toLowerCase()) ||
+    TEXT_BASENAMES.has(basename(path).toLowerCase())
+  );
 }
 
 function shouldSkipSearchDirectory(name: string): boolean {
-  return name === "node_modules" || name.startsWith(".");
+  return name === "node_modules";
 }
 
 function codeFromError(err: unknown): unknown {

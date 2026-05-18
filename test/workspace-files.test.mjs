@@ -85,7 +85,9 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
   mkdirSync(join(dir, ".git"));
   mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });
   mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, ".env"), "TOKEN=secret\n");
   writeFileSync(join(dir, ".git", "guide.md"), "# Hidden guide\n");
+  writeFileSync(join(dir, ".gitignore"), "dist\n");
   writeFileSync(join(dir, "docs", "guide.md"), "# Guide\n\nHello workspace.\n");
   writeFileSync(join(dir, "node_modules", "pkg", "guide.ts"), "export const hidden = true;\n");
   writeFileSync(join(dir, "src", "main.ts"), "export const value = 1;\n");
@@ -104,6 +106,9 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
     assert.equal(rootKinds.get("assignments"), "directory");
     assert.equal(rootKinds.get("docs"), "directory");
     assert.equal(rootKinds.get("src"), "directory");
+    const rootTextSupport = new Map(root.entries.map((entry) => [entry.name, entry.supportedText]));
+    assert.equal(rootTextSupport.get(".env"), true);
+    assert.equal(rootTextSupport.get(".gitignore"), true);
 
     const docs = getWorkspaceFileList(outcome.runId, { path: "docs" });
     assert.equal(docs.parentPath, "");
@@ -118,8 +123,12 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
     assert.equal(search.maxResults, MAX_WORKSPACE_SEARCH_RESULTS);
     assert.deepEqual(
       search.matches.map((entry) => entry.path),
-      ["docs/guide.md"],
+      [".git/guide.md", "docs/guide.md"],
     );
+
+    const envFile = getWorkspaceFile(outcome.runId, { path: ".env" });
+    assert.equal(envFile.mediaType, "text/plain");
+    assert.equal(envFile.text, "TOKEN=secret\n");
 
     const file = getWorkspaceFile(outcome.runId, { path: "docs/guide.md" });
     assert.equal(file.mediaType, "text/markdown");
@@ -134,7 +143,6 @@ test("workspace file service rejects traversal, missing paths, outside symlinks,
   const outside = tempDir();
   writeBundle(dir);
   writeFileSync(join(dir, "binary.bin"), Buffer.from([0x61, 0x00, 0x62]));
-  writeFileSync(join(dir, ".env"), "TOKEN=secret\n");
   writeFileSync(join(dir, "huge.txt"), `${"x".repeat(MAX_WORKSPACE_FILE_BYTES + 1)}`);
   writeFileSync(join(outside, "secret.txt"), "secret\n");
   symlinkSync(join(dir, "missing-target.txt"), join(dir, "broken-link.txt"));
@@ -150,7 +158,6 @@ test("workspace file service rejects traversal, missing paths, outside symlinks,
       () => getWorkspaceFile(outcome.runId, { path: "missing.txt" }),
       WorkspaceFileNotFoundError,
     );
-    assert.throws(() => getWorkspaceFile(outcome.runId, { path: ".env" }), WorkspaceFileError);
     assert.throws(() => getWorkspaceFileList(outcome.runId), WorkspaceFileNotFoundError);
     await assert.rejects(
       async () => getWorkspaceFileSearch(outcome.runId, { query: "broken" }),

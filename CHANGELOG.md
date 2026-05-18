@@ -260,6 +260,8 @@
   delete pending follow-up tasks.
 - Resume prompts for unfinished task runs now include the task CLI reminder so
   resumed workers re-check the authoritative task list before continuing.
+- Workspace file search now includes dot-directories and common text dotfiles
+  while still skipping dependency directories such as `node_modules`.
 - Cleaned up the README and reference docs for current CLI behavior,
   backend-free smoke checks, skills installation, environment-variable
   placement, and renamed Agent Runner terminology.
@@ -309,6 +311,9 @@
 
 ### Fixed
 
+- Fixed the dashboard Files surface so creating a task from selected Markdown
+  preview text opens the dialog reliably, dragged source text selections enable
+  task creation, and directories render with a folder icon.
 - Bundled `plan-feature` now uses a copied named hook instead of an
   assignment-local repo-relative hook import, so the quickstart
   `~/.config/agent-runner` copy works before package publication.
