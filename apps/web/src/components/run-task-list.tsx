@@ -13,6 +13,7 @@ import {
   AlertIcon,
   CheckIcon,
   ChevronIcon,
+  CloseIcon,
   PencilIcon,
   PendingIcon,
   RunningIcon,
@@ -75,10 +76,9 @@ export function RunTaskList({
   const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [activeTabs, setActiveTabs] = useState<Map<string, TaskTab>>(new Map());
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<TaskEditDraft>({ body: "", title: "" });
-  const [replaceNotesDrafts, setReplaceNotesDrafts] = useState<Map<string, string>>(new Map());
-  const [appendNotesDrafts, setAppendNotesDrafts] = useState<Map<string, string>>(new Map());
+  const [editMode, setEditMode] = useState(false);
+  const [editDrafts, setEditDrafts] = useState<Map<string, TaskEditDraft>>(new Map());
+  const [notesDrafts, setNotesDrafts] = useState<Map<string, string>>(new Map());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
@@ -102,28 +102,18 @@ export function RunTaskList({
     onError: (error: Error) => setMutationError(error.message),
     onSuccess: async (_task, variables) => {
       setMutationError(null);
-      setEditingTaskId((current) => (current === variables.taskId ? null : current));
+      setEditDrafts((current) => {
+        const next = new Map(current);
+        next.delete(variables.taskId);
+        return next;
+      });
       if (variables.update.notes !== undefined) {
-        setReplaceNotesDrafts((current) => {
+        setNotesDrafts((current) => {
           const next = new Map(current);
-          next.set(variables.taskId, "");
+          next.delete(variables.taskId);
           return next;
         });
       }
-      await invalidateTaskRun(runId);
-    },
-  });
-  const appendNotesMutation = useMutation({
-    mutationFn: ({ taskId, text }: { taskId: string; text: string }) =>
-      api.appendTaskNotes(runId, taskId, text),
-    onError: (error: Error) => setMutationError(error.message),
-    onSuccess: async (_task, variables) => {
-      setMutationError(null);
-      setAppendNotesDrafts((current) => {
-        const next = new Map(current);
-        next.set(variables.taskId, "");
-        return next;
-      });
       await invalidateTaskRun(runId);
     },
   });
@@ -137,17 +127,22 @@ export function RunTaskList({
   });
 
   const mutationPending =
-    createTaskMutation.isPending ||
-    updateTaskMutation.isPending ||
-    appendNotesMutation.isPending ||
-    deleteTaskMutation.isPending;
+    createTaskMutation.isPending || updateTaskMutation.isPending || deleteTaskMutation.isPending;
+  const canEditTasks =
+    capabilities.canSetStatus ||
+    capabilities.canEditNotes ||
+    capabilities.canEditPending ||
+    capabilities.canDeletePending;
 
   if (tasks.length === 0) {
     return (
       <>
         <TaskToolbar
           canAdd={capabilities.canAdd}
+          canEdit={canEditTasks}
+          editMode={editMode}
           onAdd={() => setDialogOpen(true)}
+          onToggleEdit={() => toggleEditMode()}
           pending={mutationPending}
         />
         <div className="drawer-state">
@@ -187,39 +182,57 @@ export function RunTaskList({
     return task.body ? "body" : "notes";
   }
 
-  function startEdit(task: RunTaskSummary) {
-    setEditingTaskId(task.id);
-    setEditDraft({ body: task.body, title: task.title });
-    setMutationError(null);
+  function toggleEditMode() {
+    setEditMode((current) => {
+      if (current) {
+        setEditDrafts(new Map());
+        setNotesDrafts(new Map());
+        setMutationError(null);
+      }
+      return !current;
+    });
   }
 
-  function cancelEdit() {
-    setEditingTaskId(null);
+  function taskEditDraft(task: RunTaskSummary) {
+    return editDrafts.get(task.id) ?? { body: task.body, title: task.title };
+  }
+
+  function setTaskEditDraft(taskId: string, value: TaskEditDraft) {
+    setEditDrafts((current) => {
+      const next = new Map(current);
+      next.set(taskId, value);
+      return next;
+    });
+  }
+
+  function resetTaskEditDraft(taskId: string) {
+    setEditDrafts((current) => {
+      const next = new Map(current);
+      next.delete(taskId);
+      return next;
+    });
     setMutationError(null);
   }
 
   function taskNotesDraft(task: RunTaskSummary) {
-    return replaceNotesDrafts.get(task.id) ?? "";
+    return notesDrafts.get(task.id) ?? task.notes;
   }
 
   function setTaskNotesDraft(taskId: string, value: string) {
-    setReplaceNotesDrafts((current) => {
+    setNotesDrafts((current) => {
       const next = new Map(current);
       next.set(taskId, value);
       return next;
     });
   }
 
-  function appendDraft(taskId: string) {
-    return appendNotesDrafts.get(taskId) ?? "";
-  }
-
-  function setAppendDraft(taskId: string, value: string) {
-    setAppendNotesDrafts((current) => {
+  function resetTaskNotesDraft(taskId: string) {
+    setNotesDrafts((current) => {
       const next = new Map(current);
-      next.set(taskId, value);
+      next.delete(taskId);
       return next;
     });
+    setMutationError(null);
   }
 
   function handleTaskEditKeyDown(
@@ -227,7 +240,9 @@ export function RunTaskList({
   ) {
     if (event.key === "Escape") {
       event.preventDefault();
-      cancelEdit();
+      setEditDrafts(new Map());
+      setNotesDrafts(new Map());
+      setMutationError(null);
     }
   }
 
@@ -250,7 +265,10 @@ export function RunTaskList({
     <div className="tasks">
       <TaskToolbar
         canAdd={capabilities.canAdd}
+        canEdit={canEditTasks}
+        editMode={editMode}
         onAdd={() => setDialogOpen(true)}
+        onToggleEdit={() => toggleEditMode()}
         pending={mutationPending}
       />
       {mutationError ? (
@@ -259,15 +277,16 @@ export function RunTaskList({
         </div>
       ) : null}
       {tasks.map((task) => {
-        const hasDetails = Boolean(task.body || task.notes);
+        const hasDetails = Boolean(task.body || task.notes || editMode);
         const isExpanded = expanded.has(task.id);
         const detailsId = `task-details-${task.id}`;
         const activeTab = activeTabFor(task);
-        const editing = editingTaskId === task.id;
         const canEdit = capabilities.canEditPending && task.status === "pending";
         const canDelete = capabilities.canDeletePending && task.status === "pending";
+        const editDraft = taskEditDraft(task);
         const replaceNotesDraft = taskNotesDraft(task);
-        const appendNotesDraft = appendDraft(task.id);
+        const bodyEditing = editMode && canEdit && activeTab === "body";
+        const notesEditing = editMode && capabilities.canEditNotes && activeTab === "notes";
 
         return (
           <article className="task" key={task.id}>
@@ -295,44 +314,38 @@ export function RunTaskList({
                 ) : (
                   <span className="task-chevron-spacer" aria-hidden="true" />
                 )}
-                <span className={taskStatusBadgeClass(task.status)}>
-                  {taskStatusLabel(task.status)}
-                </span>
+                {editMode && capabilities.canSetStatus ? null : (
+                  <span className={taskStatusBadgeClass(task.status)}>
+                    {taskStatusLabel(task.status)}
+                  </span>
+                )}
               </button>
               <div className="task-row__actions">
-                <label className="sr-only" htmlFor={`task-status-${task.id}`}>
-                  Task status for {task.title}
-                </label>
-                <select
-                  className="task-status-select"
-                  disabled={!capabilities.canSetStatus || mutationPending}
-                  id={`task-status-${task.id}`}
-                  onChange={(event) =>
-                    updateTaskMutation.mutate({
-                      taskId: task.id,
-                      update: { status: event.target.value as TaskStatus },
-                    })
-                  }
-                  value={task.status}
-                >
-                  <option value="pending">Pending</option>
-                  <option value="in_progress">In progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="blocked">Blocked</option>
-                </select>
-                {canEdit ? (
-                  <button
-                    aria-label={`Edit ${task.title}`}
-                    className="icon-btn icon-btn--small"
-                    disabled={mutationPending}
-                    onClick={() => startEdit(task)}
-                    title="Edit task"
-                    type="button"
-                  >
-                    <PencilIcon aria-hidden="true" />
-                  </button>
+                {editMode && capabilities.canSetStatus ? (
+                  <>
+                    <label className="sr-only" htmlFor={`task-status-${task.id}`}>
+                      Task status for {task.title}
+                    </label>
+                    <select
+                      className="task-status-select"
+                      disabled={mutationPending}
+                      id={`task-status-${task.id}`}
+                      onChange={(event) =>
+                        updateTaskMutation.mutate({
+                          taskId: task.id,
+                          update: { status: event.target.value as TaskStatus },
+                        })
+                      }
+                      value={task.status}
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="completed">Completed</option>
+                      <option value="blocked">Blocked</option>
+                    </select>
+                  </>
                 ) : null}
-                {canDelete ? (
+                {editMode && canDelete ? (
                   <button
                     aria-label={`Delete ${task.title}`}
                     className="icon-btn icon-btn--small icon-btn--destructive"
@@ -346,52 +359,6 @@ export function RunTaskList({
                 ) : null}
               </div>
             </div>
-            {editing ? (
-              <div className="task-edit">
-                <label className="field">
-                  <span>Title</span>
-                  <input
-                    disabled={mutationPending}
-                    onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })}
-                    onKeyDown={handleTaskEditKeyDown}
-                    value={editDraft.title}
-                  />
-                </label>
-                <label className="field">
-                  <span>Body</span>
-                  <textarea
-                    disabled={mutationPending}
-                    onChange={(event) => setEditDraft({ ...editDraft, body: event.target.value })}
-                    onKeyDown={handleTaskEditKeyDown}
-                    rows={5}
-                    value={editDraft.body}
-                  />
-                </label>
-                <div className="task-edit__actions">
-                  <button
-                    className="btn"
-                    disabled={mutationPending}
-                    onClick={cancelEdit}
-                    type="button"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    disabled={mutationPending || editDraft.title.trim().length === 0}
-                    onClick={() =>
-                      updateTaskMutation.mutate({
-                        taskId: task.id,
-                        update: { body: editDraft.body, title: editDraft.title.trim() },
-                      })
-                    }
-                    type="button"
-                  >
-                    Save task
-                  </button>
-                </div>
-              </div>
-            ) : null}
             {isExpanded && hasDetails ? (
               <div className="task-details" id={detailsId}>
                 <nav aria-label="Task content sections" className="task-tabs">
@@ -414,32 +381,86 @@ export function RunTaskList({
                   </button>
                 </nav>
                 {activeTab === "body" ? (
-                  task.body ? (
+                  bodyEditing ? (
+                    <div className="task-edit">
+                      <label className="field">
+                        <span>Title</span>
+                        <input
+                          aria-label="Title"
+                          disabled={mutationPending}
+                          onChange={(event) =>
+                            setTaskEditDraft(task.id, { ...editDraft, title: event.target.value })
+                          }
+                          onKeyDown={handleTaskEditKeyDown}
+                          value={editDraft.title}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Body</span>
+                        <textarea
+                          aria-label="Body"
+                          disabled={mutationPending}
+                          onChange={(event) =>
+                            setTaskEditDraft(task.id, { ...editDraft, body: event.target.value })
+                          }
+                          onKeyDown={handleTaskEditKeyDown}
+                          rows={5}
+                          value={editDraft.body}
+                        />
+                      </label>
+                      <div className="task-edit__actions">
+                        <button
+                          className="btn"
+                          disabled={mutationPending}
+                          onClick={() => resetTaskEditDraft(task.id)}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          disabled={mutationPending || editDraft.title.trim().length === 0}
+                          onClick={() =>
+                            updateTaskMutation.mutate({
+                              taskId: task.id,
+                              update: { body: editDraft.body, title: editDraft.title.trim() },
+                            })
+                          }
+                          type="button"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  ) : task.body ? (
                     <MarkdownContent className="task-markdown" text={task.body} />
                   ) : (
                     <p className="task-empty">No instructions recorded.</p>
                   )
-                ) : task.notes ? (
-                  <MarkdownContent className="task-markdown" text={task.notes} />
-                ) : (
-                  <p className="task-empty">No notes recorded yet.</p>
-                )}
-                {activeTab === "notes" ? (
+                ) : notesEditing ? (
                   <div className="task-notes-editor">
                     <label className="field">
-                      <span>Replace notes</span>
+                      <span>Notes</span>
                       <textarea
-                        disabled={!capabilities.canEditNotes || mutationPending}
+                        disabled={mutationPending}
+                        onKeyDown={handleTaskEditKeyDown}
                         onChange={(event) => setTaskNotesDraft(task.id, event.target.value)}
-                        rows={3}
+                        rows={6}
                         value={replaceNotesDraft}
-                        placeholder="Replace task notes"
                       />
                     </label>
                     <div className="task-edit__actions">
                       <button
                         className="btn"
-                        disabled={!capabilities.canEditNotes || mutationPending}
+                        disabled={mutationPending}
+                        onClick={() => resetTaskNotesDraft(task.id)}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        disabled={mutationPending}
                         onClick={() =>
                           updateTaskMutation.mutate({
                             taskId: task.id,
@@ -448,39 +469,15 @@ export function RunTaskList({
                         }
                         type="button"
                       >
-                        Replace notes
-                      </button>
-                    </div>
-                    <label className="field">
-                      <span>Append notes</span>
-                      <textarea
-                        disabled={!capabilities.canEditNotes || mutationPending}
-                        onChange={(event) => setAppendDraft(task.id, event.target.value)}
-                        rows={2}
-                        value={appendNotesDraft}
-                      />
-                    </label>
-                    <div className="task-edit__actions">
-                      <button
-                        className="btn"
-                        disabled={
-                          !capabilities.canEditNotes ||
-                          mutationPending ||
-                          appendNotesDraft.trim().length === 0
-                        }
-                        onClick={() =>
-                          appendNotesMutation.mutate({
-                            taskId: task.id,
-                            text: appendNotesDraft,
-                          })
-                        }
-                        type="button"
-                      >
-                        Append notes
+                        Save
                       </button>
                     </div>
                   </div>
-                ) : null}
+                ) : task.notes ? (
+                  <MarkdownContent className="task-markdown" text={task.notes} />
+                ) : (
+                  <p className="task-empty">No notes recorded yet.</p>
+                )}
               </div>
             ) : null}
           </article>
@@ -493,15 +490,32 @@ export function RunTaskList({
 
 function TaskToolbar({
   canAdd,
+  canEdit,
+  editMode,
   onAdd,
+  onToggleEdit,
   pending,
 }: {
   canAdd: boolean;
+  canEdit: boolean;
+  editMode: boolean;
   onAdd: () => void;
+  onToggleEdit: () => void;
   pending: boolean;
 }) {
   return (
     <div className="task-management-toolbar">
+      <button
+        aria-label={editMode ? "Exit task edit mode" : "Edit tasks"}
+        aria-pressed={editMode}
+        className={editMode ? "icon-btn active" : "icon-btn"}
+        disabled={!canEdit || pending}
+        onClick={onToggleEdit}
+        title={editMode ? "Exit task edit mode" : "Edit tasks"}
+        type="button"
+      >
+        {editMode ? <CloseIcon aria-hidden="true" /> : <PencilIcon aria-hidden="true" />}
+      </button>
       <button
         className="btn btn-primary"
         disabled={!canAdd || pending}

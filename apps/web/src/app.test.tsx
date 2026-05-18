@@ -8651,10 +8651,21 @@ describe("web app", () => {
       ).toBe(true);
     });
 
-    await user.click(screen.getByRole("button", { name: "Edit Draft task" }));
+    expect(screen.queryByLabelText("Task status for Draft task")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Edit tasks" }));
+    expect(screen.getByRole("button", { name: "Exit task edit mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Task status for Draft task")).toBeInTheDocument();
+
     const draftHeader = screen
       .getAllByRole("button", { name: /Draft task/ })
       .find((button) => button.classList.contains("task-header"));
+    if (!draftHeader) {
+      throw new Error("Draft task header was not rendered");
+    }
+    await user.click(draftHeader);
     const draftArticle = draftHeader?.closest("article");
     if (!draftArticle) {
       throw new Error("Draft task article was not rendered");
@@ -8663,7 +8674,7 @@ describe("web app", () => {
     await user.type(within(draftArticle).getByLabelText("Title"), "Edited task");
     await user.clear(within(draftArticle).getByLabelText("Body"));
     await user.type(within(draftArticle).getByLabelText("Body"), "Edited body");
-    await user.click(within(draftArticle).getByRole("button", { name: "Save task" }));
+    await user.click(within(draftArticle).getByRole("button", { name: "Save" }));
     await waitFor(() => {
       expect(
         screen
@@ -8674,57 +8685,28 @@ describe("web app", () => {
 
     await user.selectOptions(screen.getByLabelText("Task status for Edited task"), "completed");
     await waitFor(() => {
-      const editedHeader = screen
-        .getAllByRole("button", { name: /Edited task/ })
-        .find((button) => button.classList.contains("task-header"));
-      expect(editedHeader).toHaveTextContent("completed");
+      expect(screen.getByLabelText("Task status for Edited task")).toHaveValue("completed");
     });
 
-    const editedHeader = screen
+    const editedHeaderForNotes = screen
       .getAllByRole("button", { name: /Edited task/ })
       .find((button) => button.classList.contains("task-header"));
-    if (!editedHeader) {
+    if (!editedHeaderForNotes) {
       throw new Error("Edited task header was not rendered");
     }
-    await user.click(editedHeader);
-    await user.click(screen.getByRole("button", { name: "Task notes" }));
-    const editedArticle = editedHeader.closest("article");
+    if (editedHeaderForNotes.getAttribute("aria-expanded") !== "true") {
+      await user.click(editedHeaderForNotes);
+    }
+    await user.click(await screen.findByRole("button", { name: "Task notes" }));
+    const editedArticle = editedHeaderForNotes.closest("article");
     if (!editedArticle) {
       throw new Error("Edited task article was not rendered");
     }
-    await user.clear(within(editedArticle).getByLabelText("Replace notes"));
-    await user.type(within(editedArticle).getByLabelText("Replace notes"), "Replaced notes");
-    await user.click(within(editedArticle).getByRole("button", { name: "Replace notes" }));
-    expect(await screen.findByText("Replaced notes")).toBeInTheDocument();
-
-    const updatedEditedHeader = screen
-      .getAllByRole("button", { name: /Edited task/ })
-      .find((button) => button.classList.contains("task-header"));
-    const updatedEditedArticle = updatedEditedHeader?.closest("article");
-    if (!updatedEditedArticle) {
-      throw new Error("Updated edited task article was not rendered");
-    }
-    const appendNotesInput = within(updatedEditedArticle).getByLabelText("Append notes");
-    const appendNotesButton = within(updatedEditedArticle).getByRole("button", {
-      name: "Append notes",
-    });
+    await user.clear(within(editedArticle).getByLabelText("Notes"));
+    await user.type(within(editedArticle).getByLabelText("Notes"), "Replaced notes");
+    await user.click(within(editedArticle).getByRole("button", { name: "Save" }));
     await waitFor(() => {
-      expect(appendNotesInput).toBeEnabled();
-      expect(appendNotesButton).toBeDisabled();
-    });
-    await user.type(appendNotesInput, "Appended notes");
-    await waitFor(() => {
-      expect(appendNotesButton).toBeEnabled();
-    });
-    await user.click(appendNotesButton);
-    await waitFor(() => {
-      expect(
-        screen
-          .getAllByText((_content, element) =>
-            Boolean(element?.tagName === "P" && element.textContent?.includes("Appended notes")),
-          )
-          .at(0),
-      ).toBeInTheDocument();
+      expect(within(editedArticle).getByDisplayValue("Replaced notes")).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: "Delete Manual task" }));

@@ -2831,6 +2831,7 @@ body {
 
 .task-management-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-bottom: 4px;
@@ -2870,13 +2871,14 @@ body {
   display: grid;
   gap: 10px;
   min-width: 0;
-  padding: 0 12px 12px 50px;
+  padding: 0;
 }
 
 .task-edit .field,
 .task-notes-editor .field {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .task-edit .field span,
@@ -2891,6 +2893,7 @@ body {
 .task-edit input,
 .task-edit textarea,
 .task-notes-editor textarea {
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border);
@@ -2905,6 +2908,7 @@ body {
 
 .task-edit textarea,
 .task-notes-editor textarea {
+  min-height: 9rem;
   resize: vertical;
 }
 
