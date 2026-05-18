@@ -31,6 +31,11 @@ import {
 } from "@kcosr/agent-runner-core/core/run/run-loop.js";
 import { ScheduleValidationError } from "@kcosr/agent-runner-core/core/run/schedule.js";
 import {
+  WorkspaceFileError,
+  WorkspaceFileInvalidPathError,
+  WorkspaceFileNotFoundError,
+} from "@kcosr/agent-runner-core/core/run/workspace-files.js";
+import {
   BackendConfigError,
   RunCommandError,
   UnknownBackendError,
@@ -60,6 +65,7 @@ export function isKnownControlPlaneError(err: unknown): boolean {
   return (
     err instanceof RequestValidationError ||
     err instanceof AttachmentError ||
+    err instanceof WorkspaceFileError ||
     err instanceof CommandError ||
     err instanceof ConflictError ||
     err instanceof TaskNotFoundError ||
@@ -96,6 +102,9 @@ export function toHttpError(err: unknown): HttpError {
   if (err instanceof RequestValidationError) {
     return new HttpError(400, "INVALID_REQUEST", err.message, err);
   }
+  if (err instanceof WorkspaceFileInvalidPathError) {
+    return new HttpError(400, "INVALID_REQUEST", err.message, err);
+  }
   if (
     err instanceof AgentNotFoundError ||
     err instanceof AssignmentNotFoundError ||
@@ -104,7 +113,8 @@ export function toHttpError(err: unknown): HttpError {
     err instanceof RunNotFoundError ||
     err instanceof TaskNotFoundError ||
     err instanceof QueuedResumeMessageNotFoundError ||
-    err instanceof AttachmentNotFoundError
+    err instanceof AttachmentNotFoundError ||
+    err instanceof WorkspaceFileNotFoundError
   ) {
     return new HttpError(404, "NOT_FOUND", "resource not found", err);
   }

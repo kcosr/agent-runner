@@ -98,10 +98,19 @@ export interface RunTaskSummary {
   notes: string;
 }
 
+export interface RunTaskDeleteResult {
+  runId: string;
+  taskId: string;
+  deleted: true;
+  updatedAt: string;
+}
+
 export interface RunTaskMutationCapabilities {
   canSetStatus: boolean;
   canEditNotes: boolean;
   canAdd: boolean;
+  canEditPending: boolean;
+  canDeletePending: boolean;
 }
 
 export type RunAbortReason = "already_terminal" | "not_active_in_daemon";
@@ -401,12 +410,16 @@ export function isDaemonAutoRunnableReadyRun(input: DaemonAutoRunnableInput): bo
 
 export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMutationCapabilities {
   const tasksLocked = manifest.lockedFields.includes("tasks");
+  const pendingListMutationAllowed = manifest.archivedAt === null && !tasksLocked;
 
   if (manifest.backend === "passive") {
+    const stopped = !isRunning(manifest);
     return {
-      canSetStatus: !isRunning(manifest),
-      canEditNotes: !isRunning(manifest),
-      canAdd: !isRunning(manifest) && !tasksLocked,
+      canSetStatus: stopped,
+      canEditNotes: stopped,
+      canAdd: stopped && pendingListMutationAllowed,
+      canEditPending: stopped && pendingListMutationAllowed,
+      canDeletePending: stopped && pendingListMutationAllowed,
     };
   }
 
@@ -415,19 +428,25 @@ export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMu
       return {
         canSetStatus: true,
         canEditNotes: true,
-        canAdd: !tasksLocked,
+        canAdd: pendingListMutationAllowed,
+        canEditPending: pendingListMutationAllowed,
+        canDeletePending: pendingListMutationAllowed,
       };
     case "ready":
       return {
         canSetStatus: false,
         canEditNotes: true,
         canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
       };
     case "running": {
       return {
         canSetStatus: true,
         canEditNotes: true,
         canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
       };
     }
     case "success":
@@ -438,7 +457,9 @@ export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMu
       return {
         canSetStatus: true,
         canEditNotes: true,
-        canAdd: false,
+        canAdd: pendingListMutationAllowed,
+        canEditPending: pendingListMutationAllowed,
+        canDeletePending: pendingListMutationAllowed,
       };
   }
 }

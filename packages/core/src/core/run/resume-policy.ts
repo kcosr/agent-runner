@@ -1,4 +1,4 @@
-import type { TaskSnapshot } from "./manifest.js";
+import type { ManifestStatus, TaskSnapshot } from "./manifest.js";
 
 export const IMPLICIT_RESUME_MESSAGE = "Continue working through the remaining task list items.";
 
@@ -10,4 +10,26 @@ export function hasRunnableTasks(finalTasks: Record<string, TaskSnapshot>): bool
 
 export function missingResumeInputMessage(): string {
   return "cannot resume a run with no runnable tasks without either a follow-up message or a newly added task";
+}
+
+function isTerminalStatus(status: ManifestStatus): boolean {
+  return (
+    status === "success" ||
+    status === "blocked" ||
+    status === "exhausted" ||
+    status === "aborted" ||
+    status === "error"
+  );
+}
+
+export function needsStoppedRunTaskReminder(input: {
+  backend: string;
+  status: ManifestStatus;
+  finalTasks: Record<string, TaskSnapshot>;
+}): boolean {
+  return (
+    input.backend !== "passive" &&
+    isTerminalStatus(input.status) &&
+    hasRunnableTasks(input.finalTasks)
+  );
 }

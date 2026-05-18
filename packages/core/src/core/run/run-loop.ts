@@ -89,6 +89,7 @@ import {
   IMPLICIT_RESUME_MESSAGE,
   hasRunnableTasks,
   missingResumeInputMessage,
+  needsStoppedRunTaskReminder,
 } from "./resume-policy.js";
 import {
   type RunAuditEnvelope,
@@ -140,7 +141,11 @@ import {
   prepareBackendSessionHistorySync,
   recordBackendSessionSyncError,
 } from "./backend-session-sync.js";
-import { WORKER_BRIEF_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
+import {
+  WORKER_BRIEF_TEMPLATE,
+  buildAddedTasksReminder,
+  buildStoppedRunTasksReminder,
+} from "./task-workflow.js";
 import {
   refreshManifestAttachments,
   refreshManifestTaskState,
@@ -2007,6 +2012,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     trimmedMessage.length === 0 &&
     addedTitles.length === 0 &&
     hasRunnableTasks(resume?.manifest.finalTasks ?? {});
+  const resumeNeedsStoppedRunTaskReminder =
+    isResume &&
+    resume !== undefined &&
+    needsStoppedRunTaskReminder({
+      backend: resume.manifest.backend,
+      status: resume.manifest.status,
+      finalTasks: resume.manifest.finalTasks,
+    });
 
   // Run name resolution: fresh `run` / `init` may set it via the
   // CLI override, while resume and ready-start always reuse
@@ -2043,6 +2056,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
     } else if (resumeAddedNewTasks) {
       parts.push(buildAddedTasksReminder(addedTitles.length, runId));
+    } else if (resumeNeedsStoppedRunTaskReminder) {
+      parts.push(buildStoppedRunTasksReminder(runId));
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);

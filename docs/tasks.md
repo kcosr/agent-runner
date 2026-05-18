@@ -96,31 +96,43 @@ taskMutation: {
   canSetStatus: boolean
   canEditNotes: boolean
   canAdd: boolean
+  canEditPending: boolean
+  canDeletePending: boolean
 }
 ```
 
 ### Non-passive runs
 
-| State           | `canSetStatus` | `canEditNotes` | `canAdd` |
-|-----------------|----------------|----------------|----------|
-| `initialized`   | true           | true           | true*    |
-| `ready`         | false          | true           | false    |
-| `running`       | true           | true           | false    |
-| terminal (any)  | true           | true           | false    |
+| State           | `canSetStatus` | `canEditNotes` | `canAdd` | `canEditPending` | `canDeletePending` |
+|-----------------|----------------|----------------|----------|------------------|--------------------|
+| `initialized`   | true           | true           | true*    | true*            | true*              |
+| `ready`         | false          | true           | false    | false            | false              |
+| `running`       | true           | true           | false    | false            | false              |
+| terminal (any)  | true           | true           | true*    | true*            | true*              |
 
-*`canAdd` is disabled when `tasks` is in `lockedFields`.
+`canEditPending` and `canDeletePending` permit title/body edits and deletes
+only for tasks whose status is still `pending`. These operations are
+disabled when `tasks` is in `lockedFields`, when the run is archived, and
+for non-pending tasks. `canAdd` follows the same lock/archive gate.
 
 ### Passive runs
 
-| State           | `canSetStatus` | `canEditNotes` | `canAdd` |
-|-----------------|----------------|----------------|----------|
-| `running`       | false          | false          | false    |
-| not `running`   | true           | true           | true*    |
+| State           | `canSetStatus` | `canEditNotes` | `canAdd` | `canEditPending` | `canDeletePending` |
+|-----------------|----------------|----------------|----------|------------------|--------------------|
+| `running`       | false          | false          | false    | false            | false              |
+| not `running`   | true           | true           | true*    | true*            | true*              |
 
-*`canAdd` is disabled when `tasks` is in `lockedFields`.
+`canAdd`, `canEditPending`, and `canDeletePending` are disabled when
+`tasks` is in `lockedFields` or the run is archived.
 
 Passive runs are always driven externally through the task CLI; there is no
 backend to invoke.
+
+Status and notes changes remain valid independently: a PATCH or CLI
+`task set` can update only status, only notes, or both. Title/body edits
+are accepted only through the pending-task edit path, and deletes remove
+only pending tasks. Every successful mutation refreshes the run's
+canonical task map and emits compact audit records.
 
 ## Worker workflow template
 
@@ -141,9 +153,9 @@ task state.
 
 ## Retry nudges and added tasks
 
-If tasks remain incomplete when an attempt ends, agent-runner composes a
-retry prompt that points the worker back at the task CLI and identifies the
-incomplete tasks.
+If tasks remain incomplete when an attempt ends or a run is resumed with
+unfinished work, agent-runner composes a prompt that points the worker
+back at the task CLI and identifies the incomplete tasks.
 
 If new tasks are added on resume (via `--add-task` or `task add`), a
 reminder is appended to the brief so the worker knows to revisit the list.

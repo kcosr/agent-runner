@@ -29,10 +29,16 @@ import type {
   RunNoteResult,
   RunPinnedResult,
   RunSummary,
+  RunTaskDeleteResult,
   RunTaskSummary,
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
 import type { ReconfigureRunPatch } from "../contracts/runs.js";
+import type {
+  WorkspaceFileContent,
+  WorkspaceFileDirectory,
+  WorkspaceFileSearch,
+} from "../contracts/workspace-files.js";
 import type { BackendName } from "../core/backends/types.js";
 import {
   type RunListFilter,
@@ -48,6 +54,7 @@ import {
   clearRunGroup,
   clearRunSchedule as clearRunScheduleCommand,
   deleteRun,
+  deleteTask,
   downloadAttachment,
   drainQueuedResumeMessages as drainQueuedResumeMessagesCommand,
   listAttachments,
@@ -95,6 +102,11 @@ import { readRunAuditHistory } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import type { ScheduleInput } from "../core/run/schedule.js";
 import { resolveStaticInputSurface } from "../core/run/static-input-surface.js";
+import {
+  listWorkspaceFiles,
+  readWorkspaceFile,
+  searchWorkspaceFiles,
+} from "../core/run/workspace-files.js";
 import { executeRunCommand } from "../run-command.js";
 import { startDebugPerfTimer } from "../util/debug-perf.js";
 
@@ -443,6 +455,27 @@ export function getAttachment(
   };
 }
 
+export function getWorkspaceFileList(
+  target: string,
+  input: { path?: string } = {},
+): WorkspaceFileDirectory {
+  const { manifest } = resolveResumeTarget(target);
+  return listWorkspaceFiles(manifest, input);
+}
+
+export function getWorkspaceFileSearch(
+  target: string,
+  input: { query: string; limit?: number },
+): WorkspaceFileSearch {
+  const { manifest } = resolveResumeTarget(target);
+  return searchWorkspaceFiles(manifest, input);
+}
+
+export function getWorkspaceFile(target: string, input: { path: string }): WorkspaceFileContent {
+  const { manifest } = resolveResumeTarget(target);
+  return readWorkspaceFile(manifest, input);
+}
+
 export function getDefinitionList(
   kind: "agent" | "assignment" | "launcher" | "task" | "environment",
 ): ReturnType<typeof listDefinitions> {
@@ -647,7 +680,7 @@ export function addRunAttachmentFromStream(
 export function updateTask(
   target: string,
   taskId: string,
-  update: { status?: string; notes?: string },
+  update: { status?: string; notes?: string; title?: string; body?: string },
   auditContext?: MutationAuditContext,
   emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<RunTaskSummary> {
@@ -677,6 +710,15 @@ export function createTask(
   return addTask(target, input, auditContext, emitAuditEnvelope).then((result) =>
     getTaskFromMutation(result.task),
   );
+}
+
+export function removeTask(
+  target: string,
+  taskId: string,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): Promise<RunTaskDeleteResult> {
+  return deleteTask(target, taskId, auditContext, emitAuditEnvelope);
 }
 
 function getTaskFromMutation(task: ReturnType<typeof showTask>["task"]): RunTaskSummary {

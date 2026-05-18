@@ -62,6 +62,8 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
       canReconfigure: false,
       taskMutation: {
         canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
         canEditNotes: false,
         canSetStatus: false,
       },

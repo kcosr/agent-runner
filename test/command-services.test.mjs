@@ -33,6 +33,7 @@ import {
   clearRunGroup,
   clearRunSchedule,
   deleteRun,
+  deleteTask,
   downloadAttachment,
   drainQueuedResumeMessages,
   isCommandError,
@@ -990,6 +991,8 @@ test("command services: readStatus reads canonical task state for running runs",
         canSetStatus: true,
         canEditNotes: true,
         canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
       },
     });
   });
@@ -1922,6 +1925,8 @@ test("command services: readyRun promotes initialized runs and tightens task and
       canSetStatus: false,
       canEditNotes: true,
       canAdd: false,
+      canEditPending: false,
+      canDeletePending: false,
     });
 
     await assert.rejects(
@@ -2276,6 +2281,119 @@ test("command services: locked task lists reject addTask with CommandError", asy
   });
 });
 
+test("command services: task add/edit/delete capabilities follow stopped-run rules", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  writeBundle(dir, LOCKED_ASSIGNMENT, "svc-locked-work");
+  const terminal = await initRun(dir);
+  const ready = await initRun(dir);
+  const running = await initRun(dir);
+  const locked = await initRun(dir, "svc-locked-work");
+  const archived = await initRun(dir);
+
+  patchManifest(terminal.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-20T10:00:00.000Z";
+    manifest.exitCode = 0;
+  });
+  patchManifest(ready.workspaceDir, (manifest) => {
+    manifest.status = "ready";
+  });
+  patchManifest(running.workspaceDir, (manifest) => {
+    manifest.status = "running";
+  });
+  patchManifest(archived.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.archivedAt = "2026-04-20T10:00:00.000Z";
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const detail = readStatus(terminal.runId);
+    assert.deepEqual(detail.capabilities.taskMutation, {
+      canSetStatus: true,
+      canEditNotes: true,
+      canAdd: true,
+      canEditPending: true,
+      canDeletePending: true,
+    });
+
+    const added = await addTask(terminal.runId, { title: "Follow-up", body: "Do more." });
+    assert.equal(added.task.title, "Follow-up");
+    assert.equal(readManifest(terminal.workspaceDir).finalTasks[added.task.id].body, "Do more.");
+
+    assert.throws(
+      () => addTask(ready.runId, { title: "Rejected" }),
+      /cannot add tasks while run .* is ready/,
+    );
+    assert.throws(
+      () => addTask(running.runId, { title: "Rejected" }),
+      /cannot add tasks on a running run/,
+    );
+    assert.throws(
+      () => addTask(locked.runId, { title: "Rejected" }),
+      /the `tasks` field is locked/,
+    );
+    assert.throws(
+      () => addTask(archived.runId, { title: "Rejected" }),
+      /cannot add tasks while run .* is archived/,
+    );
+  });
+});
+
+test("command services: pending task edit and delete persist and audit through task map", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-20T10:00:00.000Z";
+    manifest.exitCode = 0;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const edited = await setTask(outcome.runId, "t1", {
+      title: "Edited title",
+      body: "Edited body",
+    });
+    assert.equal(edited.task.title, "Edited title");
+    assert.equal(edited.task.body, "Edited body");
+
+    await setTask(outcome.runId, "t2", { status: "in_progress" });
+    await assert.rejects(
+      () => setTask(outcome.runId, "t2", { title: "Nope" }),
+      /cannot edit task t2 unless it is pending/,
+    );
+    await assert.rejects(
+      () => deleteTask(outcome.runId, "t2"),
+      /cannot delete task t2 unless it is pending/,
+    );
+
+    const deleted = await deleteTask(outcome.runId, "t1");
+    assert.deepEqual(
+      { runId: deleted.runId, taskId: deleted.taskId, deleted: deleted.deleted },
+      { runId: outcome.runId, taskId: "t1", deleted: true },
+    );
+  });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.t1, undefined);
+  assert.equal(manifest.finalTasks.t2.title, "Second");
+  assert.equal(manifest.finalTasks.t2.status, "in_progress");
+
+  const audit = readFileSync(join(outcome.workspaceDir, "run-events.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(audit.at(-3).eventType, "task.updated");
+  assert.equal(audit.at(-3).titleChanged, true);
+  assert.equal(audit.at(-3).bodyChanged, true);
+  assert.equal(audit.at(-2).eventType, "task.updated");
+  assert.equal(audit.at(-2).statusAfter, "in_progress");
+  assert.equal(audit.at(-1).eventType, "task.deleted");
+  assert.equal(audit.at(-1).taskId, "t1");
+  assert.equal(audit.at(-1).taskTitle, "Edited title");
+});
+
 test("command services: listRuns supports exact cwd scope, repo scope, and unscoped newest-first results", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -2372,6 +2490,8 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
         canSetStatus: true,
         canEditNotes: true,
         canAdd: true,
+        canEditPending: true,
+        canDeletePending: true,
       },
     });
     assert.deepEqual(allRuns[0].dependencyState, {
@@ -2394,7 +2514,9 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
       taskMutation: {
         canSetStatus: true,
         canEditNotes: true,
-        canAdd: true,
+        canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
       },
     });
     assert.deepEqual(allRuns[1].dependencyState, {

@@ -754,6 +754,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
   const init = await initRun(dir);
   const child = await initRun(dir, "daemon-agent", { parentRunId: init.runId });
   const passiveInit = await initRun(dir, "passive-daemon-agent");
+  mkdirSync(join(dir, "docs"));
+  writeFileSync(join(dir, "docs", "api.md"), "# API\n\nDaemon workspace text.\n");
   const otherCwd = join(dir, "other-cwd");
   mkdirSync(otherCwd, { recursive: true });
   patchManifest(init.workspaceDir, (manifest) => {
@@ -808,6 +810,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
           canSetStatus: true,
           canEditNotes: true,
           canAdd: true,
+          canEditPending: true,
+          canDeletePending: true,
         },
       });
       assert.deepEqual(runs.runs.find((run) => run.runId === init.runId)?.dependencyState, {
@@ -974,6 +978,33 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.equal(updated.task.status, "completed");
       assert.equal(updated.task.notes, "Handled through daemon RPC.");
 
+      const addedTask = await client.call("tasks.add", {
+        target: init.runId,
+        title: "RPC follow-up",
+        body: "queued over RPC",
+      });
+      assert.equal(addedTask.task.title, "RPC follow-up");
+
+      const editedTask = await client.call("tasks.set", {
+        target: init.runId,
+        taskId: addedTask.task.id,
+        title: "RPC edited follow-up",
+        body: "edited over RPC",
+      });
+      assert.equal(editedTask.task.title, "RPC edited follow-up");
+      assert.equal(editedTask.task.body, "edited over RPC");
+
+      const deletedTask = await client.call("tasks.delete", {
+        target: init.runId,
+        taskId: addedTask.task.id,
+      });
+      assert.deepEqual(deletedTask.result, {
+        runId: init.runId,
+        taskId: addedTask.task.id,
+        deleted: true,
+        updatedAt: deletedTask.result.updatedAt,
+      });
+
       patchManifest(child.workspaceDir, (manifest) => {
         manifest.status = "success";
         manifest.endedAt = "2026-04-20T10:00:00.000Z";
@@ -992,7 +1023,9 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(terminalDetail.run.capabilities.taskMutation, {
         canSetStatus: true,
         canEditNotes: true,
-        canAdd: false,
+        canAdd: true,
+        canEditPending: true,
+        canDeletePending: true,
       });
 
       const readied = await client.call("runs.ready", {
@@ -1220,6 +1253,8 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
   const init = await initRun(dir);
   const child = await initRun(dir, "daemon-agent", { parentRunId: init.runId });
   const passiveInit = await initRun(dir, "passive-daemon-agent");
+  mkdirSync(join(dir, "docs"));
+  writeFileSync(join(dir, "docs", "api.md"), "# API\n\nDaemon workspace text.\n");
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -1501,6 +1536,72 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       });
       assert.equal(added.status, 200);
       assert.equal(added.body.task.title, "Follow-up task");
+
+      const editedTask = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/tasks/${added.body.task.id}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "Edited follow-up", body: "edited via HTTP" }),
+        },
+      );
+      assert.equal(editedTask.status, 200);
+      assert.equal(editedTask.body.task.title, "Edited follow-up");
+      assert.equal(editedTask.body.task.body, "edited via HTTP");
+
+      const deletedTask = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/tasks/${added.body.task.id}`,
+        { method: "DELETE" },
+      );
+      assert.equal(deletedTask.status, 200);
+      assert.deepEqual(deletedTask.body.result, {
+        runId: init.runId,
+        taskId: added.body.task.id,
+        deleted: true,
+        updatedAt: deletedTask.body.result.updatedAt,
+      });
+
+      const workspaceRoot = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/workspace/files`);
+      assert.equal(workspaceRoot.status, 200);
+      assert.equal(workspaceRoot.body.directory.runId, init.runId);
+
+      const workspaceDocs = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/files?path=docs`,
+      );
+      assert.equal(workspaceDocs.status, 200);
+      assert.deepEqual(
+        workspaceDocs.body.directory.entries.map((entry) => entry.path),
+        ["docs/api.md"],
+      );
+
+      const workspaceSearch = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/search?q=api&limit=5`,
+      );
+      assert.equal(workspaceSearch.status, 200);
+      assert.equal(workspaceSearch.body.search.maxResults, 5);
+      assert.deepEqual(
+        workspaceSearch.body.search.matches.map((entry) => entry.path),
+        ["docs/api.md"],
+      );
+
+      const workspaceFile = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/file?path=docs%2Fapi.md`,
+      );
+      assert.equal(workspaceFile.status, 200);
+      assert.equal(workspaceFile.body.file.mediaType, "text/markdown");
+      assert.equal(workspaceFile.body.file.text, "# API\n\nDaemon workspace text.\n");
+
+      const workspaceTraversal = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/file?path=..%2Fsecret.txt`,
+      );
+      assert.equal(workspaceTraversal.status, 400);
+      assert.equal(workspaceTraversal.body.error.code, "INVALID_REQUEST");
 
       const readied = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/ready`, {
         method: "POST",
@@ -2427,6 +2528,8 @@ test("daemon run projections expose explicit abort capability from local ownersh
             canSetStatus: false,
             canEditNotes: false,
             canAdd: false,
+            canEditPending: false,
+            canDeletePending: false,
           },
         },
       };
@@ -2474,6 +2577,8 @@ test("daemon run projections expose explicit abort capability from local ownersh
               canSetStatus: false,
               canEditNotes: false,
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
             },
           },
         },
@@ -2635,6 +2740,8 @@ test("daemon projects active run detail as live while it owns the run", async ()
             canSetStatus: false,
             canEditNotes: false,
             canAdd: false,
+            canEditPending: false,
+            canDeletePending: false,
           },
         },
       };
@@ -2682,6 +2789,8 @@ test("daemon projects active run detail as live while it owns the run", async ()
               canSetStatus: false,
               canEditNotes: false,
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
             },
           },
         },
@@ -2900,6 +3009,8 @@ test("daemon HTTP projections preserve hook summary and detail fields", async ()
             canSetStatus: false,
             canEditNotes: false,
             canAdd: false,
+            canEditPending: false,
+            canDeletePending: false,
           },
         },
       };
@@ -2948,6 +3059,8 @@ test("daemon HTTP projections preserve hook summary and detail fields", async ()
               canSetStatus: false,
               canEditNotes: false,
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
             },
           },
         },
@@ -3034,6 +3147,8 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
             canSetStatus: false,
             canEditNotes: false,
             canAdd: false,
+            canEditPending: false,
+            canDeletePending: false,
           },
         },
       };
@@ -3187,6 +3302,8 @@ test("daemon republishes summary and detail projections when a run retries", asy
             canSetStatus: false,
             canEditNotes: false,
             canAdd: false,
+            canEditPending: false,
+            canDeletePending: false,
           },
         },
       };
@@ -3234,6 +3351,8 @@ test("daemon republishes summary and detail projections when a run retries", asy
               canSetStatus: false,
               canEditNotes: false,
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
             },
           },
         },
@@ -5681,6 +5800,8 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
             canSetStatus: false,
             canEditNotes: false,
             canAdd: false,
+            canEditPending: false,
+            canDeletePending: false,
           },
         },
       };
@@ -5728,6 +5849,8 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
               canSetStatus: false,
               canEditNotes: false,
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
             },
           },
         },
@@ -5920,6 +6043,8 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
             canSetStatus: false,
             canEditNotes: false,
             canAdd: false,
+            canEditPending: false,
+            canDeletePending: false,
           },
         },
       };
@@ -5967,6 +6092,8 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
               canSetStatus: false,
               canEditNotes: false,
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
             },
           },
         },
@@ -6155,6 +6282,8 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
             canSetStatus: false,
             canEditNotes: false,
             canAdd: false,
+            canEditPending: false,
+            canDeletePending: false,
           },
         },
       };
@@ -6202,6 +6331,8 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
               canSetStatus: false,
               canEditNotes: false,
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
             },
           },
         },

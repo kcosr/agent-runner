@@ -66,6 +66,7 @@ import {
   TrashIcon,
 } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
+import { RunFilesSurface } from "./run-files-surface.js";
 import { RunNoteEditor } from "./run-note-editor.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
@@ -96,6 +97,7 @@ const SELECTED_RUN_SURFACE_TABS: readonly SelectedRunSurfaceTab[] = [
   { label: "Detail", shortcut: "D", surface: "detail" },
   { label: "Notes", shortcut: "N", surface: "notes" },
   { label: "Tasks", shortcut: "T", surface: "tasks" },
+  { label: "Files", shortcut: "F", surface: "files" },
   { label: "Attachments", shortcut: "A", surface: "attachments" },
 ];
 
@@ -1872,8 +1874,19 @@ export function RunDetailDrawer({
         </div>
         <div className="drawer-body" hidden={activeSurface !== "tasks"}>
           <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
-            <RunTaskList tasks={run.tasks} />
+            <RunTaskList
+              capabilities={run.capabilities.taskMutation}
+              runId={run.runId}
+              tasks={run.tasks}
+            />
           </section>
+        </div>
+        <div className="drawer-body" hidden={activeSurface !== "files"}>
+          <RunFilesSurface
+            canCreateTask={run.capabilities.taskMutation.canAdd}
+            onSwitchToTasks={() => onSelectSurface("tasks")}
+            runId={run.runId}
+          />
         </div>
         <div className="drawer-body drawer-body--notes" hidden={activeSurface !== "notes"}>
           <section aria-label="Notes" className="drawer-panel drawer-panel--notes">

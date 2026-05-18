@@ -224,9 +224,14 @@ test("resume: happy path — original blocks, resume completes, same workspace",
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      // Should receive the inherited session id and only the follow-up message
+      // Should receive the inherited session id, the task reminder, and the follow-up message.
       assert.equal(ctx.resumeSessionId, "sess-original");
-      assert.equal(ctx.prompt, "db is back up");
+      assert.ok(
+        ctx.prompt.includes(
+          `inspect them with agent-runner task list ${first.runId} and use the task CLI`,
+        ),
+      );
+      assert.ok(ctx.prompt.endsWith("db is back up"));
       patchManifest(first.workspaceDir, (manifest) => {
         manifest.finalTasks.t2.status = "completed";
         manifest.finalTasks.t3.status = "completed";
@@ -728,7 +733,12 @@ test("resume: unfinished tasks can resume with an implicit continue prompt", asy
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      assert.equal(ctx.prompt, "Continue working through the remaining task list items.");
+      assert.ok(
+        ctx.prompt.includes(
+          `inspect them with agent-runner task list ${first.runId} and use the task CLI`,
+        ),
+      );
+      assert.ok(ctx.prompt.endsWith("Continue working through the remaining task list items."));
       patchManifest(first.workspaceDir, (manifest) => {
         manifest.finalTasks.t1.status = "completed";
         manifest.finalTasks.t2.status = "completed";
@@ -779,7 +789,12 @@ test("resume: terminal task status edits feed the existing implicit continue gat
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      assert.equal(ctx.prompt, "Continue working through the remaining task list items.");
+      assert.ok(
+        ctx.prompt.includes(
+          `inspect them with agent-runner task list ${first.runId} and use the task CLI`,
+        ),
+      );
+      assert.ok(ctx.prompt.endsWith("Continue working through the remaining task list items."));
       patchManifest(first.workspaceDir, (manifest) => {
         manifest.finalTasks.t1.status = "completed";
         manifest.finalTasks.t2.status = "completed";

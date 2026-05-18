@@ -294,6 +294,8 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
       canSetStatus: true,
       canEditNotes: true,
       canAdd: true,
+      canEditPending: true,
+      canDeletePending: true,
     },
   });
   assert.deepEqual(parsed[1].capabilities, {
@@ -310,7 +312,9 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: true,
+      canAdd: false,
+      canEditPending: false,
+      canDeletePending: false,
     },
   });
   assert.deepEqual(parsed[1].dependencyState, {

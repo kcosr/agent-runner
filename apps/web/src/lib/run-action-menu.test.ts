@@ -19,6 +19,8 @@ function makeCapabilities(overrides: Partial<RunCapabilities> = {}): RunCapabili
     canUnarchive: false,
     taskMutation: {
       canAdd: false,
+      canEditPending: false,
+      canDeletePending: false,
       canEditNotes: true,
       canSetStatus: false,
     },

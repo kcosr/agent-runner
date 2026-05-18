@@ -14,7 +14,12 @@ export type AttemptHookWhen = {
   attemptIndexInSession?: number | number[];
 };
 
-export type TaskTransitionSource = "run-loop" | "task-set" | "task-append-notes" | "task-add";
+export type TaskTransitionSource =
+  | "run-loop"
+  | "task-set"
+  | "task-append-notes"
+  | "task-add"
+  | "task-delete";
 
 export interface TaskTransitionHookWhen {
   taskId?: string;

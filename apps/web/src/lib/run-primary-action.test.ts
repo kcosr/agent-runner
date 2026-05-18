@@ -22,6 +22,8 @@ function makeRun(
         canSetStatus: false,
         canEditNotes: true,
         canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
       },
     },
     ...overrides,

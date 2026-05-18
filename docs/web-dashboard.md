@@ -52,7 +52,7 @@ normal run detail/status DTOs do not expose the run's frozen
 ## Views
 
 - `/` — Runs dashboard with Board/List plus Chat, Detail, Notes, Tasks,
-  and Attachments selected-run surfaces.
+  Files, and Attachments selected-run surfaces.
 - `/runs/:runId` — Same dashboard with a specific run selected for the
   selected-run surfaces.
 - `/settings/general` — General preferences.
@@ -65,25 +65,25 @@ A multi-surface workspace:
 - **Left** — search, grouped Filters control, and preference toggles.
 - **Center** — Board or List, switchable from the toolbar.
 - **Right** — one selected-run panel with Chat, Detail, Notes, Tasks,
-  and Attachments tabs.
+  Files, and Attachments tabs.
 
 The center surface defaults to Board. The toolbar view-mode toggle switches
 between Board and List, and the durable mode choice persists in
 `agent-runner:web:dashboard-view-state.viewMode`. Selecting a run opens one
 resizable selected-run panel. Its header owns the run identity plus action
 toolbar, and the tabs below the toolbar switch between Chat, Detail,
-Notes, Tasks, and Attachments. Chat does not create a separate chat route
+Notes, Tasks, Files, and Attachments. Chat does not create a separate chat route
 or backend chat contract; it follows the selected run, derives messages
 from `RunDetail` plus timeline history, and streams live output through
 the existing timeline stream.
 
 Closing the selected-run panel navigates back to `/` and clears the
-selected run. Chat, Detail, Notes, Tasks, and Attachments tab choice
+selected run. Chat, Detail, Notes, Tasks, Files, and Attachments tab choice
 persists as the active right surface.
 
 Dashboard view state persists the durable surface layout fields:
 center-surface view mode, collapsed board columns, selected-run panel width,
-fullscreen state, and the active Chat/Detail/Notes/Tasks/Attachments tab.
+fullscreen state, and the active Chat/Detail/Notes/Tasks/Files/Attachments tab.
 Search text, per-run drawer tabs, the active board column, and the active
 list status chip remain transient.
 
@@ -200,8 +200,17 @@ The drawer surfaces:
 - Notes surface: rendered markdown by default, an Edit action that exposes
   save/cancel controls, and the same shared note mutation used by the card
   editor. `N` opens the surface; pressing `N` again focuses the editor.
-- Tasks surface: expandable task rows with inline notes and status editing,
-  gated by `taskMutation` capabilities.
+- Tasks surface: expandable task rows with rendered Markdown instructions
+  and notes, capability-gated status editing, manual task creation,
+  pending-task title/body editing, pending-task deletion, and notes
+  replacement or append actions. Mutations refresh the selected run detail
+  and list summaries; daemon errors remain visible in the surface.
+- Files surface: cwd-relative workspace browser and search for the selected
+  run. Text files can be previewed as rendered Markdown or source, selected
+  text/source ranges can seed the shared Create Task dialog, and the dialog
+  shows the exact task body that will be submitted. The surface rejects
+  daemon file errors such as binary files, missing files, and unsafe paths
+  inline instead of falling back to raw filesystem access.
 - Attachments surface: preview-only view of the selected run's
   group-scoped attachments. It shows one attachment at a time under the
   selected-run header and tabs, supports previous/next controls, and

@@ -163,6 +163,12 @@
   bundled web dashboard from a reverse-proxy subpath such as
   `/agent-runner`, including prefixed daemon HTTP routes for pass-through
   proxies. ([#156](https://github.com/kcosr/agent-runner/pull/156))
+- Added daemon workspace file APIs and a web dashboard Files surface for
+  browsing/searching selected-run cwd files, previewing Markdown/source, and
+  creating tasks from selected text or source ranges.
+- Added dashboard task management for manual task creation, pending task
+  title/body edits, pending deletes, status changes, and notes replace/append
+  actions.
 - Added a web dashboard theme mode setting with Auto, Light, and Dark options
   that persists per browser from Settings -> General.
   ([#154](https://github.com/kcosr/agent-runner/pull/154))
@@ -249,6 +255,11 @@
 
 ### Changed
 
+- Task mutation capabilities now expose explicit pending-edit and
+  pending-delete gates, and terminal non-archived runs can add or edit
+  pending follow-up tasks.
+- Resume prompts for unfinished task runs now include the task CLI reminder so
+  resumed workers re-check the authoritative task list before continuing.
 - Cleaned up the README and reference docs for current CLI behavior,
   backend-free smoke checks, skills installation, environment-variable
   placement, and renamed Agent Runner terminology.

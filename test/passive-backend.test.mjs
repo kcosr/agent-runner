@@ -530,6 +530,8 @@ test("passive status json exposes passive task-mutation capabilities and no resu
       canSetStatus: true,
       canEditNotes: true,
       canAdd: true,
+      canEditPending: true,
+      canDeletePending: true,
     },
   });
 });

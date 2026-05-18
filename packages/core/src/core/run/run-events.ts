@@ -57,6 +57,7 @@ const RUN_EVENT_TYPES = [
   "run.container.cleanup_failed",
   "task.added",
   "task.updated",
+  "task.deleted",
 ] as const;
 
 const RUN_EVENT_SHARED_KEYS = new Set([
@@ -1166,6 +1167,8 @@ export function appendTaskUpdatedEvent(params: {
   statusBefore?: TaskStatus;
   statusAfter?: TaskStatus;
   notesChanged: boolean;
+  titleChanged: boolean;
+  bodyChanged: boolean;
 }): RunAuditEnvelope {
   return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
@@ -1179,6 +1182,26 @@ export function appendTaskUpdatedEvent(params: {
       ...(params.statusBefore !== undefined ? { statusBefore: params.statusBefore } : {}),
       ...(params.statusAfter !== undefined ? { statusAfter: params.statusAfter } : {}),
       notesChanged: params.notesChanged,
+      titleChanged: params.titleChanged,
+      bodyChanged: params.bodyChanged,
+    },
+  });
+}
+
+export function appendTaskDeletedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  taskId: string;
+  taskTitle: string;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "task.deleted",
+    context: params.context,
+    fields: {
+      taskId: params.taskId,
+      taskTitle: params.taskTitle,
     },
   });
 }

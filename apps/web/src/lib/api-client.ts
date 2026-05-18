@@ -28,6 +28,8 @@ import {
   runNoteResultSchema,
   runPinnedResultSchema,
   runSummarySchema,
+  runTaskDeleteResultSchema,
+  runTaskSummarySchema,
   runTimelineHistorySchema,
 } from "@kcosr/agent-runner-core/contracts/run-schemas.js";
 import type {
@@ -45,7 +47,19 @@ import type {
   RunNoteResult,
   RunPinnedResult,
   RunSummary,
+  RunTaskDeleteResult,
+  RunTaskSummary,
 } from "@kcosr/agent-runner-core/contracts/runs.js";
+import type {
+  WorkspaceFileContent,
+  WorkspaceFileDirectory,
+  WorkspaceFileSearch,
+} from "@kcosr/agent-runner-core/contracts/workspace-files.js";
+import {
+  workspaceFileListResponseSchema,
+  workspaceFileReadResponseSchema,
+  workspaceFileSearchResponseSchema,
+} from "@kcosr/agent-runner-core/contracts/workspace-files.js";
 import type { DefinitionListResult } from "@kcosr/agent-runner-core/core/commands/service.js";
 import {
   agentConfigSchema,
@@ -387,6 +401,86 @@ async function readDependenciesResult(
     runDependenciesResultSchema,
     label,
   );
+}
+
+async function readTask(response: Response, label: string): Promise<RunTaskSummary> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "task",
+    runTaskSummarySchema,
+    label,
+  );
+}
+
+async function readTaskDeleteResult(
+  response: Response,
+  label: string,
+): Promise<RunTaskDeleteResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runTaskDeleteResultSchema,
+    label,
+  );
+}
+
+async function readWorkspaceFileList(response: Response): Promise<WorkspaceFileDirectory> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  const parsed = workspaceFileListResponseSchema.safeParse(
+    await parseResponseJson(response, "Workspace file list"),
+  );
+  if (!parsed.success) {
+    throw invalidResponse(
+      "Workspace file list response payload is invalid",
+      response.status,
+      parsed.error.flatten(),
+    );
+  }
+  return parsed.data.directory;
+}
+
+async function readWorkspaceFileSearch(response: Response): Promise<WorkspaceFileSearch> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  const parsed = workspaceFileSearchResponseSchema.safeParse(
+    await parseResponseJson(response, "Workspace file search"),
+  );
+  if (!parsed.success) {
+    throw invalidResponse(
+      "Workspace file search response payload is invalid",
+      response.status,
+      parsed.error.flatten(),
+    );
+  }
+  return parsed.data.search;
+}
+
+async function readWorkspaceFile(response: Response): Promise<WorkspaceFileContent> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  const parsed = workspaceFileReadResponseSchema.safeParse(
+    await parseResponseJson(response, "Workspace file"),
+  );
+  if (!parsed.success) {
+    throw invalidResponse(
+      "Workspace file response payload is invalid",
+      response.status,
+      parsed.error.flatten(),
+    );
+  }
+  return parsed.data.file;
 }
 
 async function readQueueResumeMessageResult(
@@ -808,6 +902,65 @@ export function createApiClient(config: AppRuntimeConfig, options: ApiClientOpti
       );
       return await readRunAuditHistory(response);
     },
+    async listWorkspaceFiles(
+      runId: string,
+      options: RequestOptions & { path?: string } = {},
+    ): Promise<WorkspaceFileDirectory> {
+      const params = new URLSearchParams();
+      if (options.path !== undefined) {
+        params.set("path", options.path);
+      }
+      const response = await apiFetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/workspace/files${params.size > 0 ? `?${params.toString()}` : ""}`,
+        ),
+        {
+          headers: { accept: "application/json" },
+          signal: options.signal,
+        },
+      );
+      return await readWorkspaceFileList(response);
+    },
+    async searchWorkspaceFiles(
+      runId: string,
+      query: string,
+      options: RequestOptions & { limit?: number } = {},
+    ): Promise<WorkspaceFileSearch> {
+      const params = new URLSearchParams({ q: query });
+      if (options.limit !== undefined) {
+        params.set("limit", String(options.limit));
+      }
+      const response = await apiFetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/workspace/search?${params.toString()}`,
+        ),
+        {
+          headers: { accept: "application/json" },
+          signal: options.signal,
+        },
+      );
+      return await readWorkspaceFileSearch(response);
+    },
+    async getWorkspaceFile(
+      runId: string,
+      path: string,
+      options: RequestOptions = {},
+    ): Promise<WorkspaceFileContent> {
+      const params = new URLSearchParams({ path });
+      const response = await apiFetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/workspace/file?${params.toString()}`,
+        ),
+        {
+          headers: { accept: "application/json" },
+          signal: options.signal,
+        },
+      );
+      return await readWorkspaceFile(response);
+    },
     async listAttachments(
       runId: string,
       options: { scope?: AttachmentScope } = {},
@@ -1197,6 +1350,74 @@ export function createApiClient(config: AppRuntimeConfig, options: ApiClientOpti
         },
       );
       return await readDependenciesResult(response, "Clear dependencies");
+    },
+    async updateTask(
+      runId: string,
+      taskId: string,
+      update: { status?: string; notes?: string; title?: string; body?: string },
+    ): Promise<RunTaskSummary> {
+      const response = await apiFetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}`,
+        ),
+        {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(update),
+        },
+      );
+      return await readTask(response, "Update task");
+    },
+    async appendTaskNotes(runId: string, taskId: string, text: string): Promise<RunTaskSummary> {
+      const response = await apiFetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/append-notes`,
+        ),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ text }),
+        },
+      );
+      return await readTask(response, "Append task notes");
+    },
+    async createTask(
+      runId: string,
+      input: { title: string; body?: string },
+    ): Promise<RunTaskSummary> {
+      const response = await apiFetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/tasks`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(input),
+        },
+      );
+      return await readTask(response, "Create task");
+    },
+    async deleteTask(runId: string, taskId: string): Promise<RunTaskDeleteResult> {
+      const response = await apiFetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}`,
+        ),
+        {
+          method: "DELETE",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readTaskDeleteResult(response, "Delete task");
     },
   };
 }

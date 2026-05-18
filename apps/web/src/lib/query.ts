@@ -11,6 +11,12 @@ export const runQueryKeys = {
   list: ({ includeArchived, runGroupId = null }: RunListKeyOptions) =>
     [...runQueryKeys.lists(), { includeArchived, runGroupId }] as const,
   detail: (runId: string) => [...runQueryKeys.all, "detail", runId] as const,
+  workspaceFiles: (runId: string, path = "") =>
+    [...runQueryKeys.all, "workspace-files", runId, path] as const,
+  workspaceSearch: (runId: string, query: string, limit?: number) =>
+    [...runQueryKeys.all, "workspace-search", runId, { query, limit: limit ?? null }] as const,
+  workspaceFile: (runId: string, path: string) =>
+    [...runQueryKeys.all, "workspace-file", runId, path] as const,
   inputSurface: (agent: string, assignment: string, cwd?: string) =>
     [...runQueryKeys.all, "input-surface", { agent, assignment, cwd: cwd ?? null }] as const,
   definitions: ["definitions"] as const,
