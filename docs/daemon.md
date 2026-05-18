@@ -403,14 +403,16 @@ updatedAt } }`.
 | Method | Path | Effect |
 |--------|------|--------|
 | `GET` | `/api/runs/:runId/workspace/files` | List a cwd-relative directory. Query: optional `path` |
-| `GET` | `/api/runs/:runId/workspace/search` | Search cwd-relative text paths. Query: `q`, optional `limit` |
-| `GET` | `/api/runs/:runId/workspace/file` | Read a text file. Query: `path` |
+| `GET` | `/api/runs/:runId/workspace/search` | Search cwd-relative supported text paths. Query: `q`, optional `limit` |
+| `GET` | `/api/runs/:runId/workspace/file` | Read a supported text file. Query: `path` |
 
 Workspace file routes are scoped to the selected run's `cwd`. Paths are
 cwd-relative and must stay inside that tree after normalization and symlink
-resolution. Traversal, missing files, unreadable binary content, and
-oversized reads return the normal daemon error envelope; the daemon never
-serves arbitrary absolute paths from these routes.
+resolution. Search is bounded, skips dependency/metadata directories such as
+`node_modules` and `.git`, and reports truncation through the response flag.
+Traversal, unsupported file extensions, missing files, unreadable binary
+content, and oversized reads return the normal daemon error envelope; the
+daemon never serves arbitrary absolute paths from these routes.
 
 ### Attachments
 

@@ -73,6 +73,7 @@ export function RunFilesSurface({
   const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const [directoryPath, setDirectoryPath] = useState("");
   const [searchDraft, setSearchDraft] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<FileViewMode>("source");
   const [sourceSelection, setSourceSelection] = useState<SourceSelection | null>(null);
@@ -80,17 +81,30 @@ export function RunFilesSurface({
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
   const [createdMessage, setCreatedMessage] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
-  const trimmedSearch = searchDraft.trim();
+  const trimmedSearch = debouncedSearch.trim();
   const searchActive = trimmedSearch.length > 0;
+
+  useEffect(() => {
+    if (searchDraft.trim().length === 0) {
+      setDebouncedSearch("");
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(searchDraft);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [searchDraft]);
 
   const directoryQuery = useQuery({
     queryKey: runQueryKeys.workspaceFiles(runId, directoryPath),
     queryFn: ({ signal }) => api.listWorkspaceFiles(runId, { path: directoryPath, signal }),
+    retry: false,
   });
   const searchQuery = useQuery({
     enabled: searchActive,
     queryKey: runQueryKeys.workspaceSearch(runId, trimmedSearch, 50),
     queryFn: ({ signal }) => api.searchWorkspaceFiles(runId, trimmedSearch, { limit: 50, signal }),
+    retry: false,
   });
   const fileQuery = useQuery({
     enabled: selectedFilePath !== null,

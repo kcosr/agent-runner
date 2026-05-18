@@ -205,12 +205,13 @@ The drawer surfaces:
   pending-task title/body editing, pending-task deletion, and notes
   replacement or append actions. Mutations refresh the selected run detail
   and list summaries; daemon errors remain visible in the surface.
-- Files surface: cwd-relative workspace browser and search for the selected
-  run. Text files can be previewed as rendered Markdown or source, selected
-  text/source ranges can seed the shared Create Task dialog, and the dialog
-  shows the exact task body that will be submitted. The surface rejects
-  daemon file errors such as binary files, missing files, and unsafe paths
-  inline instead of falling back to raw filesystem access.
+- Files surface: cwd-relative workspace browser and bounded search for the
+  selected run. Supported text files can be previewed as rendered Markdown or
+  source, selected text/source ranges can seed the shared Create Task dialog,
+  and the dialog shows the exact task body that will be submitted. The surface
+  rejects daemon file errors such as unsupported files, binary files, missing
+  files, and unsafe paths inline instead of falling back to raw filesystem
+  access.
 - Attachments surface: preview-only view of the selected run's
   group-scoped attachments. It shows one attachment at a time under the
   selected-run header and tabs, supports previous/next controls, and

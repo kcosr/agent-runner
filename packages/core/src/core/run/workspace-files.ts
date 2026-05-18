@@ -1,9 +1,17 @@
-import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import {
+  promises as fs,
+  type Stats,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   MAX_WORKSPACE_FILE_BYTES,
   MAX_WORKSPACE_LIST_ENTRIES,
   MAX_WORKSPACE_SEARCH_RESULTS,
+  MAX_WORKSPACE_SEARCH_VISITED,
   type WorkspaceFileContent,
   type WorkspaceFileDirectory,
   type WorkspaceFileEntry,
@@ -128,6 +136,10 @@ function isSupportedTextPath(path: string): boolean {
   return isMarkdownPath(path) || TEXT_EXTENSIONS.has(extname(path).toLowerCase());
 }
 
+function shouldSkipSearchDirectory(name: string): boolean {
+  return name === "node_modules" || name.startsWith(".");
+}
+
 function codeFromError(err: unknown): unknown {
   return typeof err === "object" && err !== null && "code" in err ? err.code : null;
 }
@@ -158,9 +170,9 @@ function statWorkspacePath(displayPath: string, path: string) {
   }
 }
 
-function lstatWorkspacePath(displayPath: string, path: string) {
+async function asyncWorkspaceFs<T>(displayPath: string, action: () => Promise<T>): Promise<T> {
   try {
-    return lstatSync(path);
+    return await action();
   } catch (err) {
     if (codeFromError(err) === "ENOENT") {
       throw new WorkspaceFileNotFoundError(`workspace path "${displayPath}" not found`);
@@ -171,8 +183,7 @@ function lstatWorkspacePath(displayPath: string, path: string) {
   }
 }
 
-function entryForPath(realPath: string, displayPath: string): WorkspaceFileEntry {
-  const stats = statWorkspacePath(displayPath, realPath);
+function entryFromStats(stats: Stats, displayPath: string): WorkspaceFileEntry {
   const kind = stats.isDirectory() ? "directory" : "file";
   return {
     path: displayPath,
@@ -183,6 +194,10 @@ function entryForPath(realPath: string, displayPath: string): WorkspaceFileEntry
     supportedText: kind === "file" && isSupportedTextPath(displayPath),
     markdown: kind === "file" && isMarkdownPath(displayPath),
   };
+}
+
+function entryForPath(realPath: string, displayPath: string): WorkspaceFileEntry {
+  return entryFromStats(statWorkspacePath(displayPath, realPath), displayPath);
 }
 
 function parentPathFor(path: string): string | null {
@@ -259,6 +274,9 @@ export function readWorkspaceFile(
   input: { path: string },
 ): WorkspaceFileContent {
   const target = resolveWorkspaceTarget(manifest, input.path, { allowRoot: false });
+  if (!isSupportedTextPath(target.path)) {
+    throw new WorkspaceFileError(`workspace file "${target.path}" is not a supported text file`);
+  }
   const stats = statWorkspacePath(target.path, target.realPath);
   if (!stats.isFile()) {
     throw new WorkspaceFileError(`workspace path "${target.path}" is not a file`);
@@ -286,10 +304,10 @@ export function readWorkspaceFile(
   };
 }
 
-export function searchWorkspaceFiles(
+export async function searchWorkspaceFiles(
   manifest: Pick<RunManifest, "cwd" | "runId">,
   input: { query: string; limit?: number },
-): WorkspaceFileSearch {
+): Promise<WorkspaceFileSearch> {
   const query = input.query.trim();
   if (query.length === 0) {
     throw new WorkspaceFileInvalidPathError("workspace search query cannot be empty");
@@ -307,47 +325,57 @@ export function searchWorkspaceFiles(
   const matches: WorkspaceFileEntry[] = [];
   let truncated = false;
   const pending = [root];
+  let visited = 0;
 
   while (pending.length > 0) {
     const directory = pending.shift();
     if (directory === undefined) {
       break;
     }
+    if (visited >= MAX_WORKSPACE_SEARCH_VISITED) {
+      truncated = true;
+      break;
+    }
     let names: string[];
     try {
-      names = readdirSync(directory);
+      names = await fs.readdir(directory);
     } catch (err) {
       throw new WorkspaceFileError("workspace search failed while reading directory", {
         cause: err,
       });
     }
     for (const name of names.sort((left, right) => left.localeCompare(right))) {
+      if (visited >= MAX_WORKSPACE_SEARCH_VISITED) {
+        truncated = true;
+        break;
+      }
       const absolutePath = resolve(directory, name);
       const displayPath = relativeWorkspacePath(root, absolutePath);
-      const realPath = realpathWorkspaceChild(displayPath, absolutePath);
+      const stats = await asyncWorkspaceFs(displayPath, () => fs.lstat(absolutePath));
+      if (stats.isDirectory() && shouldSkipSearchDirectory(name)) {
+        continue;
+      }
+      visited += 1;
+      const realPath = await asyncWorkspaceFs(displayPath, () => fs.realpath(absolutePath));
       if (!isContainedBy(root, realPath)) {
         throw new WorkspaceFileInvalidPathError(
           `workspace path "${displayPath}" resolves outside cwd`,
         );
       }
-      const stats = lstatWorkspacePath(displayPath, absolutePath);
       if (displayPath.toLowerCase().includes(needle)) {
         if (matches.length >= maxResults) {
           truncated = true;
-          return {
-            runId: manifest.runId,
-            cwd: manifest.cwd,
-            query,
-            matches,
-            truncated,
-            maxResults,
-          };
+          break;
         }
-        matches.push(entryForPath(realPath, displayPath));
+        const realStats = await asyncWorkspaceFs(displayPath, () => fs.stat(realPath));
+        matches.push(entryFromStats(realStats, displayPath));
       }
       if (stats.isDirectory()) {
         pending.push(absolutePath);
       }
+    }
+    if (truncated) {
+      break;
     }
   }
 

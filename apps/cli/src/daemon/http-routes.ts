@@ -210,11 +210,11 @@ const routes: RouteDefinition[] = [
   {
     method: "GET",
     pattern: ["api", "runs", ":runId", "workspace", "search"],
-    handler: (_req, res, ctx, params, url) => {
+    handler: async (_req, res, ctx, params, url) => {
       sendJson(
         res,
         200,
-        ctx.operations.searchWorkspaceFiles(routeParam(params, "runId"), {
+        await ctx.operations.searchWorkspaceFiles(routeParam(params, "runId"), {
           query: requiredNonEmptyQueryString(url.searchParams.get("q"), "q"),
           limit: parsePositiveIntegerQueryValue(url.searchParams.get("limit"), "limit"),
         }),

@@ -3,6 +3,7 @@ import { z } from "zod";
 export const MAX_WORKSPACE_FILE_BYTES = 1 * 1024 * 1024;
 export const MAX_WORKSPACE_LIST_ENTRIES = 1000;
 export const MAX_WORKSPACE_SEARCH_RESULTS = 200;
+export const MAX_WORKSPACE_SEARCH_VISITED = 5000;
 
 export type WorkspaceFileKind = "directory" | "file";
 export type WorkspaceFileMediaType = "text/markdown" | "text/plain";

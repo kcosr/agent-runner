@@ -1,12 +1,10 @@
-export type TaskReferenceView = "rendered-markdown" | "source";
-
-export interface RenderedTaskReference {
+interface RenderedTaskReference {
   path: string;
   selectedText: string;
   view: "rendered-markdown";
 }
 
-export interface SourceTaskReference {
+interface SourceTaskReference {
   endLine: number;
   language: string | null;
   path: string;

@@ -355,6 +355,7 @@ export interface TaskResult {
   task: RunTaskSummary;
 }
 
+/** @protocol */
 export interface TaskDeleteResult {
   result: RunTaskDeleteResult;
 }

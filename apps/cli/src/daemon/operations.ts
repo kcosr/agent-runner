@@ -150,8 +150,8 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     listWorkspaceFiles(target: string, input?: { path?: string }) {
       return { directory: ctx.getWorkspaceFileList(target, input) };
     },
-    searchWorkspaceFiles(target: string, input: { query: string; limit?: number }) {
-      return { search: ctx.getWorkspaceFileSearch(target, input) };
+    async searchWorkspaceFiles(target: string, input: { query: string; limit?: number }) {
+      return { search: await ctx.getWorkspaceFileSearch(target, input) };
     },
     getWorkspaceFile(target: string, input: { path: string }) {
       return { file: ctx.getWorkspaceFile(target, input) };

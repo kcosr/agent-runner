@@ -56,7 +56,11 @@ export function CreateTaskDialog({
     if (pending || trimmedTitle.length === 0 || trimmedInstruction.length === 0) {
       return;
     }
-    await onSubmit({ body, title: trimmedTitle });
+    try {
+      await onSubmit({ body, title: trimmedTitle });
+    } catch {
+      // The parent mutation owns error rendering via submitError.
+    }
   }
 
   return (

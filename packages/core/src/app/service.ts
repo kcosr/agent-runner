@@ -466,7 +466,7 @@ export function getWorkspaceFileList(
 export function getWorkspaceFileSearch(
   target: string,
   input: { query: string; limit?: number },
-): WorkspaceFileSearch {
+): Promise<WorkspaceFileSearch> {
   const { manifest } = resolveResumeTarget(target);
   return searchWorkspaceFiles(manifest, input);
 }

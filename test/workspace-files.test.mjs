@@ -82,8 +82,12 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
   const dir = tempDir();
   writeBundle(dir);
   mkdirSync(join(dir, "docs"));
+  mkdirSync(join(dir, ".git"));
+  mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });
   mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, ".git", "guide.md"), "# Hidden guide\n");
   writeFileSync(join(dir, "docs", "guide.md"), "# Guide\n\nHello workspace.\n");
+  writeFileSync(join(dir, "node_modules", "pkg", "guide.ts"), "export const hidden = true;\n");
   writeFileSync(join(dir, "src", "main.ts"), "export const value = 1;\n");
   const outcome = await initRun(dir);
 
@@ -110,7 +114,7 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
     assert.equal(docs.entries[0].supportedText, true);
     assert.equal(docs.entries[0].markdown, true);
 
-    const search = getWorkspaceFileSearch(outcome.runId, { query: "guide" });
+    const search = await getWorkspaceFileSearch(outcome.runId, { query: "guide" });
     assert.equal(search.maxResults, MAX_WORKSPACE_SEARCH_RESULTS);
     assert.deepEqual(
       search.matches.map((entry) => entry.path),
@@ -130,6 +134,7 @@ test("workspace file service rejects traversal, missing paths, outside symlinks,
   const outside = tempDir();
   writeBundle(dir);
   writeFileSync(join(dir, "binary.bin"), Buffer.from([0x61, 0x00, 0x62]));
+  writeFileSync(join(dir, ".env"), "TOKEN=secret\n");
   writeFileSync(join(dir, "huge.txt"), `${"x".repeat(MAX_WORKSPACE_FILE_BYTES + 1)}`);
   writeFileSync(join(outside, "secret.txt"), "secret\n");
   symlinkSync(join(dir, "missing-target.txt"), join(dir, "broken-link.txt"));
@@ -145,9 +150,10 @@ test("workspace file service rejects traversal, missing paths, outside symlinks,
       () => getWorkspaceFile(outcome.runId, { path: "missing.txt" }),
       WorkspaceFileNotFoundError,
     );
+    assert.throws(() => getWorkspaceFile(outcome.runId, { path: ".env" }), WorkspaceFileError);
     assert.throws(() => getWorkspaceFileList(outcome.runId), WorkspaceFileNotFoundError);
-    assert.throws(
-      () => getWorkspaceFileSearch(outcome.runId, { query: "broken" }),
+    await assert.rejects(
+      async () => getWorkspaceFileSearch(outcome.runId, { query: "broken" }),
       WorkspaceFileNotFoundError,
     );
     assert.throws(
