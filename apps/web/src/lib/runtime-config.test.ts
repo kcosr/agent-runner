@@ -14,8 +14,6 @@ describe("runtime config", () => {
         new Response(
           JSON.stringify({
             webBasePath: "/agent-runner",
-            apiBasePath: "/agent-runner/api",
-            runSummaryEventsPath: "/agent-runner/api/events/run-summaries",
           }),
           { status: 200 },
         ),
@@ -48,7 +46,7 @@ describe("runtime config", () => {
     await expect(loadRuntimeConfig()).rejects.toBeInstanceOf(RuntimeConfigError);
   });
 
-  it("rejects runtime config paths that do not match the web base path", async () => {
+  it("rejects redundant runtime config path fields", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -56,8 +54,7 @@ describe("runtime config", () => {
           new Response(
             JSON.stringify({
               webBasePath: "/agent-runner",
-              apiBasePath: "https://example.test/api",
-              runSummaryEventsPath: "/api/events/run-summaries",
+              apiBasePath: "/agent-runner/api",
             }),
             { status: 200 },
           ),

@@ -30,8 +30,9 @@ agent-runner serve [--listen <ws-url>]
 
 When a reverse proxy exposes the bundled web dashboard from a subpath,
 set `AGENT_RUNNER_WEB_BASE_PATH` to the external mount path, for example
-`/agent-runner`. The daemon returns that path from `/app-config.json` and
-uses it when serving the dashboard HTML.
+`/agent-runner`. The daemon returns that path from `/app-config.json`,
+uses it when serving the dashboard HTML, and accepts prefixed HTTP routes
+for pass-through proxy setups.
 
 ## Startup and shutdown recovery
 
@@ -415,10 +416,10 @@ routes.
 
 ### App config
 
-- `GET /app-config.json` → `{ webBasePath, apiBasePath, runSummaryEventsPath }`
+- `GET /app-config.json` → `{ webBasePath }`
 
-The web UI fetches this before initialization. Per-run detail, audit,
-and timeline paths are derived from `apiBasePath` and the active run id.
+The web UI fetches this before initialization, then derives API, summary
+event, per-run detail, audit, and timeline paths from `webBasePath`.
 When `AGENT_RUNNER_WEB_BASE_PATH` is set, the daemon also accepts the
 configured prefix on HTTP routes, for example
 `/agent-runner/app-config.json` and `/agent-runner/api/runs`.

@@ -121,9 +121,7 @@ function htmlWithWebBasePath(body: Buffer, webBasePath: string): Buffer {
   return Buffer.from(
     withInjectedBasePath
       .replaceAll('src="/assets/', `src="${prefix}/assets/`)
-      .replaceAll("src='/assets/", `src='${prefix}/assets/`)
-      .replaceAll('href="/assets/', `href="${prefix}/assets/`)
-      .replaceAll("href='/assets/", `href='${prefix}/assets/`),
+      .replaceAll('href="/assets/', `href="${prefix}/assets/`),
     "utf8",
   );
 }

@@ -9,6 +9,10 @@ export interface AppRuntimeConfig {
   runSummaryEventsPath: string;
 }
 
+export interface AppRuntimeConfigPayload {
+  webBasePath: string;
+}
+
 export function normalizeWebBasePath(raw: string | undefined, label = "web base path"): string {
   const value = raw?.trim();
   if (!value || value === "/") {
@@ -42,36 +46,30 @@ export function appRuntimeConfigForWebBasePath(webBasePath: string): AppRuntimeC
   };
 }
 
-export const appRuntimeConfigSchema: z.ZodType<AppRuntimeConfig> = z
+export function appRuntimeConfigPayloadForWebBasePath(
+  webBasePath: string,
+): AppRuntimeConfigPayload {
+  return { webBasePath: normalizeWebBasePath(webBasePath) };
+}
+
+export const appRuntimeConfigPayloadSchema = z
   .object({
     webBasePath: z.string(),
-    apiBasePath: z.string(),
-    runSummaryEventsPath: z.string(),
   })
-  .superRefine((config, context) => {
-    let expectedConfig: AppRuntimeConfig;
+  .strict()
+  .transform((payload, context) => {
     try {
-      expectedConfig = appRuntimeConfigForWebBasePath(config.webBasePath);
+      return appRuntimeConfigPayloadForWebBasePath(payload.webBasePath);
     } catch {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "webBasePath must be an absolute normalized path",
         path: ["webBasePath"],
       });
-      return;
-    }
-    if (config.apiBasePath !== expectedConfig.apiBasePath) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "apiBasePath must match webBasePath",
-        path: ["apiBasePath"],
-      });
-    }
-    if (config.runSummaryEventsPath !== expectedConfig.runSummaryEventsPath) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "runSummaryEventsPath must match webBasePath",
-        path: ["runSummaryEventsPath"],
-      });
+      return z.NEVER;
     }
   });
+
+export const appRuntimeConfigSchema = appRuntimeConfigPayloadSchema.transform((payload) =>
+  appRuntimeConfigForWebBasePath(payload.webBasePath),
+);

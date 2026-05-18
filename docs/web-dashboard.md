@@ -14,9 +14,8 @@ API. It is a client of the daemon only — there is no standalone mode.
    `http://127.0.0.1:4773/`).
 
 The daemon serves the bundled assets plus `GET /app-config.json`, which
-tells the UI where to reach the API (`apiBasePath`) and summary event
-stream (`runSummaryEventsPath`). All other endpoints are derived from
-those plus the active run id.
+tells the UI the configured web mount path (`webBasePath`). The browser
+derives API and event stream paths from that base path.
 
 ## Daemon Token
 
@@ -447,10 +446,15 @@ mounted behind a reverse proxy at a subpath, set
 `AGENT_RUNNER_WEB_BASE_PATH` in the daemon environment, for example
 `AGENT_RUNNER_WEB_BASE_PATH=/agent-runner`.
 
+For pass-through prefix proxies, build the bundled dashboard with the
+same `AGENT_RUNNER_WEB_BASE_PATH` value used by the daemon. The daemon
+rewrites entry asset URLs at runtime, but Vite's module preload hints are
+emitted with the build-time base path.
+
 ## Data flow summary
 
 1. App boots and fetches `app-config.json` from the configured web base
-   path for the API paths.
+   path, then derives API and event stream paths.
 2. Reads the optional Settings -> General daemon token and attaches it as
    an Authorization bearer header on API, attachment, and fetch-backed SSE
    requests.

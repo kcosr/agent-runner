@@ -2166,8 +2166,6 @@ test("daemon serve exposes app config, keeps /api precedence, and falls back to 
         assert.equal(appConfig.status, 200);
         assert.deepEqual(appConfig.body, {
           webBasePath: "/",
-          apiBasePath: "/api",
-          runSummaryEventsPath: "/api/events/run-summaries",
         });
 
         const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
@@ -2239,8 +2237,6 @@ test("daemon serve exposes web runtime config for a mounted base path", async ()
         assert.equal(appConfig.status, 200);
         assert.deepEqual(appConfig.body, {
           webBasePath: "/agent-runner",
-          apiBasePath: "/agent-runner/api",
-          runSummaryEventsPath: "/agent-runner/api/events/run-summaries",
         });
 
         const response = await fetch(new URL("/", httpBaseUrl));
@@ -2253,6 +2249,11 @@ test("daemon serve exposes web runtime config for a mounted base path", async ()
         const prefixedConfig = await httpJson(httpBaseUrl, "/agent-runner/app-config.json");
         assert.equal(prefixedConfig.status, 200);
         assert.deepEqual(prefixedConfig.body, appConfig.body);
+
+        const falsePrefixConfig = await fetch(
+          new URL("/agent-runner-other/app-config.json", httpBaseUrl),
+        );
+        assert.equal(falsePrefixConfig.status, 404);
 
         const prefixedAsset = await fetch(new URL(assetPath, httpBaseUrl));
         assert.equal(prefixedAsset.status, 200);
@@ -7749,7 +7750,6 @@ test("daemon bearer auth protects HTTP, SSE, and WebSocket while leaving public 
           const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
           assert.equal(appConfig.status, 200);
           assert.equal(appConfig.body.webBasePath, "/");
-          assert.equal(appConfig.body.apiBasePath, "/api");
           assert.equal(appConfig.headers.get("www-authenticate"), null);
 
           const staticAsset = await fetch(

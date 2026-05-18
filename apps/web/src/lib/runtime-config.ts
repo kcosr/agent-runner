@@ -1,6 +1,7 @@
 import {
   type AppRuntimeConfig,
   appRuntimeConfigSchema,
+  webPathPrefix,
 } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import { createContext, useContext } from "react";
 
@@ -20,18 +21,11 @@ export class RuntimeConfigError extends Error {
   }
 }
 
-function normalizeConfigBasePath(basePath: string): string {
-  if (basePath === "/" || basePath === "") {
-    return "";
-  }
-  return `/${basePath.replace(/^\/+|\/+$/g, "")}`;
-}
-
 export function runtimeConfigPath(): string {
   const injectedBasePath =
     typeof window === "undefined" ? undefined : window.__AGENT_RUNNER_WEB_BASE_PATH__;
   const basePath = injectedBasePath ?? import.meta.env.BASE_URL;
-  return `${normalizeConfigBasePath(basePath)}/app-config.json`;
+  return `${webPathPrefix(basePath)}/app-config.json`;
 }
 
 export async function loadRuntimeConfig(

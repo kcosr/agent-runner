@@ -184,10 +184,13 @@ mode uses `--connect-host` and `--connect-local-port`. See
 When `agent-runner serve` is mounted below a reverse-proxy subpath, set
 `AGENT_RUNNER_WEB_BASE_PATH` in the daemon environment to that external
 path. The value must be an absolute path such as `/agent-runner`; the
-daemon uses it for the browser router, generated asset URLs, and web API
-paths returned by `/app-config.json`. The daemon accepts both strip-prefix
-proxy routing (`/agent-runner/*` forwarded as `/*`) and pass-through
-prefix routing (`/agent-runner/*` forwarded unchanged).
+daemon uses it for the browser router, generated entry asset URLs, and
+browser-derived web API paths. The daemon accepts both strip-prefix proxy
+routing (`/agent-runner/*` forwarded as `/*`) and pass-through prefix
+routing (`/agent-runner/*` forwarded unchanged). For pass-through prefix
+proxying, build the bundled dashboard with the same
+`AGENT_RUNNER_WEB_BASE_PATH` value so Vite module preload hints use the
+external mount path too.
 
 Daemon auth is a single shared-token control-plane guard. It protects
 `/api/*`, SSE, and WebSocket JSON-RPC access, but it is not multi-user

@@ -61,6 +61,7 @@ import {
 } from "@kcosr/agent-runner-core/backends/codex.js";
 import { loadCustomBackends, resolveBackend } from "@kcosr/agent-runner-core/backends/registry.js";
 import { isPathArg } from "@kcosr/agent-runner-core/config/runtime-paths.js";
+import { appRuntimeConfigPayloadForWebBasePath } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import type { RunAttachment } from "@kcosr/agent-runner-core/contracts/attachments.js";
 import type {
   RunAuditEnvelope,
@@ -824,6 +825,9 @@ export async function serveDaemon(
 
   const daemonAuth = resolveDaemonAuthConfig();
   const appRuntimeConfig = deriveAppRuntimeConfig();
+  const appRuntimeConfigPayload = appRuntimeConfigPayloadForWebBasePath(
+    appRuntimeConfig.webBasePath,
+  );
   const { host, port, path } = listenSocketConfig(listenUrl);
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const startedAt = new Date().toISOString();
@@ -3363,7 +3367,7 @@ export async function serveDaemon(
     if (routedPathname === "/app-config.json") {
       res.setHeader("cache-control", "no-cache");
       res.setHeader("content-type", "application/json; charset=utf-8");
-      res.end(JSON.stringify(appRuntimeConfig));
+      res.end(JSON.stringify(appRuntimeConfigPayload));
       return;
     }
 
@@ -3375,29 +3379,24 @@ export async function serveDaemon(
         return;
       }
       void (async () => {
-        const originalUrl = req.url;
         req.url = requestUrlWithPathname(req.url, httpBaseUrl, routedPathname);
-        try {
-          await handleHttpRequest(req, res, {
-            operations,
-            httpBaseUrl,
-            subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
-            subscribeRunDetail: (runId, publish) =>
-              subscribeRunDetail(res, runId, publish).unsubscribe,
-            subscribeRunAudit: (runId, publish) => {
-              const subscription = subscribeRunAudit(res, runId, publish);
-              replayAudit(runId, publish);
-              return subscription.unsubscribe;
-            },
-            subscribeRunTimeline: (runId, publish) => {
-              const subscription = subscribeRunTimeline(res, runId, publish);
-              replayTimeline(runId, publish);
-              return subscription.unsubscribe;
-            },
-          });
-        } finally {
-          req.url = originalUrl;
-        }
+        await handleHttpRequest(req, res, {
+          operations,
+          httpBaseUrl,
+          subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
+          subscribeRunDetail: (runId, publish) =>
+            subscribeRunDetail(res, runId, publish).unsubscribe,
+          subscribeRunAudit: (runId, publish) => {
+            const subscription = subscribeRunAudit(res, runId, publish);
+            replayAudit(runId, publish);
+            return subscription.unsubscribe;
+          },
+          subscribeRunTimeline: (runId, publish) => {
+            const subscription = subscribeRunTimeline(res, runId, publish);
+            replayTimeline(runId, publish);
+            return subscription.unsubscribe;
+          },
+        });
       })();
       return;
     }
