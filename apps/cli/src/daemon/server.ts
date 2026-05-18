@@ -3378,26 +3378,23 @@ export async function serveDaemon(
         sendError(res, err);
         return;
       }
-      void (async () => {
-        req.url = requestUrlWithPathname(req.url, httpBaseUrl, routedPathname);
-        await handleHttpRequest(req, res, {
-          operations,
-          httpBaseUrl,
-          subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
-          subscribeRunDetail: (runId, publish) =>
-            subscribeRunDetail(res, runId, publish).unsubscribe,
-          subscribeRunAudit: (runId, publish) => {
-            const subscription = subscribeRunAudit(res, runId, publish);
-            replayAudit(runId, publish);
-            return subscription.unsubscribe;
-          },
-          subscribeRunTimeline: (runId, publish) => {
-            const subscription = subscribeRunTimeline(res, runId, publish);
-            replayTimeline(runId, publish);
-            return subscription.unsubscribe;
-          },
-        });
-      })();
+      req.url = requestUrlWithPathname(req.url, httpBaseUrl, routedPathname);
+      void handleHttpRequest(req, res, {
+        operations,
+        httpBaseUrl,
+        subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
+        subscribeRunDetail: (runId, publish) => subscribeRunDetail(res, runId, publish).unsubscribe,
+        subscribeRunAudit: (runId, publish) => {
+          const subscription = subscribeRunAudit(res, runId, publish);
+          replayAudit(runId, publish);
+          return subscription.unsubscribe;
+        },
+        subscribeRunTimeline: (runId, publish) => {
+          const subscription = subscribeRunTimeline(res, runId, publish);
+          replayTimeline(runId, publish);
+          return subscription.unsubscribe;
+        },
+      });
       return;
     }
 

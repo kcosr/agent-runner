@@ -52,7 +52,7 @@ export function appRuntimeConfigPayloadForWebBasePath(
   return { webBasePath: normalizeWebBasePath(webBasePath) };
 }
 
-export const appRuntimeConfigPayloadSchema = z
+const appRuntimeConfigPayloadSchema = z
   .object({
     webBasePath: z.string(),
   })
