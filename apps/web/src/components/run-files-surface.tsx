@@ -12,7 +12,7 @@ import { useDaemonAuthToken } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { type TaskReference, defaultTaskTitle, languageForPath } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
-import { CloseIcon, FileIcon, FolderIcon, SearchIcon } from "./icons.js";
+import { ChevronIcon, CloseIcon, FileIcon, FolderIcon, SearchIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
 
 type FileViewMode = "rendered-markdown" | "source";
@@ -92,6 +92,8 @@ export function RunFilesSurface({
   const [searchDraft, setSearchDraft] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [browserCollapsed, setBrowserCollapsed] = useState(false);
+  const [mobileLayout, setMobileLayout] = useState(false);
   const [viewMode, setViewMode] = useState<FileViewMode>("source");
   const [sourceSelection, setSourceSelection] = useState<SourceSelection | null>(null);
   const [renderedSelection, setRenderedSelection] = useState("");
@@ -101,6 +103,19 @@ export function RunFilesSurface({
   const sourceRef = useRef<HTMLDivElement | null>(null);
   const trimmedSearch = debouncedSearch.trim();
   const searchActive = trimmedSearch.length > 0;
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const query = window.matchMedia("(max-width: 760px)");
+    function updateLayout() {
+      setMobileLayout(query.matches);
+    }
+    updateLayout();
+    query.addEventListener("change", updateLayout);
+    return () => query.removeEventListener("change", updateLayout);
+  }, []);
 
   useEffect(() => {
     if (searchDraft.trim().length === 0) {
@@ -234,9 +249,13 @@ export function RunFilesSurface({
       setDirectoryPath(entry.path);
       setSearchDraft("");
       setSelectedFilePath(null);
+      setBrowserCollapsed(false);
       return;
     }
     setSelectedFilePath(entry.path);
+    if (mobileLayout) {
+      setBrowserCollapsed(true);
+    }
   }
 
   function captureRenderedSelection() {
@@ -303,74 +322,97 @@ export function RunFilesSurface({
 
   return (
     <section aria-label="Files" className="drawer-panel drawer-panel--files" ref={rootRef}>
-      <div className="files-toolbar">
-        <label className="files-search">
-          <SearchIcon aria-hidden="true" />
-          <span className="sr-only">Search workspace files</span>
-          <input
-            aria-label="Search workspace files"
-            onChange={(event) => setSearchDraft(event.target.value)}
-            placeholder="Search files"
-            value={searchDraft}
-          />
-        </label>
-        {directoryPath ? (
-          <button
-            className="btn btn--quiet"
-            onClick={() => setDirectoryPath(parentPath(directoryPath))}
-            type="button"
-          >
-            Parent
-          </button>
-        ) : null}
-      </div>
-      <div className="files-layout">
-        <div className="files-browser" aria-label="Workspace file browser">
+      <div
+        className={
+          browserCollapsed ? "files-layout files-layout--browser-collapsed" : "files-layout"
+        }
+      >
+        <div className="files-browser-shell">
           <div className="files-browser__header">
-            <span>{searchActive ? "Search results" : directoryPath || "Workspace"}</span>
-            {searchActive && searchQuery.data?.truncated ? (
-              <span>Showing first {searchQuery.data.maxResults}</span>
-            ) : directoryQuery.data?.truncated ? (
-              <span>Showing first {directoryQuery.data.maxEntries}</span>
+            <button
+              aria-expanded={!browserCollapsed}
+              className="files-browser__toggle"
+              onClick={() => setBrowserCollapsed((current) => !current)}
+              title={browserCollapsed ? "Show workspace files" : "Collapse workspace files"}
+              type="button"
+            >
+              <ChevronIcon aria-hidden="true" />
+              <span>{searchActive ? "Search results" : directoryPath || "Workspace"}</span>
+            </button>
+            {!browserCollapsed ? (
+              searchActive && searchQuery.data?.truncated ? (
+                <span>Showing first {searchQuery.data.maxResults}</span>
+              ) : directoryQuery.data?.truncated ? (
+                <span>Showing first {directoryQuery.data.maxEntries}</span>
+              ) : null
             ) : null}
           </div>
-          {entriesPending ? <p className="task-empty">Loading files...</p> : null}
-          {entriesError ? <p className="files-error">{entriesError.message}</p> : null}
-          {!entriesPending && !entriesError && entries.length === 0 ? (
-            <p className="task-empty">
-              {searchActive ? "No matching files." : "This directory is empty."}
-            </p>
+          {!browserCollapsed ? (
+            <>
+              <div className="files-toolbar">
+                <label className="files-search">
+                  <SearchIcon aria-hidden="true" />
+                  <span className="sr-only">Search workspace files</span>
+                  <input
+                    aria-label="Search workspace files"
+                    onChange={(event) => setSearchDraft(event.target.value)}
+                    placeholder="Search files"
+                    value={searchDraft}
+                  />
+                </label>
+                {directoryPath ? (
+                  <button
+                    className="btn btn--quiet"
+                    onClick={() => setDirectoryPath(parentPath(directoryPath))}
+                    type="button"
+                  >
+                    Parent
+                  </button>
+                ) : null}
+              </div>
+              <div className="files-browser" aria-label="Workspace file browser">
+                {entriesPending ? <p className="task-empty">Loading files...</p> : null}
+                {entriesError ? <p className="files-error">{entriesError.message}</p> : null}
+                {!entriesPending && !entriesError && entries.length === 0 ? (
+                  <p className="task-empty">
+                    {searchActive ? "No matching files." : "This directory is empty."}
+                  </p>
+                ) : null}
+                <div className="files-list">
+                  {entries.map((entry) => (
+                    <button
+                      aria-label={entryLabel(entry)}
+                      className={
+                        selectedFilePath === entry.path
+                          ? "files-list__row active"
+                          : "files-list__row"
+                      }
+                      disabled={entry.kind === "file" && !entry.supportedText}
+                      key={`${entry.kind}:${entry.path}`}
+                      onClick={() => openEntry(entry)}
+                      type="button"
+                    >
+                      {entry.kind === "directory" ? (
+                        <FolderIcon aria-hidden="true" />
+                      ) : (
+                        <FileIcon aria-hidden="true" />
+                      )}
+                      <span className="files-list__name">{entry.name}</span>
+                      <span className="files-list__meta">
+                        {entry.kind === "directory"
+                          ? "Directory"
+                          : entry.supportedText
+                            ? entry.size === null
+                              ? "Text"
+                              : formatBytes(entry.size)
+                            : "Unsupported"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
           ) : null}
-          <div className="files-list">
-            {entries.map((entry) => (
-              <button
-                aria-label={entryLabel(entry)}
-                className={
-                  selectedFilePath === entry.path ? "files-list__row active" : "files-list__row"
-                }
-                disabled={entry.kind === "file" && !entry.supportedText}
-                key={`${entry.kind}:${entry.path}`}
-                onClick={() => openEntry(entry)}
-                type="button"
-              >
-                {entry.kind === "directory" ? (
-                  <FolderIcon aria-hidden="true" />
-                ) : (
-                  <FileIcon aria-hidden="true" />
-                )}
-                <span className="files-list__name">{entry.name}</span>
-                <span className="files-list__meta">
-                  {entry.kind === "directory"
-                    ? "Directory"
-                    : entry.supportedText
-                      ? entry.size === null
-                        ? "Text"
-                        : formatBytes(entry.size)
-                      : "Unsupported"}
-                </span>
-              </button>
-            ))}
-          </div>
         </div>
         <div className="files-viewer" aria-label="File preview">
           {!selectedFilePath ? <p className="task-empty">Select a text or Markdown file.</p> : null}

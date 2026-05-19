@@ -30,7 +30,6 @@ export function CreateTaskDialog({
   const [title, setTitle] = useState(initialTitle);
   const [instruction, setInstruction] = useState(initialInstruction);
   const trimmedTitle = title.trim();
-  const trimmedInstruction = instruction.trim();
   const body = useMemo(() => buildTaskBody(reference, instruction), [instruction, reference]);
 
   useEffect(() => {
@@ -53,7 +52,7 @@ export function CreateTaskDialog({
   }
 
   async function submit() {
-    if (pending || trimmedTitle.length === 0 || trimmedInstruction.length === 0) {
+    if (pending || trimmedTitle.length === 0) {
       return;
     }
     try {
@@ -94,7 +93,7 @@ export function CreateTaskDialog({
           value={title}
         />
         <label className="resume-dialog__field" htmlFor="create-task-instruction">
-          Instruction
+          Description
         </label>
         <textarea
           className="resume-dialog__textarea"
@@ -102,7 +101,7 @@ export function CreateTaskDialog({
           id="create-task-instruction"
           onChange={(event) => setInstruction(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Describe what the agent should do with this selection."
+          placeholder="Optional details for the agent."
           rows={5}
           value={instruction}
         />
@@ -118,7 +117,7 @@ export function CreateTaskDialog({
           </button>
           <button
             className="btn btn-primary"
-            disabled={pending || trimmedTitle.length === 0 || trimmedInstruction.length === 0}
+            disabled={pending || trimmedTitle.length === 0}
             onClick={() => void submit()}
             type="button"
           >

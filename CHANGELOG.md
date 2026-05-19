@@ -257,6 +257,9 @@
 
 - Dashboard keyboard shortcuts now use `F` for the selected run Files tab and
   `Shift+F` for fullscreen drawer toggle.
+- File-selection task creation now supports title-only tasks, omits the
+  generated instructions section when empty, and collapses the workspace
+  browser on mobile after opening a file.
 - Task mutation capabilities now expose explicit pending-edit and
   pending-delete gates, and terminal non-archived runs can add, edit, or
   delete pending follow-up tasks.

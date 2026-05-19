@@ -3023,6 +3023,97 @@ describe("web app", () => {
     expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
   });
 
+  it("auto-collapses the workspace browser after opening a file on mobile", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: query === "(max-width: 760px)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "README.md",
+                      name: "README.md",
+                      kind: "file",
+                      size: 42,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "README.md",
+                  name: "README.md",
+                  size: 42,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: "# README",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    expect(await screen.findByLabelText("Search workspace files")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /README.md/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Workspace" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(screen.queryByLabelText("Search workspace files")).not.toBeInTheDocument();
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(await screen.findByLabelText("Search workspace files")).toBeInTheDocument();
+  });
+
   it("creates a task from rendered Markdown selection with the contracted task body", async () => {
     setStoredDashboardViewState({ activeRightSurface: "files" });
     let createdTaskBody: { body?: string; title?: string } | undefined;
@@ -3135,7 +3226,7 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: "Add task" }));
     expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Instruction"), "Rewrite this paragraph.");
+    await user.type(screen.getByLabelText("Description"), "Rewrite this paragraph.");
     await user.click(screen.getByRole("button", { name: "Create task" }));
 
     await waitFor(() => {
@@ -3149,7 +3240,7 @@ describe("web app", () => {
           "",
           "> The selected rendered text.",
           "",
-          "Instruction:",
+          "Instructions:",
           "",
           "Rewrite this paragraph.",
         ].join("\n"),
@@ -3364,7 +3455,6 @@ describe("web app", () => {
 
     fireEvent.keyDown(window, { key: "Enter" });
     expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Instruction"), "Refactor this block.");
     await user.click(screen.getByRole("button", { name: "Create task" }));
 
     await waitFor(() => {
@@ -3381,10 +3471,6 @@ describe("web app", () => {
           "const b = 2;",
           "const c = a + b;",
           "```",
-          "",
-          "Instruction:",
-          "",
-          "Refactor this block.",
         ].join("\n"),
       });
     });
@@ -8735,7 +8821,7 @@ describe("web app", () => {
     expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Title"));
     await user.type(screen.getByLabelText("Title"), "Manual task");
-    await user.type(screen.getByLabelText("Instruction"), "Manual task body");
+    await user.type(screen.getByLabelText("Description"), "Manual task body");
     await user.click(screen.getByRole("button", { name: "Create task" }));
     await waitFor(() => {
       expect(

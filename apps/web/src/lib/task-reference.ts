@@ -48,18 +48,17 @@ export function buildTaskBody(reference: TaskReference | null, instruction: stri
   }
 
   if (reference.view === "rendered-markdown") {
-    return [
-      `File: \`${reference.path}\``,
-      "View: rendered-markdown",
-      "",
-      "Selected text:",
-      "",
-      blockquote(reference.selectedText),
-      "",
-      "Instruction:",
-      "",
+    return withOptionalInstruction(
+      [
+        `File: \`${reference.path}\``,
+        "View: rendered-markdown",
+        "",
+        "Selected text:",
+        "",
+        blockquote(reference.selectedText),
+      ].join("\n"),
       trimmedInstruction,
-    ].join("\n");
+    );
   }
 
   const range =
@@ -67,21 +66,27 @@ export function buildTaskBody(reference: TaskReference | null, instruction: stri
       ? `${reference.path}:${reference.startLine}`
       : `${reference.path}:${reference.startLine}-${reference.endLine}`;
   const fenceLanguage = reference.language ?? "";
-  return [
-    `File: \`${reference.path}\``,
-    "View: source",
-    `Range: \`${range}\``,
-    "",
-    "Selected source:",
-    "",
-    `\`\`\`${fenceLanguage}`,
-    reference.selectedText,
-    "```",
-    "",
-    "Instruction:",
-    "",
+  return withOptionalInstruction(
+    [
+      `File: \`${reference.path}\``,
+      "View: source",
+      `Range: \`${range}\``,
+      "",
+      "Selected source:",
+      "",
+      `\`\`\`${fenceLanguage}`,
+      reference.selectedText,
+      "```",
+    ].join("\n"),
     trimmedInstruction,
-  ].join("\n");
+  );
+}
+
+function withOptionalInstruction(referenceBody: string, instruction: string): string {
+  if (!instruction) {
+    return referenceBody;
+  }
+  return [referenceBody, "", "Instructions:", "", instruction].join("\n");
 }
 
 function blockquote(text: string): string {

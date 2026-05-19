@@ -1925,13 +1925,6 @@ body {
   overflow: hidden;
 }
 
-.files-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
 .files-search {
   display: flex;
   flex: 1 1 auto;
@@ -1970,7 +1963,11 @@ body {
   min-height: 0;
 }
 
-.files-browser,
+.files-layout--browser-collapsed {
+  grid-template-columns: 2.75rem minmax(0, 1fr);
+}
+
+.files-browser-shell,
 .files-viewer {
   min-width: 0;
   min-height: 0;
@@ -1979,10 +1976,28 @@ body {
   background: color-mix(in srgb, var(--card) 96%, var(--background));
 }
 
-.files-browser {
+.files-browser-shell {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.files-browser {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.files-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
 }
 
 .files-browser__header,
@@ -1997,11 +2012,47 @@ body {
   font-size: 12px;
 }
 
-.files-browser__header span:first-child {
+.files-browser__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.files-browser__toggle svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+
+.files-layout--browser-collapsed .files-browser__toggle {
+  writing-mode: vertical-rl;
+}
+
+.files-layout--browser-collapsed .files-browser__header {
+  height: 100%;
+  justify-content: flex-start;
+  border-bottom: 0;
+}
+
+.files-layout--browser-collapsed .files-browser__toggle svg {
+  transform: rotate(-90deg);
+}
+
+.files-browser__toggle span {
   min-width: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2185,6 +2236,27 @@ body {
 @media (max-width: 760px) {
   .files-layout {
     grid-template-columns: 1fr;
+  }
+
+  .files-layout--browser-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .files-layout--browser-collapsed .files-browser-shell {
+    min-height: 2.75rem;
+  }
+
+  .files-layout--browser-collapsed .files-browser__toggle {
+    writing-mode: horizontal-tb;
+  }
+
+  .files-layout--browser-collapsed .files-browser__header {
+    height: auto;
+    border-bottom: 0;
+  }
+
+  .files-layout--browser-collapsed .files-browser__toggle svg {
+    transform: rotate(-90deg);
   }
 
   .files-rendered,
