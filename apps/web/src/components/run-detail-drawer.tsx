@@ -1906,6 +1906,7 @@ export function RunDetailDrawer({
         <div className="drawer-body" hidden={activeSurface !== "files"}>
           <RunFilesSurface
             canCreateTask={run.capabilities.taskMutation.canAdd}
+            fullscreen={isFullscreen && activeSurface === "files"}
             searchRequestVersion={fileSearchRequestVersion}
             onTaskCreated={(taskId) => onNotify(`Created task ${taskId}.`, "success")}
             runId={run.runId}

@@ -83,12 +83,14 @@ function selectionLineNumber(container: HTMLElement, node: Node | null): number 
 
 export function RunFilesSurface({
   canCreateTask,
+  fullscreen,
   onTaskCreated,
   runId,
   searchRequestVersion = 0,
   taskCreationUnavailableReason,
 }: {
   canCreateTask: boolean;
+  fullscreen: boolean;
   onTaskCreated: (taskId: string) => void;
   runId: string;
   searchRequestVersion?: number;
@@ -108,9 +110,11 @@ export function RunFilesSurface({
   const [renderedSelection, setRenderedSelection] = useState("");
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
+  const entriesRef = useRef<WorkspaceFileEntry[]>([]);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchRequestVersionRef = useRef(searchRequestVersion);
+  const selectedFilePathRef = useRef<string | null>(null);
   const selectedFileRef = useRef<WorkspaceFileContent | undefined>(undefined);
   const sourceRef = useRef<HTMLDivElement | null>(null);
   const trimmedSearch = debouncedSearch.trim();
@@ -196,8 +200,10 @@ export function RunFilesSurface({
   const selectedFile = fileQuery.data;
 
   useEffect(() => {
+    entriesRef.current = entries;
+    selectedFilePathRef.current = selectedFilePath;
     selectedFileRef.current = selectedFile;
-  }, [selectedFile]);
+  }, [entries, selectedFile, selectedFilePath]);
 
   useEffect(() => {
     if (searchRequestVersion === searchRequestVersionRef.current) {
@@ -241,7 +247,18 @@ export function RunFilesSurface({
       const filesSurfaceVisible = root?.isConnected === true && !root.closest("[hidden]");
       const typingTarget =
         isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement);
-      if (!filesSurfaceVisible || dialogReference || event.defaultPrevented || typingTarget) {
+      if (!filesSurfaceVisible || dialogReference || event.defaultPrevented) {
+        return;
+      }
+
+      if (fullscreen && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+        event.preventDefault();
+        event.stopPropagation();
+        navigateFileList(event.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+
+      if (typingTarget) {
         return;
       }
 
@@ -263,7 +280,7 @@ export function RunFilesSurface({
     return () => {
       window.removeEventListener("keydown", handleKeyDown, { capture: true });
     };
-  }, [canCreateTask, dialogReference, selectedReference]);
+  }, [canCreateTask, dialogReference, fullscreen, selectedReference]);
 
   useEffect(() => {
     function handleSelectionChange() {
@@ -293,6 +310,29 @@ export function RunFilesSurface({
     setSelectedFilePath(entry.path);
     if (mobileLayout) {
       setBrowserCollapsed(true);
+    }
+  }
+
+  function navigateFileList(direction: -1 | 1) {
+    const currentSelectedFilePath = selectedFilePathRef.current;
+    const navigableEntries = entriesRef.current.filter(
+      (entry) => entry.kind === "file" && entry.supportedText,
+    );
+    if (navigableEntries.length === 0) {
+      return;
+    }
+    const currentIndex = currentSelectedFilePath
+      ? navigableEntries.findIndex((entry) => entry.path === currentSelectedFilePath)
+      : -1;
+    const nextIndex =
+      currentIndex === -1
+        ? direction === 1
+          ? 0
+          : navigableEntries.length - 1
+        : Math.max(0, Math.min(navigableEntries.length - 1, currentIndex + direction));
+    const nextEntry = navigableEntries[nextIndex];
+    if (nextEntry && nextEntry.path !== currentSelectedFilePath) {
+      openEntry(nextEntry);
     }
   }
 

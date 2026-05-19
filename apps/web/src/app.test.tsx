@@ -3032,6 +3032,108 @@ describe("web app", () => {
     expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
   });
 
+  it("navigates workspace files with fullscreen up and down keys while search is focused", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "docs",
+                      name: "docs",
+                      kind: "directory",
+                      size: null,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: false,
+                    },
+                    {
+                      path: "alpha.md",
+                      name: "alpha.md",
+                      kind: "file",
+                      size: 16,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                    {
+                      path: "beta.md",
+                      name: "beta.md",
+                      kind: "file",
+                      size: 15,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            const filePath = parsed.searchParams.get("path") ?? "";
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: filePath,
+                  name: filePath,
+                  size: filePath === "beta.md" ? 15 : 16,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: filePath === "beta.md" ? "# Beta\nbeta body" : "# Alpha\nalpha body",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    await user.click(await screen.findByRole("button", { name: /alpha\.md/ }));
+    expect(await screen.findByRole("heading", { name: "alpha.md" })).toBeInTheDocument();
+    const searchInput = screen.getByLabelText("Search workspace files");
+    searchInput.focus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("heading", { name: "alpha.md" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
+    searchInput.focus();
+    expect(searchInput).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("heading", { name: "beta.md" })).toBeInTheDocument();
+
+    await user.keyboard("{ArrowUp}");
+    expect(await screen.findByRole("heading", { name: "alpha.md" })).toBeInTheDocument();
+    expect(searchInput).toHaveFocus();
+  });
+
   it("auto-collapses the workspace browser after opening a file on mobile", async () => {
     vi.stubGlobal(
       "matchMedia",

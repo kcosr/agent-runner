@@ -715,7 +715,7 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
   assert.ok(!seenPrompt.includes("\n\n\n"), "no triple newlines from empty message slot");
 });
 
-test("resume: unfinished tasks can resume with an implicit continue prompt", async () => {
+test("resume: unfinished stopped runs use the concrete task-list nudge", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
@@ -737,16 +737,11 @@ test("resume: unfinished tasks can resume with an implicit continue prompt", asy
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      assert.ok(
-        ctx.prompt.includes(
-          `inspect them with agent-runner task list ${first.runId} and use the task CLI`,
-        ),
-      );
-      assert.ok(
-        ctx.prompt.endsWith(
-          "Check the task list and continue working through the remaining items.",
-        ),
-      );
+      assert.ok(ctx.prompt.includes(`Some tasks in run ${first.runId} are not yet completed.`));
+      assert.ok(ctx.prompt.includes(`Inspect them with: agent-runner task list ${first.runId}`));
+      assert.ok(ctx.prompt.includes("- t1 (status: blocked) — First"));
+      assert.ok(!ctx.prompt.includes("stopped run has pending or in-progress tasks"));
+      assert.ok(!ctx.prompt.includes("Check the task list and continue working through"));
       patchManifest(first.workspaceDir, (manifest) => {
         manifest.finalTasks.t1.status = "completed";
         manifest.finalTasks.t2.status = "completed";
@@ -772,7 +767,7 @@ test("resume: unfinished tasks can resume with an implicit continue prompt", asy
   assert.equal(second.manifest.sessions.at(-1)?.message, null);
 });
 
-test("resume: terminal task status edits feed the existing implicit continue gate", async () => {
+test("resume: terminal task status edits use the concrete task-list nudge", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
@@ -797,16 +792,11 @@ test("resume: terminal task status edits feed the existing implicit continue gat
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      assert.ok(
-        ctx.prompt.includes(
-          `inspect them with agent-runner task list ${first.runId} and use the task CLI`,
-        ),
-      );
-      assert.ok(
-        ctx.prompt.endsWith(
-          "Check the task list and continue working through the remaining items.",
-        ),
-      );
+      assert.ok(ctx.prompt.includes(`Some tasks in run ${first.runId} are not yet completed.`));
+      assert.ok(ctx.prompt.includes(`Inspect them with: agent-runner task list ${first.runId}`));
+      assert.ok(ctx.prompt.includes("- t1 (status: pending) — First"));
+      assert.ok(!ctx.prompt.includes("stopped run has pending or in-progress tasks"));
+      assert.ok(!ctx.prompt.includes("Check the task list and continue working through"));
       patchManifest(first.workspaceDir, (manifest) => {
         manifest.finalTasks.t1.status = "completed";
         manifest.finalTasks.t2.status = "completed";
