@@ -1964,7 +1964,8 @@ body {
 }
 
 .files-layout--browser-collapsed {
-  grid-template-columns: 2.75rem minmax(0, 1fr);
+  grid-template-columns: 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .files-browser-shell,
@@ -2006,19 +2007,33 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
   font-size: 12px;
 }
 
+.files-browser__header {
+  padding: 0;
+}
+
+.files-viewer__header {
+  padding: 10px 12px;
+}
+
+.files-browser__header > span {
+  flex: 0 0 auto;
+  padding: 10px 12px 10px 0;
+}
+
 .files-browser__toggle {
-  display: inline-flex;
+  display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 100%;
-  padding: 0;
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -2035,18 +2050,12 @@ body {
   transition: transform 0.15s ease;
 }
 
-.files-layout--browser-collapsed .files-browser__toggle {
-  writing-mode: vertical-rl;
-}
-
 .files-layout--browser-collapsed .files-browser__header {
-  height: 100%;
-  justify-content: flex-start;
   border-bottom: 0;
 }
 
 .files-layout--browser-collapsed .files-browser__toggle svg {
-  transform: rotate(-90deg);
+  transform: rotate(90deg);
 }
 
 .files-browser__toggle span {
@@ -2238,25 +2247,8 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .files-layout--browser-collapsed {
-    grid-template-columns: 1fr;
-  }
-
   .files-layout--browser-collapsed .files-browser-shell {
     min-height: 2.75rem;
-  }
-
-  .files-layout--browser-collapsed .files-browser__toggle {
-    writing-mode: horizontal-tb;
-  }
-
-  .files-layout--browser-collapsed .files-browser__header {
-    height: auto;
-    border-bottom: 0;
-  }
-
-  .files-layout--browser-collapsed .files-browser__toggle svg {
-    transform: rotate(-90deg);
   }
 
   .files-rendered,
