@@ -267,8 +267,9 @@ export function RunFilesSurface({
       return;
     }
     const source = sourceRef.current;
+    const file = selectedFile;
     const selection = window.getSelection();
-    if (!source || !selection || !isSelectionInside(source, selection)) {
+    if (!source || !file || !selection || !isSelectionInside(source, selection)) {
       return;
     }
     const anchorLine = selectionLineNumber(source, selection.anchorNode);
@@ -276,12 +277,14 @@ export function RunFilesSurface({
     if (!anchorLine || !focusLine) {
       return;
     }
-    const selectedText = selection.toString().trim();
-    setSourceSelection({
+    const rangeSelection = {
       anchorLine,
       endLine: Math.max(anchorLine, focusLine),
-      selectedText,
       startLine: Math.min(anchorLine, focusLine),
+    };
+    setSourceSelection({
+      ...rangeSelection,
+      selectedText: lineRangeText(file, rangeSelection),
     });
   }
 

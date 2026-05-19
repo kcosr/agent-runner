@@ -320,6 +320,8 @@
 - Fixed the dashboard Files surface so creating a task from selected Markdown
   preview text opens the dialog reliably, dragged source text selections enable
   task creation, and directories render with a folder icon.
+- Fixed source selection task bodies so the selected source snippet does not
+  include gutter line numbers.
 - Fixed fullscreen selected-run drawers so they clear the normal saved drawer
   width and fill the main content area beside the sidebar.
 - Bundled `plan-feature` now uses a copied named hook instead of an

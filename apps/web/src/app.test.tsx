@@ -3347,7 +3347,7 @@ describe("web app", () => {
       anchorNode: selectedStart.firstChild,
       focusNode: selectedEnd.firstChild,
       removeAllRanges: vi.fn(),
-      toString: () => "const b = 2;\nconst c = a + b;",
+      toString: () => "2\nconst b = 2;\n3\nconst c = a + b;",
     } as unknown as Selection);
     const sourcePreview = selectedStart.closest(".files-source");
     if (!sourcePreview) {

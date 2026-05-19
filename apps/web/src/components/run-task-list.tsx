@@ -8,6 +8,7 @@ import { createApiClient } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
+import { stripSourceGutterNumbersFromTaskBody } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
 import {
   AlertIcon,
@@ -206,7 +207,12 @@ export function RunTaskList({
   }
 
   function taskEditDraft(task: RunTaskSummary) {
-    return editDrafts.get(task.id) ?? { body: task.body, title: task.title };
+    return (
+      editDrafts.get(task.id) ?? {
+        body: stripSourceGutterNumbersFromTaskBody(task.body),
+        title: task.title,
+      }
+    );
   }
 
   function setTaskEditDraft(taskId: string, value: TaskEditDraft) {
@@ -427,7 +433,7 @@ export function RunTaskList({
                   bodyEditing ? (
                     <div className="task-edit">
                       <label className="field task-edit__title-field">
-                        <span>Title</span>
+                        <span className="sr-only">Title</span>
                         <input
                           aria-label="Title"
                           disabled={mutationPending}
@@ -439,7 +445,7 @@ export function RunTaskList({
                         />
                       </label>
                       <label className="field task-edit__body-field">
-                        <span>Body</span>
+                        <span className="sr-only">Body</span>
                         <textarea
                           aria-label="Body"
                           disabled={mutationPending}
@@ -476,7 +482,10 @@ export function RunTaskList({
                       </div>
                     </div>
                   ) : task.body ? (
-                    <MarkdownContent className="task-markdown" text={task.body} />
+                    <MarkdownContent
+                      className="task-markdown"
+                      text={stripSourceGutterNumbersFromTaskBody(task.body)}
+                    />
                   ) : (
                     <p className="task-empty">No instructions recorded.</p>
                   )

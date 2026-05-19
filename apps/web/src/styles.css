@@ -2135,6 +2135,7 @@ body {
   text-align: right;
   padding: 0 10px;
   cursor: pointer;
+  user-select: none;
 }
 
 .files-source__gutter:hover,
@@ -2881,9 +2882,17 @@ body {
 .task-edit,
 .task-notes-editor {
   display: grid;
-  gap: 10px;
+  gap: 0;
   min-width: 0;
   padding: 0;
+}
+
+.task-edit,
+.task-notes-editor {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
 }
 
 .task--editing .task-edit,
@@ -2897,7 +2906,6 @@ body {
 .task-edit .field,
 .task-notes-editor .field {
   display: grid;
-  gap: 6px;
   min-width: 0;
 }
 
@@ -2928,14 +2936,17 @@ body {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--background);
+  border: 0;
+  background: transparent;
   color: var(--foreground);
   font: inherit;
   font-size: 12.5px;
   line-height: 1.5;
   padding: 8px 10px;
+}
+
+.task-edit input {
+  border-bottom: 1px solid var(--border);
 }
 
 .task-edit textarea,
@@ -2959,7 +2970,9 @@ body {
   flex: 0 0 auto;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 2px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--secondary) 55%, transparent);
 }
 
 .task-tabs {
