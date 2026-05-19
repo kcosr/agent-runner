@@ -260,8 +260,12 @@
   delete pending follow-up tasks.
 - Resume prompts for unfinished task runs now include the task CLI reminder so
   resumed workers re-check the authoritative task list before continuing.
-- Workspace file search now includes dot-directories and common text dotfiles
-  while still skipping dependency directories such as `node_modules`.
+- Workspace file browsing includes hidden files and common non-secret text
+  dotfiles, while search skips dependency and VCS directories such as
+  `node_modules` and `.git`.
+- Generated `plan-feature` and `plan-implement-feature` assignments no longer
+  lock the task list with `lockedFields: [tasks]`, so task-runner workflows can
+  add or remove follow-up tasks during implementation when appropriate.
 - Cleaned up the README and reference docs for current CLI behavior,
   backend-free smoke checks, skills installation, environment-variable
   placement, and renamed Agent Runner terminology.
