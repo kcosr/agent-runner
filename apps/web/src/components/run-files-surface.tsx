@@ -81,10 +81,12 @@ export function RunFilesSurface({
   canCreateTask,
   onSwitchToTasks,
   runId,
+  taskCreationUnavailableReason,
 }: {
   canCreateTask: boolean;
   onSwitchToTasks: () => void;
   runId: string;
+  taskCreationUnavailableReason: string | null;
 }) {
   const config = useRuntimeConfig();
   const { daemonToken } = useDaemonAuthToken();
@@ -299,6 +301,7 @@ export function RunFilesSurface({
         canCreateTask,
         hasReference: Boolean(reference),
         path: selectedFile?.path ?? null,
+        reason: taskCreationUnavailableReason,
         sourceSelection,
         viewMode,
       });
@@ -432,6 +435,7 @@ export function RunFilesSurface({
                   className="btn btn-primary"
                   disabled={!canCreateTask || !selectedReference}
                   onClick={() => openCreateTaskDialog(selectedReference)}
+                  title={canCreateTask ? undefined : (taskCreationUnavailableReason ?? undefined)}
                   type="button"
                 >
                   Create task from selection
@@ -450,7 +454,11 @@ export function RunFilesSurface({
                   {renderedSelection ? (
                     <button
                       className="btn btn-primary files-selection-action"
+                      disabled={!canCreateTask}
                       onClick={() => openCreateTaskDialog(selectedReference)}
+                      title={
+                        canCreateTask ? undefined : (taskCreationUnavailableReason ?? undefined)
+                      }
                       type="button"
                     >
                       Create task from selection

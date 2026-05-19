@@ -3164,6 +3164,109 @@ describe("web app", () => {
     expect(await screen.findByText("Created task created.")).toBeInTheDocument();
   });
 
+  it("disables rendered Markdown task creation when the run cannot add tasks", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "CHANGELOG.md",
+                      name: "CHANGELOG.md",
+                      kind: "file",
+                      size: 28,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "CHANGELOG.md",
+                  name: "CHANGELOG.md",
+                  size: 28,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: "# Changelog\n\nSelected rendered text.",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    await user.click(await screen.findByRole("button", { name: /CHANGELOG.md/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Preview" })).toHaveAttribute("aria-selected", "true");
+    });
+    const renderedText = await screen.findByText("Selected rendered text.");
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: renderedText.firstChild,
+      focusNode: renderedText.firstChild,
+      toString: () => "Selected rendered text.",
+    } as Selection);
+    const renderedPreview = renderedText.closest(".files-rendered");
+    if (!renderedPreview) {
+      throw new Error("Rendered preview was not available");
+    }
+    fireEvent.mouseUp(renderedPreview);
+
+    const createSelectionButtons = screen.getAllByRole("button", {
+      name: "Create task from selection",
+    });
+    expect(createSelectionButtons).toHaveLength(2);
+    for (const button of createSelectionButtons) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute(
+        "title",
+        "Task creation is unavailable because this run locks its task list.",
+      );
+    }
+    const floatingCreateSelectionButton = createSelectionButtons.at(-1);
+    if (!floatingCreateSelectionButton) {
+      throw new Error("Floating create task from selection button was not rendered");
+    }
+    await user.click(floatingCreateSelectionButton);
+    expect(screen.queryByRole("dialog", { name: "Create task" })).not.toBeInTheDocument();
+    expect(consoleInfo).not.toHaveBeenCalledWith(
+      "[agent-runner files]",
+      "create task dialog blocked",
+      expect.anything(),
+    );
+  });
+
   it("creates a task from source gutter range selection with the contracted task body", async () => {
     setStoredDashboardViewState({ activeRightSurface: "files" });
     let createdTaskBody: { body?: string; title?: string } | undefined;

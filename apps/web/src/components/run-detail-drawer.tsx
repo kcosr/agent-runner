@@ -561,6 +561,25 @@ function InlineConfirmActions({
   );
 }
 
+function taskCreationUnavailableReason(run: RunDetail): string | null {
+  if (run.capabilities.taskMutation.canAdd) {
+    return null;
+  }
+  if (run.archivedAt !== null) {
+    return "Task creation is unavailable because this run is archived.";
+  }
+  if (run.lockedFields.includes("tasks")) {
+    return "Task creation is unavailable because this run locks its task list.";
+  }
+  if (run.status === "ready") {
+    return "Task creation is unavailable while this run is ready.";
+  }
+  if (run.status === "running") {
+    return "Task creation is unavailable while this run is running.";
+  }
+  return `Task creation is unavailable for this ${run.status} run.`;
+}
+
 export function RunDetailDrawer({
   activeSection,
   activeSurface,
@@ -1886,6 +1905,7 @@ export function RunDetailDrawer({
             canCreateTask={run.capabilities.taskMutation.canAdd}
             onSwitchToTasks={() => onSelectSurface("tasks")}
             runId={run.runId}
+            taskCreationUnavailableReason={taskCreationUnavailableReason(run)}
           />
         </div>
         <div className="drawer-body drawer-body--notes" hidden={activeSurface !== "notes"}>
