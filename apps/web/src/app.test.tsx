@@ -37,6 +37,7 @@ vi.mock("mermaid", () => ({
 
 const APP_CONFIG = {
   apiBasePath: "/api",
+  webBasePath: "/",
   runSummaryEventsPath: "/api/events/run-summaries",
 };
 
@@ -750,7 +751,7 @@ function installFetchMock(
       return override;
     }
     if (url.endsWith("/app-config.json")) {
-      return new Response(JSON.stringify(APP_CONFIG), { status: 200 });
+      return new Response(JSON.stringify({ webBasePath: APP_CONFIG.webBasePath }), { status: 200 });
     }
 
     const parsedUrl = new UrlConstructor(url, "http://agent-runner.test");

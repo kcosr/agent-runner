@@ -123,3 +123,41 @@ test("serveFrontendRequest rejects unsupported methods with 405", () => {
   assert.equal(res.body, "Method Not Allowed");
   assert.equal(res.headers.get("allow"), "GET, HEAD");
 });
+
+test("serveFrontendRequest injects web base path when index html has no head close", () => {
+  const req = new EventEmitter();
+  req.method = "GET";
+
+  const res = {
+    destroyed: false,
+    headers: new Map(),
+    statusCode: 200,
+    writableEnded: false,
+    setHeader(name, value) {
+      this.headers.set(name.toLowerCase(), value);
+    },
+    end(chunk = "") {
+      this.body = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      this.writableEnded = true;
+    },
+  };
+
+  serveFrontendRequest(req, res, "/", {
+    fsApi: {
+      statSync() {
+        return { isFile: () => true };
+      },
+      readFileSync() {
+        return Buffer.from(
+          '<div id="root"></div><script type="module" src="/assets/app.js"></script>',
+        );
+      },
+    },
+    rootPath: "/tmp/agent-runner/apps/cli/dist/web",
+    webBasePath: "/agent-runner",
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body, /^<script>window\.__AGENT_RUNNER_WEB_BASE_PATH__="\/agent-runner"/);
+  assert.match(res.body, /src="\/agent-runner\/assets\/app\.js"/);
+});

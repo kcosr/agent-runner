@@ -3,6 +3,7 @@ import { ApiError, createApiClient, isUnauthorizedError } from "./api-client.js"
 
 const config = {
   apiBasePath: "/api",
+  webBasePath: "/",
   runSummaryEventsPath: "/api/events/run-summaries",
 };
 

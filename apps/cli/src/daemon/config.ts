@@ -1,9 +1,14 @@
-import type { AppRuntimeConfig } from "@kcosr/agent-runner-core/contracts/app-config.js";
+import {
+  type AppRuntimeConfig,
+  appRuntimeConfigForWebBasePath,
+  normalizeWebBasePath,
+} from "@kcosr/agent-runner-core/contracts/app-config.js";
 import {
   AGENT_RUNNER_CONNECT_ENV,
   AGENT_RUNNER_CONNECT_HOST_ENV,
   AGENT_RUNNER_CONNECT_LOCAL_PORT_ENV,
   AGENT_RUNNER_LISTEN_ENV,
+  AGENT_RUNNER_WEB_BASE_PATH_ENV,
   DEFAULT_DAEMON_URL,
 } from "./protocol.js";
 
@@ -147,9 +152,13 @@ export function deriveHttpBaseUrl(listenUrl: string): string {
   return parsed.toString();
 }
 
-export function deriveAppRuntimeConfig(): AppRuntimeConfig {
-  return {
-    apiBasePath: "/api",
-    runSummaryEventsPath: "/api/events/run-summaries",
-  };
+export function resolveWebBasePath(env: NodeJS.ProcessEnv = process.env): string {
+  return normalizeWebBasePath(
+    nonEmpty(env[AGENT_RUNNER_WEB_BASE_PATH_ENV]),
+    AGENT_RUNNER_WEB_BASE_PATH_ENV,
+  );
+}
+
+export function deriveAppRuntimeConfig(env: NodeJS.ProcessEnv = process.env): AppRuntimeConfig {
+  return appRuntimeConfigForWebBasePath(resolveWebBasePath(env));
 }

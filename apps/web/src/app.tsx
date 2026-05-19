@@ -25,6 +25,7 @@ export function App() {
     void loadRuntimeConfig()
       .then((config) => {
         if (active) {
+          router.update({ basepath: config.webBasePath });
           setBootState({ status: "ready", config });
         }
       })

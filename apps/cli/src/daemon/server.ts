@@ -61,6 +61,7 @@ import {
 } from "@kcosr/agent-runner-core/backends/codex.js";
 import { loadCustomBackends, resolveBackend } from "@kcosr/agent-runner-core/backends/registry.js";
 import { isPathArg } from "@kcosr/agent-runner-core/config/runtime-paths.js";
+import { appRuntimeConfigPayloadForWebBasePath } from "@kcosr/agent-runner-core/contracts/app-config.js";
 import type { RunAttachment } from "@kcosr/agent-runner-core/contracts/attachments.js";
 import type {
   RunAuditEnvelope,
@@ -795,6 +796,27 @@ interface DaemonServerHandle {
   close(): Promise<void>;
 }
 
+function stripWebBasePath(pathname: string, webBasePath: string): string {
+  if (webBasePath === "/") {
+    return pathname;
+  }
+  if (pathname === webBasePath) {
+    return "/";
+  }
+  const prefix = `${webBasePath}/`;
+  return pathname.startsWith(prefix) ? pathname.slice(webBasePath.length) : pathname;
+}
+
+function requestUrlWithPathname(
+  rawUrl: string | undefined,
+  httpBaseUrl: string,
+  pathname: string,
+): string {
+  const url = new URL(rawUrl ?? "/", httpBaseUrl);
+  url.pathname = pathname;
+  return `${url.pathname}${url.search}`;
+}
+
 export async function serveDaemon(
   listenUrl: string,
   handlers: Partial<DaemonHandlers> = {},
@@ -802,6 +824,10 @@ export async function serveDaemon(
   await loadCustomBackends();
 
   const daemonAuth = resolveDaemonAuthConfig();
+  const appRuntimeConfig = deriveAppRuntimeConfig();
+  const appRuntimeConfigPayload = appRuntimeConfigPayloadForWebBasePath(
+    appRuntimeConfig.webBasePath,
+  );
   const { host, port, path } = listenSocketConfig(listenUrl);
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const startedAt = new Date().toISOString();
@@ -3336,21 +3362,23 @@ export async function serveDaemon(
 
   const httpServer = createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", httpBaseUrl).pathname;
+    const routedPathname = stripWebBasePath(pathname, appRuntimeConfig.webBasePath);
 
-    if (pathname === "/app-config.json") {
+    if (routedPathname === "/app-config.json") {
       res.setHeader("cache-control", "no-cache");
       res.setHeader("content-type", "application/json; charset=utf-8");
-      res.end(JSON.stringify(deriveAppRuntimeConfig()));
+      res.end(JSON.stringify(appRuntimeConfigPayload));
       return;
     }
 
-    if (pathname === "/api" || pathname.startsWith("/api/")) {
+    if (routedPathname === "/api" || routedPathname.startsWith("/api/")) {
       try {
         assertDaemonAuthorized(daemonAuth, req.headers.authorization);
       } catch (err) {
         sendError(res, err);
         return;
       }
+      req.url = requestUrlWithPathname(req.url, httpBaseUrl, routedPathname);
       void handleHttpRequest(req, res, {
         operations,
         httpBaseUrl,
@@ -3370,7 +3398,7 @@ export async function serveDaemon(
       return;
     }
 
-    serveFrontendRequest(req, res, pathname);
+    serveFrontendRequest(req, res, routedPathname, { webBasePath: appRuntimeConfig.webBasePath });
   });
   const wsServer = new WebSocketServer({
     server: httpServer,

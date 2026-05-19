@@ -2,6 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { webPathPrefix } from "@kcosr/agent-runner-core/contracts/app-config.js";
 
 const WEB_ROOT_PATH = fileURLToPath(new URL("../web/", import.meta.url));
 
@@ -104,6 +105,39 @@ function sendBuffer(
   res.end(body);
 }
 
+function htmlWithWebBasePath(body: Buffer, webBasePath: string): Buffer {
+  const prefix = webPathPrefix(webBasePath);
+  if (!prefix) {
+    return body;
+  }
+  const html = body.toString("utf8");
+  const serializedWebBasePath = JSON.stringify(webBasePath).replaceAll("<", "\\u003c");
+  const injected = `<script>window.__AGENT_RUNNER_WEB_BASE_PATH__=${serializedWebBasePath};</script>`;
+  const headCloseIndex = html.lastIndexOf("</head>");
+  const withInjectedBasePath =
+    headCloseIndex === -1
+      ? `${injected}${html}`
+      : `${html.slice(0, headCloseIndex)}${injected}${html.slice(headCloseIndex)}`;
+  return Buffer.from(
+    withInjectedBasePath
+      .replaceAll('src="/assets/', `src="${prefix}/assets/`)
+      .replaceAll('href="/assets/', `href="${prefix}/assets/`),
+    "utf8",
+  );
+}
+
+function sendFrontendAsset(
+  req: IncomingMessage,
+  res: ServerResponse,
+  asset: Extract<FrontendReadResult, { kind: "asset" }>,
+  webBasePath: string,
+): void {
+  const body = asset.contentType.startsWith("text/html")
+    ? htmlWithWebBasePath(asset.body, webBasePath)
+    : asset.body;
+  sendBuffer(req, res, 200, body, asset.contentType);
+}
+
 function sendText(
   req: IncomingMessage,
   res: ServerResponse,
@@ -122,11 +156,13 @@ export function serveFrontendRequest(
     rootPath?: string;
     fsApi?: FrontendFsApi;
     logError?: (error: unknown) => void;
+    webBasePath?: string;
   } = {},
 ): void {
   const rootPath = options.rootPath ?? webRootPath();
   const fsApi = options.fsApi ?? { statSync, readFileSync };
   const logError = options.logError ?? ((error: unknown) => console.error(error));
+  const webBasePath = options.webBasePath ?? "/";
 
   if (req.method !== "GET" && req.method !== "HEAD") {
     res.statusCode = 405;
@@ -137,7 +173,7 @@ export function serveFrontendRequest(
 
   const asset = readFrontendFile(pathname, rootPath, fsApi);
   if (asset.kind === "asset") {
-    sendBuffer(req, res, 200, asset.body, asset.contentType);
+    sendFrontendAsset(req, res, asset, webBasePath);
     return;
   }
   if (asset.kind === "error") {
@@ -163,5 +199,5 @@ export function serveFrontendRequest(
     return;
   }
 
-  sendBuffer(req, res, 200, indexFile.body, indexFile.contentType);
+  sendFrontendAsset(req, res, indexFile, webBasePath);
 }

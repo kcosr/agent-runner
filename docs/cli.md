@@ -219,6 +219,9 @@ shared bearer token for daemon `/api/*` and WebSocket access. This is
 daemon access protection only; anyone with the token has full daemon
 access.
 
+Set `AGENT_RUNNER_WEB_BASE_PATH=/agent-runner` when the bundled web UI is
+served behind a reverse proxy at a subpath instead of `/`.
+
 See [daemon.md](daemon.md).
 
 ## `status`

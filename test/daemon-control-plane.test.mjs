@@ -2165,8 +2165,7 @@ test("daemon serve exposes app config, keeps /api precedence, and falls back to 
         const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
         assert.equal(appConfig.status, 200);
         assert.deepEqual(appConfig.body, {
-          apiBasePath: "/api",
-          runSummaryEventsPath: "/api/events/run-summaries",
+          webBasePath: "/",
         });
 
         const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
@@ -2223,6 +2222,49 @@ test("daemon serve reads packaged web assets from the CLI dist layout", async ()
     } finally {
       await server.close();
     }
+  });
+});
+
+test("daemon serve exposes web runtime config for a mounted base path", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv({ AGENT_RUNNER_WEB_BASE_PATH: "/agent-runner/" }, async () => {
+    await withSeededFrontendDist(async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
+        assert.equal(appConfig.status, 200);
+        assert.deepEqual(appConfig.body, {
+          webBasePath: "/agent-runner",
+        });
+
+        const response = await fetch(new URL("/", httpBaseUrl));
+        const body = await response.text();
+        assert.equal(response.status, 200);
+        assert.match(body, /window\.__AGENT_RUNNER_WEB_BASE_PATH__="\/agent-runner"/);
+        const assetPath = body.match(/\/agent-runner\/assets\/[^"]+\.js/)?.[0];
+        assert.ok(assetPath, "expected prefixed built asset path in served index.html");
+
+        const prefixedConfig = await httpJson(httpBaseUrl, "/agent-runner/app-config.json");
+        assert.equal(prefixedConfig.status, 200);
+        assert.deepEqual(prefixedConfig.body, appConfig.body);
+
+        const falsePrefixConfig = await fetch(
+          new URL("/agent-runner-other/app-config.json", httpBaseUrl),
+        );
+        assert.equal(falsePrefixConfig.status, 404);
+
+        const prefixedAsset = await fetch(new URL(assetPath, httpBaseUrl));
+        assert.equal(prefixedAsset.status, 200);
+
+        const prefixedApi = await httpJson(httpBaseUrl, "/agent-runner/api/daemon");
+        assert.equal(prefixedApi.status, 200);
+        assert.equal(prefixedApi.body.daemon.listenUrl, listenUrl);
+      } finally {
+        await server.close();
+      }
+    });
   });
 });
 
@@ -7707,7 +7749,7 @@ test("daemon bearer auth protects HTTP, SSE, and WebSocket while leaving public 
 
           const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
           assert.equal(appConfig.status, 200);
-          assert.equal(appConfig.body.apiBasePath, "/api");
+          assert.equal(appConfig.body.webBasePath, "/");
           assert.equal(appConfig.headers.get("www-authenticate"), null);
 
           const staticAsset = await fetch(
