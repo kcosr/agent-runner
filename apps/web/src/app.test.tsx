@@ -8864,13 +8864,6 @@ describe("web app", () => {
     });
 
     expect(screen.queryByLabelText("Task status for Draft task")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Edit tasks" }));
-    expect(screen.getByRole("button", { name: "Exit task edit mode" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByLabelText("Task status for Draft task")).toBeInTheDocument();
-
     const draftHeader = screen
       .getAllByRole("button", { name: /Draft task/ })
       .find((button) => button.classList.contains("task-header"));
@@ -8878,10 +8871,19 @@ describe("web app", () => {
       throw new Error("Draft task header was not rendered");
     }
     await user.click(draftHeader);
-    const draftArticle = draftHeader?.closest("article");
+    const draftArticle = draftHeader.closest("article");
     if (!draftArticle) {
       throw new Error("Draft task article was not rendered");
     }
+    expect(within(draftArticle).queryByRole("button", { name: "Edit Draft task" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Edit tasks" }));
+    expect(screen.getByRole("button", { name: "Exit task edit mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Task status for Draft task")).toBeInTheDocument();
+
     await user.click(within(draftArticle).getByRole("button", { name: "Edit Draft task" }));
     await user.clear(within(draftArticle).getByLabelText("Title"));
     await user.type(within(draftArticle).getByLabelText("Title"), "Edited task");

@@ -85,11 +85,13 @@ export function RunFilesSurface({
   canCreateTask,
   onTaskCreated,
   runId,
+  searchRequestVersion = 0,
   taskCreationUnavailableReason,
 }: {
   canCreateTask: boolean;
   onTaskCreated: (taskId: string) => void;
   runId: string;
+  searchRequestVersion?: number;
   taskCreationUnavailableReason: string | null;
 }) {
   const config = useRuntimeConfig();
@@ -108,6 +110,7 @@ export function RunFilesSurface({
   const rootRef = useRef<HTMLElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const searchRequestVersionRef = useRef(searchRequestVersion);
   const selectedFileRef = useRef<WorkspaceFileContent | undefined>(undefined);
   const sourceRef = useRef<HTMLDivElement | null>(null);
   const trimmedSearch = debouncedSearch.trim();
@@ -196,6 +199,14 @@ export function RunFilesSurface({
     selectedFileRef.current = selectedFile;
   }, [selectedFile]);
 
+  useEffect(() => {
+    if (searchRequestVersion === searchRequestVersionRef.current) {
+      return;
+    }
+    searchRequestVersionRef.current = searchRequestVersion;
+    focusSearchInput();
+  }, [searchRequestVersion]);
+
   const selectedSourceText =
     selectedFile && sourceSelection
       ? (sourceSelection.selectedText ?? lineRangeText(selectedFile, sourceSelection))
@@ -231,19 +242,6 @@ export function RunFilesSurface({
       const typingTarget =
         isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement);
       if (!filesSurfaceVisible || dialogReference || event.defaultPrevented || typingTarget) {
-        return;
-      }
-
-      if (
-        event.key.toLowerCase() === "f" &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.shiftKey
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        focusSearchInput();
         return;
       }
 

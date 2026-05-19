@@ -388,7 +388,7 @@ export function RunTaskList({
                     <TrashIcon aria-hidden="true" />
                   </button>
                 ) : null}
-                {canEditContent && !isEditingTask ? (
+                {editMode && canEditContent && !isEditingTask ? (
                   <button
                     aria-label={`Edit ${task.title}`}
                     className="icon-btn icon-btn--small"

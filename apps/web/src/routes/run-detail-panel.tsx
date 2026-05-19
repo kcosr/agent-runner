@@ -31,6 +31,7 @@ export function RunDetailPanel({
   drawerWidth,
   drawerView,
   attachmentPreviewSelection,
+  fileSearchRequestVersion,
   noteEditRequestVersion,
   runs,
   onAbort,
@@ -85,6 +86,7 @@ export function RunDetailPanel({
   drawerWidth: number;
   drawerView?: RunDrawerView;
   attachmentPreviewSelection?: AttachmentPreviewSelection;
+  fileSearchRequestVersion: number;
   noteEditRequestVersion: number;
   runs: RunSummary[];
   onAbort: (runId: string) => void;
@@ -215,6 +217,7 @@ export function RunDetailPanel({
         attachmentPreviewSelection={attachmentPreviewSelection}
         chatSurface={chatSurface}
         dependencyCandidateRuns={runs}
+        fileSearchRequestVersion={fileSearchRequestVersion}
         noteEditRequestVersion={noteEditRequestVersion}
         onAddDependency={(dependency) => onAddDependency(selectedRun.runId, dependency)}
         actionError={actionError}
