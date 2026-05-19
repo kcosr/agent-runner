@@ -574,9 +574,6 @@ function taskCreationUnavailableReason(run: RunDetail): string | null {
   if (run.status === "ready") {
     return "Task creation is unavailable while this run is ready.";
   }
-  if (run.status === "running") {
-    return "Task creation is unavailable while this run is running.";
-  }
   return `Task creation is unavailable for this ${run.status} run.`;
 }
 

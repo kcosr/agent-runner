@@ -990,7 +990,7 @@ test("command services: readStatus reads canonical task state for running runs",
       taskMutation: {
         canSetStatus: true,
         canEditNotes: true,
-        canAdd: false,
+        canAdd: true,
         canEditPending: false,
         canDeletePending: false,
       },
@@ -2281,7 +2281,7 @@ test("command services: locked task lists reject addTask with CommandError", asy
   });
 });
 
-test("command services: task add/edit/delete capabilities follow stopped-run rules", async () => {
+test("command services: task add/edit/delete capabilities follow lifecycle rules", async () => {
   const dir = tempDir();
   writeBundle(dir);
   writeBundle(dir, LOCKED_ASSIGNMENT, "svc-locked-work");
@@ -2325,9 +2325,11 @@ test("command services: task add/edit/delete capabilities follow stopped-run rul
       () => addTask(ready.runId, { title: "Rejected" }),
       /cannot add tasks while run .* is ready/,
     );
-    assert.throws(
-      () => addTask(running.runId, { title: "Rejected" }),
-      /cannot add tasks on a running run/,
+    const runningAdded = await addTask(running.runId, { title: "Running follow-up" });
+    assert.equal(runningAdded.task.title, "Running follow-up");
+    assert.equal(
+      readManifest(running.workspaceDir).finalTasks[runningAdded.task.id].status,
+      "pending",
     );
     assert.throws(
       () => addTask(locked.runId, { title: "Rejected" }),

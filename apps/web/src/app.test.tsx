@@ -8851,6 +8851,7 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: "Add task" }));
     expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
+    expect(screen.queryByText("Reference preview")).not.toBeInTheDocument();
     await user.clear(screen.getByLabelText("Title"));
     await user.type(screen.getByLabelText("Title"), "Manual task");
     await user.type(screen.getByLabelText("Description"), "Manual task body");

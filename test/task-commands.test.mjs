@@ -336,7 +336,7 @@ test("task set: allowed while manifest status=running", async () => {
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
       canEditPending: false,
       canDeletePending: false,
     },
@@ -801,7 +801,7 @@ test("task append-notes: allowed while manifest status=running", async () => {
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
       canEditPending: false,
       canDeletePending: false,
     },
@@ -1343,7 +1343,7 @@ test("task add: accepts terminal non-passive runs", async () => {
   assert.equal(task?.status, "pending");
 });
 
-test("task add: remains rejected while a run is running", async () => {
+test("task add: accepts running non-passive runs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -1352,11 +1352,13 @@ test("task add: remains rejected while a run is running", async () => {
     manifest.status = "running";
   });
 
-  const result = runCliExpectFail(["task", "add", outcome.runId, "--title", "Follow-up"], {
+  const out = runCli(["task", "add", outcome.runId, "--title", "Follow-up"], {
     cwd: dir,
   });
-  assert.equal(result.status, 3);
-  assert.match(result.stderr, /task list mutations remain rejected while a run is in-flight/);
+  assert.match(out, /added task/);
+  const after = readManifest(outcome.workspaceDir);
+  const task = Object.values(after.finalTasks).find((candidate) => candidate.title === "Follow-up");
+  assert.equal(task?.status, "pending");
 });
 
 test("task command: missing subcommand prints usage and exits 3", async () => {

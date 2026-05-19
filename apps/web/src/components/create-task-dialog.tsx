@@ -105,12 +105,16 @@ export function CreateTaskDialog({
           rows={5}
           value={instruction}
         />
-        <label className="resume-dialog__field" htmlFor="create-task-body-preview">
-          Reference preview
-        </label>
-        <pre className="create-task-dialog__preview" id="create-task-body-preview">
-          {body}
-        </pre>
+        {reference ? (
+          <>
+            <label className="resume-dialog__field" htmlFor="create-task-body-preview">
+              Reference preview
+            </label>
+            <pre className="create-task-dialog__preview" id="create-task-body-preview">
+              {body}
+            </pre>
+          </>
+        ) : null}
         <div className="resume-dialog__actions">
           <button className="btn" disabled={pending} onClick={onClose} type="button">
             Cancel

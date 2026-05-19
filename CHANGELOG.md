@@ -258,6 +258,8 @@
 - Dashboard keyboard shortcuts now use `F` for the selected run Files tab,
   press `F` again to focus file search, and `Shift+F` for fullscreen drawer
   toggle.
+- Non-passive runs can now add new pending tasks while they are running when
+  the task list is otherwise unlocked.
 - File-selection task creation now supports title-only tasks, omits the
   generated instructions section when empty, and collapses the workspace
   browser on mobile after opening a file.

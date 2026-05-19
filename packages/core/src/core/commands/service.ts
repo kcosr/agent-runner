@@ -575,15 +575,13 @@ function requireTaskMutationAllowed(
   }
 
   if (manifest.status === "running") {
-    const verb = kind === "add" ? "add tasks" : kind === "delete" ? "delete tasks" : "mutate tasks";
+    const verb = kind === "delete" ? "delete tasks" : "mutate tasks";
     throw new ConflictError(
-      `cannot ${verb} on a running run${kind === "add" || kind === "delete" ? " (task list mutations remain rejected while a run is in-flight)" : " (task set and task append-notes remain allowed while a run is in-flight)"}`,
+      `cannot ${verb} on a running run${kind === "delete" ? " (task deletes remain rejected while a run is in-flight)" : " (task set and task append-notes remain allowed while a run is in-flight)"}`,
     );
   }
 
-  throw new CommandError(
-    `cannot mutate tasks on a ${manifest.status} run (agent-runner task set/add is rejected while a run is in-flight)`,
-  );
+  throw new CommandError(`cannot mutate tasks on a ${manifest.status} run`);
 }
 
 function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): void {

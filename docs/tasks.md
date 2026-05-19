@@ -107,13 +107,14 @@ taskMutation: {
 |-----------------|----------------|----------------|----------|------------------|--------------------|
 | `initialized`   | true           | true           | true*    | true*            | true*              |
 | `ready`         | false          | true           | false    | false            | false              |
-| `running`       | true           | true           | false    | false            | false              |
+| `running`       | true           | true           | true*    | false            | false              |
 | terminal (any)  | true           | true           | true*    | true*            | true*              |
 
 `canEditPending` and `canDeletePending` permit title/body edits and deletes
 only for tasks whose status is still `pending`. These operations are
 disabled when `tasks` is in `lockedFields`, when the run is archived, and
-for non-pending tasks. `canAdd` follows the same lock/archive gate.
+for non-pending tasks. `canAdd` follows the same lock/archive gate and
+remains available while non-passive runs are `running`.
 
 ### Passive runs
 

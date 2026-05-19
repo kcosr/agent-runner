@@ -952,7 +952,7 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
       canEditPending: false,
       canDeletePending: false,
     },

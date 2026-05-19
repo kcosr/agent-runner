@@ -444,7 +444,7 @@ export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMu
       return {
         canSetStatus: true,
         canEditNotes: true,
-        canAdd: false,
+        canAdd: pendingListMutationAllowed,
         canEditPending: false,
         canDeletePending: false,
       };
