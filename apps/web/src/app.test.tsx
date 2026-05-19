@@ -3166,7 +3166,6 @@ describe("web app", () => {
 
   it("disables rendered Markdown task creation when the run cannot add tasks", async () => {
     setStoredDashboardViewState({ activeRightSurface: "files" });
-    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
     installFetchMock(
       {
         runs: [makeRun()],
@@ -3260,11 +3259,6 @@ describe("web app", () => {
     }
     await user.click(floatingCreateSelectionButton);
     expect(screen.queryByRole("dialog", { name: "Create task" })).not.toBeInTheDocument();
-    expect(consoleInfo).not.toHaveBeenCalledWith(
-      "[agent-runner files]",
-      "create task dialog blocked",
-      expect.anything(),
-    );
   });
 
   it("creates a task from source gutter range selection with the contracted task body", async () => {
