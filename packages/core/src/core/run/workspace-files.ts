@@ -67,17 +67,10 @@ const TEXT_BASENAMES = new Set([
   ".babelrc",
   ".dockerignore",
   ".editorconfig",
-  ".env",
-  ".env.development",
-  ".env.local",
-  ".env.production",
-  ".env.test",
   ".eslintrc",
   ".gitignore",
-  ".npmrc",
   ".nvmrc",
   ".prettierrc",
-  ".yarnrc",
 ]);
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
@@ -158,7 +151,13 @@ function isSupportedTextPath(path: string): boolean {
 }
 
 function shouldSkipSearchDirectory(name: string): boolean {
-  return name === "node_modules";
+  const normalized = name.toLowerCase();
+  return (
+    normalized === "node_modules" ||
+    normalized === ".git" ||
+    normalized === ".hg" ||
+    normalized === ".svn"
+  );
 }
 
 function codeFromError(err: unknown): unknown {

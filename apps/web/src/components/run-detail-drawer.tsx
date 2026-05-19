@@ -1897,6 +1897,7 @@ export function RunDetailDrawer({
           <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
             <RunTaskList
               capabilities={run.capabilities.taskMutation}
+              key={run.runId}
               runId={run.runId}
               tasks={run.tasks}
             />

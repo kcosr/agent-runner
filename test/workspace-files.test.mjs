@@ -83,10 +83,14 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
   writeBundle(dir);
   mkdirSync(join(dir, "docs"));
   mkdirSync(join(dir, ".git"));
+  mkdirSync(join(dir, ".hg"));
+  mkdirSync(join(dir, ".svn"));
   mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });
   mkdirSync(join(dir, "src"));
   writeFileSync(join(dir, ".env"), "TOKEN=secret\n");
   writeFileSync(join(dir, ".git", "guide.md"), "# Hidden guide\n");
+  writeFileSync(join(dir, ".hg", "guide.md"), "# Hidden guide\n");
+  writeFileSync(join(dir, ".svn", "guide.md"), "# Hidden guide\n");
   writeFileSync(join(dir, ".gitignore"), "dist\n");
   writeFileSync(join(dir, "docs", "guide.md"), "# Guide\n\nHello workspace.\n");
   writeFileSync(join(dir, "node_modules", "pkg", "guide.ts"), "export const hidden = true;\n");
@@ -107,7 +111,7 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
     assert.equal(rootKinds.get("docs"), "directory");
     assert.equal(rootKinds.get("src"), "directory");
     const rootTextSupport = new Map(root.entries.map((entry) => [entry.name, entry.supportedText]));
-    assert.equal(rootTextSupport.get(".env"), true);
+    assert.equal(rootTextSupport.get(".env"), false);
     assert.equal(rootTextSupport.get(".gitignore"), true);
 
     const docs = getWorkspaceFileList(outcome.runId, { path: "docs" });
@@ -123,12 +127,13 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
     assert.equal(search.maxResults, MAX_WORKSPACE_SEARCH_RESULTS);
     assert.deepEqual(
       search.matches.map((entry) => entry.path),
-      [".git/guide.md", "docs/guide.md"],
+      ["docs/guide.md"],
     );
 
-    const envFile = getWorkspaceFile(outcome.runId, { path: ".env" });
-    assert.equal(envFile.mediaType, "text/plain");
-    assert.equal(envFile.text, "TOKEN=secret\n");
+    assert.throws(
+      () => getWorkspaceFile(outcome.runId, { path: ".env" }),
+      /not a supported text file/,
+    );
 
     const file = getWorkspaceFile(outcome.runId, { path: "docs/guide.md" });
     assert.equal(file.mediaType, "text/markdown");
