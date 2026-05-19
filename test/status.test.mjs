@@ -537,7 +537,9 @@ test("run status --field capabilities exposes the current run capability contrac
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
+      canEditPending: true,
+      canDeletePending: true,
     },
   });
   assert.equal("canMutateTasks" in projected.capabilities, false);

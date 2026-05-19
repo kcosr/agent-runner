@@ -86,6 +86,8 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
       canReconfigure: true,
       taskMutation: {
         canAdd: true,
+        canEditPending: true,
+        canDeletePending: true,
         canEditNotes: true,
         canSetStatus: true,
       },
@@ -185,6 +187,8 @@ describe("api client", () => {
                     canReconfigure: false,
                     taskMutation: {
                       canAdd: false,
+                      canEditPending: false,
+                      canDeletePending: false,
                       canEditNotes: false,
                       canSetStatus: false,
                     },
@@ -296,6 +300,8 @@ describe("api client", () => {
                     canReconfigure: true,
                     taskMutation: {
                       canAdd: true,
+                      canEditPending: true,
+                      canDeletePending: true,
                       canEditNotes: true,
                       canSetStatus: true,
                     },
@@ -537,6 +543,8 @@ describe("api client", () => {
                 canReconfigure: false,
                 taskMutation: {
                   canAdd: false,
+                  canEditPending: false,
+                  canDeletePending: false,
                   canEditNotes: false,
                   canSetStatus: false,
                 },
@@ -635,6 +643,8 @@ describe("api client", () => {
                   canReconfigure: false,
                   taskMutation: {
                     canAdd: true,
+                    canEditPending: true,
+                    canDeletePending: true,
                     canEditNotes: true,
                     canSetStatus: true,
                   },
@@ -780,6 +790,8 @@ describe("api client", () => {
                   canReconfigure: false,
                   taskMutation: {
                     canAdd: true,
+                    canEditPending: true,
+                    canDeletePending: true,
                     canEditNotes: true,
                     canSetStatus: true,
                   },
@@ -903,6 +915,216 @@ describe("api client", () => {
     });
   });
 
+  it("lists, searches, and reads workspace files with bearer auth", async () => {
+    const directory = {
+      runId: "run-1",
+      cwd: "/tmp/project",
+      path: "docs",
+      parentPath: "",
+      entries: [
+        {
+          path: "docs/api.md",
+          name: "api.md",
+          kind: "file",
+          size: 12,
+          mtimeMs: 123,
+          supportedText: true,
+          markdown: true,
+        },
+      ],
+      truncated: false,
+      maxEntries: 1000,
+    };
+    const search = {
+      runId: "run-1",
+      cwd: "/tmp/project",
+      query: "api",
+      matches: directory.entries,
+      truncated: false,
+      maxResults: 5,
+    };
+    const file = {
+      runId: "run-1",
+      cwd: "/tmp/project",
+      path: "docs/api.md",
+      name: "api.md",
+      size: 12,
+      mtimeMs: 123,
+      mediaType: "text/markdown",
+      markdown: true,
+      text: "# API\n",
+      maxBytes: 1048576,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ directory }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ search }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ file }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config, { daemonToken: " token-1 " });
+
+    await expect(api.listWorkspaceFiles("run-1", { path: "docs" })).resolves.toEqual(directory);
+    await expect(api.searchWorkspaceFiles("run-1", "api", { limit: 5 })).resolves.toEqual(search);
+    await expect(api.getWorkspaceFile("run-1", "docs/api.md")).resolves.toEqual(file);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/runs/run-1/workspace/files?path=docs", {
+      headers: { accept: "application/json", authorization: "Bearer token-1" },
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/runs/run-1/workspace/search?q=api&limit=5", {
+      headers: { accept: "application/json", authorization: "Bearer token-1" },
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/runs/run-1/workspace/file?path=docs%2Fapi.md",
+      {
+        headers: { accept: "application/json", authorization: "Bearer token-1" },
+      },
+    );
+  });
+
+  it("rejects invalid workspace file API payloads", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ directory: { path: "docs" } }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ search: { query: "api" } }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ file: { path: "docs/api.md" } }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.listWorkspaceFiles("run-1")).rejects.toMatchObject({
+      message: "Workspace file list response payload is invalid",
+      status: 200,
+    });
+    await expect(api.searchWorkspaceFiles("run-1", "api")).rejects.toMatchObject({
+      message: "Workspace file search response payload is invalid",
+      status: 200,
+    });
+    await expect(api.getWorkspaceFile("run-1", "docs/api.md")).rejects.toMatchObject({
+      message: "Workspace file response payload is invalid",
+      status: 200,
+    });
+  });
+
+  it("creates, edits, appends notes, and deletes tasks through task HTTP APIs", async () => {
+    const created = {
+      id: "cli-1",
+      title: "Review docs",
+      body: "Use file context",
+      status: "pending",
+      notes: "",
+    };
+    const edited = {
+      ...created,
+      title: "Review API docs",
+      body: "Use selected file context",
+    };
+    const noted = {
+      ...edited,
+      notes: "Started",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ task: created }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ task: edited }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ task: noted }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              runId: "run-1",
+              taskId: "cli-1",
+              deleted: true,
+              updatedAt: "2026-05-18T18:00:00.000Z",
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.createTask("run-1", { title: "Review docs", body: "Use file context" }),
+    ).resolves.toEqual(created);
+    await expect(
+      api.updateTask("run-1", "cli-1", {
+        title: "Review API docs",
+        body: "Use selected file context",
+      }),
+    ).resolves.toEqual(edited);
+    await expect(api.appendTaskNotes("run-1", "cli-1", "Started")).resolves.toEqual(noted);
+    await expect(api.deleteTask("run-1", "cli-1")).resolves.toEqual({
+      runId: "run-1",
+      taskId: "cli-1",
+      deleted: true,
+      updatedAt: "2026-05-18T18:00:00.000Z",
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/runs/run-1/tasks", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({ title: "Review docs", body: "Use file context" }),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/runs/run-1/tasks/cli-1", {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        title: "Review API docs",
+        body: "Use selected file context",
+      }),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/runs/run-1/tasks/cli-1/append-notes", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({ text: "Started" }),
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/runs/run-1/tasks/cli-1", {
+      method: "DELETE",
+      headers: { accept: "application/json" },
+    });
+  });
+
+  it("rejects invalid task API payloads", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ task: { id: "cli-1" } }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { runId: "run-1" } }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.createTask("run-1", { title: "Review docs" })).rejects.toMatchObject({
+      message: "Create task response payload is invalid",
+      status: 200,
+    });
+    await expect(api.deleteTask("run-1", "cli-1")).rejects.toMatchObject({
+      message: "Delete task response payload is invalid",
+      status: 200,
+    });
+  });
+
   it("posts reset requests and parses the returned run detail", async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -972,6 +1194,8 @@ describe("api client", () => {
                 canReconfigure: false,
                 taskMutation: {
                   canAdd: true,
+                  canEditPending: true,
+                  canDeletePending: true,
                   canEditNotes: true,
                   canSetStatus: true,
                 },
@@ -2191,6 +2415,8 @@ describe("api client", () => {
                 canReconfigure: false,
                 taskMutation: {
                   canAdd: true,
+                  canEditPending: true,
+                  canDeletePending: true,
                   canEditNotes: true,
                   canSetStatus: true,
                 },

@@ -292,6 +292,7 @@ export function RunsDashboardRoute() {
     useState<DestructiveRunConfirmation | null>(null);
   const [runActionMenu, setRunActionMenu] = useState<RunActionMenuState | null>(null);
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
+  const [fileSearchRequestVersion, setFileSearchRequestVersion] = useState(0);
   const [noteEditRequestVersion, setNoteEditRequestVersion] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const latestStateRef = useRef(state);
@@ -449,6 +450,16 @@ export function RunsDashboardRoute() {
       if (command === "run.showDetail") {
         event.preventDefault();
         currentState.setActiveRightSurface("detail");
+        return;
+      }
+
+      if (command === "run.showFiles") {
+        event.preventDefault();
+        if (currentState.activeRightSurface === "files") {
+          setFileSearchRequestVersion((current) => current + 1);
+          return;
+        }
+        currentState.setActiveRightSurface("files");
         return;
       }
 
@@ -772,6 +783,7 @@ export function RunsDashboardRoute() {
                   drawerWidth={state.viewState.drawerWidth}
                   drawerView={state.selectedDrawerView}
                   attachmentPreviewSelection={state.selectedAttachmentPreview}
+                  fileSearchRequestVersion={fileSearchRequestVersion}
                   noteEditRequestVersion={noteEditRequestVersion}
                   runs={state.runs}
                   onAbort={state.runActions.abort}
@@ -782,6 +794,7 @@ export function RunsDashboardRoute() {
                   onCopy={state.copyText}
                   onDelete={state.runActions.delete}
                   onDownloadAttachment={state.runActions.downloadAttachment}
+                  onNotify={state.showNotice}
                   onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
                   onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
                   onSelectRun={state.openRun}

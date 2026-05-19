@@ -47,10 +47,12 @@ import {
 } from "../lib/settings.js";
 import { subscribeToRunDetailEvents } from "../lib/sse.js";
 
+export type DashboardNoticeTone = "warning" | "error" | "success";
+
 interface NoticeState {
   id: string;
   message: string;
-  tone: "warning" | "error";
+  tone: DashboardNoticeTone;
   autoDismissMs?: number;
 }
 
@@ -1361,6 +1363,16 @@ export function useRunsDashboardState() {
       } else {
         setActionError(`Failed to copy ${label}.`);
       }
+    },
+    showNotice: (message: string, tone: DashboardNoticeTone = "warning") => {
+      setNotices((current) =>
+        appendNotice(current, {
+          id: `notice-${Date.now()}`,
+          message,
+          autoDismissMs: 4000,
+          tone,
+        }),
+      );
     },
     dismissNotice: (id: string) => {
       const timeoutId = noticeTimersRef.current.get(id);

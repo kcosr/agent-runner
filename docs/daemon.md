@@ -386,9 +386,34 @@ are reusable task-definition fields, not run task-state fields such as
 |--------|------|--------|
 | `GET` | `/api/runs/:runId/tasks` | List tasks |
 | `GET` | `/api/runs/:runId/tasks/:taskId` | Single task |
-| `PATCH` | `/api/runs/:runId/tasks/:taskId` | Update status and/or notes |
+| `PATCH` | `/api/runs/:runId/tasks/:taskId` | Update status, notes, or pending title/body fields |
 | `POST` | `/api/runs/:runId/tasks/:taskId/append-notes` | Append to notes |
 | `POST` | `/api/runs/:runId/tasks` | Add a task |
+| `DELETE` | `/api/runs/:runId/tasks/:taskId` | Delete a pending task |
+
+Task PATCH bodies accept any valid subset of `status`, `notes`, `title`,
+and `body`, subject to the `taskMutation` gates on `RunCapabilities`.
+`status` and `notes` can be changed independently. `title` and `body` are
+accepted only for pending tasks when pending edits are enabled. DELETE uses
+the same pending-task gate and returns `{ result: { runId, taskId, deleted,
+updatedAt } }`.
+
+### Workspace files
+
+| Method | Path | Effect |
+|--------|------|--------|
+| `GET` | `/api/runs/:runId/workspace/files` | List a cwd-relative directory. Query: optional `path` |
+| `GET` | `/api/runs/:runId/workspace/search` | Search cwd-relative supported text paths. Query: `q`, optional `limit` |
+| `GET` | `/api/runs/:runId/workspace/file` | Read a supported text file. Query: `path` |
+
+Workspace file routes are scoped to the selected run's `cwd`. Paths are
+cwd-relative and must stay inside that tree after normalization and symlink
+resolution. Search is bounded, skips dependency directories such as
+`node_modules`, includes dot-directories and common text dotfiles, and reports
+truncation through the response flag.
+Traversal, unsupported file extensions, missing files, unreadable binary
+content, and oversized reads return the normal daemon error envelope; the
+daemon never serves arbitrary absolute paths from these routes.
 
 ### Attachments
 
@@ -473,7 +498,8 @@ callers set schedules through the explicit schedule routes.
 
 **Tasks**
 
-- `tasks.list`, `tasks.get`, `tasks.set`, `tasks.appendNotes`, `tasks.add`
+- `tasks.list`, `tasks.get`, `tasks.set`, `tasks.appendNotes`,
+  `tasks.add`, `tasks.delete`
 
 **Definitions**
 

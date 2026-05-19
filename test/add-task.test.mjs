@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -89,6 +89,13 @@ function writeAssignment(baseDir, name, body) {
   const path = join(dir, "assignment.md");
   writeFileSync(path, body);
   return path;
+}
+
+function patchManifest(workspaceDir, mutator) {
+  const manifestPath = join(workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  mutator(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function setupTwo(dir) {
@@ -229,7 +236,12 @@ test("add-task: works on resume — appends after task normalization", async () 
         loaded,
         cliVars: {},
         backend: mockBackend(async (ctx) => {
-          completeAllTasksFromPrompt(ctx.prompt);
+          patchManifest(target.workspaceDir, (manifest) => {
+            for (const task of Object.values(manifest.finalTasks)) {
+              task.status = "completed";
+            }
+            manifest.tasksCompleted = Object.keys(manifest.finalTasks).length;
+          });
           return {
             exitCode: 0,
             signal: null,

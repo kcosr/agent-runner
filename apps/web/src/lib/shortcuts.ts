@@ -16,6 +16,7 @@ type RunsShortcutCommand =
   | "run.showAttachments"
   | "run.showChat"
   | "run.showDetail"
+  | "run.showFiles"
   | "run.showNotes"
   | "run.showTasks"
   | "run.destructiveCleanup"
@@ -199,7 +200,12 @@ function resolveRunSurfaceShortcut(
   context: RunsShortcutContext,
 ): Extract<
   RunsShortcutCommand,
-  "run.showAttachments" | "run.showChat" | "run.showDetail" | "run.showNotes" | "run.showTasks"
+  | "run.showAttachments"
+  | "run.showChat"
+  | "run.showDetail"
+  | "run.showFiles"
+  | "run.showNotes"
+  | "run.showTasks"
 > | null {
   if (
     context.typingTarget ||
@@ -218,6 +224,9 @@ function resolveRunSurfaceShortcut(
   }
   if (matchesShortcut(event, { key: "d" })) {
     return "run.showDetail";
+  }
+  if (matchesShortcut(event, { key: "f" })) {
+    return "run.showFiles";
   }
   if (matchesShortcut(event, { key: "n" })) {
     return "run.showNotes";
@@ -325,7 +334,7 @@ export function resolveRunsShortcutCommand(
   context: RunsShortcutContext,
 ): RunsShortcutCommand | null {
   if (
-    matchesShortcut(event, { key: "f" }) &&
+    matchesShortcut(event, { key: "f", shiftKey: true }) &&
     !context.typingTarget &&
     !context.resumeDialogOpen &&
     !context.modalOpen &&

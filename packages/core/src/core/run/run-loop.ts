@@ -89,6 +89,7 @@ import {
   IMPLICIT_RESUME_MESSAGE,
   hasRunnableTasks,
   missingResumeInputMessage,
+  needsStoppedRunTaskReminder,
 } from "./resume-policy.js";
 import {
   type RunAuditEnvelope,
@@ -140,7 +141,7 @@ import {
   prepareBackendSessionHistorySync,
   recordBackendSessionSyncError,
 } from "./backend-session-sync.js";
-import { WORKER_BRIEF_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
+import { WORKER_BRIEF_TEMPLATE, buildStoppedRunTasksReminder } from "./task-workflow.js";
 import {
   refreshManifestAttachments,
   refreshManifestTaskState,
@@ -2001,12 +2002,21 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const hasTasks = tasks.size > 0;
   const firstTimeTasksAppear = isResume && !priorHadTasks && hasTasks;
-  const resumeAddedNewTasks = isResume && priorHadTasks && addedTitles.length > 0;
   const resumeUsesImplicitContinueMessage =
     isResume &&
     trimmedMessage.length === 0 &&
-    addedTitles.length === 0 &&
-    hasRunnableTasks(resume?.manifest.finalTasks ?? {});
+    !firstTimeTasksAppear &&
+    (addedTitles.length > 0 || hasRunnableTasks(resume?.manifest.finalTasks ?? {}));
+  const resumeNeedsStoppedRunTaskReminder =
+    isResume &&
+    resume !== undefined &&
+    needsStoppedRunTaskReminder({
+      backend: resume.manifest.backend,
+      status: resume.manifest.status,
+      finalTasks: resume.manifest.finalTasks,
+    });
+  const resumeUsesConcreteTaskNudge =
+    resumeNeedsStoppedRunTaskReminder && trimmedMessage.length === 0;
 
   // Run name resolution: fresh `run` / `init` may set it via the
   // CLI override, while resume and ready-start always reuse
@@ -2022,7 +2032,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   //   4. message (specific ask)
   //
   // Resume follow-up parts:
-  //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
+  //   1. workflow (only if firstTimeTasksAppear), a concrete stopped-run task nudge,
+  //      or a stopped-run task reminder before an explicit user message
   //   2. message, or an implicit continue prompt when unfinished tasks remain
   //
   // Start-after-ready: reuse the stored brief verbatim.
@@ -2041,12 +2052,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const parts: string[] = [];
     if (firstTimeTasksAppear) {
       parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
-    } else if (resumeAddedNewTasks) {
-      parts.push(buildAddedTasksReminder(addedTitles.length, runId));
+    } else if (resumeUsesConcreteTaskNudge) {
+      parts.push(buildNudgeMessage(tasks, [], runId));
+    } else if (resumeNeedsStoppedRunTaskReminder) {
+      parts.push(buildStoppedRunTasksReminder(runId));
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
-    } else if (resumeUsesImplicitContinueMessage) {
+    } else if (resumeUsesImplicitContinueMessage && !resumeUsesConcreteTaskNudge) {
       parts.push(IMPLICIT_RESUME_MESSAGE);
     }
     initialPrompt = parts.join("\n\n");

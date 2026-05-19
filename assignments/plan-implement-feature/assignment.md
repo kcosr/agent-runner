@@ -2,8 +2,6 @@
 schemaVersion: 1
 name: plan-implement-feature
 maxRetries: 4
-lockedFields:
-  - tasks
 callerInstructions: |
   This assignment plans and implements a feature in a single
   agent-runner run.

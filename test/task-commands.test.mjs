@@ -294,14 +294,14 @@ test("task set: rejects invalid status value", async () => {
   assert.match(result.stderr, /invalid --status/);
 });
 
-test("task set: requires at least one of --status / --notes", async () => {
+test("task set: requires at least one field", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
 
   const result = runCliExpectFail(["task", "set", outcome.runId, "t1"], { cwd: dir });
   assert.equal(result.status, 3);
-  assert.match(result.stderr, /requires at least one of --status \/ --notes/);
+  assert.match(result.stderr, /requires at least one field/);
 });
 
 test("task set: rejects missing positionals", async () => {
@@ -336,7 +336,9 @@ test("task set: allowed while manifest status=running", async () => {
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
+      canEditPending: false,
+      canDeletePending: false,
     },
   });
 });
@@ -799,7 +801,9 @@ test("task append-notes: allowed while manifest status=running", async () => {
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
+      canEditPending: false,
+      canDeletePending: false,
     },
   });
 });
@@ -1312,12 +1316,14 @@ test("task set: accepts status changes on a terminal non-passive run without rew
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
+      canEditPending: true,
+      canDeletePending: true,
     },
   });
 });
 
-test("task add: rejects terminal non-passive runs", async () => {
+test("task add: accepts terminal non-passive runs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -1328,14 +1334,16 @@ test("task add: rejects terminal non-passive runs", async () => {
   m.endedAt = new Date().toISOString();
   writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
 
-  const result = runCliExpectFail(["task", "add", outcome.runId, "--title", "Follow-up"], {
+  const out = runCli(["task", "add", outcome.runId, "--title", "Follow-up"], {
     cwd: dir,
   });
-  assert.equal(result.status, 3);
-  assert.match(result.stderr, /cannot add tasks to a terminal non-passive run/);
+  assert.match(out, /added task/);
+  const after = readManifest(outcome.workspaceDir);
+  const task = Object.values(after.finalTasks).find((candidate) => candidate.title === "Follow-up");
+  assert.equal(task?.status, "pending");
 });
 
-test("task add: remains rejected while a run is running", async () => {
+test("task add: accepts running non-passive runs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -1344,11 +1352,13 @@ test("task add: remains rejected while a run is running", async () => {
     manifest.status = "running";
   });
 
-  const result = runCliExpectFail(["task", "add", outcome.runId, "--title", "Follow-up"], {
+  const out = runCli(["task", "add", outcome.runId, "--title", "Follow-up"], {
     cwd: dir,
   });
-  assert.equal(result.status, 3);
-  assert.match(result.stderr, /task add remains rejected while a run is in-flight/);
+  assert.match(out, /added task/);
+  const after = readManifest(outcome.workspaceDir);
+  const task = Object.values(after.finalTasks).find((candidate) => candidate.title === "Follow-up");
+  assert.equal(task?.status, "pending");
 });
 
 test("task command: missing subcommand prints usage and exits 3", async () => {

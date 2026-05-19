@@ -317,6 +317,19 @@ describe("DashboardSettingsProvider", () => {
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerFullscreen":true');
   });
 
+  it("hydrates the persisted files dashboard surface key", () => {
+    window.localStorage.setItem(
+      "agent-runner:web:dashboard-view-state",
+      JSON.stringify({
+        activeRightSurface: "files",
+      }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"files"');
+  });
+
   it("defaults malformed dashboard surface view state", () => {
     window.localStorage.setItem(
       "agent-runner:web:dashboard-view-state",

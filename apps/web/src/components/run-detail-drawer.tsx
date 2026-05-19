@@ -48,7 +48,7 @@ import {
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
-import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
+import type { DashboardNoticeTone, RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { AttachmentPreviewPanel } from "./attachment-preview-drawer.js";
 import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import {
@@ -66,6 +66,7 @@ import {
   TrashIcon,
 } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
+import { RunFilesSurface } from "./run-files-surface.js";
 import { RunNoteEditor } from "./run-note-editor.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
@@ -96,6 +97,7 @@ const SELECTED_RUN_SURFACE_TABS: readonly SelectedRunSurfaceTab[] = [
   { label: "Detail", shortcut: "D", surface: "detail" },
   { label: "Notes", shortcut: "N", surface: "notes" },
   { label: "Tasks", shortcut: "T", surface: "tasks" },
+  { label: "Files", shortcut: "F", surface: "files" },
   { label: "Attachments", shortcut: "A", surface: "attachments" },
 ];
 
@@ -559,12 +561,29 @@ function InlineConfirmActions({
   );
 }
 
+function taskCreationUnavailableReason(run: RunDetail): string | null {
+  if (run.capabilities.taskMutation.canAdd) {
+    return null;
+  }
+  if (run.archivedAt !== null) {
+    return "Task creation is unavailable because this run is archived.";
+  }
+  if (run.lockedFields.includes("tasks")) {
+    return "Task creation is unavailable because this run locks its task list.";
+  }
+  if (run.status === "ready") {
+    return "Task creation is unavailable while this run is ready.";
+  }
+  return `Task creation is unavailable for this ${run.status} run.`;
+}
+
 export function RunDetailDrawer({
   activeSection,
   activeSurface,
   attachmentPreviewSelection,
   chatSurface,
   dependencyCandidateRuns,
+  fileSearchRequestVersion,
   noteEditRequestVersion,
   onAddDependency,
   actionError,
@@ -577,6 +596,7 @@ export function RunDetailDrawer({
   onDelete,
   groupAttachmentsQuery,
   onDownloadAttachment,
+  onNotify,
   onOpenAttachmentPreview,
   onReplaceAttachmentPreview,
   onSelectRun,
@@ -608,6 +628,7 @@ export function RunDetailDrawer({
   attachmentPreviewSelection?: AttachmentPreviewSelection;
   chatSurface: ReactNode;
   dependencyCandidateRuns: RunSummary[];
+  fileSearchRequestVersion: number;
   noteEditRequestVersion: number;
   onAddDependency: (dependency: RunDependencyRef) => Promise<void>;
   actionError?: string;
@@ -620,6 +641,7 @@ export function RunDetailDrawer({
   onDelete: () => void;
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   onDownloadAttachment: (ownerRunId: string, attachmentId: string, name: string) => Promise<void>;
+  onNotify: (message: string, tone?: DashboardNoticeTone) => void;
   onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
@@ -1784,6 +1806,7 @@ export function RunDetailDrawer({
             </button>
             <button
               aria-label={isFullscreen ? "Exit full-width drawer" : "Expand drawer to full width"}
+              aria-keyshortcuts="Shift+F"
               aria-pressed={isFullscreen}
               className="icon-btn drawer-fullscreen-toggle"
               onClick={toggleFullscreen}
@@ -1872,8 +1895,23 @@ export function RunDetailDrawer({
         </div>
         <div className="drawer-body" hidden={activeSurface !== "tasks"}>
           <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
-            <RunTaskList tasks={run.tasks} />
+            <RunTaskList
+              capabilities={run.capabilities.taskMutation}
+              key={run.runId}
+              runId={run.runId}
+              tasks={run.tasks}
+            />
           </section>
+        </div>
+        <div className="drawer-body" hidden={activeSurface !== "files"}>
+          <RunFilesSurface
+            canCreateTask={run.capabilities.taskMutation.canAdd}
+            fullscreen={isFullscreen && activeSurface === "files"}
+            searchRequestVersion={fileSearchRequestVersion}
+            onTaskCreated={(taskId) => onNotify(`Created task ${taskId}.`, "success")}
+            runId={run.runId}
+            taskCreationUnavailableReason={taskCreationUnavailableReason(run)}
+          />
         </div>
         <div className="drawer-body drawer-body--notes" hidden={activeSurface !== "notes"}>
           <section aria-label="Notes" className="drawer-panel drawer-panel--notes">

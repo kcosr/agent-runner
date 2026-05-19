@@ -217,7 +217,9 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
       taskMutation: {
         canSetStatus: true,
         canEditNotes: true,
-        canAdd: false,
+        canAdd: true,
+        canEditPending: true,
+        canDeletePending: true,
       },
     },
   });
@@ -265,7 +267,9 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
+      canEditPending: true,
+      canDeletePending: true,
     },
   });
   assert.equal("canMutateTasks" in detail.capabilities, false);
@@ -859,6 +863,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
       canSetStatus: true,
       canEditNotes: true,
       canAdd: true,
+      canEditPending: true,
+      canDeletePending: true,
     },
   });
 
@@ -882,6 +888,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
       canSetStatus: false,
       canEditNotes: true,
       canAdd: false,
+      canEditPending: false,
+      canDeletePending: false,
     },
   });
 
@@ -920,6 +928,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
       canSetStatus: true,
       canEditNotes: true,
       canAdd: false,
+      canEditPending: false,
+      canDeletePending: false,
     },
   });
 
@@ -942,7 +952,9 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
-      canAdd: false,
+      canAdd: true,
+      canEditPending: false,
+      canDeletePending: false,
     },
   });
 
@@ -959,6 +971,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canSetStatus: true,
     canEditNotes: true,
     canAdd: true,
+    canEditPending: true,
+    canDeletePending: true,
   });
 
   const initializedLocked = deriveRunCapabilities(
@@ -971,6 +985,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canSetStatus: true,
     canEditNotes: true,
     canAdd: false,
+    canEditPending: false,
+    canDeletePending: false,
   });
 });
 
@@ -1060,6 +1076,8 @@ test("run contracts: passive summaries and details derive effectiveStatus from t
       canSetStatus: true,
       canEditNotes: true,
       canAdd: true,
+      canEditPending: true,
+      canDeletePending: true,
     },
   });
 });

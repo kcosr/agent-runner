@@ -69,8 +69,7 @@ callerInstructions: |
        adjusts the task list to fit the feature, and fills in
        every `<<PLACEHOLDER>>` with concrete steps. The
        template's task list is a starting shape; the planner
-       may add, remove, or rename tasks so long as the
-       `lockedFields: [tasks]` line stays in the frontmatter.
+       may add, remove, or rename tasks.
     3. Runs the bundled `plan-review` assignment against the
        draft, passing both the draft path and the planner's own
        run id so the reviewer can validate the draft against
@@ -213,10 +212,7 @@ tasks:
         - Re-order where the dependency chain demands it.
 
       Rules you must not break:
-        - Keep `schemaVersion: 1` and the `lockedFields:
-          [tasks]` line in the frontmatter — once the draft
-          is init'd, the executor must not be able to
-          silently drop tasks at runtime.
+        - Keep `schemaVersion: 1` in the frontmatter.
         - Use semantic task ids that describe the work
           (`implement_core`, not `step_three`).
           Array order defines execution order; do not encode

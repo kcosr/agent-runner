@@ -31,6 +31,7 @@ import type {
   RunNoteResult,
   RunPinnedResult,
   RunSummary,
+  RunTaskDeleteResult,
   RunTaskSummary,
 } from "@kcosr/agent-runner-core/contracts/runs.js";
 import type { DefinitionListResult } from "@kcosr/agent-runner-core/core/commands/service.js";
@@ -195,6 +196,8 @@ interface TaskTargetParams extends RunTargetParams {
 interface TaskSetParams extends TaskTargetParams {
   status?: "pending" | "in_progress" | "completed" | "blocked";
   notes?: string;
+  title?: string;
+  body?: string;
 }
 
 interface TaskAppendNotesParams extends TaskTargetParams {
@@ -350,6 +353,11 @@ export interface TasksListResult {
 /** @protocol */
 export interface TaskResult {
   task: RunTaskSummary;
+}
+
+/** @protocol */
+export interface TaskDeleteResult {
+  result: RunTaskDeleteResult;
 }
 
 export interface AttachmentsListResult {

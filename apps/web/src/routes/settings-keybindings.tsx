@@ -103,6 +103,11 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Switch to Detail",
       },
       {
+        description: "Show the selected run's Files tab, or focus file search when Files is open.",
+        keys: ["F"],
+        title: "Switch to Files",
+      },
+      {
         description: "Show the selected run's Notes tab, or focus its editor when Notes is open.",
         keys: ["N"],
         title: "Switch to Notes",
@@ -130,7 +135,7 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       },
       {
         description: "Toggle the selected-run panel between normal and fullscreen widths.",
-        keys: ["F"],
+        keys: ["Shift", "F"],
         title: "Toggle drawer fullscreen",
       },
       {

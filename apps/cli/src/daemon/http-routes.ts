@@ -195,6 +195,46 @@ const routes: RouteDefinition[] = [
     },
   },
   {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "workspace", "files"],
+    handler: (_req, res, ctx, params, url) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.listWorkspaceFiles(routeParam(params, "runId"), {
+          path: optionalQueryString(url.searchParams.get("path")),
+        }),
+      );
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "workspace", "search"],
+    handler: async (_req, res, ctx, params, url) => {
+      sendJson(
+        res,
+        200,
+        await ctx.operations.searchWorkspaceFiles(routeParam(params, "runId"), {
+          query: requiredNonEmptyQueryString(url.searchParams.get("q"), "q"),
+          limit: parsePositiveIntegerQueryValue(url.searchParams.get("limit"), "limit"),
+        }),
+      );
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "workspace", "file"],
+    handler: (_req, res, ctx, params, url) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.getWorkspaceFile(routeParam(params, "runId"), {
+          path: requiredNonEmptyQueryString(url.searchParams.get("path"), "path"),
+        }),
+      );
+    },
+  },
+  {
     method: "POST",
     pattern: ["api", "runs", "init"],
     handler: async (req, res, ctx) => {
@@ -548,7 +588,20 @@ const routes: RouteDefinition[] = [
         await ctx.operations.updateTask(routeParam(params, "runId"), routeParam(params, "taskId"), {
           status: optionalEnum(body.status, "status", VALID_STATUSES),
           notes: optionalString(body.notes, "notes"),
+          title: optionalString(body.title, "title"),
+          body: optionalString(body.body, "body"),
         }),
+      );
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: ["api", "runs", ":runId", "tasks", ":taskId"],
+    handler: async (_req, res, ctx, params) => {
+      sendJson(
+        res,
+        200,
+        await ctx.operations.removeTask(routeParam(params, "runId"), routeParam(params, "taskId")),
       );
     },
   },
@@ -889,4 +942,18 @@ function parsePositiveIntegerQueryValue(value: string | null, label: string): nu
     throw new RequestValidationError(`${label} must be a positive integer`);
   }
   return parsed;
+}
+
+function optionalQueryString(value: string | null): string | undefined {
+  return value === null ? undefined : value;
+}
+
+function requiredNonEmptyQueryString(value: string | null, label: string): string {
+  if (value === null) {
+    throw new RequestValidationError(`${label} is required`);
+  }
+  if (value.trim().length === 0) {
+    throw new RequestValidationError(`${label} cannot be empty`);
+  }
+  return value;
 }

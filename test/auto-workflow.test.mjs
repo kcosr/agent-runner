@@ -245,7 +245,7 @@ test("workflow: resume session does NOT re-inject workflow when prior sessions h
   });
 });
 
-test("workflow: resume session with --add-task (prior had tasks) appends reminder only", async () => {
+test("workflow: resume session with --add-task and message keeps message last without added-task reminder", async () => {
   const dir = tempDir();
   setupOne(dir);
 
@@ -273,7 +273,6 @@ test("workflow: resume session with --add-task (prior had tasks) appends reminde
       overrides: { message: "also do these", addedTasks: ["new one", "new two"] },
       backend: mockBackend(async (ctx) => {
         seenPrompt = ctx.prompt;
-        completeAllTasksFromPrompt(ctx.prompt);
         return {
           exitCode: 0,
           signal: null,
@@ -287,14 +286,15 @@ test("workflow: resume session with --add-task (prior had tasks) appends reminde
     });
 
     assert.ok(seenPrompt.includes("also do these"), "message present");
-    assert.ok(seenPrompt.includes("2 new tasks have been added to run"), "reminder mentions count");
+    assert.ok(
+      !seenPrompt.includes("new tasks have been added to run"),
+      "added-task reminder omitted",
+    );
     assert.ok(
       !seenPrompt.includes("You are working through a task list"),
       "full workflow not re-injected",
     );
-    const msgIdx = seenPrompt.indexOf("also do these");
-    const reminderIdx = seenPrompt.indexOf("2 new tasks have been added to run");
-    assert.ok(reminderIdx < msgIdx, "reminder comes before message (message last)");
+    assert.equal(seenPrompt, "also do these", "explicit message is not wrapped in reminders");
   });
 });
 

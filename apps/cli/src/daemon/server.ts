@@ -30,6 +30,9 @@ import {
   getRunTimelineHistory,
   getTask,
   getTaskList,
+  getWorkspaceFile,
+  getWorkspaceFileList,
+  getWorkspaceFileSearch,
   initRun,
   queueResumeMessage,
   readyRun,
@@ -37,6 +40,7 @@ import {
   removeDependency,
   removeQueuedResumeMessage,
   removeRunAttachment,
+  removeTask,
   renameRun,
   reset,
   resumeRun,
@@ -874,6 +878,9 @@ export async function serveDaemon(
     getRunSummary,
     getRunAuditHistory,
     getRunTimelineHistory,
+    getWorkspaceFileList,
+    getWorkspaceFileSearch,
+    getWorkspaceFile,
     getAttachment,
     getAttachmentList,
     getTask,
@@ -906,6 +913,7 @@ export async function serveDaemon(
     updateTask,
     appendNotes,
     createTask,
+    removeTask,
     initRun,
     readyRun,
     queueResumeMessage,
@@ -3306,6 +3314,14 @@ export async function serveDaemon(
           inferDependentFanout: true,
         },
       ),
+    removeTask: (target, taskId) =>
+      withPublishedMutationAsync(
+        target,
+        () => app.removeTask(target, taskId, mutationAuditContext, publishAudit),
+        {
+          inferDependentFanout: true,
+        },
+      ),
     daemonInfo: {
       daemonInstanceId,
       pid: process.pid,
@@ -4009,6 +4025,8 @@ export async function serveDaemon(
                 {
                   status: optionalEnum(parsed.status, "status", VALID_STATUSES),
                   notes: optionalString(parsed.notes, "notes"),
+                  title: optionalString(parsed.title, "title"),
+                  body: optionalString(parsed.body, "body"),
                 },
               ),
             ),
@@ -4040,6 +4058,20 @@ export async function serveDaemon(
                 title: requiredString(parsed.title, "title"),
                 body: optionalString(parsed.body, "body"),
               }),
+            ),
+          );
+          return;
+        }
+        case "tasks.delete": {
+          const parsed = asRecord(params, "tasks.delete params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              await operations.removeTask(
+                requiredString(parsed.target, "target"),
+                requiredString(parsed.taskId, "taskId"),
+              ),
             ),
           );
           return;

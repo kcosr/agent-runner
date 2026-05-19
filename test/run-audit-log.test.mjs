@@ -247,6 +247,8 @@ test("audit log is created lazily for a logless run and task updates stay compac
           statusBefore: "pending",
           statusAfter: "in_progress",
           notesChanged: false,
+          titleChanged: false,
+          bodyChanged: false,
         },
       },
     },
@@ -293,6 +295,8 @@ test("terminal non-passive status edits emit normal task.updated audit records",
     statusBefore: "pending",
     statusAfter: "in_progress",
     notesChanged: false,
+    titleChanged: false,
+    bodyChanged: false,
   });
 });
 

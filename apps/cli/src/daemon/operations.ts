@@ -25,6 +25,9 @@ import type {
   getRunTimelineHistory,
   getTask,
   getTaskList,
+  getWorkspaceFile,
+  getWorkspaceFileList,
+  getWorkspaceFileSearch,
   initRun,
   queueResumeMessage,
   readyRun,
@@ -32,6 +35,7 @@ import type {
   removeDependency,
   removeQueuedResumeMessage,
   removeRunAttachment,
+  removeTask,
   renameRun,
   reset,
   resumeRun,
@@ -72,6 +76,9 @@ export interface DaemonHandlers {
   getRunSummary: typeof getRunSummary;
   getRunAuditHistory: typeof getRunAuditHistory;
   getRunTimelineHistory: typeof getRunTimelineHistory;
+  getWorkspaceFileList: typeof getWorkspaceFileList;
+  getWorkspaceFileSearch: typeof getWorkspaceFileSearch;
+  getWorkspaceFile: typeof getWorkspaceFile;
   getTask: typeof getTask;
   getTaskList: typeof getTaskList;
   getDefinition: typeof getDefinition;
@@ -104,6 +111,7 @@ export interface DaemonHandlers {
   updateTask: typeof updateTask;
   appendNotes: typeof appendNotes;
   createTask: typeof createTask;
+  removeTask: typeof removeTask;
   initRun: typeof initRun;
   readyRun: typeof readyRun;
   queueResumeMessage: typeof queueResumeMessage;
@@ -138,6 +146,15 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     getRunTimelineHistory(target: string) {
       return { history: ctx.getRunTimelineHistory(target) };
+    },
+    listWorkspaceFiles(target: string, input?: { path?: string }) {
+      return { directory: ctx.getWorkspaceFileList(target, input) };
+    },
+    async searchWorkspaceFiles(target: string, input: { query: string; limit?: number }) {
+      return { search: await ctx.getWorkspaceFileSearch(target, input) };
+    },
+    getWorkspaceFile(target: string, input: { path: string }) {
+      return { file: ctx.getWorkspaceFile(target, input) };
     },
     getRunBrief(target: string) {
       return { brief: ctx.getRunBrief(target) };
@@ -285,6 +302,9 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     async createTask(target: string, task: Parameters<typeof createTask>[1]) {
       return { task: await ctx.createTask(target, task) };
+    },
+    async removeTask(target: string, taskId: string) {
+      return { result: await ctx.removeTask(target, taskId) };
     },
     listAgents() {
       return { agents: ctx.getDefinitionList("agent") };

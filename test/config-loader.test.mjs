@@ -1874,7 +1874,7 @@ test("built-in plan-implement-feature assignment composes shared tasks for a sin
 
     assert.equal(loaded.config.name, "plan-implement-feature");
     assert.equal(loaded.config.maxRetries, 4);
-    assert.deepEqual(loaded.config.lockedFields, ["tasks"]);
+    assert.deepEqual(loaded.config.lockedFields, []);
     assert.deepEqual(Object.keys(loaded.config.vars), []);
     assert.deepEqual(loaded.config.hooks.prepare, []);
     assert.deepEqual(loaded.config.hooks.beforeAttempt, []);

@@ -65,7 +65,7 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   viewMode: "board" | "list";
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  activeRightSurface: "attachments" | "chat" | "detail" | "notes" | "tasks";
+  activeRightSurface: "attachments" | "chat" | "detail" | "files" | "notes" | "tasks";
   drawerFullscreen: boolean;
 } = {
   viewMode: "board",
@@ -223,6 +223,8 @@ function makeRun(
       canReconfigure: false,
       taskMutation: {
         canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
         canEditNotes: false,
         canSetStatus: false,
       },
@@ -400,6 +402,8 @@ function makeDetail(
       canReconfigure: false,
       taskMutation: {
         canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
         canEditNotes: false,
         canSetStatus: false,
       },
@@ -724,6 +728,20 @@ function installFetchMock(
     );
   }
 
+  function syncTaskCounts(runId: string) {
+    const detail = state.details[runId];
+    if (!detail) {
+      return;
+    }
+    detail.tasksTotal = detail.tasks.length;
+    detail.tasksCompleted = detail.tasks.filter((task) => task.status === "completed").length;
+    detail.activeTask =
+      detail.tasks.find((task) => task.status === "in_progress") ??
+      detail.tasks.find((task) => task.status === "pending") ??
+      null;
+    syncRunSummary(runId);
+  }
+
   function headerValue(headers: HeadersInit | undefined, key: string): string | null {
     if (!headers) {
       return null;
@@ -800,6 +818,105 @@ function installFetchMock(
         syncAttachmentCount(runId);
         return new Response(JSON.stringify({ attachment }), { status: 200 });
       }
+    }
+
+    const createTaskMatch = /\/api\/runs\/([^/]+)\/tasks$/.exec(url);
+    if (createTaskMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(createTaskMatch[1] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { body?: string; title?: string })
+          : {};
+      const task = {
+        id: `task-${detail.tasks.length + 1}`,
+        title: body.title ?? "New task",
+        body: body.body ?? "",
+        status: "pending" as const,
+        notes: "",
+      };
+      detail.tasks = [...detail.tasks, task];
+      syncTaskCounts(runId);
+      return new Response(JSON.stringify({ task }), { status: 200 });
+    }
+
+    const appendTaskNotesMatch = /\/api\/runs\/([^/]+)\/tasks\/([^/]+)\/append-notes$/.exec(url);
+    if (appendTaskNotesMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(appendTaskNotesMatch[1] ?? "");
+      const taskId = decodeURIComponent(appendTaskNotesMatch[2] ?? "");
+      const detail = state.details[runId];
+      const task = detail?.tasks.find((entry) => entry.id === taskId);
+      if (!detail || !task) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { text?: string })
+          : {};
+      task.notes = task.notes ? `${task.notes}\n${body.text ?? ""}` : (body.text ?? "");
+      syncTaskCounts(runId);
+      return new Response(JSON.stringify({ task }), { status: 200 });
+    }
+
+    const taskMatch = /\/api\/runs\/([^/]+)\/tasks\/([^/]+)$/.exec(url);
+    if (taskMatch && init?.method === "PATCH") {
+      const runId = decodeURIComponent(taskMatch[1] ?? "");
+      const taskId = decodeURIComponent(taskMatch[2] ?? "");
+      const detail = state.details[runId];
+      const task = detail?.tasks.find((entry) => entry.id === taskId);
+      if (!detail || !task) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as Partial<RunDetail["tasks"][number]>)
+          : {};
+      if (body.title !== undefined) {
+        task.title = body.title;
+      }
+      if (body.body !== undefined) {
+        task.body = body.body;
+      }
+      if (body.notes !== undefined) {
+        task.notes = body.notes;
+      }
+      if (body.status !== undefined) {
+        task.status = body.status;
+      }
+      syncTaskCounts(runId);
+      return new Response(JSON.stringify({ task }), { status: 200 });
+    }
+    if (taskMatch && init?.method === "DELETE") {
+      const runId = decodeURIComponent(taskMatch[1] ?? "");
+      const taskId = decodeURIComponent(taskMatch[2] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      detail.tasks = detail.tasks.filter((task) => task.id !== taskId);
+      syncTaskCounts(runId);
+      return new Response(
+        JSON.stringify({
+          result: {
+            runId,
+            taskId,
+            deleted: true,
+            updatedAt: detail.updatedAt,
+          },
+        }),
+        { status: 200 },
+      );
     }
 
     const attachmentContentMatch = /\/api\/runs\/([^/]+)\/attachments\/([^/]+)\/content$/.exec(url);
@@ -2681,7 +2798,7 @@ describe("web app", () => {
       within(tablist)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Chat", "Detail", "Notes", "Tasks", "Attachments"]);
+    ).toEqual(["Chat", "Detail", "Notes", "Tasks", "Files", "Attachments"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
     expect(notesTab).toHaveAttribute("aria-selected", "false");
@@ -2726,6 +2843,7 @@ describe("web app", () => {
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
     const notesTab = within(tablist).getByRole("tab", { name: "Notes" });
     const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
+    const filesTab = within(tablist).getByRole("tab", { name: "Files" });
     expect(detailTab).toHaveAttribute("aria-selected", "true");
 
     await user.keyboard("c");
@@ -2776,6 +2894,720 @@ describe("web app", () => {
     await user.keyboard("t");
     expect(tasksTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
+
+    await user.keyboard("f");
+    expect(filesTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Files")).toBeInTheDocument();
+  });
+
+  it("renders the Files surface with loading, empty, error, and accessible controls", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    let resolveRoot: (response: Response) => void = () => {};
+    const rootResponse = new Promise<Response>((resolve) => {
+      resolveRoot = resolve;
+    });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            if ((parsed.searchParams.get("path") ?? "") === "") {
+              return rootResponse;
+            }
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "docs",
+                  parentPath: "",
+                  entries: [],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/search") {
+            return new Response(
+              JSON.stringify({
+                search: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  query: parsed.searchParams.get("q") ?? "",
+                  matches: [],
+                  truncated: false,
+                  maxResults: 50,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: "INVALID_COMMAND",
+                  message: 'workspace file "README.md" is binary',
+                },
+              }),
+              { status: 422 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    expect(await screen.findByRole("tab", { name: "Files", selected: true })).toBeInTheDocument();
+    const searchInput = screen.getByLabelText("Search workspace files");
+    expect(searchInput).toBeInTheDocument();
+    expect(screen.getByText("Loading files...")).toBeInTheDocument();
+    expect(screen.queryByText("Loading file...")).not.toBeInTheDocument();
+    searchInput.blur();
+    fireEvent.keyDown(window, { key: "f" });
+    await waitFor(() => expect(searchInput).toHaveFocus());
+
+    await act(async () => {
+      resolveRoot(
+        new Response(
+          JSON.stringify({
+            directory: {
+              runId: "run-1",
+              cwd: "/tmp/agent-runner",
+              path: "",
+              parentPath: null,
+              entries: [
+                {
+                  path: "docs",
+                  name: "docs",
+                  kind: "directory",
+                  size: null,
+                  mtimeMs: null,
+                  supportedText: true,
+                  markdown: false,
+                },
+                {
+                  path: "README.md",
+                  name: "README.md",
+                  kind: "file",
+                  size: 42,
+                  mtimeMs: null,
+                  supportedText: true,
+                  markdown: true,
+                },
+              ],
+              truncated: false,
+              maxEntries: 1000,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+      await rootResponse;
+    });
+
+    await user.click(await screen.findByRole("button", { name: /README.md/ }));
+    expect(await screen.findByText(/workspace file "README.md" is binary/)).toBeInTheDocument();
+
+    await user.clear(searchInput);
+    await user.type(searchInput, "missing");
+    expect(await screen.findByText("No matching files.")).toBeInTheDocument();
+    fireEvent.keyDown(searchInput, { key: "Escape" });
+    expect(searchInput).toHaveValue("");
+    expect(searchInput).toHaveFocus();
+    fireEvent.keyDown(searchInput, { key: "Escape" });
+    expect(searchInput).not.toHaveFocus();
+
+    await user.clear(searchInput);
+    await user.click(screen.getByRole("button", { name: /docs/ }));
+    expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
+  });
+
+  it("navigates workspace files with fullscreen up and down keys while search is focused", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "docs",
+                      name: "docs",
+                      kind: "directory",
+                      size: null,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: false,
+                    },
+                    {
+                      path: "alpha.md",
+                      name: "alpha.md",
+                      kind: "file",
+                      size: 16,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                    {
+                      path: "beta.md",
+                      name: "beta.md",
+                      kind: "file",
+                      size: 15,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            const filePath = parsed.searchParams.get("path") ?? "";
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: filePath,
+                  name: filePath,
+                  size: filePath === "beta.md" ? 15 : 16,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: filePath === "beta.md" ? "# Beta\nbeta body" : "# Alpha\nalpha body",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    await user.click(await screen.findByRole("button", { name: /alpha\.md/ }));
+    expect(await screen.findByRole("heading", { name: "alpha.md" })).toBeInTheDocument();
+    const searchInput = screen.getByLabelText("Search workspace files");
+    searchInput.focus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("heading", { name: "alpha.md" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
+    searchInput.focus();
+    expect(searchInput).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("heading", { name: "beta.md" })).toBeInTheDocument();
+
+    await user.keyboard("{ArrowUp}");
+    expect(await screen.findByRole("heading", { name: "alpha.md" })).toBeInTheDocument();
+    expect(searchInput).toHaveFocus();
+  });
+
+  it("auto-collapses the workspace browser after opening a file on mobile", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: query === "(max-width: 760px)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "README.md",
+                      name: "README.md",
+                      kind: "file",
+                      size: 42,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "README.md",
+                  name: "README.md",
+                  size: 42,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: "# README",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    expect(await screen.findByLabelText("Search workspace files")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /README.md/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Workspace" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(screen.queryByLabelText("Search workspace files")).not.toBeInTheDocument();
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "f" });
+    const mobileSearchInput = await screen.findByLabelText("Search workspace files");
+    await waitFor(() => expect(mobileSearchInput).toHaveFocus());
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(screen.queryByLabelText("Search workspace files")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(await screen.findByLabelText("Search workspace files")).toBeInTheDocument();
+  });
+
+  it("creates a task from rendered Markdown selection with the contracted task body", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    let createdTaskBody: { body?: string; title?: string } | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: {
+          "run-1": makeDetail({
+            capabilities: {
+              taskMutation: {
+                canAdd: true,
+                canEditPending: true,
+                canDeletePending: true,
+                canEditNotes: true,
+                canSetStatus: true,
+              },
+            },
+            lockedFields: [],
+          }),
+        },
+      },
+      {
+        handleRequest: async (url, init) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "docs/foo.md",
+                      name: "foo.md",
+                      kind: "file",
+                      size: 28,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "docs/foo.md",
+                  name: "foo.md",
+                  size: 28,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: "# Heading\n\nThe selected rendered text.",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/tasks" && init?.method === "POST") {
+            createdTaskBody =
+              typeof init.body === "string"
+                ? (JSON.parse(init.body) as { body?: string; title?: string })
+                : undefined;
+            return new Response(
+              JSON.stringify({
+                task: {
+                  id: "created",
+                  title: createdTaskBody?.title ?? "",
+                  body: createdTaskBody?.body ?? "",
+                  status: "pending",
+                  notes: "",
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    await user.click(await screen.findByRole("button", { name: /foo.md/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Preview" })).toHaveAttribute("aria-selected", "true");
+    });
+    const renderedText = await screen.findByText("The selected rendered text.");
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: renderedText.firstChild,
+      focusNode: renderedText.firstChild,
+      toString: () => "The selected rendered text.",
+    } as Selection);
+    const renderedPreview = renderedText.closest(".files-rendered");
+    if (!renderedPreview) {
+      throw new Error("Rendered preview was not available");
+    }
+    fireEvent(document, new Event("selectionchange"));
+
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Description"), "Rewrite this paragraph.");
+    await user.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => {
+      expect(createdTaskBody).toEqual({
+        title: "Update docs/foo.md",
+        body: [
+          "File: `docs/foo.md`",
+          "View: rendered-markdown",
+          "",
+          "Selected text:",
+          "",
+          "> The selected rendered text.",
+          "",
+          "Instructions:",
+          "",
+          "Rewrite this paragraph.",
+        ].join("\n"),
+      });
+    });
+    expect(await screen.findByText("Created task created.")).toBeInTheDocument();
+  });
+
+  it("disables rendered Markdown task creation when the run cannot add tasks", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "CHANGELOG.md",
+                      name: "CHANGELOG.md",
+                      kind: "file",
+                      size: 28,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "CHANGELOG.md",
+                  name: "CHANGELOG.md",
+                  size: 28,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: "# Changelog\n\nSelected rendered text.",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    await user.click(await screen.findByRole("button", { name: /CHANGELOG.md/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Preview" })).toHaveAttribute("aria-selected", "true");
+    });
+    const renderedText = await screen.findByText("Selected rendered text.");
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      anchorNode: renderedText.firstChild,
+      focusNode: renderedText.firstChild,
+      toString: () => "Selected rendered text.",
+    } as Selection);
+    const renderedPreview = renderedText.closest(".files-rendered");
+    if (!renderedPreview) {
+      throw new Error("Rendered preview was not available");
+    }
+    fireEvent.mouseUp(renderedPreview);
+
+    const addTaskButton = screen.getByRole("button", { name: "Add task" });
+    expect(addTaskButton).toBeDisabled();
+    expect(addTaskButton).toHaveAttribute(
+      "title",
+      "Task creation is unavailable because this run locks its task list.",
+    );
+    await user.click(addTaskButton);
+    expect(screen.queryByRole("dialog", { name: "Create task" })).not.toBeInTheDocument();
+  });
+
+  it("creates a task from source gutter range selection with the contracted task body", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    let createdTaskBody: { body?: string; title?: string } | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: {
+          "run-1": makeDetail({
+            capabilities: {
+              taskMutation: {
+                canAdd: true,
+                canEditPending: true,
+                canDeletePending: true,
+                canEditNotes: true,
+                canSetStatus: true,
+              },
+            },
+            lockedFields: [],
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "src/foo.ts",
+                      name: "foo.ts",
+                      kind: "file",
+                      size: 64,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: false,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "src/foo.ts",
+                  name: "foo.ts",
+                  size: 64,
+                  mtimeMs: null,
+                  mediaType: "text/plain",
+                  markdown: false,
+                  text: "const a = 1;\nconst b = 2;\nconst c = a + b;",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/tasks" && init?.method === "POST") {
+            createdTaskBody =
+              typeof init.body === "string"
+                ? (JSON.parse(init.body) as { body?: string; title?: string })
+                : undefined;
+            return new Response(
+              JSON.stringify({
+                task: {
+                  id: "source-task",
+                  title: createdTaskBody?.title ?? "",
+                  body: createdTaskBody?.body ?? "",
+                  status: "pending",
+                  notes: "",
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    await user.click(await screen.findByRole("button", { name: /foo.ts/ }));
+    const selectedStart = await screen.findByText("const b = 2;");
+    const selectedEnd = screen.getByText("const c = a + b;");
+    let selectionAnchor: Node | null = selectedStart.firstChild;
+    let selectionFocus: Node | null = selectedEnd.firstChild;
+    let selectionText = "2\nconst b = 2;\n3\nconst c = a + b;";
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      get anchorNode() {
+        return selectionAnchor;
+      },
+      get focusNode() {
+        return selectionFocus;
+      },
+      removeAllRanges: vi.fn(() => {
+        selectionAnchor = null;
+        selectionFocus = null;
+        selectionText = "";
+      }),
+      toString: () => selectionText,
+    } as unknown as Selection);
+    const sourcePreview = selectedStart.closest(".files-source");
+    if (!sourcePreview) {
+      throw new Error("Source preview was not available");
+    }
+    fireEvent(document, new Event("selectionchange"));
+    expect(screen.getByRole("button", { name: "Add task" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear file selection" }));
+    expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
+    selectionAnchor = selectedStart.firstChild;
+    selectionFocus = selectedEnd.firstChild;
+    selectionText = "2\nconst b = 2;\n3\nconst c = a + b;";
+    fireEvent(document, new Event("selectionchange"));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
+    selectionAnchor = selectedStart.firstChild;
+    selectionFocus = selectedEnd.firstChild;
+    selectionText = "2\nconst b = 2;\n3\nconst c = a + b;";
+    fireEvent(document, new Event("selectionchange"));
+
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => {
+      expect(createdTaskBody).toEqual({
+        title: "Update src/foo.ts",
+        body: [
+          "File: `src/foo.ts`",
+          "View: source",
+          "Range: `src/foo.ts:2-3`",
+          "",
+          "Selected source:",
+          "",
+          "```ts",
+          "const b = 2;",
+          "const c = a + b;",
+          "```",
+        ].join("\n"),
+      });
+    });
   });
 
   it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
@@ -5791,6 +6623,8 @@ describe("web app", () => {
             canResume: false,
             taskMutation: {
               canAdd: true,
+              canEditPending: true,
+              canDeletePending: true,
               canEditNotes: true,
               canSetStatus: true,
             },
@@ -5813,6 +6647,8 @@ describe("web app", () => {
             canResume: false,
             taskMutation: {
               canAdd: true,
+              canEditPending: true,
+              canDeletePending: true,
               canEditNotes: true,
               canSetStatus: true,
             },
@@ -5850,6 +6686,8 @@ describe("web app", () => {
             canResume: false,
             taskMutation: {
               canAdd: true,
+              canEditPending: true,
+              canDeletePending: true,
               canEditNotes: true,
               canSetStatus: true,
             },
@@ -5873,6 +6711,8 @@ describe("web app", () => {
             canResume: false,
             taskMutation: {
               canAdd: true,
+              canEditPending: true,
+              canDeletePending: true,
               canEditNotes: true,
               canSetStatus: true,
             },
@@ -7240,6 +8080,8 @@ describe("web app", () => {
               canResume: true,
               taskMutation: {
                 canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
                 canEditNotes: false,
                 canSetStatus: false,
               },
@@ -7346,7 +8188,7 @@ describe("web app", () => {
     });
   });
 
-  it("toggles drawer fullscreen with f when a run detail is open", async () => {
+  it("toggles drawer fullscreen with Shift+F when a run detail is open", async () => {
     installFetchMock({
       runs: [
         makeRun({
@@ -7373,7 +8215,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Fullscreen toggle"));
     expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toBeInTheDocument();
 
-    await user.keyboard("f");
+    await user.keyboard("{Shift>}f{/Shift}");
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -7382,7 +8224,7 @@ describe("web app", () => {
       '"drawerFullscreen":true',
     );
 
-    await user.keyboard("f");
+    await user.keyboard("{Shift>}f{/Shift}");
     expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
       "aria-pressed",
       "false",
@@ -7782,9 +8624,12 @@ describe("web app", () => {
     expect(screen.getByText("Toggle notes-only filter")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: C")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: D")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: F")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: Shift + F")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: T")).toBeInTheDocument();
     expect(screen.getByText("Switch to Chat")).toBeInTheDocument();
     expect(screen.getByText("Switch to Detail")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Files")).toBeInTheDocument();
     expect(screen.getByText("Switch to Tasks")).toBeInTheDocument();
 
     await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
@@ -8065,6 +8910,131 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: "Task notes" }));
     expect(await screen.findByText("npm run check")).toBeInTheDocument();
     expect(screen.getByText("npm run check").tagName).toBe("CODE");
+  });
+
+  it("manages tasks with add, edit, status, notes, and delete controls", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          capabilities: {
+            taskMutation: {
+              canAdd: true,
+              canEditPending: true,
+              canDeletePending: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+          lockedFields: [],
+          tasks: [
+            {
+              id: "draft",
+              title: "Draft task",
+              body: "Initial body",
+              status: "pending",
+              notes: "Initial notes",
+            },
+          ],
+          tasksCompleted: 0,
+          tasksTotal: 1,
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
+    expect(screen.queryByText("Reference preview")).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Manual task");
+    await user.type(screen.getByLabelText("Description"), "Manual task body");
+    await user.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() => {
+      expect(
+        screen
+          .getAllByRole("button", { name: /Manual task/ })
+          .some((button) => button.classList.contains("task-header")),
+      ).toBe(true);
+    });
+
+    expect(screen.queryByLabelText("Task status for Draft task")).not.toBeInTheDocument();
+    const draftHeader = screen
+      .getAllByRole("button", { name: /Draft task/ })
+      .find((button) => button.classList.contains("task-header"));
+    if (!draftHeader) {
+      throw new Error("Draft task header was not rendered");
+    }
+    await user.click(draftHeader);
+    const draftArticle = draftHeader.closest("article");
+    if (!draftArticle) {
+      throw new Error("Draft task article was not rendered");
+    }
+    expect(within(draftArticle).queryByRole("button", { name: "Edit Draft task" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Edit tasks" }));
+    expect(screen.getByRole("button", { name: "Exit task edit mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Task status for Draft task")).toBeInTheDocument();
+
+    await user.click(within(draftArticle).getByRole("button", { name: "Edit Draft task" }));
+    await user.clear(within(draftArticle).getByLabelText("Title"));
+    await user.type(within(draftArticle).getByLabelText("Title"), "Edited task");
+    await user.clear(within(draftArticle).getByLabelText("Body"));
+    await user.type(within(draftArticle).getByLabelText("Body"), "Edited body");
+    await user.click(within(draftArticle).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(
+        screen
+          .getAllByRole("button", { name: /Edited task/ })
+          .some((button) => button.classList.contains("task-header")),
+      ).toBe(true);
+    });
+
+    await user.selectOptions(screen.getByLabelText("Task status for Edited task"), "completed");
+    await waitFor(() => {
+      expect(screen.getByLabelText("Task status for Edited task")).toHaveValue("completed");
+    });
+
+    const editedHeaderForNotes = screen
+      .getAllByRole("button", { name: /Edited task/ })
+      .find((button) => button.classList.contains("task-header"));
+    if (!editedHeaderForNotes) {
+      throw new Error("Edited task header was not rendered");
+    }
+    if (editedHeaderForNotes.getAttribute("aria-expanded") !== "true") {
+      await user.click(editedHeaderForNotes);
+    }
+    await user.click(await screen.findByRole("button", { name: "Task notes" }));
+    const editedArticle = editedHeaderForNotes.closest("article");
+    if (!editedArticle) {
+      throw new Error("Edited task article was not rendered");
+    }
+    await user.click(within(editedArticle).getByRole("button", { name: "Edit Edited task" }));
+    await user.clear(within(editedArticle).getByLabelText("Notes"));
+    await user.type(within(editedArticle).getByLabelText("Notes"), "Replaced notes");
+    await user.click(within(editedArticle).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(within(editedArticle).getByText("Replaced notes")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete Manual task" }));
+    const deleteTaskDialog = await screen.findByRole("dialog", { name: "Delete task?" });
+    expect(within(deleteTaskDialog).getByText(/Manual task/)).toBeInTheDocument();
+    await user.click(within(deleteTaskDialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Manual task/ })).not.toBeInTheDocument();
+    });
   });
 
   it("distinguishes empty runs from filter-hidden runs", async () => {
@@ -8835,6 +9805,8 @@ describe("web app", () => {
             canResume: true,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -10905,6 +11877,9 @@ describe("web app", () => {
     expect(fullscreenDrawerLayer).not.toBeNull();
     expect(resumeDialogLayer?.[1]).toBe("60");
     expect(fullscreenDrawerLayer?.[1]).toBe("40");
+    expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?right:\s*0;[\s\S]*?left:\s*56px;/);
+    expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?width:\s*auto;/);
+    expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?min-width:\s*0;/);
   });
 
   it("keeps the Chat composer textarea custom and non-resizable", () => {
@@ -11651,6 +12626,8 @@ describe("web app", () => {
             canResume: false,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -11671,6 +12648,8 @@ describe("web app", () => {
             canResume: true,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -11687,6 +12666,8 @@ describe("web app", () => {
             canResume: false,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -11867,6 +12848,8 @@ describe("web app", () => {
             canResume: true,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -11911,6 +12894,8 @@ describe("web app", () => {
             canResume: true,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -11966,6 +12951,8 @@ describe("web app", () => {
               canResume: true,
               taskMutation: {
                 canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
                 canEditNotes: false,
                 canSetStatus: false,
               },
@@ -12031,6 +13018,8 @@ describe("web app", () => {
             canResume: true,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -12094,6 +13083,8 @@ describe("web app", () => {
               canResume: false,
               taskMutation: {
                 canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
                 canEditNotes: false,
                 canSetStatus: false,
               },
@@ -12172,6 +13163,8 @@ describe("web app", () => {
               canResume: true,
               taskMutation: {
                 canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
                 canEditNotes: false,
                 canSetStatus: false,
               },
@@ -12235,6 +13228,8 @@ describe("web app", () => {
               canResume: true,
               taskMutation: {
                 canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
                 canEditNotes: false,
                 canSetStatus: false,
               },
@@ -12318,6 +13313,8 @@ describe("web app", () => {
               canResume: true,
               taskMutation: {
                 canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
                 canEditNotes: false,
                 canSetStatus: false,
               },
@@ -12395,6 +13392,8 @@ describe("web app", () => {
             canResume: true,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -12444,6 +13443,8 @@ describe("web app", () => {
               canResume: true,
               taskMutation: {
                 canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
                 canEditNotes: false,
                 canSetStatus: false,
               },
@@ -12516,6 +13517,8 @@ describe("web app", () => {
             canResume: true,
             taskMutation: {
               canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
               canEditNotes: false,
               canSetStatus: false,
             },
@@ -12647,6 +13650,8 @@ describe("web app", () => {
               canResume: true,
               taskMutation: {
                 canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
                 canEditNotes: false,
                 canSetStatus: false,
               },

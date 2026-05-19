@@ -133,6 +133,8 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
       canReconfigure: false,
       taskMutation: {
         canAdd: false,
+        canEditPending: false,
+        canDeletePending: false,
         canEditNotes: false,
         canSetStatus: false,
       },

@@ -505,7 +505,26 @@ export function formatAuditEvent(
           text("."),
         ],
       };
+    case "task.deleted":
+      return {
+        message: [
+          text("Deleted task "),
+          strong(fields.taskTitle ?? fields.taskId ?? "unknown"),
+          text("."),
+        ],
+      };
     case "task.updated":
+      if (fields.titleChanged === true || fields.bodyChanged === true) {
+        return {
+          message: [
+            text("Edited task "),
+            strong(fields.taskTitle ?? fields.taskId ?? "unknown"),
+            text(" via "),
+            code(formatTaskCommand(fields.command)),
+            text("."),
+          ],
+        };
+      }
       if (isTaskStatus(fields.statusBefore) && isTaskStatus(fields.statusAfter)) {
         return {
           message: [

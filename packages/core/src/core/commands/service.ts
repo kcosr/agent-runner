@@ -42,6 +42,7 @@ import {
   type RunNoteResult,
   type RunPinnedResult,
   type RunSummary,
+  type RunTaskDeleteResult,
   type RunTaskMutationCapabilities,
   canArchiveRun,
   canDeleteRun,
@@ -127,6 +128,7 @@ import {
   appendRunScheduleSetEvent,
   appendRunUnarchivedEvent,
   appendTaskAddedEvent,
+  appendTaskDeletedEvent,
   appendTaskUpdatedEvent,
   commandRunEventContext,
   systemRunEventContext,
@@ -320,9 +322,16 @@ type TaskMutationAuditEvent =
       statusBefore?: TaskStatus;
       statusAfter?: TaskStatus;
       notesChanged: boolean;
+      titleChanged: boolean;
+      bodyChanged: boolean;
     }
   | {
       type: "task.added";
+      taskId: string;
+      taskTitle: string;
+    }
+  | {
+      type: "task.deleted";
       taskId: string;
       taskTitle: string;
     };
@@ -362,7 +371,7 @@ export class ScheduleMutationError extends CommandError {
   }
 }
 
-type TaskMutationKind = "set" | "append-notes" | "add";
+type TaskMutationKind = "set" | "append-notes" | "add" | "delete";
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_QUEUED_RESUME_MESSAGES = 50;
@@ -542,26 +551,37 @@ function requireTaskMutationAllowed(
     if (capabilities.canAdd) {
       return capabilities;
     }
-    if (manifest.backend !== "passive" && isTerminalStatus(manifest.status)) {
-      throw new CommandError(
-        `cannot add tasks to a terminal non-passive run; use ${resolveAgentRunnerCommand()} run --resume-run <id> --add-task "..." instead`,
-      );
-    }
     if (manifest.status === "ready") {
       throw new CommandError(`cannot add tasks while run ${manifest.runId} is ready`);
     }
   }
 
+  if (kind === "delete") {
+    if (manifest.lockedFields.includes("tasks")) {
+      throw new CommandError(
+        "task delete: the `tasks` field is locked for this run — cannot delete tasks",
+      );
+    }
+    if (capabilities.canDeletePending) {
+      return capabilities;
+    }
+    if (manifest.status === "ready") {
+      throw new CommandError(`cannot delete tasks while run ${manifest.runId} is ready`);
+    }
+  }
+
+  if (manifest.archivedAt !== null && (kind === "add" || kind === "delete")) {
+    throw new CommandError(`cannot ${kind} tasks while run ${manifest.runId} is archived`);
+  }
+
   if (manifest.status === "running") {
-    const verb = kind === "add" ? "add tasks" : "mutate tasks";
+    const verb = kind === "delete" ? "delete tasks" : "mutate tasks";
     throw new ConflictError(
-      `cannot ${verb} on a running run${kind === "add" ? " (task add remains rejected while a run is in-flight)" : " (task set and task append-notes remain allowed while a run is in-flight)"}`,
+      `cannot ${verb} on a running run${kind === "delete" ? " (task deletes remain rejected while a run is in-flight)" : " (task set and task append-notes remain allowed while a run is in-flight)"}`,
     );
   }
 
-  throw new CommandError(
-    `cannot mutate tasks on a ${manifest.status} run (agent-runner task set/add is rejected while a run is in-flight)`,
-  );
+  throw new CommandError(`cannot mutate tasks on a ${manifest.status} run`);
 }
 
 function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): void {
@@ -611,6 +631,16 @@ function persistTaskMap(
               taskTitle: auditEvent.taskTitle,
             }),
           );
+        } else if (auditEvent.type === "task.deleted") {
+          emitPersistedAudit(
+            emitAuditEnvelope,
+            appendTaskDeletedEvent({
+              manifest,
+              context: taskCommandContext,
+              taskId: auditEvent.taskId,
+              taskTitle: auditEvent.taskTitle,
+            }),
+          );
         } else {
           emitPersistedAudit(
             emitAuditEnvelope,
@@ -623,6 +653,8 @@ function persistTaskMap(
               statusBefore: auditEvent.statusBefore,
               statusAfter: auditEvent.statusAfter,
               notesChanged: auditEvent.notesChanged,
+              titleChanged: auditEvent.titleChanged,
+              bodyChanged: auditEvent.bodyChanged,
             }),
           );
         }
@@ -652,7 +684,7 @@ function persistTaskMap(
 function updateTaskMap(
   resolved: ReturnType<typeof resolveResumeTarget>,
   auditOrigin: RunEventOrigin,
-  source: "task-set" | "task-append-notes" | "task-add",
+  source: "task-set" | "task-append-notes" | "task-add" | "task-delete",
   emitAuditEnvelope: AuditEnvelopeEmitter | undefined,
   updater: (tasks: Map<string, TaskState>) => {
     auditEvent: TaskMutationAuditEvent | null;
@@ -711,18 +743,18 @@ function updateTaskMap(
   });
 }
 
-function validateTaskTitle(title: string): string {
+function validateTaskTitle(title: string, command = "task add"): string {
   const trimmed = title.trim();
   if (trimmed.length === 0) {
-    throw new CommandError("task add: --title cannot be empty");
+    throw new CommandError(`${command}: title cannot be empty`);
   }
   if (trimmed.length > MAX_TITLE_LENGTH) {
     throw new CommandError(
-      `task add: --title exceeds ${MAX_TITLE_LENGTH} characters (${trimmed.length})`,
+      `${command}: title exceeds ${MAX_TITLE_LENGTH} characters (${trimmed.length})`,
     );
   }
   if (trimmed.includes("\n")) {
-    throw new CommandError("task add: --title must be a single line");
+    throw new CommandError(`${command}: title must be a single line`);
   }
   return trimmed;
 }
@@ -2139,18 +2171,25 @@ export function showTask(target: string, taskId: string): TaskDetailsResult {
 export function setTask(
   target: string,
   taskId: string,
-  update: { status?: string; notes?: string },
+  update: { status?: string; notes?: string; title?: string; body?: string },
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
   emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<TaskMutationResult> {
-  if (update.status === undefined && update.notes === undefined) {
-    throw new CommandError("task set requires at least one of --status / --notes");
+  if (
+    update.status === undefined &&
+    update.notes === undefined &&
+    update.title === undefined &&
+    update.body === undefined
+  ) {
+    throw new CommandError("task set requires at least one field");
   }
   if (update.status !== undefined && !isValidStatus(update.status)) {
     throw new CommandError(
       `invalid --status "${update.status}" — expected one of: ${VALID_STATUSES.join(", ")}`,
     );
   }
+  const title =
+    update.title === undefined ? undefined : validateTaskTitle(update.title, "task set");
 
   const resolved = resolveRun(target);
   const capabilities = requireTaskMutationAllowed(resolved.manifest, "set");
@@ -2162,6 +2201,14 @@ export function setTask(
     }
     const statusBefore = task.status;
     const notesBefore = task.notes;
+    const titleBefore = task.title;
+    const bodyBefore = task.body;
+    if ((title !== undefined || update.body !== undefined) && !capabilities.canEditPending) {
+      throw new CommandError(`cannot edit pending tasks on a ${resolved.manifest.status} run`);
+    }
+    if ((title !== undefined || update.body !== undefined) && task.status !== "pending") {
+      throw new CommandError(`cannot edit task ${task.id} unless it is pending`);
+    }
     if (
       update.status !== undefined &&
       update.status !== task.status &&
@@ -2177,9 +2224,17 @@ export function setTask(
     if (update.notes !== undefined) {
       task.notes = update.notes;
     }
+    if (title !== undefined) {
+      task.title = title;
+    }
+    if (update.body !== undefined) {
+      task.body = update.body;
+    }
     const statusChanged = statusBefore !== task.status;
     const notesChanged = notesBefore !== task.notes;
-    if (!statusChanged && !notesChanged) {
+    const titleChanged = titleBefore !== task.title;
+    const bodyChanged = bodyBefore !== task.body;
+    if (!statusChanged && !notesChanged && !titleChanged && !bodyChanged) {
       return { auditEvent: null, transition: null };
     }
     return {
@@ -2190,6 +2245,8 @@ export function setTask(
         command: "set",
         ...(statusChanged ? { statusBefore, statusAfter: task.status } : {}),
         notesChanged,
+        titleChanged,
+        bodyChanged,
       },
       transition: {
         taskId: task.id,
@@ -2203,6 +2260,8 @@ export function setTask(
         changedFields: [
           ...(statusChanged ? (["status"] as const) : []),
           ...(notesChanged ? (["notes"] as const) : []),
+          ...(titleChanged ? (["title"] as const) : []),
+          ...(bodyChanged ? (["body"] as const) : []),
         ],
         rollback(currentTasks) {
           const current = currentTasks.get(task.id);
@@ -2211,6 +2270,8 @@ export function setTask(
           }
           current.status = statusBefore;
           current.notes = notesBefore;
+          current.title = titleBefore;
+          current.body = bodyBefore;
         },
       },
     };
@@ -2249,6 +2310,8 @@ export function appendTaskNotes(
         taskTitle: task.title,
         command: "append_notes",
         notesChanged: true,
+        titleChanged: false,
+        bodyChanged: false,
       },
       transition: {
         taskId: task.id,
@@ -2321,6 +2384,56 @@ export function addTask(
   }).then(() => ({
     manifest: resolved.manifest,
     task: taskSnapshot(resolved.manifest, taskId),
+  }));
+}
+
+export function deleteTask(
+  target: string,
+  taskId: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): Promise<RunTaskDeleteResult> {
+  const resolved = resolveRun(target);
+  requireTaskMutationAllowed(resolved.manifest, "delete");
+
+  let deletedTitle = "";
+  return updateTaskMap(resolved, auditOrigin, "task-delete", emitAuditEnvelope, (tasks) => {
+    const task = tasks.get(taskId);
+    if (!task) {
+      throw new TaskNotFoundError(resolved.manifest.runId, taskId);
+    }
+    if (task.status !== "pending") {
+      throw new CommandError(`cannot delete task ${task.id} unless it is pending`);
+    }
+    deletedTitle = task.title;
+    const before = { ...task };
+    tasks.delete(taskId);
+    return {
+      auditEvent: {
+        type: "task.deleted",
+        taskId,
+        taskTitle: deletedTitle,
+      },
+      transition: {
+        taskId,
+        from: { status: before.status, notes: before.notes },
+        to: {
+          status: before.status,
+          notes: before.notes,
+          title: before.title,
+          body: before.body,
+        },
+        changedFields: [],
+        rollback(currentTasks) {
+          currentTasks.set(taskId, before);
+        },
+      },
+    };
+  }).then(() => ({
+    runId: resolved.manifest.runId,
+    taskId,
+    deleted: true,
+    updatedAt: resolved.manifest.updatedAt,
   }));
 }
 

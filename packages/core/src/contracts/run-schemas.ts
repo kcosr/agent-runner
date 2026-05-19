@@ -39,6 +39,7 @@ import type {
   RunSessionSummary,
   RunStatus,
   RunSummary,
+  RunTaskDeleteResult,
   RunTaskMutationCapabilities,
   RunTaskSummary,
 } from "./runs.js";
@@ -209,6 +210,13 @@ export const runTaskSummarySchema: z.ZodType<RunTaskSummary> = z.object({
   notes: z.string(),
 });
 
+export const runTaskDeleteResultSchema: z.ZodType<RunTaskDeleteResult> = z.object({
+  runId: z.string(),
+  taskId: z.string(),
+  deleted: z.literal(true),
+  updatedAt: z.string(),
+});
+
 export const runActiveTaskSchema: z.ZodType<RunActiveTask> = z.object({
   id: z.string(),
   title: z.string(),
@@ -218,6 +226,8 @@ export const runTaskMutationCapabilitiesSchema: z.ZodType<RunTaskMutationCapabil
   canSetStatus: z.boolean(),
   canEditNotes: z.boolean(),
   canAdd: z.boolean(),
+  canEditPending: z.boolean(),
+  canDeletePending: z.boolean(),
 });
 
 const runExecutionSchema = z
