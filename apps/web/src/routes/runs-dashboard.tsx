@@ -452,6 +452,12 @@ export function RunsDashboardRoute() {
         return;
       }
 
+      if (command === "run.showFiles") {
+        event.preventDefault();
+        currentState.setActiveRightSurface("files");
+        return;
+      }
+
       if (command === "run.showNotes") {
         event.preventDefault();
         if (currentState.activeRightSurface === "notes") {

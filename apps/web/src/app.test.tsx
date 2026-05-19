@@ -2895,7 +2895,7 @@ describe("web app", () => {
     expect(tasksTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
 
-    await user.click(filesTab);
+    await user.keyboard("f");
     expect(filesTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Files")).toBeInTheDocument();
   });
@@ -7968,7 +7968,7 @@ describe("web app", () => {
     });
   });
 
-  it("toggles drawer fullscreen with f when a run detail is open", async () => {
+  it("toggles drawer fullscreen with Shift+F when a run detail is open", async () => {
     installFetchMock({
       runs: [
         makeRun({
@@ -7995,7 +7995,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Fullscreen toggle"));
     expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toBeInTheDocument();
 
-    await user.keyboard("f");
+    await user.keyboard("{Shift>}f{/Shift}");
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -8004,7 +8004,7 @@ describe("web app", () => {
       '"drawerFullscreen":true',
     );
 
-    await user.keyboard("f");
+    await user.keyboard("{Shift>}f{/Shift}");
     expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
       "aria-pressed",
       "false",
@@ -8404,9 +8404,12 @@ describe("web app", () => {
     expect(screen.getByText("Toggle notes-only filter")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: C")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: D")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: F")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: Shift + F")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: T")).toBeInTheDocument();
     expect(screen.getByText("Switch to Chat")).toBeInTheDocument();
     expect(screen.getByText("Switch to Detail")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Files")).toBeInTheDocument();
     expect(screen.getByText("Switch to Tasks")).toBeInTheDocument();
 
     await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));

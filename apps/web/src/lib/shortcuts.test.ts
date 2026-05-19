@@ -309,6 +309,18 @@ describe("resolveRunsShortcutCommand", () => {
         },
         context,
       ),
+    ).toBe("run.showFiles");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
     ).toBe("ui.toggleDrawerFullscreen");
     expect(
       resolveRunsShortcutCommand(
@@ -358,6 +370,18 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showFiles");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -1237,6 +1261,18 @@ describe("resolveRunsShortcutCommand", () => {
           key: "f",
           metaKey: false,
           shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBe("run.showFiles");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: true,
         },
         fullscreenContext,
       ),

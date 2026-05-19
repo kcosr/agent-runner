@@ -387,11 +387,12 @@ The dashboard's shortcut system is customizable from
 | `A` | Show the selected run's Attachments tab |
 | `C` | Show the selected run's Chat tab, or focus its composer when Chat is open |
 | `D` | Show the selected run's Detail tab |
+| `F` | Show the selected run's Files tab |
 | `N` | Show the selected run's Notes tab, or focus its editor when Notes is open |
 | `T` | Show the selected run's Tasks tab |
 | `Shift+A` | Archive or restore the selected run |
 | `Shift+D` | Confirm archive/delete cleanup for the selected run |
-| `F` | Toggle the detail drawer fullscreen |
+| `Shift+F` | Toggle the detail drawer fullscreen |
 | `←` / `→` (fullscreen attachment preview) | Previous or next attachment |
 
 Shortcuts are suppressed while typing in inputs or when a modal dialog

@@ -1807,6 +1807,7 @@ export function RunDetailDrawer({
             </button>
             <button
               aria-label={isFullscreen ? "Exit full-width drawer" : "Expand drawer to full width"}
+              aria-keyshortcuts="Shift+F"
               aria-pressed={isFullscreen}
               className="icon-btn drawer-fullscreen-toggle"
               onClick={toggleFullscreen}
