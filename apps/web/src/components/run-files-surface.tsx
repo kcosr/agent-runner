@@ -3,7 +3,14 @@ import type {
   WorkspaceFileEntry,
 } from "@kcosr/agent-runner-core/contracts/workspace-files.js";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes } from "../lib/format.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
@@ -100,6 +107,8 @@ export function RunFilesSurface({
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const selectedFileRef = useRef<WorkspaceFileContent | undefined>(undefined);
   const sourceRef = useRef<HTMLDivElement | null>(null);
   const trimmedSearch = debouncedSearch.trim();
   const searchActive = trimmedSearch.length > 0;
@@ -182,6 +191,11 @@ export function RunFilesSurface({
   const entriesPending = searchActive ? searchQuery.isPending : directoryQuery.isPending;
   const entriesError = searchActive ? searchQuery.error : directoryQuery.error;
   const selectedFile = fileQuery.data;
+
+  useEffect(() => {
+    selectedFileRef.current = selectedFile;
+  }, [selectedFile]);
+
   const selectedSourceText =
     selectedFile && sourceSelection
       ? (sourceSelection.selectedText ?? lineRangeText(selectedFile, sourceSelection))
@@ -214,13 +228,22 @@ export function RunFilesSurface({
     function handleKeyDown(event: KeyboardEvent) {
       const root = rootRef.current;
       const filesSurfaceVisible = root?.isConnected === true && !root.closest("[hidden]");
+      const typingTarget =
+        isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement);
+      if (!filesSurfaceVisible || dialogReference || event.defaultPrevented || typingTarget) {
+        return;
+      }
+
       if (
-        !filesSurfaceVisible ||
-        dialogReference ||
-        event.defaultPrevented ||
-        isEditableEventTarget(event.target) ||
-        isEditableEventTarget(document.activeElement)
+        event.key.toLowerCase() === "f" &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey
       ) {
+        event.preventDefault();
+        event.stopPropagation();
+        focusSearchInput();
         return;
       }
 
@@ -243,6 +266,23 @@ export function RunFilesSurface({
       window.removeEventListener("keydown", handleKeyDown, { capture: true });
     };
   }, [canCreateTask, dialogReference, selectedReference]);
+
+  useEffect(() => {
+    function handleSelectionChange() {
+      const root = rootRef.current;
+      if (!root || !root.isConnected || root.closest("[hidden]")) {
+        return;
+      }
+      if (viewMode === "rendered-markdown") {
+        captureRenderedSelection();
+        return;
+      }
+      captureSourceTextSelection();
+    }
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+  }, [viewMode]);
 
   function openEntry(entry: WorkspaceFileEntry) {
     if (entry.kind === "directory") {
@@ -268,6 +308,28 @@ export function RunFilesSurface({
     setRenderedSelection(selection.toString().trim());
   }
 
+  function focusSearchInput() {
+    setBrowserCollapsed(false);
+    window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    });
+  }
+
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Escape") {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (searchDraft.length > 0) {
+      setSearchDraft("");
+      setDebouncedSearch("");
+      return;
+    }
+    event.currentTarget.blur();
+  }
+
   function selectLine(lineNumber: number, event: MouseEvent<HTMLButtonElement>) {
     setSourceSelection((current) => {
       if (event.shiftKey && current) {
@@ -285,8 +347,12 @@ export function RunFilesSurface({
     if (event.target instanceof Element && event.target.closest(".files-source__gutter")) {
       return;
     }
+    captureSourceTextSelection();
+  }
+
+  function captureSourceTextSelection() {
     const source = sourceRef.current;
-    const file = selectedFile;
+    const file = selectedFileRef.current;
     const selection = window.getSelection();
     if (!source || !file || !selection || !isSelectionInside(source, selection)) {
       return;
@@ -355,8 +421,11 @@ export function RunFilesSurface({
                   <span className="sr-only">Search workspace files</span>
                   <input
                     aria-label="Search workspace files"
+                    id="workspace-file-search"
                     onChange={(event) => setSearchDraft(event.target.value)}
+                    onKeyDown={handleSearchKeyDown}
                     placeholder="Search files"
+                    ref={searchInputRef}
                     value={searchDraft}
                   />
                 </label>
@@ -485,6 +554,7 @@ export function RunFilesSurface({
                   className="files-rendered markdown"
                   onKeyUp={captureRenderedSelection}
                   onMouseUp={captureRenderedSelection}
+                  onTouchEnd={captureRenderedSelection}
                   ref={previewRef}
                 >
                   <MarkdownContent text={selectedFile.text} />
@@ -494,6 +564,7 @@ export function RunFilesSurface({
                   className="files-source"
                   aria-label={`Source for ${selectedFile.path}`}
                   onMouseUp={captureSourceSelection}
+                  onTouchEnd={() => captureSourceTextSelection()}
                   ref={sourceRef}
                 >
                   {selectedFile.text.split(/\r?\n/).map((line, index) => {

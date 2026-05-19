@@ -2968,9 +2968,13 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     expect(await screen.findByRole("tab", { name: "Files", selected: true })).toBeInTheDocument();
-    expect(screen.getByLabelText("Search workspace files")).toBeInTheDocument();
+    const searchInput = screen.getByLabelText("Search workspace files");
+    expect(searchInput).toBeInTheDocument();
     expect(screen.getByText("Loading files...")).toBeInTheDocument();
     expect(screen.queryByText("Loading file...")).not.toBeInTheDocument();
+    searchInput.blur();
+    fireEvent.keyDown(window, { key: "f" });
+    await waitFor(() => expect(searchInput).toHaveFocus());
 
     await act(async () => {
       resolveRoot(
@@ -3014,11 +3018,16 @@ describe("web app", () => {
     await user.click(await screen.findByRole("button", { name: /README.md/ }));
     expect(await screen.findByText(/workspace file "README.md" is binary/)).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText("Search workspace files"));
-    await user.type(screen.getByLabelText("Search workspace files"), "missing");
+    await user.clear(searchInput);
+    await user.type(searchInput, "missing");
     expect(await screen.findByText("No matching files.")).toBeInTheDocument();
+    fireEvent.keyDown(searchInput, { key: "Escape" });
+    expect(searchInput).toHaveValue("");
+    expect(searchInput).toHaveFocus();
+    fireEvent.keyDown(searchInput, { key: "Escape" });
+    expect(searchInput).not.toHaveFocus();
 
-    await user.clear(screen.getByLabelText("Search workspace files"));
+    await user.clear(searchInput);
     await user.click(screen.getByRole("button", { name: /docs/ }));
     expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
   });
@@ -3109,6 +3118,12 @@ describe("web app", () => {
     });
     expect(screen.queryByLabelText("Search workspace files")).not.toBeInTheDocument();
     expect(await screen.findByText("README.md")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "f" });
+    const mobileSearchInput = await screen.findByLabelText("Search workspace files");
+    await waitFor(() => expect(mobileSearchInput).toHaveFocus());
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(screen.queryByLabelText("Search workspace files")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Workspace" }));
     expect(await screen.findByLabelText("Search workspace files")).toBeInTheDocument();
@@ -3222,7 +3237,7 @@ describe("web app", () => {
     if (!renderedPreview) {
       throw new Error("Rendered preview was not available");
     }
-    fireEvent.mouseUp(renderedPreview);
+    fireEvent(document, new Event("selectionchange"));
 
     await user.click(screen.getByRole("button", { name: "Add task" }));
     expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
@@ -3434,24 +3449,41 @@ describe("web app", () => {
     await user.click(await screen.findByRole("button", { name: /foo.ts/ }));
     const selectedStart = await screen.findByText("const b = 2;");
     const selectedEnd = screen.getByText("const c = a + b;");
+    let selectionAnchor: Node | null = selectedStart.firstChild;
+    let selectionFocus: Node | null = selectedEnd.firstChild;
+    let selectionText = "2\nconst b = 2;\n3\nconst c = a + b;";
     vi.spyOn(window, "getSelection").mockReturnValue({
-      anchorNode: selectedStart.firstChild,
-      focusNode: selectedEnd.firstChild,
-      removeAllRanges: vi.fn(),
-      toString: () => "2\nconst b = 2;\n3\nconst c = a + b;",
+      get anchorNode() {
+        return selectionAnchor;
+      },
+      get focusNode() {
+        return selectionFocus;
+      },
+      removeAllRanges: vi.fn(() => {
+        selectionAnchor = null;
+        selectionFocus = null;
+        selectionText = "";
+      }),
+      toString: () => selectionText,
     } as unknown as Selection);
     const sourcePreview = selectedStart.closest(".files-source");
     if (!sourcePreview) {
       throw new Error("Source preview was not available");
     }
-    fireEvent.mouseUp(sourcePreview);
+    fireEvent(document, new Event("selectionchange"));
     expect(screen.getByRole("button", { name: "Add task" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Clear file selection" }));
     expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
-    fireEvent.mouseUp(sourcePreview);
+    selectionAnchor = selectedStart.firstChild;
+    selectionFocus = selectedEnd.firstChild;
+    selectionText = "2\nconst b = 2;\n3\nconst c = a + b;";
+    fireEvent(document, new Event("selectionchange"));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
-    fireEvent.mouseUp(sourcePreview);
+    selectionAnchor = selectedStart.firstChild;
+    selectionFocus = selectedEnd.firstChild;
+    selectionText = "2\nconst b = 2;\n3\nconst c = a + b;";
+    fireEvent(document, new Event("selectionchange"));
 
     fireEvent.keyDown(window, { key: "Enter" });
     expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
