@@ -88,6 +88,10 @@ body {
   border-color: color-mix(in srgb, var(--destructive) 16%, var(--border));
 }
 
+.notice[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--success) 18%, var(--border));
+}
+
 .notice__message {
   min-width: 0;
   color: var(--muted-foreground);
@@ -2072,12 +2076,12 @@ body {
   overflow-wrap: anywhere;
 }
 
-.files-viewer__actions {
-  display: flex;
-  justify-content: flex-end;
+.files-viewer__controls {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  justify-content: flex-end;
 }
 
 .files-rendered,
@@ -2091,14 +2095,6 @@ body {
 
 .files-rendered {
   user-select: text;
-}
-
-.files-selection-action {
-  position: sticky;
-  bottom: 8px;
-  left: 8px;
-  margin-top: 8px;
-  box-shadow: var(--shadow-card);
 }
 
 .files-source {

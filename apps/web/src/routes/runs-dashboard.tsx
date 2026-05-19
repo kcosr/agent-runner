@@ -782,6 +782,7 @@ export function RunsDashboardRoute() {
                   onCopy={state.copyText}
                   onDelete={state.runActions.delete}
                   onDownloadAttachment={state.runActions.downloadAttachment}
+                  onNotify={state.showNotice}
                   onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
                   onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
                   onSelectRun={state.openRun}

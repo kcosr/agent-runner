@@ -19,7 +19,7 @@ import type {
   DrawerDetailSection,
   RunDrawerView,
 } from "../lib/settings.js";
-import type { RunActionPending } from "./use-runs-dashboard-state.js";
+import type { DashboardNoticeTone, RunActionPending } from "./use-runs-dashboard-state.js";
 
 export function RunDetailPanel({
   activeRightSurface,
@@ -41,6 +41,7 @@ export function RunDetailPanel({
   onCopy,
   onDelete,
   onDownloadAttachment,
+  onNotify,
   onOpenAttachmentPreview,
   onReplaceAttachmentPreview,
   onSelectRun,
@@ -94,6 +95,7 @@ export function RunDetailPanel({
   onCopy: (value: string, label: string) => Promise<void>;
   onDelete: (runId: string) => void;
   onDownloadAttachment: (runId: string, attachmentId: string, name: string) => Promise<void>;
+  onNotify: (message: string, tone?: DashboardNoticeTone) => void;
   onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
@@ -228,6 +230,7 @@ export function RunDetailPanel({
         onDownloadAttachment={(ownerRunId, attachmentId, name) =>
           onDownloadAttachment(ownerRunId, attachmentId, name)
         }
+        onNotify={onNotify}
         onOpenAttachmentPreview={onOpenAttachmentPreview}
         onReplaceAttachmentPreview={onReplaceAttachmentPreview}
         onSelectRun={onSelectRun}

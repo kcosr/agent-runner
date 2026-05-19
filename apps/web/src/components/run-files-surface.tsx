@@ -75,12 +75,12 @@ function selectionLineNumber(container: HTMLElement, node: Node | null): number 
 
 export function RunFilesSurface({
   canCreateTask,
-  onSwitchToTasks,
+  onTaskCreated,
   runId,
   taskCreationUnavailableReason,
 }: {
   canCreateTask: boolean;
-  onSwitchToTasks: () => void;
+  onTaskCreated: (taskId: string) => void;
   runId: string;
   taskCreationUnavailableReason: string | null;
 }) {
@@ -95,7 +95,6 @@ export function RunFilesSurface({
   const [sourceSelection, setSourceSelection] = useState<SourceSelection | null>(null);
   const [renderedSelection, setRenderedSelection] = useState("");
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
-  const [createdMessage, setCreatedMessage] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const sourceRef = useRef<HTMLDivElement | null>(null);
   const trimmedSearch = debouncedSearch.trim();
@@ -142,7 +141,7 @@ export function RunFilesSurface({
       setDialogReference(null);
       setRenderedSelection("");
       setSourceSelection(null);
-      setCreatedMessage(`Created task ${task.id}.`);
+      onTaskCreated(task.id);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
         queryClient.invalidateQueries({ queryKey: runQueryKeys.lists() }),
@@ -195,7 +194,6 @@ export function RunFilesSurface({
   }, [renderedSelection, selectedFile, selectedSourceText, sourceSelection, viewMode]);
 
   function openEntry(entry: WorkspaceFileEntry) {
-    setCreatedMessage(null);
     if (entry.kind === "directory") {
       setDirectoryPath(entry.path);
       setSearchDraft("");
@@ -281,14 +279,6 @@ export function RunFilesSurface({
           </button>
         ) : null}
       </div>
-      {createdMessage ? (
-        <div className="notice" data-tone="success">
-          <span className="notice__message">{createdMessage}</span>
-          <button className="btn btn--quiet" onClick={onSwitchToTasks} type="button">
-            View tasks
-          </button>
-        </div>
-      ) : null}
       <div className="files-layout">
         <div className="files-browser" aria-label="Workspace file browser">
           <div className="files-browser__header">
@@ -339,7 +329,9 @@ export function RunFilesSurface({
         </div>
         <div className="files-viewer" aria-label="File preview">
           {!selectedFilePath ? <p className="task-empty">Select a text or Markdown file.</p> : null}
-          {fileQuery.isPending ? <p className="task-empty">Loading file...</p> : null}
+          {selectedFilePath && fileQuery.isPending ? (
+            <p className="task-empty">Loading file...</p>
+          ) : null}
           {fileQuery.isError ? <p className="files-error">{fileQuery.error.message}</p> : null}
           {selectedFile ? (
             <>
@@ -350,53 +342,10 @@ export function RunFilesSurface({
                     {selectedFile.path} · {formatBytes(selectedFile.size)}
                   </p>
                 </div>
-                <div className="task-tabs" role="tablist" aria-label="File view mode">
-                  {selectedFile.markdown ? (
+                <div className="files-viewer__controls">
+                  {selectedReference ? (
                     <button
-                      aria-selected={viewMode === "rendered-markdown"}
-                      className={viewMode === "rendered-markdown" ? "task-tab active" : "task-tab"}
-                      onClick={() => setViewMode("rendered-markdown")}
-                      role="tab"
-                      type="button"
-                    >
-                      Preview
-                    </button>
-                  ) : null}
-                  <button
-                    aria-selected={viewMode === "source"}
-                    className={viewMode === "source" ? "task-tab active" : "task-tab"}
-                    onClick={() => setViewMode("source")}
-                    role="tab"
-                    type="button"
-                  >
-                    Source
-                  </button>
-                </div>
-              </div>
-              <div className="files-viewer__actions">
-                <button
-                  className="btn btn-primary"
-                  disabled={!canCreateTask || !selectedReference}
-                  onClick={() => openCreateTaskDialog(selectedReference)}
-                  title={canCreateTask ? undefined : (taskCreationUnavailableReason ?? undefined)}
-                  type="button"
-                >
-                  Create task from selection
-                </button>
-              </div>
-              {viewMode === "rendered-markdown" ? (
-                <>
-                  <div
-                    className="files-rendered markdown"
-                    onKeyUp={captureRenderedSelection}
-                    onMouseUp={captureRenderedSelection}
-                    ref={previewRef}
-                  >
-                    <MarkdownContent text={selectedFile.text} />
-                  </div>
-                  {renderedSelection ? (
-                    <button
-                      className="btn btn-primary files-selection-action"
+                      className="btn btn-primary"
                       disabled={!canCreateTask}
                       onClick={() => openCreateTaskDialog(selectedReference)}
                       title={
@@ -404,10 +353,44 @@ export function RunFilesSurface({
                       }
                       type="button"
                     >
-                      Create task from selection
+                      Add task
                     </button>
                   ) : null}
-                </>
+                  <div className="task-tabs" role="tablist" aria-label="File view mode">
+                    {selectedFile.markdown ? (
+                      <button
+                        aria-selected={viewMode === "rendered-markdown"}
+                        className={
+                          viewMode === "rendered-markdown" ? "task-tab active" : "task-tab"
+                        }
+                        onClick={() => setViewMode("rendered-markdown")}
+                        role="tab"
+                        type="button"
+                      >
+                        Preview
+                      </button>
+                    ) : null}
+                    <button
+                      aria-selected={viewMode === "source"}
+                      className={viewMode === "source" ? "task-tab active" : "task-tab"}
+                      onClick={() => setViewMode("source")}
+                      role="tab"
+                      type="button"
+                    >
+                      Source
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {viewMode === "rendered-markdown" ? (
+                <div
+                  className="files-rendered markdown"
+                  onKeyUp={captureRenderedSelection}
+                  onMouseUp={captureRenderedSelection}
+                  ref={previewRef}
+                >
+                  <MarkdownContent text={selectedFile.text} />
+                </div>
               ) : (
                 <div
                   className="files-source"

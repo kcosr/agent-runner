@@ -2970,6 +2970,7 @@ describe("web app", () => {
     expect(await screen.findByRole("tab", { name: "Files", selected: true })).toBeInTheDocument();
     expect(screen.getByLabelText("Search workspace files")).toBeInTheDocument();
     expect(screen.getByText("Loading files...")).toBeInTheDocument();
+    expect(screen.queryByText("Loading file...")).not.toBeInTheDocument();
 
     await act(async () => {
       resolveRoot(
@@ -3132,14 +3133,7 @@ describe("web app", () => {
     }
     fireEvent.mouseUp(renderedPreview);
 
-    const createSelectionButtons = screen.getAllByRole("button", {
-      name: "Create task from selection",
-    });
-    const createSelectionButton = createSelectionButtons[createSelectionButtons.length - 1];
-    if (!createSelectionButton) {
-      throw new Error("Create task from selection button was not rendered");
-    }
-    await user.click(createSelectionButton);
+    await user.click(screen.getByRole("button", { name: "Add task" }));
     expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
     await user.type(screen.getByLabelText("Instruction"), "Rewrite this paragraph.");
     await user.click(screen.getByRole("button", { name: "Create task" }));
@@ -3242,22 +3236,13 @@ describe("web app", () => {
     }
     fireEvent.mouseUp(renderedPreview);
 
-    const createSelectionButtons = screen.getAllByRole("button", {
-      name: "Create task from selection",
-    });
-    expect(createSelectionButtons).toHaveLength(2);
-    for (const button of createSelectionButtons) {
-      expect(button).toBeDisabled();
-      expect(button).toHaveAttribute(
-        "title",
-        "Task creation is unavailable because this run locks its task list.",
-      );
-    }
-    const floatingCreateSelectionButton = createSelectionButtons.at(-1);
-    if (!floatingCreateSelectionButton) {
-      throw new Error("Floating create task from selection button was not rendered");
-    }
-    await user.click(floatingCreateSelectionButton);
+    const addTaskButton = screen.getByRole("button", { name: "Add task" });
+    expect(addTaskButton).toBeDisabled();
+    expect(addTaskButton).toHaveAttribute(
+      "title",
+      "Task creation is unavailable because this run locks its task list.",
+    );
+    await user.click(addTaskButton);
     expect(screen.queryByRole("dialog", { name: "Create task" })).not.toBeInTheDocument();
   });
 
@@ -3369,7 +3354,7 @@ describe("web app", () => {
     }
     fireEvent.mouseUp(sourcePreview);
 
-    await user.click(screen.getByRole("button", { name: "Create task from selection" }));
+    await user.click(screen.getByRole("button", { name: "Add task" }));
     await user.type(screen.getByLabelText("Instruction"), "Refactor this block.");
     await user.click(screen.getByRole("button", { name: "Create task" }));
 

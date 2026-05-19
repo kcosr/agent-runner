@@ -48,7 +48,7 @@ import {
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
-import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
+import type { DashboardNoticeTone, RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { AttachmentPreviewPanel } from "./attachment-preview-drawer.js";
 import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import {
@@ -598,6 +598,7 @@ export function RunDetailDrawer({
   onDelete,
   groupAttachmentsQuery,
   onDownloadAttachment,
+  onNotify,
   onOpenAttachmentPreview,
   onReplaceAttachmentPreview,
   onSelectRun,
@@ -641,6 +642,7 @@ export function RunDetailDrawer({
   onDelete: () => void;
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   onDownloadAttachment: (ownerRunId: string, attachmentId: string, name: string) => Promise<void>;
+  onNotify: (message: string, tone?: DashboardNoticeTone) => void;
   onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
@@ -1903,7 +1905,7 @@ export function RunDetailDrawer({
         <div className="drawer-body" hidden={activeSurface !== "files"}>
           <RunFilesSurface
             canCreateTask={run.capabilities.taskMutation.canAdd}
-            onSwitchToTasks={() => onSelectSurface("tasks")}
+            onTaskCreated={(taskId) => onNotify(`Created task ${taskId}.`, "success")}
             runId={run.runId}
             taskCreationUnavailableReason={taskCreationUnavailableReason(run)}
           />
