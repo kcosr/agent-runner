@@ -689,7 +689,12 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
-      completeAllTasksFromPrompt(ctx.prompt);
+      patchManifest(first.workspaceDir, (manifest) => {
+        for (const task of Object.values(manifest.finalTasks)) {
+          task.status = "completed";
+        }
+        manifest.tasksCompleted = Object.keys(manifest.finalTasks).length;
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -705,9 +710,8 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
   });
 
   assert.equal(second.exitCode, 0);
-  // The prompt should be ONLY the new-tasks reminder, no leading whitespace.
-  assert.ok(seenPrompt.startsWith("(agent-runner:"), "prompt starts with the reminder");
-  assert.ok(seenPrompt.includes("1 new task has been added"));
+  // The prompt should be ONLY the implicit continue message, no leading whitespace.
+  assert.equal(seenPrompt, "Check the task list and continue working through the remaining items.");
   assert.ok(!seenPrompt.includes("\n\n\n"), "no triple newlines from empty message slot");
 });
 
@@ -738,7 +742,11 @@ test("resume: unfinished tasks can resume with an implicit continue prompt", asy
           `inspect them with agent-runner task list ${first.runId} and use the task CLI`,
         ),
       );
-      assert.ok(ctx.prompt.endsWith("Continue working through the remaining task list items."));
+      assert.ok(
+        ctx.prompt.endsWith(
+          "Check the task list and continue working through the remaining items.",
+        ),
+      );
       patchManifest(first.workspaceDir, (manifest) => {
         manifest.finalTasks.t1.status = "completed";
         manifest.finalTasks.t2.status = "completed";
@@ -794,7 +802,11 @@ test("resume: terminal task status edits feed the existing implicit continue gat
           `inspect them with agent-runner task list ${first.runId} and use the task CLI`,
         ),
       );
-      assert.ok(ctx.prompt.endsWith("Continue working through the remaining task list items."));
+      assert.ok(
+        ctx.prompt.endsWith(
+          "Check the task list and continue working through the remaining items.",
+        ),
+      );
       patchManifest(first.workspaceDir, (manifest) => {
         manifest.finalTasks.t1.status = "completed";
         manifest.finalTasks.t2.status = "completed";

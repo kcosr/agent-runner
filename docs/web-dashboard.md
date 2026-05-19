@@ -387,7 +387,7 @@ The dashboard's shortcut system is customizable from
 | `A` | Show the selected run's Attachments tab |
 | `C` | Show the selected run's Chat tab, or focus its composer when Chat is open |
 | `D` | Show the selected run's Detail tab |
-| `F` | Show the selected run's Files tab |
+| `F` | Show the selected run's Files tab, or focus file search when Files is open |
 | `N` | Show the selected run's Notes tab, or focus its editor when Notes is open |
 | `T` | Show the selected run's Tasks tab |
 | `Shift+A` | Archive or restore the selected run |

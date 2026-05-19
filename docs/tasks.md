@@ -157,8 +157,9 @@ If tasks remain incomplete when an attempt ends or a run is resumed with
 unfinished work, agent-runner composes a prompt that points the worker
 back at the task CLI and identifies the incomplete tasks.
 
-If new tasks are added on resume (via `--add-task` or `task add`), a
-reminder is appended to the brief so the worker knows to revisit the list.
+If new tasks are added on resume (via `--add-task` or `task add`) and no
+explicit follow-up message is supplied, the implicit continue prompt tells
+the worker to check the task list before continuing.
 
 ## Notes escaping
 

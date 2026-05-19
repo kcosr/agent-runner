@@ -68,10 +68,10 @@ For non-initialized (previously-run) runs, resume requires at least one of:
 If all tasks are already `completed` and no follow-up message or new tasks
 are supplied, resume errors rather than re-sending a stale prompt.
 
-If the run has incomplete tasks and no explicit message, agent-runner
-injects an implicit continue message:
+If the run has incomplete tasks or newly added tasks and no explicit message,
+agent-runner injects an implicit continue message:
 
-> Continue working through the remaining task list items.
+> Check the task list and continue working through the remaining items.
 
 Resume evaluates the current manifest task list, so task status edits made
 after a terminal non-passive run can make that run runnable again without
@@ -113,8 +113,8 @@ On resume, the brief sent to the backend is composed as follows:
 
 1. If this is the first attempt with tasks (tasks were absent and are now
    present), the worker workflow template is prepended.
-2. If new tasks were added since the last attempt, an added-tasks reminder
-   is prepended instead.
+2. If the stopped run still has pending or in-progress tasks, a task CLI
+   reminder is prepended instead.
 3. The follow-up message is appended, or the implicit continue message is
    used if incomplete tasks remain.
 

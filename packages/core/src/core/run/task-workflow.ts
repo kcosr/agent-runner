@@ -36,11 +36,6 @@ Check overall run status at any time:
 Use the task CLI as the task interface for this run. \`assignment-seed.md\`
 may exist on disk for human audit, but it is not your work surface.`;
 
-export function buildAddedTasksReminder(addedCount: number, runId: string): string {
-  const noun = addedCount === 1 ? "task has" : "tasks have";
-  return `(agent-runner: ${addedCount} new ${noun} been added to run ${runId} since the last session — inspect them with agent-runner task list ${runId} before continuing.)`;
-}
-
 export function buildStoppedRunTasksReminder(runId: string): string {
   return `(agent-runner: this stopped run has pending or in-progress tasks — inspect them with agent-runner task list ${runId} and use the task CLI before continuing.)`;
 }

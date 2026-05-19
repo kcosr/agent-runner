@@ -103,7 +103,7 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Switch to Detail",
       },
       {
-        description: "Show the selected run's Files tab.",
+        description: "Show the selected run's Files tab, or focus file search when Files is open.",
         keys: ["F"],
         title: "Switch to Files",
       },

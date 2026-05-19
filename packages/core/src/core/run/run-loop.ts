@@ -141,11 +141,7 @@ import {
   prepareBackendSessionHistorySync,
   recordBackendSessionSyncError,
 } from "./backend-session-sync.js";
-import {
-  WORKER_BRIEF_TEMPLATE,
-  buildAddedTasksReminder,
-  buildStoppedRunTasksReminder,
-} from "./task-workflow.js";
+import { WORKER_BRIEF_TEMPLATE, buildStoppedRunTasksReminder } from "./task-workflow.js";
 import {
   refreshManifestAttachments,
   refreshManifestTaskState,
@@ -2006,12 +2002,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const hasTasks = tasks.size > 0;
   const firstTimeTasksAppear = isResume && !priorHadTasks && hasTasks;
-  const resumeAddedNewTasks = isResume && priorHadTasks && addedTitles.length > 0;
   const resumeUsesImplicitContinueMessage =
     isResume &&
     trimmedMessage.length === 0 &&
-    addedTitles.length === 0 &&
-    hasRunnableTasks(resume?.manifest.finalTasks ?? {});
+    !firstTimeTasksAppear &&
+    (addedTitles.length > 0 || hasRunnableTasks(resume?.manifest.finalTasks ?? {}));
   const resumeNeedsStoppedRunTaskReminder =
     isResume &&
     resume !== undefined &&
@@ -2035,7 +2030,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   //   4. message (specific ask)
   //
   // Resume follow-up parts:
-  //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
+  //   1. workflow (only if firstTimeTasksAppear) OR stopped-run task reminder
   //   2. message, or an implicit continue prompt when unfinished tasks remain
   //
   // Start-after-ready: reuse the stored brief verbatim.
@@ -2054,8 +2049,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const parts: string[] = [];
     if (firstTimeTasksAppear) {
       parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
-    } else if (resumeAddedNewTasks) {
-      parts.push(buildAddedTasksReminder(addedTitles.length, runId));
     } else if (resumeNeedsStoppedRunTaskReminder) {
       parts.push(buildStoppedRunTasksReminder(runId));
     }

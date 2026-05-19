@@ -1,6 +1,7 @@
 import type { ManifestStatus, TaskSnapshot } from "./manifest.js";
 
-export const IMPLICIT_RESUME_MESSAGE = "Continue working through the remaining task list items.";
+export const IMPLICIT_RESUME_MESSAGE =
+  "Check the task list and continue working through the remaining items.";
 
 export function hasRunnableTasks(finalTasks: Record<string, TaskSnapshot>): boolean {
   return Object.values(finalTasks).some(

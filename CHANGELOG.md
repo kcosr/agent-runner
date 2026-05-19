@@ -255,8 +255,9 @@
 
 ### Changed
 
-- Dashboard keyboard shortcuts now use `F` for the selected run Files tab and
-  `Shift+F` for fullscreen drawer toggle.
+- Dashboard keyboard shortcuts now use `F` for the selected run Files tab,
+  press `F` again to focus file search, and `Shift+F` for fullscreen drawer
+  toggle.
 - File-selection task creation now supports title-only tasks, omits the
   generated instructions section when empty, and collapses the workspace
   browser on mobile after opening a file.
@@ -265,6 +266,8 @@
   delete pending follow-up tasks.
 - Resume prompts for unfinished task runs now include the task CLI reminder so
   resumed workers re-check the authoritative task list before continuing.
+- Resume prompts for newly added tasks now reuse the concise implicit task-list
+  reminder instead of adding a separate added-tasks notice.
 - Workspace file browsing includes hidden files and common non-secret text
   dotfiles, while search skips dependency and VCS directories such as
   `node_modules` and `.git`.
