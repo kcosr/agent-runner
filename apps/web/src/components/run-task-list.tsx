@@ -8,7 +8,6 @@ import { createApiClient } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
-import { stripSourceGutterNumbersFromTaskBody } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
 import {
   AlertIcon,
@@ -207,12 +206,7 @@ export function RunTaskList({
   }
 
   function taskEditDraft(task: RunTaskSummary) {
-    return (
-      editDrafts.get(task.id) ?? {
-        body: stripSourceGutterNumbersFromTaskBody(task.body),
-        title: task.title,
-      }
-    );
+    return editDrafts.get(task.id) ?? { body: task.body, title: task.title };
   }
 
   function setTaskEditDraft(taskId: string, value: TaskEditDraft) {
@@ -482,10 +476,7 @@ export function RunTaskList({
                       </div>
                     </div>
                   ) : task.body ? (
-                    <MarkdownContent
-                      className="task-markdown"
-                      text={stripSourceGutterNumbersFromTaskBody(task.body)}
-                    />
+                    <MarkdownContent className="task-markdown" text={task.body} />
                   ) : (
                     <p className="task-empty">No instructions recorded.</p>
                   )
@@ -565,6 +556,14 @@ function DeleteTaskDialog({
   task: RunTaskSummary;
 }) {
   const { dialogProps, ref: dialogRef } = useNativeModalDialog(true, onClose);
+  async function handleConfirm() {
+    try {
+      await onConfirm();
+    } catch {
+      // The mutation error is already surfaced through the dialog error prop.
+    }
+  }
+
   return (
     <dialog
       aria-labelledby="delete-task-dialog-title"
@@ -593,7 +592,7 @@ function DeleteTaskDialog({
           <button
             className="btn btn-destructive-outline"
             disabled={pending}
-            onClick={() => void onConfirm()}
+            onClick={() => void handleConfirm()}
             type="button"
           >
             {pending ? "Deleting..." : "Delete"}

@@ -84,63 +84,6 @@ export function buildTaskBody(reference: TaskReference | null, instruction: stri
   ].join("\n");
 }
 
-export function stripSourceGutterNumbersFromTaskBody(body: string): string {
-  const lines = body.split("\n");
-  const rangeLineIndex = lines.findIndex((line) => line.startsWith("Range: `"));
-  if (rangeLineIndex === -1) {
-    return body;
-  }
-
-  const rangeLine = lines[rangeLineIndex];
-  if (rangeLine === undefined) {
-    return body;
-  }
-  const rangeMatch = /:(\d+)(?:-(\d+))?`$/.exec(rangeLine);
-  const startLineMatch = rangeMatch?.[1];
-  if (!rangeMatch || startLineMatch === undefined) {
-    return body;
-  }
-
-  const startLine = Number.parseInt(startLineMatch, 10);
-  const endLine = rangeMatch[2] ? Number.parseInt(rangeMatch[2], 10) : startLine;
-  if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || endLine < startLine) {
-    return body;
-  }
-
-  const selectedSourceIndex = lines.findIndex(
-    (line, index) => index > rangeLineIndex && line === "Selected source:",
-  );
-  if (selectedSourceIndex === -1) {
-    return body;
-  }
-
-  const fenceStartIndex = lines.findIndex(
-    (line, index) => index > selectedSourceIndex && line.startsWith("```"),
-  );
-  if (fenceStartIndex === -1) {
-    return body;
-  }
-
-  const fenceEndIndex = lines.findIndex(
-    (line, index) => index > fenceStartIndex && line.startsWith("```"),
-  );
-  if (fenceEndIndex === -1) {
-    return body;
-  }
-
-  const rangeNumbers = new Set(
-    Array.from({ length: endLine - startLine + 1 }, (_, index) => String(startLine + index)),
-  );
-  const sourceLines = lines
-    .slice(fenceStartIndex + 1, fenceEndIndex)
-    .filter((line) => !rangeNumbers.has(line.trim()));
-  return [
-    ...lines.slice(0, fenceStartIndex + 1),
-    ...sourceLines,
-    ...lines.slice(fenceEndIndex),
-  ].join("\n");
-}
-
 function blockquote(text: string): string {
   return text
     .split(/\r?\n/)
