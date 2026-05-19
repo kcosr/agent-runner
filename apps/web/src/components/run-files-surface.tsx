@@ -8,10 +8,11 @@ import { createApiClient } from "../lib/api-client.js";
 import { formatBytes } from "../lib/format.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
+import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
 import { type TaskReference, defaultTaskTitle, languageForPath } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
-import { FileIcon, FolderIcon, SearchIcon } from "./icons.js";
+import { CloseIcon, FileIcon, FolderIcon, SearchIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
 
 type FileViewMode = "rendered-markdown" | "source";
@@ -95,6 +96,7 @@ export function RunFilesSurface({
   const [sourceSelection, setSourceSelection] = useState<SourceSelection | null>(null);
   const [renderedSelection, setRenderedSelection] = useState("");
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
+  const rootRef = useRef<HTMLElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const sourceRef = useRef<HTMLDivElement | null>(null);
   const trimmedSearch = debouncedSearch.trim();
@@ -193,6 +195,40 @@ export function RunFilesSurface({
     return null;
   }, [renderedSelection, selectedFile, selectedSourceText, sourceSelection, viewMode]);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const root = rootRef.current;
+      const filesSurfaceVisible = root?.isConnected === true && !root.closest("[hidden]");
+      if (
+        !filesSurfaceVisible ||
+        dialogReference ||
+        event.defaultPrevented ||
+        isEditableEventTarget(event.target) ||
+        isEditableEventTarget(document.activeElement)
+      ) {
+        return;
+      }
+
+      if (event.key === "Escape" && selectedReference) {
+        event.preventDefault();
+        event.stopPropagation();
+        clearSelection();
+        return;
+      }
+
+      if (event.key === "Enter" && selectedReference && canCreateTask) {
+        event.preventDefault();
+        event.stopPropagation();
+        openCreateTaskDialog(selectedReference);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+    };
+  }, [canCreateTask, dialogReference, selectedReference]);
+
   function openEntry(entry: WorkspaceFileEntry) {
     if (entry.kind === "directory") {
       setDirectoryPath(entry.path);
@@ -256,8 +292,14 @@ export function RunFilesSurface({
     setDialogReference(reference);
   }
 
+  function clearSelection() {
+    setRenderedSelection("");
+    setSourceSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }
+
   return (
-    <section aria-label="Files" className="drawer-panel drawer-panel--files">
+    <section aria-label="Files" className="drawer-panel drawer-panel--files" ref={rootRef}>
       <div className="files-toolbar">
         <label className="files-search">
           <SearchIcon aria-hidden="true" />
@@ -344,17 +386,28 @@ export function RunFilesSurface({
                 </div>
                 <div className="files-viewer__controls">
                   {selectedReference ? (
-                    <button
-                      className="btn btn-primary"
-                      disabled={!canCreateTask}
-                      onClick={() => openCreateTaskDialog(selectedReference)}
-                      title={
-                        canCreateTask ? undefined : (taskCreationUnavailableReason ?? undefined)
-                      }
-                      type="button"
-                    >
-                      Add task
-                    </button>
+                    <div className="files-selection-controls">
+                      <button
+                        className="btn btn-primary"
+                        disabled={!canCreateTask}
+                        onClick={() => openCreateTaskDialog(selectedReference)}
+                        title={
+                          canCreateTask ? undefined : (taskCreationUnavailableReason ?? undefined)
+                        }
+                        type="button"
+                      >
+                        Add task
+                      </button>
+                      <button
+                        aria-label="Clear file selection"
+                        className="icon-btn icon-btn--small"
+                        onClick={clearSelection}
+                        title="Clear selection"
+                        type="button"
+                      >
+                        <CloseIcon aria-hidden="true" />
+                      </button>
+                    </div>
                   ) : null}
                   <div className="task-tabs" role="tablist" aria-label="File view mode">
                     {selectedFile.markdown ? (

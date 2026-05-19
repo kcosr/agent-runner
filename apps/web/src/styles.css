@@ -1918,9 +1918,11 @@ body {
 
 .drawer-panel--files {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .files-toolbar {
@@ -1962,6 +1964,7 @@ body {
 
 .files-layout {
   display: grid;
+  flex: 1 1 auto;
   grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
@@ -2084,11 +2087,18 @@ body {
   justify-content: flex-end;
 }
 
+.files-selection-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .files-rendered,
 .files-source {
   position: relative;
+  flex: 1 1 auto;
   min-height: 18rem;
-  max-height: 55vh;
+  max-height: none;
   overflow: auto;
   padding: 12px;
 }

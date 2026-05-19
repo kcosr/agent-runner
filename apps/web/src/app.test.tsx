@@ -3346,15 +3346,24 @@ describe("web app", () => {
     vi.spyOn(window, "getSelection").mockReturnValue({
       anchorNode: selectedStart.firstChild,
       focusNode: selectedEnd.firstChild,
+      removeAllRanges: vi.fn(),
       toString: () => "const b = 2;\nconst c = a + b;",
-    } as Selection);
+    } as unknown as Selection);
     const sourcePreview = selectedStart.closest(".files-source");
     if (!sourcePreview) {
       throw new Error("Source preview was not available");
     }
     fireEvent.mouseUp(sourcePreview);
+    expect(screen.getByRole("button", { name: "Add task" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear file selection" }));
+    expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
+    fireEvent.mouseUp(sourcePreview);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
+    fireEvent.mouseUp(sourcePreview);
 
-    await user.click(screen.getByRole("button", { name: "Add task" }));
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
     await user.type(screen.getByLabelText("Instruction"), "Refactor this block.");
     await user.click(screen.getByRole("button", { name: "Create task" }));
 
