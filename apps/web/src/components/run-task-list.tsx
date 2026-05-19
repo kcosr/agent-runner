@@ -20,6 +20,7 @@ import {
   TrashIcon,
 } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
+import { useNativeModalDialog } from "./native-dialog.js";
 
 function taskStatusClass(status: RunTaskSummary["status"]) {
   switch (status) {
@@ -77,9 +78,11 @@ export function RunTaskList({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [activeTabs, setActiveTabs] = useState<Map<string, TaskTab>>(new Map());
   const [editMode, setEditMode] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDrafts, setEditDrafts] = useState<Map<string, TaskEditDraft>>(new Map());
   const [notesDrafts, setNotesDrafts] = useState<Map<string, string>>(new Map());
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleteDialogTask, setDeleteDialogTask] = useState<RunTaskSummary | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const createTaskMutation = useMutation({
@@ -114,6 +117,13 @@ export function RunTaskList({
           return next;
         });
       }
+      if (
+        variables.update.body !== undefined ||
+        variables.update.title !== undefined ||
+        variables.update.notes !== undefined
+      ) {
+        setEditingTaskId(null);
+      }
       await invalidateTaskRun(runId);
     },
   });
@@ -121,6 +131,7 @@ export function RunTaskList({
     mutationFn: (taskId: string) => api.deleteTask(runId, taskId),
     onError: (error: Error) => setMutationError(error.message),
     onSuccess: async () => {
+      setDeleteDialogTask(null);
       setMutationError(null);
       await invalidateTaskRun(runId);
     },
@@ -187,6 +198,7 @@ export function RunTaskList({
       if (current) {
         setEditDrafts(new Map());
         setNotesDrafts(new Map());
+        setEditingTaskId(null);
         setMutationError(null);
       }
       return !current;
@@ -211,6 +223,7 @@ export function RunTaskList({
       next.delete(taskId);
       return next;
     });
+    setEditingTaskId(null);
     setMutationError(null);
   }
 
@@ -232,18 +245,34 @@ export function RunTaskList({
       next.delete(taskId);
       return next;
     });
+    setEditingTaskId(null);
     setMutationError(null);
   }
 
   function handleTaskEditKeyDown(
     event: ReactKeyboardEvent<HTMLTextAreaElement | HTMLInputElement>,
+    taskId: string,
   ) {
     if (event.key === "Escape") {
       event.preventDefault();
-      setEditDrafts(new Map());
-      setNotesDrafts(new Map());
+      resetTaskEditDraft(taskId);
+      resetTaskNotesDraft(taskId);
       setMutationError(null);
     }
+  }
+
+  function startTaskEdit(task: RunTaskSummary, tab: TaskTab) {
+    setExpanded((current) => {
+      if (current.has(task.id)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(task.id);
+      return next;
+    });
+    selectTab(task.id, tab);
+    setEditingTaskId(task.id);
+    setMutationError(null);
   }
 
   function renderCreateDialog() {
@@ -277,19 +306,21 @@ export function RunTaskList({
         </div>
       ) : null}
       {tasks.map((task) => {
-        const hasDetails = Boolean(task.body || task.notes || editMode);
+        const canEdit = capabilities.canEditPending && task.status === "pending";
+        const canDelete = capabilities.canDeletePending && task.status === "pending";
+        const canEditContent = canEdit || capabilities.canEditNotes;
+        const hasDetails = Boolean(task.body || task.notes || editMode || canEditContent);
         const isExpanded = expanded.has(task.id);
         const detailsId = `task-details-${task.id}`;
         const activeTab = activeTabFor(task);
-        const canEdit = capabilities.canEditPending && task.status === "pending";
-        const canDelete = capabilities.canDeletePending && task.status === "pending";
         const editDraft = taskEditDraft(task);
         const replaceNotesDraft = taskNotesDraft(task);
-        const bodyEditing = editMode && canEdit && activeTab === "body";
-        const notesEditing = editMode && capabilities.canEditNotes && activeTab === "notes";
+        const isEditingTask = editingTaskId === task.id;
+        const bodyEditing = isEditingTask && canEdit && activeTab === "body";
+        const notesEditing = isEditingTask && capabilities.canEditNotes && activeTab === "notes";
 
         return (
-          <article className="task" key={task.id}>
+          <article className={isEditingTask ? "task task--editing" : "task"} key={task.id}>
             <div className="task-row">
               <button
                 aria-controls={hasDetails ? detailsId : undefined}
@@ -350,11 +381,23 @@ export function RunTaskList({
                     aria-label={`Delete ${task.title}`}
                     className="icon-btn icon-btn--small icon-btn--destructive"
                     disabled={mutationPending}
-                    onClick={() => deleteTaskMutation.mutate(task.id)}
+                    onClick={() => setDeleteDialogTask(task)}
                     title="Delete task"
                     type="button"
                   >
                     <TrashIcon aria-hidden="true" />
+                  </button>
+                ) : null}
+                {canEditContent && !isEditingTask ? (
+                  <button
+                    aria-label={`Edit ${task.title}`}
+                    className="icon-btn icon-btn--small"
+                    disabled={mutationPending}
+                    onClick={() => startTaskEdit(task, canEdit ? "body" : "notes")}
+                    title="Edit task"
+                    type="button"
+                  >
+                    <PencilIcon aria-hidden="true" />
                   </button>
                 ) : null}
               </div>
@@ -391,7 +434,7 @@ export function RunTaskList({
                           onChange={(event) =>
                             setTaskEditDraft(task.id, { ...editDraft, title: event.target.value })
                           }
-                          onKeyDown={handleTaskEditKeyDown}
+                          onKeyDown={(event) => handleTaskEditKeyDown(event, task.id)}
                           value={editDraft.title}
                         />
                       </label>
@@ -403,8 +446,8 @@ export function RunTaskList({
                           onChange={(event) =>
                             setTaskEditDraft(task.id, { ...editDraft, body: event.target.value })
                           }
-                          onKeyDown={handleTaskEditKeyDown}
-                          rows={5}
+                          onKeyDown={(event) => handleTaskEditKeyDown(event, task.id)}
+                          rows={10}
                           value={editDraft.body}
                         />
                       </label>
@@ -443,9 +486,9 @@ export function RunTaskList({
                       <span>Notes</span>
                       <textarea
                         disabled={mutationPending}
-                        onKeyDown={handleTaskEditKeyDown}
+                        onKeyDown={(event) => handleTaskEditKeyDown(event, task.id)}
                         onChange={(event) => setTaskNotesDraft(task.id, event.target.value)}
-                        rows={6}
+                        rows={10}
                         value={replaceNotesDraft}
                       />
                     </label>
@@ -484,7 +527,71 @@ export function RunTaskList({
         );
       })}
       {dialogOpen ? renderCreateDialog() : null}
+      {deleteDialogTask ? (
+        <DeleteTaskDialog
+          error={deleteTaskMutation.error?.message}
+          onClose={() => setDeleteDialogTask(null)}
+          onConfirm={async () => {
+            await deleteTaskMutation.mutateAsync(deleteDialogTask.id);
+          }}
+          pending={deleteTaskMutation.isPending}
+          task={deleteDialogTask}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function DeleteTaskDialog({
+  error,
+  onClose,
+  onConfirm,
+  pending,
+  task,
+}: {
+  error?: string;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+  pending: boolean;
+  task: RunTaskSummary;
+}) {
+  const { dialogProps, ref: dialogRef } = useNativeModalDialog(true, onClose);
+  return (
+    <dialog
+      aria-labelledby="delete-task-dialog-title"
+      className="resume-dialog-backdrop"
+      {...dialogProps}
+      ref={dialogRef}
+    >
+      <div className="resume-dialog delete-task-dialog">
+        <div className="resume-dialog__header">
+          <h3 className="resume-dialog__title" id="delete-task-dialog-title">
+            Delete task?
+          </h3>
+          <p className="resume-dialog__copy">
+            Delete <strong>{task.title}</strong>. This removes the task from the run.
+          </p>
+        </div>
+        {error ? (
+          <div className="notice" data-tone="error">
+            <span className="notice__message">{error}</span>
+          </div>
+        ) : null}
+        <div className="resume-dialog__actions">
+          <button className="btn" disabled={pending} onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button
+            className="btn btn-destructive-outline"
+            disabled={pending}
+            onClick={() => void onConfirm()}
+            type="button"
+          >
+            {pending ? "Deleting..." : "Delete"}
+          </button>
+        </div>
+      </div>
+    </dialog>
   );
 }
 

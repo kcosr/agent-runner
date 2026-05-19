@@ -266,6 +266,8 @@
 - Generated `plan-feature` and `plan-implement-feature` assignments no longer
   lock the task list with `lockedFields: [tasks]`, so task-runner workflows can
   add or remove follow-up tasks during implementation when appropriate.
+- Dashboard task rows now use per-task edit controls and ask for confirmation
+  before deleting a pending task.
 - Cleaned up the README and reference docs for current CLI behavior,
   backend-free smoke checks, skills installation, environment-variable
   placement, and renamed Agent Runner terminology.

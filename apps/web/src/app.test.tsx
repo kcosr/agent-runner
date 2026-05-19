@@ -8761,6 +8761,7 @@ describe("web app", () => {
     if (!draftArticle) {
       throw new Error("Draft task article was not rendered");
     }
+    await user.click(within(draftArticle).getByRole("button", { name: "Edit Draft task" }));
     await user.clear(within(draftArticle).getByLabelText("Title"));
     await user.type(within(draftArticle).getByLabelText("Title"), "Edited task");
     await user.clear(within(draftArticle).getByLabelText("Body"));
@@ -8793,14 +8794,18 @@ describe("web app", () => {
     if (!editedArticle) {
       throw new Error("Edited task article was not rendered");
     }
+    await user.click(within(editedArticle).getByRole("button", { name: "Edit Edited task" }));
     await user.clear(within(editedArticle).getByLabelText("Notes"));
     await user.type(within(editedArticle).getByLabelText("Notes"), "Replaced notes");
     await user.click(within(editedArticle).getByRole("button", { name: "Save" }));
     await waitFor(() => {
-      expect(within(editedArticle).getByDisplayValue("Replaced notes")).toBeInTheDocument();
+      expect(within(editedArticle).getByText("Replaced notes")).toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("button", { name: "Delete Manual task" }));
+    const deleteTaskDialog = await screen.findByRole("dialog", { name: "Delete task?" });
+    expect(within(deleteTaskDialog).getByText(/Manual task/)).toBeInTheDocument();
+    await user.click(within(deleteTaskDialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /Manual task/ })).not.toBeInTheDocument();
     });
