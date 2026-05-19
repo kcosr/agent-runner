@@ -426,7 +426,7 @@ export function RunTaskList({
                 {activeTab === "body" ? (
                   bodyEditing ? (
                     <div className="task-edit">
-                      <label className="field">
+                      <label className="field task-edit__title-field">
                         <span>Title</span>
                         <input
                           aria-label="Title"
@@ -438,7 +438,7 @@ export function RunTaskList({
                           value={editDraft.title}
                         />
                       </label>
-                      <label className="field">
+                      <label className="field task-edit__body-field">
                         <span>Body</span>
                         <textarea
                           aria-label="Body"
@@ -482,8 +482,8 @@ export function RunTaskList({
                   )
                 ) : notesEditing ? (
                   <div className="task-notes-editor">
-                    <label className="field">
-                      <span>Notes</span>
+                    <label className="field task-edit__notes-field">
+                      <span className="sr-only">Notes</span>
                       <textarea
                         disabled={mutationPending}
                         onKeyDown={(event) => handleTaskEditKeyDown(event, task.id)}

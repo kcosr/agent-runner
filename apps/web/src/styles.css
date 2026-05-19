@@ -2836,6 +2836,8 @@ body {
 }
 
 .task--editing .task-details {
+  flex: 1 1 auto;
+  min-height: clamp(28rem, 68vh, 52rem);
   padding-left: 12px;
 }
 
@@ -2884,11 +2886,31 @@ body {
   padding: 0;
 }
 
+.task--editing .task-edit,
+.task--editing .task-notes-editor {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .task-edit .field,
 .task-notes-editor .field {
   display: grid;
   gap: 6px;
   min-width: 0;
+}
+
+.task--editing .task-edit__body-field,
+.task--editing .task-edit__notes-field {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.task--editing .task-edit__title-field {
+  flex: 0 0 auto;
 }
 
 .task-edit .field span,
@@ -2922,14 +2944,22 @@ body {
   resize: vertical;
 }
 
+.task--editing .task-edit__body-field textarea,
+.task--editing .task-edit__notes-field textarea {
+  flex: 1 1 auto;
+  min-height: 24rem;
+}
+
 .delete-task-dialog {
   max-width: 24rem;
 }
 
 .task-edit__actions {
   display: flex;
+  flex: 0 0 auto;
   justify-content: flex-end;
   gap: 8px;
+  padding-top: 2px;
 }
 
 .task-tabs {
