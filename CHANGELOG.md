@@ -13,6 +13,9 @@
   navigating files in fullscreen, and creating tasks from selected text or
   source ranges.
   ([#157](https://github.com/kcosr/agent-runner/pull/157))
+- Dashboard Files surface now exposes a Refresh workspace files button that
+  re-fetches the current directory listing, active search, and selected file
+  preview. ([#159](https://github.com/kcosr/agent-runner/pull/159))
 - Added dashboard task management for manual task creation, pending task
   title/body edits, pending deletes, status changes, and notes replace/append
   actions. ([#157](https://github.com/kcosr/agent-runner/pull/157))
@@ -41,6 +44,7 @@
   clearly when opened. Because preview attempts can include sensitive text files
   such as `.env`, expose the daemon only to trusted clients, bind it to
   `127.0.0.1`, or enable daemon auth before sharing dashboard access.
+  ([#159](https://github.com/kcosr/agent-runner/pull/159))
 - Generated `plan-feature` and `plan-implement-feature` assignments no longer
   lock the task list with `lockedFields: [tasks]`, so agent-runner workflows
   can add or remove follow-up tasks during implementation when appropriate.

@@ -3069,6 +3069,8 @@ describe("web app", () => {
   it("refreshes the workspace file browser from the Files header", async () => {
     setStoredDashboardViewState({ activeRightSurface: "files" });
     let filesRequests = 0;
+    let fileRequests = 0;
+    let searchRequests = 0;
     installFetchMock(
       {
         runs: [makeRun()],
@@ -3086,9 +3088,65 @@ describe("web app", () => {
                   cwd: "/tmp/agent-runner",
                   path: "",
                   parentPath: null,
-                  entries: [],
+                  entries: [
+                    {
+                      path: "README.md",
+                      name: "README.md",
+                      kind: "file",
+                      size: 14,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
                   truncated: false,
                   maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/search") {
+            searchRequests += 1;
+            return new Response(
+              JSON.stringify({
+                search: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  query: parsed.searchParams.get("q") ?? "",
+                  matches: [
+                    {
+                      path: "README.md",
+                      name: "README.md",
+                      kind: "file",
+                      size: 14,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxResults: 50,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            fileRequests += 1;
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "README.md",
+                  name: "README.md",
+                  size: 14,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: "# Workspace\n",
+                  maxBytes: 1048576,
                 },
               }),
               { status: 200 },
@@ -3101,11 +3159,20 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp("/runs/run-1");
-    expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /README.md/ })).toBeInTheDocument();
     expect(filesRequests).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: /README.md/ }));
+    expect(await screen.findByRole("heading", { name: "README.md" })).toBeInTheDocument();
+    expect(fileRequests).toBe(1);
+
+    await user.type(screen.getByLabelText("Search workspace files"), "readme");
+    await waitFor(() => expect(searchRequests).toBe(1));
 
     await user.click(screen.getByRole("button", { name: "Refresh workspace files" }));
     await waitFor(() => expect(filesRequests).toBe(2));
+    expect(searchRequests).toBe(2);
+    expect(fileRequests).toBe(2);
   });
 
   it("navigates workspace files with fullscreen up and down keys while search is focused", async () => {

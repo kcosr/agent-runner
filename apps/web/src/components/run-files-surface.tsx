@@ -357,21 +357,26 @@ export function RunFilesSurface({
   }
 
   async function refreshWorkspace() {
-    await Promise.all([
+    const refreshes = [
       queryClient.invalidateQueries({
         queryKey: runQueryKeys.workspaceFiles(runId, directoryPath),
       }),
-      searchActive
-        ? queryClient.invalidateQueries({
-            queryKey: runQueryKeys.workspaceSearch(runId, trimmedSearch, 50),
-          })
-        : Promise.resolve(),
-      selectedFilePath
-        ? queryClient.invalidateQueries({
-            queryKey: runQueryKeys.workspaceFile(runId, selectedFilePath),
-          })
-        : Promise.resolve(),
-    ]);
+    ];
+    if (searchActive) {
+      refreshes.push(
+        queryClient.invalidateQueries({
+          queryKey: runQueryKeys.workspaceSearch(runId, trimmedSearch, 50),
+        }),
+      );
+    }
+    if (selectedFilePath) {
+      refreshes.push(
+        queryClient.invalidateQueries({
+          queryKey: runQueryKeys.workspaceFile(runId, selectedFilePath),
+        }),
+      );
+    }
+    await Promise.all(refreshes);
   }
 
   function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
