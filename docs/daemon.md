@@ -413,7 +413,9 @@ resolution. Search is bounded, skips dependency directories such as
 response flag. File preview attempts perform the content validation: traversal,
 missing files, unreadable binary content, invalid UTF-8, and oversized reads
 return the normal daemon error envelope; the daemon never serves arbitrary
-absolute paths from these routes.
+absolute paths from these routes. Because valid UTF-8 files can include secrets,
+expose the daemon only to trusted clients, bind it to `127.0.0.1`, or enable
+daemon auth before sharing dashboard access.
 
 ### Attachments
 

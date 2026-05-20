@@ -33,12 +33,14 @@
 - Resume prompts for stopped runs with unfinished tasks now include the
   concrete task list instead of a terse reminder plus a generic continue
   message. ([#157](https://github.com/kcosr/agent-runner/pull/157))
-- Workspace file browsing includes hidden files and common non-secret text
-  dotfiles, while search skips dependency and VCS directories such as
-  `node_modules` and `.git`. ([#157](https://github.com/kcosr/agent-runner/pull/157))
+- Workspace file browsing includes hidden files and directories, while search
+  skips dependency and VCS directories such as `node_modules` and `.git`.
+  ([#157](https://github.com/kcosr/agent-runner/pull/157))
 - Workspace file preview attempts now allow small regular files regardless of
   filename or extension, with binary, invalid UTF-8, and oversized files failing
-  clearly when opened.
+  clearly when opened. Because preview attempts can include sensitive text files
+  such as `.env`, expose the daemon only to trusted clients, bind it to
+  `127.0.0.1`, or enable daemon auth before sharing dashboard access.
 - Generated `plan-feature` and `plan-implement-feature` assignments no longer
   lock the task list with `lockedFields: [tasks]`, so agent-runner workflows
   can add or remove follow-up tasks during implementation when appropriate.

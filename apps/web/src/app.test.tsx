@@ -3047,6 +3047,7 @@ describe("web app", () => {
     await user.click(await screen.findByRole("button", { name: /Dockerfile/ }));
     expect(await screen.findByRole("heading", { name: "Dockerfile" })).toBeInTheDocument();
     expect(await screen.findByText("FROM node")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Preview" })).not.toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: /README.md/ }));
     expect(await screen.findByText(/workspace file "README.md" is binary/)).toBeInTheDocument();

@@ -512,7 +512,9 @@ export function RunFilesSurface({
                             ? entry.size === null
                               ? "Text"
                               : formatBytes(entry.size)
-                            : "Preview unavailable"}
+                            : entry.size === null
+                              ? "Preview unavailable"
+                              : `Preview unavailable · ${formatBytes(entry.size)}`}
                       </span>
                     </button>
                   ))}

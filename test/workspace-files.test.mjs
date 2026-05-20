@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -151,6 +151,11 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
     assert.equal(license.markdown, false);
     assert.equal(license.text, "MIT License\n");
 
+    const env = getWorkspaceFile(outcome.runId, { path: ".env" });
+    assert.equal(env.mediaType, "text/plain");
+    assert.equal(env.markdown, false);
+    assert.equal(env.text, "TOKEN=secret\n");
+
     const unknown = getWorkspaceFile(outcome.runId, { path: "src/component.view" });
     assert.equal(unknown.mediaType, "text/plain");
     assert.equal(unknown.markdown, false);
@@ -170,6 +175,8 @@ test("workspace file service rejects traversal, missing paths, outside symlinks,
   writeBundle(dir);
   writeFileSync(join(dir, "binary.bin"), Buffer.from([0x61, 0x00, 0x62]));
   writeFileSync(join(dir, "huge.txt"), `${"x".repeat(MAX_WORKSPACE_FILE_BYTES + 1)}`);
+  writeFileSync(join(dir, "unreadable.txt"), "not readable\n");
+  chmodSync(join(dir, "unreadable.txt"), 0);
   writeFileSync(join(outside, "secret.txt"), "secret\n");
   symlinkSync(join(dir, "missing-target.txt"), join(dir, "broken-link.txt"));
   symlinkSync(join(outside, "secret.txt"), join(dir, "secret-link.txt"));
@@ -200,6 +207,14 @@ test("workspace file service rejects traversal, missing paths, outside symlinks,
         err.message === 'workspace file "binary.bin" is binary',
     );
     assert.throws(() => getWorkspaceFile(outcome.runId, { path: "huge.txt" }), WorkspaceFileError);
+    if (process.getuid?.() !== 0) {
+      assert.throws(
+        () => getWorkspaceFile(outcome.runId, { path: "unreadable.txt" }),
+        (err) =>
+          err instanceof WorkspaceFileError &&
+          err.message === 'workspace file "unreadable.txt" is not readable',
+      );
+    }
   });
 });
 
