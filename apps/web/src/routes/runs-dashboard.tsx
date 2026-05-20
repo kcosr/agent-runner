@@ -14,6 +14,7 @@ import type { DashboardPreferences } from "../lib/settings.js";
 import type { DashboardViewMode } from "../lib/settings.js";
 import {
   isEditableEventTarget,
+  isEditableKeyboardEvent,
   resolveBoardNeighborRunId,
   resolveListNeighborRunId,
   resolveRunsShortcutCommand,
@@ -324,7 +325,7 @@ export function RunsDashboardRoute() {
         document.querySelector(".drawer--fullscreen") !== null;
       const modalOpen = document.querySelector('dialog[open][data-modal="true"]') !== null;
       const typingTarget =
-        isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement);
+        isEditableKeyboardEvent(event) || isEditableEventTarget(document.activeElement);
 
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: currentState.activeBoardColumnKey,

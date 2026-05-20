@@ -1934,9 +1934,8 @@ body {
   overflow: hidden;
 }
 
-.diffs-toolbar,
+.diffs-topbar,
 .diffs-ref-form,
-.diffs-summary,
 .diffs-viewer__header {
   display: flex;
   align-items: center;
@@ -1944,13 +1943,24 @@ body {
   min-width: 0;
 }
 
-.diffs-toolbar {
+.diffs-topbar {
   justify-content: space-between;
 }
 
 .diffs-mode-tabs {
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.diffs-mode-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.diffs-mode-tabs .task-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .diffs-ref-form {
@@ -1968,28 +1978,14 @@ body {
 
 .diffs-ref-form input {
   min-width: 0;
-  width: 10rem;
-  height: 32px;
+  width: 8.5rem;
+  height: 30px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--background);
   color: var(--foreground);
   font: inherit;
   padding: 0 8px;
-}
-
-.diffs-summary {
-  justify-content: space-between;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-
-.diffs-summary strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--foreground);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .diffs-notice {
@@ -2004,10 +2000,11 @@ body {
 
 .diffs-layout {
   display: grid;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr);
   gap: 12px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .diffs-sidebar,
@@ -2022,60 +2019,83 @@ body {
 .diffs-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   overflow: hidden;
-  padding: 10px;
+  padding: 0;
 }
 
 .diffs-file-tree {
-  min-height: 10rem;
+  flex: 1 1 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  background: var(--background);
+  --trees-accent-override: var(--primary);
+  --trees-bg-muted-override: var(--accent);
+  --trees-bg-override: var(--background);
   --trees-border-color-override: var(--border);
+  --trees-fg-muted-override: var(--muted-foreground);
   --trees-fg-override: var(--foreground);
+  --trees-input-bg-override: var(--background);
+  --trees-search-bg-override: var(--background);
+  --trees-search-fg-override: var(--foreground);
   --trees-selected-bg-override: var(--accent);
 }
 
-.diffs-file-list {
+.diffs-tree-header {
   display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.diffs-file-row {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
-  padding: 8px 6px;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-}
-
-.diffs-file-row:hover,
-.diffs-file-row.active {
-  background: var(--accent);
-}
-
-.diffs-file-row__path {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 12.5px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.diffs-file-row__meta {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diffs-stats-panel {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 98%, var(--background));
+}
+
+.diffs-stats-panel div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.diffs-stats-panel div:last-child {
+  border-bottom: 0;
+}
+
+.diffs-stats-panel dt,
+.diffs-stats-panel dd {
+  margin: 0;
+}
+
+.diffs-stats-panel dd {
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.diffs-stats-panel .diffs-stat-addition {
+  color: var(--success-foreground);
+}
+
+.diffs-stats-panel .diffs-stat-deletion {
+  color: var(--destructive-foreground);
 }
 
 .diffs-viewer {
@@ -2116,9 +2136,10 @@ body {
 }
 
 .diffs-code-view {
-  flex: 1 1 auto;
-  min-height: 18rem;
-  overflow: hidden;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--background);
 }
 
 .files-search {

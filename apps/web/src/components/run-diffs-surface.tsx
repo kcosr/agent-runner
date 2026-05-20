@@ -25,7 +25,7 @@ import { createApiClient } from "../lib/api-client.js";
 import { formatBytes } from "../lib/format.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import { useDaemonAuthToken } from "../lib/settings.js";
+import { useDaemonAuthToken, useDashboardPreferences } from "../lib/settings.js";
 import { type TaskReference, defaultTaskTitle } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
 import { CloseIcon, RefreshIcon, SearchIcon } from "./icons.js";
@@ -140,6 +140,7 @@ function selectedTextFromFileDiff(
 export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiffsSurfaceProps) {
   const config = useRuntimeConfig();
   const { daemonToken } = useDaemonAuthToken();
+  const { preferences } = useDashboardPreferences();
   const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const [comparisonMode, setComparisonMode] = useState<DiffComparisonMode>("merge-base");
   const [branchRefs, setBranchRefs] = useState({ base: DEFAULT_BASE_REF, head: DEFAULT_HEAD_REF });
@@ -274,10 +275,20 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   }, [diff, files, filePathSet]);
 
   useEffect(() => {
+    tree.model.resetPaths(filePaths);
+    tree.model.setGitStatus(gitStatus);
+  }, [filePaths, gitStatus, tree.model]);
+
+  useEffect(() => {
     const selected = selectedTreePaths.find((path) => filePathSet.has(path));
     if (selected !== undefined) {
-      setSelectedPath(selected);
-      setSelectedLines(null);
+      setSelectedPath((current) => {
+        if (current === selected) {
+          return current;
+        }
+        setSelectedLines(null);
+        return selected;
+      });
     }
   }, [filePathSet, selectedTreePaths]);
 
@@ -333,10 +344,31 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
 
   const loading = diffQuery.isPending;
   const empty = diff && diff.files.length === 0 && diff.patch.length === 0;
+  const themeType = preferences.themeMode === "auto" ? "system" : preferences.themeMode;
+  const treeHeader = (
+    <div className="diffs-tree-header">
+      <span>Files</span>
+      <button
+        aria-label={treeSearch.isOpen ? "Close changed-file search" : "Search changed files"}
+        className="icon-btn icon-btn--small"
+        onClick={() => {
+          if (treeSearch.isOpen) {
+            treeSearch.close();
+            return;
+          }
+          treeSearch.open(treeSearch.value);
+        }}
+        title={treeSearch.isOpen ? "Close search" : "Search files"}
+        type="button"
+      >
+        {treeSearch.isOpen ? <CloseIcon aria-hidden="true" /> : <SearchIcon aria-hidden="true" />}
+      </button>
+    </div>
+  );
 
   return (
     <section aria-label="Diffs" className="drawer-panel drawer-panel--diffs">
-      <div className="diffs-toolbar">
+      <div className="diffs-topbar">
         <div className="task-tabs diffs-mode-tabs" role="tablist" aria-label="Diff comparison">
           <button
             aria-selected={comparisonMode === "merge-base"}
@@ -378,42 +410,25 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
         </button>
       </div>
 
-      <form className="diffs-ref-form" onSubmit={applyBranchRefs}>
-        <label>
-          <span>Base</span>
-          <input
-            disabled={comparisonMode === "working-tree"}
-            onChange={(event) => setBaseDraft(event.target.value)}
-            value={baseDraft}
-          />
-        </label>
-        <label>
-          <span>Head</span>
-          <input
-            disabled={comparisonMode === "working-tree"}
-            onChange={(event) => setHeadDraft(event.target.value)}
-            value={headDraft}
-          />
-        </label>
-        <button
-          className="btn"
-          disabled={baseDraft.trim().length === 0 || headDraft.trim().length === 0}
-          type="submit"
-        >
-          Apply
-        </button>
-      </form>
-
-      <div className="diffs-summary" aria-live="polite">
-        <strong>
-          {diff?.displayRange ?? (comparisonMode === "working-tree" ? "Working tree" : "Diff")}
-        </strong>
-        {diff ? (
-          <span>
-            {diff.stats.files} files · +{diff.stats.additions} / -{diff.stats.deletions}
-          </span>
-        ) : null}
-      </div>
+      {comparisonMode === "working-tree" ? null : (
+        <form className="diffs-ref-form" onSubmit={applyBranchRefs}>
+          <label>
+            <span>Base</span>
+            <input onChange={(event) => setBaseDraft(event.target.value)} value={baseDraft} />
+          </label>
+          <label>
+            <span>Head</span>
+            <input onChange={(event) => setHeadDraft(event.target.value)} value={headDraft} />
+          </label>
+          <button
+            className="btn btn-compact"
+            disabled={baseDraft.trim().length === 0 || headDraft.trim().length === 0}
+            type="submit"
+          >
+            Apply
+          </button>
+        </form>
+      )}
 
       {diff?.truncated ? (
         <p className="diffs-notice">Patch output was truncated at {formatBytes(diff.maxBytes)}.</p>
@@ -424,36 +439,27 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
 
       <div className="diffs-layout">
         <aside className="diffs-sidebar" aria-label="Changed files">
-          <label className="files-search">
-            <SearchIcon aria-hidden="true" />
-            <input
-              aria-label="Search changed files"
-              onChange={(event) => treeSearch.setValue(event.target.value || null)}
-              onFocus={() => treeSearch.open(treeSearch.value)}
-              placeholder="Search changed files"
-              value={treeSearch.value}
-            />
-          </label>
           {files.length > 0 ? (
-            <FileTree className="diffs-file-tree" model={tree.model} />
+            <FileTree className="diffs-file-tree" header={treeHeader} model={tree.model} />
           ) : (
             <p className="task-empty">No changed files.</p>
           )}
-          <div className="diffs-file-list" aria-label="Changed file details">
-            {files.map((file) => (
-              <button
-                className={selectedPath === file.path ? "diffs-file-row active" : "diffs-file-row"}
-                key={file.path}
-                onClick={() => setSelectedPath(file.path)}
-                type="button"
-              >
-                <span className="diffs-file-row__path">{file.path}</span>
-                <span className="diffs-file-row__meta">
-                  {statusLabel(file.status)} · {displayStats(file)}
-                </span>
-              </button>
-            ))}
-          </div>
+          {diff ? (
+            <dl className="diffs-stats-panel" aria-label="Diff stats">
+              <div>
+                <dt>Files</dt>
+                <dd>{diff.stats.files}</dd>
+              </div>
+              <div>
+                <dt>Additions</dt>
+                <dd className="diffs-stat-addition">{diff.stats.additions}</dd>
+              </div>
+              <div>
+                <dt>Deletions</dt>
+                <dd className="diffs-stat-deletion">{diff.stats.deletions}</dd>
+              </div>
+            </dl>
+          ) : null}
         </aside>
 
         <div className="diffs-viewer" aria-label="Diff viewer">
@@ -527,6 +533,8 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
                 hunkSeparators: "line-info-basic",
                 overflow: "wrap",
                 stickyHeaders: true,
+                theme: { dark: "pierre-dark", light: "pierre-light" },
+                themeType,
               }}
               ref={codeViewRef}
               selectedLines={selectedLines}

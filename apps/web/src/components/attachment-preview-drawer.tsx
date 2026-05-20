@@ -13,7 +13,7 @@ import {
 import { formatBytes, formatTimestamp } from "../lib/format.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
-import { isEditableEventTarget } from "../lib/shortcuts.js";
+import { isEditableKeyboardEvent } from "../lib/shortcuts.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { ChevronIcon, DownloadIcon } from "./icons.js";
@@ -92,7 +92,7 @@ export function AttachmentPreviewPanel({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (resumeDialogOpen || event.defaultPrevented || isEditableEventTarget(event.target)) {
+      if (resumeDialogOpen || event.defaultPrevented || isEditableKeyboardEvent(event)) {
         return;
       }
 

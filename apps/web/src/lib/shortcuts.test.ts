@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { BoardColumn } from "../components/run-column.js";
 import {
+  isEditableEventTarget,
+  isEditableKeyboardEvent,
   resolveBoardEntryRunId,
   resolveBoardNeighborRunId,
   resolveListNeighborRunId,
@@ -157,6 +159,38 @@ describe("resolveListNeighborRunId", () => {
         selectedRunId: "run-filtered-out",
       }),
     ).toBe("run-1");
+  });
+});
+
+describe("editable keyboard targets", () => {
+  it("treats focused inputs inside a shadow host as editable targets", () => {
+    const host = document.createElement("div");
+    const shadowRoot = host.attachShadow({ mode: "open" });
+    const input = document.createElement("input");
+    shadowRoot.append(input);
+    document.body.append(host);
+
+    input.focus();
+
+    expect(isEditableEventTarget(host)).toBe(true);
+
+    host.remove();
+  });
+
+  it("detects editable inputs from a composed keyboard event path", () => {
+    const host = document.createElement("div");
+    const shadowRoot = host.attachShadow({ mode: "open" });
+    const input = document.createElement("input");
+    shadowRoot.append(input);
+    document.body.append(host);
+    const event = new KeyboardEvent("keydown", { bubbles: true, composed: true, key: "t" });
+    Object.defineProperty(event, "composedPath", {
+      value: () => [input, shadowRoot, host, document.body, document, window],
+    });
+
+    expect(isEditableKeyboardEvent(event)).toBe(true);
+
+    host.remove();
   });
 });
 

@@ -40,10 +40,14 @@ vi.mock("@pierre/trees/react", () => ({
   useFileTree: () => ({
     model: {
       getItem: () => ({ select: () => {} }),
+      resetPaths: () => {},
       scrollToPath: () => {},
+      setGitStatus: () => {},
     },
   }),
   useFileTreeSearch: () => ({
+    close: () => {},
+    isOpen: false,
     open: () => {},
     setValue: () => {},
     value: "",

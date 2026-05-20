@@ -16,7 +16,7 @@ import { formatBytes } from "../lib/format.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
-import { isEditableEventTarget } from "../lib/shortcuts.js";
+import { isEditableEventTarget, isEditableKeyboardEvent } from "../lib/shortcuts.js";
 import { type TaskReference, defaultTaskTitle, languageForPath } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
 import { ChevronIcon, CloseIcon, FileIcon, FolderIcon, RefreshIcon, SearchIcon } from "./icons.js";
@@ -248,7 +248,7 @@ export function RunFilesSurface({
       const root = rootRef.current;
       const filesSurfaceVisible = root?.isConnected === true && !root.closest("[hidden]");
       const typingTarget =
-        isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement);
+        isEditableKeyboardEvent(event) || isEditableEventTarget(document.activeElement);
       if (!filesSurfaceVisible || dialogReference || event.defaultPrevented) {
         return;
       }

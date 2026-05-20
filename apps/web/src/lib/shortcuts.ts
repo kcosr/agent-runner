@@ -82,12 +82,27 @@ const BOARD_FILTER_SHORTCUTS: readonly {
   { command: "ui.toggleHideEmptyColumns", key: "e" },
 ];
 
+const EDITABLE_TARGET_SELECTOR =
+  'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
+
 export function isEditableEventTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
-  return Boolean(
-    target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'),
+  if (target.closest(EDITABLE_TARGET_SELECTOR)) {
+    return true;
+  }
+
+  const shadowActiveElement = target.shadowRoot?.activeElement;
+  return shadowActiveElement instanceof HTMLElement
+    ? isEditableEventTarget(shadowActiveElement)
+    : false;
+}
+
+export function isEditableKeyboardEvent(event: Event): boolean {
+  return (
+    event.composedPath().some((target) => isEditableEventTarget(target)) ||
+    isEditableEventTarget(event.target)
   );
 }
 
