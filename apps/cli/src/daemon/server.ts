@@ -148,6 +148,11 @@ import {
   deriveScheduleState,
 } from "@kcosr/agent-runner-core/core/run/schedule.js";
 import {
+  listWorkspaceFiles as listWorkspaceFilesFromManifest,
+  readWorkspaceFile as readWorkspaceFileFromManifest,
+  searchWorkspaceFiles as searchWorkspaceFilesFromManifest,
+} from "@kcosr/agent-runner-core/core/run/workspace-files.js";
+import {
   tryWithTaskStateLockAsync,
   withTaskStateLock,
   withTaskStateLockAsync,
@@ -1024,6 +1029,35 @@ export async function serveDaemon(
     }
     rememberManifestIndexEntry(entry);
     return entry;
+  };
+
+  const resolveWorkspaceManifestTarget = (target: string): ListedRunManifest => {
+    ensureManifestIndex();
+    return resolveManifestTarget(target);
+  };
+
+  const getDaemonWorkspaceFileList = (
+    target: string,
+    input: { path?: string } = {},
+  ): ReturnType<typeof getWorkspaceFileList> => {
+    const entry = resolveWorkspaceManifestTarget(target);
+    return listWorkspaceFilesFromManifest(entry.manifest, input);
+  };
+
+  const getDaemonWorkspaceFileSearch = (
+    target: string,
+    input: { query: string; limit?: number },
+  ): ReturnType<typeof getWorkspaceFileSearch> => {
+    const entry = resolveWorkspaceManifestTarget(target);
+    return searchWorkspaceFilesFromManifest(entry.manifest, input);
+  };
+
+  const getDaemonWorkspaceFile = (
+    target: string,
+    input: { path: string },
+  ): ReturnType<typeof getWorkspaceFile> => {
+    const entry = resolveWorkspaceManifestTarget(target);
+    return readWorkspaceFileFromManifest(entry.manifest, input);
   };
 
   const refreshManifestByRunId = (runId: string): RunManifest | undefined => {
@@ -3161,6 +3195,9 @@ export async function serveDaemon(
     getRunList: getDaemonRunList,
     getRunAuditHistory: getProjectedAuditHistory,
     getRunTimelineHistory: getProjectedTimelineHistory,
+    getWorkspaceFileList: getDaemonWorkspaceFileList,
+    getWorkspaceFileSearch: getDaemonWorkspaceFileSearch,
+    getWorkspaceFile: getDaemonWorkspaceFile,
     getAttachment,
     getAttachmentList,
     initRun: async (request) => {
