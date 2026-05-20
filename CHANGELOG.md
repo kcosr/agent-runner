@@ -9,9 +9,9 @@
   including prefixed daemon HTTP routes for pass-through proxies.
   ([#156](https://github.com/kcosr/agent-runner/pull/156))
 - Added daemon workspace file APIs and a web dashboard Files surface for
-  browsing and searching selected-run cwd supported text files, previewing
-  Markdown/source, navigating files in fullscreen, and creating tasks from
-  selected text or source ranges.
+  browsing and searching selected-run cwd files, previewing Markdown/source,
+  navigating files in fullscreen, and creating tasks from selected text or
+  source ranges.
   ([#157](https://github.com/kcosr/agent-runner/pull/157))
 - Added dashboard task management for manual task creation, pending task
   title/body edits, pending deletes, status changes, and notes replace/append
@@ -36,6 +36,9 @@
 - Workspace file browsing includes hidden files and common non-secret text
   dotfiles, while search skips dependency and VCS directories such as
   `node_modules` and `.git`. ([#157](https://github.com/kcosr/agent-runner/pull/157))
+- Workspace file preview attempts now allow small regular files regardless of
+  filename or extension, with binary, invalid UTF-8, and oversized files failing
+  clearly when opened.
 - Generated `plan-feature` and `plan-implement-feature` assignments no longer
   lock the task list with `lockedFields: [tasks]`, so agent-runner workflows
   can add or remove follow-up tasks during implementation when appropriate.

@@ -403,17 +403,17 @@ updatedAt } }`.
 | Method | Path | Effect |
 |--------|------|--------|
 | `GET` | `/api/runs/:runId/workspace/files` | List a cwd-relative directory. Query: optional `path` |
-| `GET` | `/api/runs/:runId/workspace/search` | Search cwd-relative supported text paths. Query: `q`, optional `limit` |
-| `GET` | `/api/runs/:runId/workspace/file` | Read a supported text file. Query: `path` |
+| `GET` | `/api/runs/:runId/workspace/search` | Search cwd-relative workspace paths. Query: `q`, optional `limit` |
+| `GET` | `/api/runs/:runId/workspace/file` | Attempt to preview a cwd-relative file as text. Query: `path` |
 
 Workspace file routes are scoped to the selected run's `cwd`. Paths are
 cwd-relative and must stay inside that tree after normalization and symlink
 resolution. Search is bounded, skips dependency directories such as
-`node_modules`, includes dot-directories and common text dotfiles, and reports
-truncation through the response flag.
-Traversal, unsupported file extensions, missing files, unreadable binary
-content, and oversized reads return the normal daemon error envelope; the
-daemon never serves arbitrary absolute paths from these routes.
+`node_modules`, includes dot-directories, and reports truncation through the
+response flag. File preview attempts perform the content validation: traversal,
+missing files, unreadable binary content, invalid UTF-8, and oversized reads
+return the normal daemon error envelope; the daemon never serves arbitrary
+absolute paths from these routes.
 
 ### Attachments
 

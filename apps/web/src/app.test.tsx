@@ -2949,6 +2949,26 @@ describe("web app", () => {
             );
           }
           if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            const filePath = parsed.searchParams.get("path") ?? "";
+            if (filePath === "Dockerfile") {
+              return new Response(
+                JSON.stringify({
+                  file: {
+                    runId: "run-1",
+                    cwd: "/tmp/agent-runner",
+                    path: "Dockerfile",
+                    name: "Dockerfile",
+                    size: 12,
+                    mtimeMs: null,
+                    mediaType: "text/plain",
+                    markdown: false,
+                    text: "FROM node\n",
+                    maxBytes: 1048576,
+                  },
+                }),
+                { status: 200 },
+              );
+            }
             return new Response(
               JSON.stringify({
                 error: {
@@ -2996,6 +3016,15 @@ describe("web app", () => {
                   markdown: false,
                 },
                 {
+                  path: "Dockerfile",
+                  name: "Dockerfile",
+                  kind: "file",
+                  size: 12,
+                  mtimeMs: null,
+                  supportedText: true,
+                  markdown: false,
+                },
+                {
                   path: "README.md",
                   name: "README.md",
                   kind: "file",
@@ -3014,6 +3043,10 @@ describe("web app", () => {
       );
       await rootResponse;
     });
+
+    await user.click(await screen.findByRole("button", { name: /Dockerfile/ }));
+    expect(await screen.findByRole("heading", { name: "Dockerfile" })).toBeInTheDocument();
+    expect(await screen.findByText("FROM node")).toBeInTheDocument();
 
     await user.click(await screen.findByRole("button", { name: /README.md/ }));
     expect(await screen.findByText(/workspace file "README.md" is binary/)).toBeInTheDocument();
@@ -3078,6 +3111,15 @@ describe("web app", () => {
                       supportedText: true,
                       markdown: true,
                     },
+                    {
+                      path: "Cargo.lock",
+                      name: "Cargo.lock",
+                      kind: "file",
+                      size: 12,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: false,
+                    },
                   ],
                   truncated: false,
                   maxEntries: 1000,
@@ -3088,6 +3130,7 @@ describe("web app", () => {
           }
           if (parsed.pathname === "/api/runs/run-1/workspace/file") {
             const filePath = parsed.searchParams.get("path") ?? "";
+            const markdown = filePath !== "Cargo.lock";
             return new Response(
               JSON.stringify({
                 file: {
@@ -3095,11 +3138,16 @@ describe("web app", () => {
                   cwd: "/tmp/agent-runner",
                   path: filePath,
                   name: filePath,
-                  size: filePath === "beta.md" ? 15 : 16,
+                  size: filePath === "beta.md" ? 15 : filePath === "Cargo.lock" ? 12 : 16,
                   mtimeMs: null,
-                  mediaType: "text/markdown",
-                  markdown: true,
-                  text: filePath === "beta.md" ? "# Beta\nbeta body" : "# Alpha\nalpha body",
+                  mediaType: markdown ? "text/markdown" : "text/plain",
+                  markdown,
+                  text:
+                    filePath === "beta.md"
+                      ? "# Beta\nbeta body"
+                      : filePath === "Cargo.lock"
+                        ? "# lockfile"
+                        : "# Alpha\nalpha body",
                   maxBytes: 1048576,
                 },
               }),
@@ -3129,8 +3177,11 @@ describe("web app", () => {
     await user.keyboard("{ArrowDown}");
     expect(await screen.findByRole("heading", { name: "beta.md" })).toBeInTheDocument();
 
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("heading", { name: "Cargo.lock" })).toBeInTheDocument();
+
     await user.keyboard("{ArrowUp}");
-    expect(await screen.findByRole("heading", { name: "alpha.md" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "beta.md" })).toBeInTheDocument();
     expect(searchInput).toHaveFocus();
   });
 

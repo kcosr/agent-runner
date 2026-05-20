@@ -36,8 +36,8 @@ function entryLabel(entry: WorkspaceFileEntry): string {
     entry.kind === "directory"
       ? "Directory"
       : entry.supportedText
-        ? "Text file"
-        : "Unsupported file",
+        ? "Previewable file"
+        : "Preview unavailable",
     entry.size === null ? null : formatBytes(entry.size),
   ].filter(Boolean);
   return `${entry.name} (${details.join(", ")})`;
@@ -512,7 +512,7 @@ export function RunFilesSurface({
                             ? entry.size === null
                               ? "Text"
                               : formatBytes(entry.size)
-                            : "Unsupported"}
+                            : "Preview unavailable"}
                       </span>
                     </button>
                   ))}
