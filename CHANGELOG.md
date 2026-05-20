@@ -46,6 +46,9 @@
 
 ### Fixed
 
+- Fixed daemon workspace file APIs so selected-run file browsing works for
+  runs stored in repo buckets outside the daemon's current repo.
+  ([#158](https://github.com/kcosr/agent-runner/pull/158))
 - Fixed the dashboard Files surface so creating a task from selected Markdown
   preview text opens the dialog reliably, dragged source text selections enable
   task creation, and directories render with a folder icon.
