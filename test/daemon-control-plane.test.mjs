@@ -3563,6 +3563,61 @@ test("daemon resumes unique cross-bucket short ids through RPC and HTTP", async 
   });
 });
 
+test("daemon workspace APIs resolve unique cross-bucket short ids", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  const workspaceCwd = join(dir, "assistant-cwd");
+  mkdirSync(join(workspaceCwd, "docs"), { recursive: true });
+  writeFileSync(join(workspaceCwd, "docs", "api.md"), "# API\n\nCross-bucket workspace text.\n");
+  moveRunToRepoBucket(dir, run.workspaceDir, "assistant", { cwd: workspaceCwd });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const detail = await httpJson(httpBaseUrl, `/api/runs/${run.runId}`);
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.run.runId, run.runId);
+
+      const workspaceRoot = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/workspace/files?path=`,
+      );
+      assert.equal(workspaceRoot.status, 200);
+      assert.equal(workspaceRoot.body.directory.runId, run.runId);
+      assert.equal(workspaceRoot.body.directory.cwd, workspaceCwd);
+      assert.deepEqual(
+        workspaceRoot.body.directory.entries.map((entry) => entry.path),
+        ["docs"],
+      );
+
+      const workspaceSearch = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/workspace/search?q=api&limit=5`,
+      );
+      assert.equal(workspaceSearch.status, 200);
+      assert.deepEqual(
+        workspaceSearch.body.search.matches.map((entry) => entry.path),
+        ["docs/api.md"],
+      );
+
+      const workspaceFile = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/workspace/file?path=docs%2Fapi.md`,
+      );
+      assert.equal(workspaceFile.status, 200);
+      assert.equal(workspaceFile.body.file.text, "# API\n\nCross-bucket workspace text.\n");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("daemon rejects ambiguous cross-bucket short ids through RPC and HTTP", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
@@ -3607,6 +3662,17 @@ test("daemon rejects ambiguous cross-bucket short ids through RPC and HTTP", asy
       assert.equal(httpResult.status, 409);
       assert.equal(httpResult.body.error.code, "CONFLICT");
       assert.equal(httpResult.body.error.message, ambiguityMessage);
+
+      for (const path of [
+        `/api/runs/${first.runId}/workspace/files`,
+        `/api/runs/${first.runId}/workspace/search?q=api`,
+        `/api/runs/${first.runId}/workspace/file?path=README.md`,
+      ]) {
+        const workspaceResult = await httpJson(httpBaseUrl, path);
+        assert.equal(workspaceResult.status, 409);
+        assert.equal(workspaceResult.body.error.code, "CONFLICT");
+        assert.equal(workspaceResult.body.error.message, ambiguityMessage);
+      }
     } finally {
       console.error = originalConsoleError;
       await client.close();
