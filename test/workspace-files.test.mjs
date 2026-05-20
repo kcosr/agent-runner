@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -87,6 +87,8 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
   mkdirSync(join(dir, ".svn"));
   mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });
   mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "Cargo.lock"), "# cargo lock\n");
+  writeFileSync(join(dir, "LICENSE"), "MIT License\n");
   writeFileSync(join(dir, ".env"), "TOKEN=secret\n");
   writeFileSync(join(dir, ".git", "guide.md"), "# Hidden guide\n");
   writeFileSync(join(dir, ".hg", "guide.md"), "# Hidden guide\n");
@@ -94,6 +96,7 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
   writeFileSync(join(dir, ".gitignore"), "dist\n");
   writeFileSync(join(dir, "docs", "guide.md"), "# Guide\n\nHello workspace.\n");
   writeFileSync(join(dir, "node_modules", "pkg", "guide.ts"), "export const hidden = true;\n");
+  writeFileSync(join(dir, "src", "component.view"), "component template\n");
   writeFileSync(join(dir, "src", "main.ts"), "export const value = 1;\n");
   const outcome = await initRun(dir);
 
@@ -111,7 +114,9 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
     assert.equal(rootKinds.get("docs"), "directory");
     assert.equal(rootKinds.get("src"), "directory");
     const rootTextSupport = new Map(root.entries.map((entry) => [entry.name, entry.supportedText]));
-    assert.equal(rootTextSupport.get(".env"), false);
+    assert.equal(rootTextSupport.get(".env"), true);
+    assert.equal(rootTextSupport.get("Cargo.lock"), true);
+    assert.equal(rootTextSupport.get("LICENSE"), true);
     assert.equal(rootTextSupport.get(".gitignore"), true);
 
     const docs = getWorkspaceFileList(outcome.runId, { path: "docs" });
@@ -130,10 +135,31 @@ test("workspace file service lists, searches, and reads cwd-relative files", asy
       ["docs/guide.md"],
     );
 
-    assert.throws(
-      () => getWorkspaceFile(outcome.runId, { path: ".env" }),
-      /not a supported text file/,
+    const lockSearch = await getWorkspaceFileSearch(outcome.runId, { query: "Cargo" });
+    assert.deepEqual(
+      lockSearch.matches.map((entry) => [entry.path, entry.supportedText]),
+      [["Cargo.lock", true]],
     );
+
+    const lock = getWorkspaceFile(outcome.runId, { path: "Cargo.lock" });
+    assert.equal(lock.mediaType, "text/plain");
+    assert.equal(lock.markdown, false);
+    assert.equal(lock.text, "# cargo lock\n");
+
+    const license = getWorkspaceFile(outcome.runId, { path: "LICENSE" });
+    assert.equal(license.mediaType, "text/plain");
+    assert.equal(license.markdown, false);
+    assert.equal(license.text, "MIT License\n");
+
+    const env = getWorkspaceFile(outcome.runId, { path: ".env" });
+    assert.equal(env.mediaType, "text/plain");
+    assert.equal(env.markdown, false);
+    assert.equal(env.text, "TOKEN=secret\n");
+
+    const unknown = getWorkspaceFile(outcome.runId, { path: "src/component.view" });
+    assert.equal(unknown.mediaType, "text/plain");
+    assert.equal(unknown.markdown, false);
+    assert.equal(unknown.text, "component template\n");
 
     const file = getWorkspaceFile(outcome.runId, { path: "docs/guide.md" });
     assert.equal(file.mediaType, "text/markdown");
@@ -149,6 +175,8 @@ test("workspace file service rejects traversal, missing paths, outside symlinks,
   writeBundle(dir);
   writeFileSync(join(dir, "binary.bin"), Buffer.from([0x61, 0x00, 0x62]));
   writeFileSync(join(dir, "huge.txt"), `${"x".repeat(MAX_WORKSPACE_FILE_BYTES + 1)}`);
+  writeFileSync(join(dir, "unreadable.txt"), "not readable\n");
+  chmodSync(join(dir, "unreadable.txt"), 0);
   writeFileSync(join(outside, "secret.txt"), "secret\n");
   symlinkSync(join(dir, "missing-target.txt"), join(dir, "broken-link.txt"));
   symlinkSync(join(outside, "secret.txt"), join(dir, "secret-link.txt"));
@@ -174,9 +202,19 @@ test("workspace file service rejects traversal, missing paths, outside symlinks,
     );
     assert.throws(
       () => getWorkspaceFile(outcome.runId, { path: "binary.bin" }),
-      WorkspaceFileError,
+      (err) =>
+        err instanceof WorkspaceFileError &&
+        err.message === 'workspace file "binary.bin" is binary',
     );
     assert.throws(() => getWorkspaceFile(outcome.runId, { path: "huge.txt" }), WorkspaceFileError);
+    if (process.getuid?.() !== 0) {
+      assert.throws(
+        () => getWorkspaceFile(outcome.runId, { path: "unreadable.txt" }),
+        (err) =>
+          err instanceof WorkspaceFileError &&
+          err.message === 'workspace file "unreadable.txt" is not readable',
+      );
+    }
   });
 });
 

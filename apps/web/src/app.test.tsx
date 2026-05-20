@@ -2949,6 +2949,26 @@ describe("web app", () => {
             );
           }
           if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            const filePath = parsed.searchParams.get("path") ?? "";
+            if (filePath === "Dockerfile") {
+              return new Response(
+                JSON.stringify({
+                  file: {
+                    runId: "run-1",
+                    cwd: "/tmp/agent-runner",
+                    path: "Dockerfile",
+                    name: "Dockerfile",
+                    size: 12,
+                    mtimeMs: null,
+                    mediaType: "text/plain",
+                    markdown: false,
+                    text: "FROM node\n",
+                    maxBytes: 1048576,
+                  },
+                }),
+                { status: 200 },
+              );
+            }
             return new Response(
               JSON.stringify({
                 error: {
@@ -2996,6 +3016,15 @@ describe("web app", () => {
                   markdown: false,
                 },
                 {
+                  path: "Dockerfile",
+                  name: "Dockerfile",
+                  kind: "file",
+                  size: 12,
+                  mtimeMs: null,
+                  supportedText: true,
+                  markdown: false,
+                },
+                {
                   path: "README.md",
                   name: "README.md",
                   kind: "file",
@@ -3015,6 +3044,11 @@ describe("web app", () => {
       await rootResponse;
     });
 
+    await user.click(await screen.findByRole("button", { name: /Dockerfile/ }));
+    expect(await screen.findByRole("heading", { name: "Dockerfile" })).toBeInTheDocument();
+    expect(await screen.findByText("FROM node")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Preview" })).not.toBeInTheDocument();
+
     await user.click(await screen.findByRole("button", { name: /README.md/ }));
     expect(await screen.findByText(/workspace file "README.md" is binary/)).toBeInTheDocument();
 
@@ -3030,6 +3064,115 @@ describe("web app", () => {
     await user.clear(searchInput);
     await user.click(screen.getByRole("button", { name: /docs/ }));
     expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
+  });
+
+  it("refreshes the workspace file browser from the Files header", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    let filesRequests = 0;
+    let fileRequests = 0;
+    let searchRequests = 0;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            filesRequests += 1;
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [
+                    {
+                      path: "README.md",
+                      name: "README.md",
+                      kind: "file",
+                      size: 14,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/search") {
+            searchRequests += 1;
+            return new Response(
+              JSON.stringify({
+                search: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  query: parsed.searchParams.get("q") ?? "",
+                  matches: [
+                    {
+                      path: "README.md",
+                      name: "README.md",
+                      kind: "file",
+                      size: 14,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: true,
+                    },
+                  ],
+                  truncated: false,
+                  maxResults: 50,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          if (parsed.pathname === "/api/runs/run-1/workspace/file") {
+            fileRequests += 1;
+            return new Response(
+              JSON.stringify({
+                file: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "README.md",
+                  name: "README.md",
+                  size: 14,
+                  mtimeMs: null,
+                  mediaType: "text/markdown",
+                  markdown: true,
+                  text: "# Workspace\n",
+                  maxBytes: 1048576,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    expect(await screen.findByRole("button", { name: /README.md/ })).toBeInTheDocument();
+    expect(filesRequests).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: /README.md/ }));
+    expect(await screen.findByRole("heading", { name: "README.md" })).toBeInTheDocument();
+    expect(fileRequests).toBe(1);
+
+    await user.type(screen.getByLabelText("Search workspace files"), "readme");
+    await waitFor(() => expect(searchRequests).toBe(1));
+
+    await user.click(screen.getByRole("button", { name: "Refresh workspace files" }));
+    await waitFor(() => expect(filesRequests).toBe(2));
+    expect(searchRequests).toBe(2);
+    expect(fileRequests).toBe(2);
   });
 
   it("navigates workspace files with fullscreen up and down keys while search is focused", async () => {
@@ -3078,6 +3221,15 @@ describe("web app", () => {
                       supportedText: true,
                       markdown: true,
                     },
+                    {
+                      path: "Cargo.lock",
+                      name: "Cargo.lock",
+                      kind: "file",
+                      size: 12,
+                      mtimeMs: null,
+                      supportedText: true,
+                      markdown: false,
+                    },
                   ],
                   truncated: false,
                   maxEntries: 1000,
@@ -3088,6 +3240,7 @@ describe("web app", () => {
           }
           if (parsed.pathname === "/api/runs/run-1/workspace/file") {
             const filePath = parsed.searchParams.get("path") ?? "";
+            const markdown = filePath !== "Cargo.lock";
             return new Response(
               JSON.stringify({
                 file: {
@@ -3095,11 +3248,16 @@ describe("web app", () => {
                   cwd: "/tmp/agent-runner",
                   path: filePath,
                   name: filePath,
-                  size: filePath === "beta.md" ? 15 : 16,
+                  size: filePath === "beta.md" ? 15 : filePath === "Cargo.lock" ? 12 : 16,
                   mtimeMs: null,
-                  mediaType: "text/markdown",
-                  markdown: true,
-                  text: filePath === "beta.md" ? "# Beta\nbeta body" : "# Alpha\nalpha body",
+                  mediaType: markdown ? "text/markdown" : "text/plain",
+                  markdown,
+                  text:
+                    filePath === "beta.md"
+                      ? "# Beta\nbeta body"
+                      : filePath === "Cargo.lock"
+                        ? "# lockfile"
+                        : "# Alpha\nalpha body",
                   maxBytes: 1048576,
                 },
               }),
@@ -3129,8 +3287,11 @@ describe("web app", () => {
     await user.keyboard("{ArrowDown}");
     expect(await screen.findByRole("heading", { name: "beta.md" })).toBeInTheDocument();
 
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("heading", { name: "Cargo.lock" })).toBeInTheDocument();
+
     await user.keyboard("{ArrowUp}");
-    expect(await screen.findByRole("heading", { name: "alpha.md" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "beta.md" })).toBeInTheDocument();
     expect(searchInput).toHaveFocus();
   });
 

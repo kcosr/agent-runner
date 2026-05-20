@@ -207,12 +207,15 @@ The drawer surfaces:
   daemon errors remain visible in the surface.
 - Files surface: cwd-relative workspace browser and bounded search for the
   selected run. The browser includes hidden files and directories, while search
-  skips dependency and VCS directories. Supported text files can be previewed as
-  rendered Markdown or source, selected text/source ranges can seed the shared
-  Create Task dialog, and the dialog shows the exact task body that will be
-  submitted. The surface rejects daemon file errors such as unsupported files,
-  binary files, missing files, and unsafe paths inline instead of falling back to
-  raw filesystem access.
+  skips dependency and VCS directories. Small regular files can be opened for a
+  text preview attempt; Markdown paths render as Markdown or source, while other
+  valid UTF-8 files render as source. Selected text/source ranges can seed the
+  shared Create Task dialog, and the dialog shows the exact task body that will
+  be submitted. The header includes a Refresh workspace files button that
+  re-fetches the active listing, search, and preview. The surface rejects daemon
+  file errors such as binary files, invalid UTF-8, oversized reads, missing
+  files, and unsafe paths inline instead of falling back to raw filesystem
+  access.
 - Attachments surface: preview-only view of the selected run's
   group-scoped attachments. It shows one attachment at a time under the
   selected-run header and tabs, supports previous/next controls, and

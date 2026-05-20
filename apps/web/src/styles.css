@@ -2020,9 +2020,16 @@ body {
   padding: 10px 12px;
 }
 
-.files-browser__header > span {
+.files-browser__header-actions {
+  display: inline-flex;
   flex: 0 0 auto;
-  padding: 10px 12px 10px 0;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px 9px 0;
+}
+
+.files-browser__header-actions > span {
+  white-space: nowrap;
 }
 
 .files-browser__toggle {

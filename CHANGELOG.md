@@ -9,10 +9,13 @@
   including prefixed daemon HTTP routes for pass-through proxies.
   ([#156](https://github.com/kcosr/agent-runner/pull/156))
 - Added daemon workspace file APIs and a web dashboard Files surface for
-  browsing and searching selected-run cwd supported text files, previewing
-  Markdown/source, navigating files in fullscreen, and creating tasks from
-  selected text or source ranges.
+  browsing and searching selected-run cwd files, previewing Markdown/source,
+  navigating files in fullscreen, and creating tasks from selected text or
+  source ranges.
   ([#157](https://github.com/kcosr/agent-runner/pull/157))
+- Dashboard Files surface now exposes a Refresh workspace files button that
+  re-fetches the current directory listing, active search, and selected file
+  preview. ([#159](https://github.com/kcosr/agent-runner/pull/159))
 - Added dashboard task management for manual task creation, pending task
   title/body edits, pending deletes, status changes, and notes replace/append
   actions. ([#157](https://github.com/kcosr/agent-runner/pull/157))
@@ -33,9 +36,15 @@
 - Resume prompts for stopped runs with unfinished tasks now include the
   concrete task list instead of a terse reminder plus a generic continue
   message. ([#157](https://github.com/kcosr/agent-runner/pull/157))
-- Workspace file browsing includes hidden files and common non-secret text
-  dotfiles, while search skips dependency and VCS directories such as
-  `node_modules` and `.git`. ([#157](https://github.com/kcosr/agent-runner/pull/157))
+- Workspace file browsing includes hidden files and directories, while search
+  skips dependency and VCS directories such as `node_modules` and `.git`.
+  ([#157](https://github.com/kcosr/agent-runner/pull/157))
+- Workspace file preview attempts now allow small regular files regardless of
+  filename or extension, with binary, invalid UTF-8, and oversized files failing
+  clearly when opened. Because preview attempts can include sensitive text files
+  such as `.env`, expose the daemon only to trusted clients, bind it to
+  `127.0.0.1`, or enable daemon auth before sharing dashboard access.
+  ([#159](https://github.com/kcosr/agent-runner/pull/159))
 - Generated `plan-feature` and `plan-implement-feature` assignments no longer
   lock the task list with `lockedFields: [tasks]`, so agent-runner workflows
   can add or remove follow-up tasks during implementation when appropriate.

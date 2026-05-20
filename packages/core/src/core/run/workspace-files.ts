@@ -41,38 +41,6 @@ export class WorkspaceFileNotFoundError extends WorkspaceFileError {
   }
 }
 
-const TEXT_EXTENSIONS = new Set([
-  ".cjs",
-  ".css",
-  ".csv",
-  ".html",
-  ".js",
-  ".json",
-  ".jsx",
-  ".md",
-  ".mdx",
-  ".mjs",
-  ".sh",
-  ".text",
-  ".toml",
-  ".ts",
-  ".tsx",
-  ".txt",
-  ".xml",
-  ".yaml",
-  ".yml",
-]);
-
-const TEXT_BASENAMES = new Set([
-  ".babelrc",
-  ".dockerignore",
-  ".editorconfig",
-  ".eslintrc",
-  ".gitignore",
-  ".nvmrc",
-  ".prettierrc",
-]);
-
 const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
 
 function isContainedBy(root: string, target: string): boolean {
@@ -142,14 +110,6 @@ function isMarkdownPath(path: string): boolean {
   return MARKDOWN_EXTENSIONS.has(extname(path).toLowerCase());
 }
 
-function isSupportedTextPath(path: string): boolean {
-  return (
-    isMarkdownPath(path) ||
-    TEXT_EXTENSIONS.has(extname(path).toLowerCase()) ||
-    TEXT_BASENAMES.has(basename(path).toLowerCase())
-  );
-}
-
 function shouldSkipSearchDirectory(name: string): boolean {
   const normalized = name.toLowerCase();
   return (
@@ -190,6 +150,19 @@ function statWorkspacePath(displayPath: string, path: string) {
   }
 }
 
+function readWorkspaceFileBuffer(displayPath: string, path: string): Buffer {
+  try {
+    return readFileSync(path);
+  } catch (err) {
+    if (codeFromError(err) === "ENOENT") {
+      throw new WorkspaceFileNotFoundError(`workspace path "${displayPath}" not found`);
+    }
+    throw new WorkspaceFileError(`workspace file "${displayPath}" is not readable`, {
+      cause: err,
+    });
+  }
+}
+
 async function asyncWorkspaceFs<T>(displayPath: string, action: () => Promise<T>): Promise<T> {
   try {
     return await action();
@@ -211,7 +184,7 @@ function entryFromStats(stats: Stats, displayPath: string): WorkspaceFileEntry {
     kind,
     size: kind === "file" ? stats.size : null,
     mtimeMs: Number.isFinite(stats.mtimeMs) ? stats.mtimeMs : null,
-    supportedText: kind === "file" && isSupportedTextPath(displayPath),
+    supportedText: kind === "file" && stats.isFile() && stats.size <= MAX_WORKSPACE_FILE_BYTES,
     markdown: kind === "file" && isMarkdownPath(displayPath),
   };
 }
@@ -294,9 +267,6 @@ export function readWorkspaceFile(
   input: { path: string },
 ): WorkspaceFileContent {
   const target = resolveWorkspaceTarget(manifest, input.path, { allowRoot: false });
-  if (!isSupportedTextPath(target.path)) {
-    throw new WorkspaceFileError(`workspace file "${target.path}" is not a supported text file`);
-  }
   const stats = statWorkspacePath(target.path, target.realPath);
   if (!stats.isFile()) {
     throw new WorkspaceFileError(`workspace path "${target.path}" is not a file`);
@@ -306,7 +276,7 @@ export function readWorkspaceFile(
       `workspace file "${target.path}" exceeds ${MAX_WORKSPACE_FILE_BYTES} bytes`,
     );
   }
-  const buffer = readFileSync(target.realPath);
+  const buffer = readWorkspaceFileBuffer(target.path, target.realPath);
   const text = decodeUtf8(buffer, target.path);
   const markdown = isMarkdownPath(target.path);
   const mediaType: WorkspaceFileMediaType = markdown ? "text/markdown" : "text/plain";
