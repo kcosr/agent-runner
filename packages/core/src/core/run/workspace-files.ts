@@ -184,7 +184,7 @@ function entryFromStats(stats: Stats, displayPath: string): WorkspaceFileEntry {
     kind,
     size: kind === "file" ? stats.size : null,
     mtimeMs: Number.isFinite(stats.mtimeMs) ? stats.mtimeMs : null,
-    supportedText: kind === "file" && stats.size <= MAX_WORKSPACE_FILE_BYTES,
+    supportedText: kind === "file" && stats.isFile() && stats.size <= MAX_WORKSPACE_FILE_BYTES,
     markdown: kind === "file" && isMarkdownPath(displayPath),
   };
 }
