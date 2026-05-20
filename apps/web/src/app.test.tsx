@@ -3066,6 +3066,48 @@ describe("web app", () => {
     expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
   });
 
+  it("refreshes the workspace file browser from the Files header", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files" });
+    let filesRequests = 0;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url) => {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/files") {
+            filesRequests += 1;
+            return new Response(
+              JSON.stringify({
+                directory: {
+                  runId: "run-1",
+                  cwd: "/tmp/agent-runner",
+                  path: "",
+                  parentPath: null,
+                  entries: [],
+                  truncated: false,
+                  maxEntries: 1000,
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    expect(await screen.findByText("This directory is empty.")).toBeInTheDocument();
+    expect(filesRequests).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: "Refresh workspace files" }));
+    await waitFor(() => expect(filesRequests).toBe(2));
+  });
+
   it("navigates workspace files with fullscreen up and down keys while search is focused", async () => {
     setStoredDashboardViewState({ activeRightSurface: "files" });
     installFetchMock(

@@ -19,7 +19,7 @@ import { useDaemonAuthToken } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { type TaskReference, defaultTaskTitle, languageForPath } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
-import { ChevronIcon, CloseIcon, FileIcon, FolderIcon, SearchIcon } from "./icons.js";
+import { ChevronIcon, CloseIcon, FileIcon, FolderIcon, RefreshIcon, SearchIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
 
 type FileViewMode = "rendered-markdown" | "source";
@@ -198,6 +198,8 @@ export function RunFilesSurface({
   const entriesPending = searchActive ? searchQuery.isPending : directoryQuery.isPending;
   const entriesError = searchActive ? searchQuery.error : directoryQuery.error;
   const selectedFile = fileQuery.data;
+  const workspaceRefreshPending =
+    directoryQuery.isFetching || searchQuery.isFetching || fileQuery.isFetching;
 
   useEffect(() => {
     entriesRef.current = entries;
@@ -354,6 +356,24 @@ export function RunFilesSurface({
     });
   }
 
+  async function refreshWorkspace() {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: runQueryKeys.workspaceFiles(runId, directoryPath),
+      }),
+      searchActive
+        ? queryClient.invalidateQueries({
+            queryKey: runQueryKeys.workspaceSearch(runId, trimmedSearch, 50),
+          })
+        : Promise.resolve(),
+      selectedFilePath
+        ? queryClient.invalidateQueries({
+            queryKey: runQueryKeys.workspaceFile(runId, selectedFilePath),
+          })
+        : Promise.resolve(),
+    ]);
+  }
+
   function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Escape") {
       return;
@@ -443,13 +463,27 @@ export function RunFilesSurface({
               <ChevronIcon aria-hidden="true" />
               <span>{searchActive ? "Search results" : directoryPath || "Workspace"}</span>
             </button>
-            {!browserCollapsed ? (
-              searchActive && searchQuery.data?.truncated ? (
-                <span>Showing first {searchQuery.data.maxResults}</span>
-              ) : directoryQuery.data?.truncated ? (
-                <span>Showing first {directoryQuery.data.maxEntries}</span>
-              ) : null
-            ) : null}
+            <div className="files-browser__header-actions">
+              {!browserCollapsed ? (
+                searchActive && searchQuery.data?.truncated ? (
+                  <span>Showing first {searchQuery.data.maxResults}</span>
+                ) : directoryQuery.data?.truncated ? (
+                  <span>Showing first {directoryQuery.data.maxEntries}</span>
+                ) : null
+              ) : null}
+              <button
+                aria-label="Refresh workspace files"
+                className="icon-btn icon-btn--small"
+                disabled={workspaceRefreshPending}
+                onClick={() => {
+                  void refreshWorkspace();
+                }}
+                title="Refresh workspace files"
+                type="button"
+              >
+                <RefreshIcon aria-hidden="true" />
+              </button>
+            </div>
           </div>
           {!browserCollapsed ? (
             <>
