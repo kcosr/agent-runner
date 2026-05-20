@@ -34,6 +34,7 @@ import type {
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
 import type { ReconfigureRunPatch } from "../contracts/runs.js";
+import type { WorkspaceDiff, WorkspaceDiffInput } from "../contracts/workspace-diffs.js";
 import type {
   WorkspaceFileContent,
   WorkspaceFileDirectory,
@@ -102,6 +103,7 @@ import { readRunAuditHistory } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import type { ScheduleInput } from "../core/run/schedule.js";
 import { resolveStaticInputSurface } from "../core/run/static-input-surface.js";
+import { getWorkspaceDiffForRun } from "../core/run/workspace-diffs.js";
 import {
   listWorkspaceFiles,
   readWorkspaceFile,
@@ -474,6 +476,15 @@ export function getWorkspaceFileSearch(
 export function getWorkspaceFile(target: string, input: { path: string }): WorkspaceFileContent {
   const { manifest } = resolveResumeTarget(target);
   return readWorkspaceFile(manifest, input);
+}
+
+export function getWorkspaceDiff(
+  target: string,
+  input: WorkspaceDiffInput,
+): Promise<WorkspaceDiff> {
+  const detail = readStatus(target);
+  const { manifest } = resolveResumeTarget(detail.workspaceDir);
+  return getWorkspaceDiffForRun(manifest, input);
 }
 
 export function getDefinitionList(

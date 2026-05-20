@@ -66,6 +66,7 @@ import {
   TrashIcon,
 } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
+import { RunDiffsSurface } from "./run-diffs-surface.js";
 import { RunFilesSurface } from "./run-files-surface.js";
 import { RunNoteEditor } from "./run-note-editor.js";
 import { RunTaskList } from "./run-task-list.js";
@@ -97,6 +98,7 @@ const SELECTED_RUN_SURFACE_TABS: readonly SelectedRunSurfaceTab[] = [
   { label: "Detail", shortcut: "D", surface: "detail" },
   { label: "Notes", shortcut: "N", surface: "notes" },
   { label: "Tasks", shortcut: "T", surface: "tasks" },
+  { label: "Diffs", shortcut: "I", surface: "diffs" },
   { label: "Files", shortcut: "F", surface: "files" },
   { label: "Attachments", shortcut: "A", surface: "attachments" },
 ];
@@ -1912,6 +1914,15 @@ export function RunDetailDrawer({
             runId={run.runId}
             taskCreationUnavailableReason={taskCreationUnavailableReason(run)}
           />
+        </div>
+        <div className="drawer-body" hidden={activeSurface !== "diffs"}>
+          {activeSurface === "diffs" ? (
+            <RunDiffsSurface
+              canCreateTask={run.capabilities.taskMutation.canAdd}
+              onTaskCreated={(taskId) => onNotify(`Created task ${taskId}.`, "success")}
+              runId={run.runId}
+            />
+          ) : null}
         </div>
         <div className="drawer-body drawer-body--notes" hidden={activeSurface !== "notes"}>
           <section aria-label="Notes" className="drawer-panel drawer-panel--notes">

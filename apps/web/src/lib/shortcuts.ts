@@ -16,6 +16,7 @@ type RunsShortcutCommand =
   | "run.showAttachments"
   | "run.showChat"
   | "run.showDetail"
+  | "run.showDiffs"
   | "run.showFiles"
   | "run.showNotes"
   | "run.showTasks"
@@ -203,6 +204,7 @@ function resolveRunSurfaceShortcut(
   | "run.showAttachments"
   | "run.showChat"
   | "run.showDetail"
+  | "run.showDiffs"
   | "run.showFiles"
   | "run.showNotes"
   | "run.showTasks"
@@ -224,6 +226,9 @@ function resolveRunSurfaceShortcut(
   }
   if (matchesShortcut(event, { key: "d" })) {
     return "run.showDetail";
+  }
+  if (matchesShortcut(event, { key: "i" })) {
+    return "run.showDiffs";
   }
   if (matchesShortcut(event, { key: "f" })) {
     return "run.showFiles";

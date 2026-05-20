@@ -31,6 +31,10 @@ import {
 } from "@kcosr/agent-runner-core/core/run/run-loop.js";
 import { ScheduleValidationError } from "@kcosr/agent-runner-core/core/run/schedule.js";
 import {
+  WorkspaceDiffError,
+  WorkspaceDiffInvalidRequestError,
+} from "@kcosr/agent-runner-core/core/run/workspace-diffs.js";
+import {
   WorkspaceFileError,
   WorkspaceFileInvalidPathError,
   WorkspaceFileNotFoundError,
@@ -65,6 +69,7 @@ export function isKnownControlPlaneError(err: unknown): boolean {
   return (
     err instanceof RequestValidationError ||
     err instanceof AttachmentError ||
+    err instanceof WorkspaceDiffError ||
     err instanceof WorkspaceFileError ||
     err instanceof CommandError ||
     err instanceof ConflictError ||
@@ -102,7 +107,10 @@ export function toHttpError(err: unknown): HttpError {
   if (err instanceof RequestValidationError) {
     return new HttpError(400, "INVALID_REQUEST", err.message, err);
   }
-  if (err instanceof WorkspaceFileInvalidPathError) {
+  if (
+    err instanceof WorkspaceFileInvalidPathError ||
+    err instanceof WorkspaceDiffInvalidRequestError
+  ) {
     return new HttpError(400, "INVALID_REQUEST", err.message, err);
   }
   if (

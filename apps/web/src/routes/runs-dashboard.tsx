@@ -453,6 +453,12 @@ export function RunsDashboardRoute() {
         return;
       }
 
+      if (command === "run.showDiffs") {
+        event.preventDefault();
+        currentState.setActiveRightSurface("diffs");
+        return;
+      }
+
       if (command === "run.showFiles") {
         event.preventDefault();
         if (currentState.activeRightSurface === "files") {

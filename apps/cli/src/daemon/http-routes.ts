@@ -8,6 +8,7 @@ import type {
   RunSummaryStreamEvent,
   RunTimelineEnvelope,
 } from "@kcosr/agent-runner-core/contracts/events.js";
+import type { WorkspaceDiffInput } from "@kcosr/agent-runner-core/contracts/workspace-diffs.js";
 import { startDebugPerfTimer } from "@kcosr/agent-runner-core/util/debug-perf.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
@@ -204,6 +205,20 @@ const routes: RouteDefinition[] = [
         ctx.operations.listWorkspaceFiles(routeParam(params, "runId"), {
           path: optionalQueryString(url.searchParams.get("path")),
         }),
+      );
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "workspace", "diff"],
+    handler: async (_req, res, ctx, params, url) => {
+      sendJson(
+        res,
+        200,
+        await ctx.operations.getWorkspaceDiff(
+          routeParam(params, "runId"),
+          parseWorkspaceDiffQuery(url.searchParams),
+        ),
       );
     },
   },
@@ -956,4 +971,52 @@ function requiredNonEmptyQueryString(value: string | null, label: string): strin
     throw new RequestValidationError(`${label} cannot be empty`);
   }
   return value;
+}
+
+function unsupportedQueryParams(
+  searchParams: URLSearchParams,
+  allowed: readonly string[],
+): string[] {
+  const allowedSet = new Set(allowed);
+  return [...searchParams.keys()].filter((key) => !allowedSet.has(key));
+}
+
+function parseWorkspaceDiffQuery(searchParams: URLSearchParams): WorkspaceDiffInput {
+  const mode = searchParams.get("mode");
+  if (mode === "working-tree") {
+    const unsupported = unsupportedQueryParams(searchParams, ["mode"]);
+    if (unsupported.length > 0) {
+      throw new RequestValidationError(
+        `working-tree diff does not support query parameter "${unsupported[0]}"`,
+      );
+    }
+    return { mode };
+  }
+  if (mode === "branch") {
+    const unsupported = unsupportedQueryParams(searchParams, [
+      "mode",
+      "base",
+      "head",
+      "comparison",
+    ]);
+    if (unsupported.length > 0) {
+      throw new RequestValidationError(
+        `branch diff does not support query parameter "${unsupported[0]}"`,
+      );
+    }
+    const comparison = searchParams.get("comparison");
+    if (comparison !== "merge-base" && comparison !== "direct") {
+      throw new RequestValidationError("comparison must be one of: merge-base, direct");
+    }
+    return {
+      mode,
+      base: requiredNonEmptyQueryString(searchParams.get("base"), "base"),
+      head: requiredNonEmptyQueryString(searchParams.get("head"), "head"),
+      comparison,
+    };
+  }
+  if (mode === null) {
+    throw new RequestValidationError("mode is required");
+  }
+  throw new RequestValidationError("mode must be one of: branch, working-tree");
 }

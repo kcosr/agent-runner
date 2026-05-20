@@ -35,6 +35,22 @@ vi.mock("mermaid", () => ({
   },
 }));
 
+vi.mock("@pierre/trees/react", () => ({
+  FileTree: () => null,
+  useFileTree: () => ({
+    model: {
+      getItem: () => ({ select: () => {} }),
+      scrollToPath: () => {},
+    },
+  }),
+  useFileTreeSearch: () => ({
+    open: () => {},
+    setValue: () => {},
+    value: "",
+  }),
+  useFileTreeSelection: () => [],
+}));
+
 const APP_CONFIG = {
   apiBasePath: "/api",
   webBasePath: "/",
@@ -65,7 +81,7 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   viewMode: "board" | "list";
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  activeRightSurface: "attachments" | "chat" | "detail" | "files" | "notes" | "tasks";
+  activeRightSurface: "attachments" | "chat" | "detail" | "diffs" | "files" | "notes" | "tasks";
   drawerFullscreen: boolean;
 } = {
   viewMode: "board",
@@ -103,6 +119,14 @@ class MockEventSource {
   emitOpen() {
     this.onopen?.(new Event("open"));
   }
+}
+
+class MockResizeObserver {
+  disconnect() {}
+
+  observe() {}
+
+  unobserve() {}
 }
 
 function setStoredDashboardPreferences(overrides: Partial<typeof DEFAULT_DASHBOARD_PREFERENCES>) {
@@ -1658,6 +1682,33 @@ function fetchMutationUrls(fetchMock: ReturnType<typeof installFetchMock>) {
     .map(([url]) => String(url));
 }
 
+function makeWorkspaceDiff(overrides: Record<string, unknown> = {}) {
+  return {
+    runId: "run-1",
+    cwd: "/tmp/agent-runner",
+    repoRoot: "/tmp/agent-runner",
+    mode: "branch",
+    baseRef: "main",
+    headRef: "HEAD",
+    comparison: "merge-base",
+    displayRange: "main...HEAD",
+    files: [
+      {
+        path: "src/app.ts",
+        status: "binary",
+        additions: null,
+        deletions: null,
+        binary: true,
+      },
+    ],
+    stats: { files: 1, additions: 0, deletions: 0 },
+    patch: "",
+    truncated: false,
+    maxBytes: 524288,
+    ...overrides,
+  };
+}
+
 function getRunActionMenuElement() {
   const menu = document.querySelector(".run-action-menu");
   expect(menu).toBeInTheDocument();
@@ -1871,10 +1922,18 @@ describe("web app", () => {
     initializeMermaid.mockClear();
     renderMermaid.mockClear();
     vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
     vi.stubGlobal("scrollTo", vi.fn());
+    HTMLElement.prototype.scrollTo = vi.fn();
     vi.stubGlobal("CSS", {
       escape: (value: string) => value.replace(/["\\]/g, "\\$&"),
     } satisfies Pick<typeof CSS, "escape">);
+    if (window.CSSStyleSheet && !CSSStyleSheet.prototype.replaceSync) {
+      Object.defineProperty(CSSStyleSheet.prototype, "replaceSync", {
+        configurable: true,
+        value: vi.fn(),
+      });
+    }
   });
 
   afterEach(async () => {
@@ -2798,7 +2857,7 @@ describe("web app", () => {
       within(tablist)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Chat", "Detail", "Notes", "Tasks", "Files", "Attachments"]);
+    ).toEqual(["Chat", "Detail", "Notes", "Tasks", "Diffs", "Files", "Attachments"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
     expect(notesTab).toHaveAttribute("aria-selected", "false");
@@ -2844,6 +2903,7 @@ describe("web app", () => {
     const notesTab = within(tablist).getByRole("tab", { name: "Notes" });
     const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
     const filesTab = within(tablist).getByRole("tab", { name: "Files" });
+    const diffsTab = within(tablist).getByRole("tab", { name: "Diffs" });
     expect(detailTab).toHaveAttribute("aria-selected", "true");
 
     await user.keyboard("c");
@@ -2898,6 +2958,149 @@ describe("web app", () => {
     await user.keyboard("f");
     expect(filesTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Files")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "i" });
+    expect(diffsTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Diffs")).toBeInTheDocument();
+  });
+
+  it("renders the Diffs surface, restores it, switches comparisons, and refreshes", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    const diffRequests: string[] = [];
+    const fetchMock = installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            diffRequests.push(parsed.search);
+            const mode = parsed.searchParams.get("mode");
+            const comparison = parsed.searchParams.get("comparison");
+            const diff =
+              mode === "working-tree"
+                ? makeWorkspaceDiff({
+                    mode: "working-tree",
+                    baseRef: null,
+                    headRef: null,
+                    comparison: null,
+                    displayRange: "Working tree",
+                  })
+                : makeWorkspaceDiff({
+                    comparison,
+                    displayRange: comparison === "direct" ? "main..HEAD" : "main...HEAD",
+                  });
+            return new Response(JSON.stringify({ diff }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    expect(within(tablist).getByRole("tab", { name: "Diffs" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(await screen.findByLabelText("Diffs")).toBeInTheDocument();
+    expect((await screen.findAllByText("src/app.ts")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("main...HEAD").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("tab", { name: "main..HEAD" }));
+    await waitFor(() => {
+      expect(diffRequests).toContain("?mode=branch&base=main&head=HEAD&comparison=direct");
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Working tree" }));
+    await waitFor(() => {
+      expect(diffRequests).toContain("?mode=working-tree");
+    });
+
+    const beforeRefresh = fetchCallCount(fetchMock, (url) => url.includes("/workspace/diff"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh workspace diff" }));
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.includes("/workspace/diff"))).toBeGreaterThan(
+        beforeRefresh,
+      );
+    });
+  });
+
+  it("shows Diffs loading, empty, error, and truncated states", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let resolveDiff: (response: Response) => void = () => {};
+    const pendingDiff = new Promise<Response>((resolve) => {
+      resolveDiff = resolve;
+    });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return pendingDiff;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+    expect(await screen.findByText("Loading diff...")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveDiff(
+        new Response(
+          JSON.stringify({
+            diff: makeWorkspaceDiff({
+              files: [],
+              stats: { files: 0, additions: 0, deletions: 0 },
+              patch: "",
+              truncated: true,
+            }),
+          }),
+          { status: 200 },
+        ),
+      );
+      await pendingDiff;
+    });
+
+    expect(await screen.findByText("No changes in this comparison.")).toBeInTheDocument();
+    expect(screen.getByText("Patch output was truncated at 512 KB.")).toBeInTheDocument();
+
+    cleanup();
+    queryClient.clear();
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(
+              JSON.stringify({
+                error: { code: "INVALID_COMMAND", message: 'missing git base ref "main"' },
+              }),
+              { status: 422 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+    expect(await screen.findByText('missing git base ref "main"')).toBeInTheDocument();
   });
 
   it("renders the Files surface with loading, empty, error, and accessible controls", async () => {

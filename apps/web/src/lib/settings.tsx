@@ -59,7 +59,14 @@ export interface AttachmentPreviewSelection {
   attachmentOwnerRunId: string;
 }
 
-export type DashboardRightSurface = "attachments" | "chat" | "detail" | "files" | "notes" | "tasks";
+export type DashboardRightSurface =
+  | "attachments"
+  | "chat"
+  | "detail"
+  | "diffs"
+  | "files"
+  | "notes"
+  | "tasks";
 export type DashboardViewMode = "board" | "list";
 
 export interface DashboardViewState {
@@ -295,6 +302,7 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
     activeRightSurface:
       record.activeRightSurface === "attachments" ||
       record.activeRightSurface === "detail" ||
+      record.activeRightSurface === "diffs" ||
       record.activeRightSurface === "files" ||
       record.activeRightSurface === "chat" ||
       record.activeRightSurface === "notes" ||
