@@ -46,7 +46,7 @@ import {
 } from "../lib/settings.js";
 import { type TaskReference, defaultTaskTitle } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
-import { ChevronIcon, CloseIcon, RefreshIcon, SearchIcon } from "./icons.js";
+import { ChevronIcon, CloseIcon, RefreshIcon, SearchIcon, WrapTextIcon } from "./icons.js";
 
 type DiffComparisonMode = "merge-base" | "direct";
 type DiffViewMode = "unified" | "split";
@@ -202,8 +202,13 @@ export function RunDiffsSurface({
   const [browserCollapsed, setBrowserCollapsed] = useState(false);
   const [mobileLayout, setMobileLayout] = useState(false);
   const viewMode: DiffViewMode = viewState.diffsViewMode;
+  const wordWrap = viewState.diffsWordWrap;
   const setViewMode = useCallback(
     (mode: DiffViewMode) => updateViewState({ diffsViewMode: mode }),
+    [updateViewState],
+  );
+  const setWordWrap = useCallback(
+    (enabled: boolean) => updateViewState({ diffsWordWrap: enabled }),
     [updateViewState],
   );
   const [collapsedDiffItemIds, setCollapsedDiffItemIds] = useState<ReadonlySet<string>>(
@@ -745,12 +750,30 @@ export function RunDiffsSurface({
               ) : null}
               <div className="diffs-view-actions">
                 <button
-                  className="btn btn-compact"
+                  aria-label={allDiffItemsCollapsed ? "Expand all files" : "Collapse all files"}
+                  className={
+                    allDiffItemsCollapsed
+                      ? "icon-btn icon-btn--small diffs-collapse-all-toggle diffs-collapse-all-toggle--collapsed"
+                      : "icon-btn icon-btn--small diffs-collapse-all-toggle"
+                  }
                   disabled={codeViewItems.length === 0}
                   onClick={toggleAllDiffItemsCollapsed}
+                  title={allDiffItemsCollapsed ? "Expand all files" : "Collapse all files"}
                   type="button"
                 >
-                  {allDiffItemsCollapsed ? "Expand all" : "Collapse all"}
+                  <ChevronIcon aria-hidden="true" />
+                </button>
+                <button
+                  aria-label={wordWrap ? "Disable word wrap" : "Enable word wrap"}
+                  aria-pressed={wordWrap}
+                  className={
+                    wordWrap ? "icon-btn icon-btn--small active" : "icon-btn icon-btn--small"
+                  }
+                  onClick={() => setWordWrap(!wordWrap)}
+                  title={wordWrap ? "Disable word wrap" : "Enable word wrap"}
+                  type="button"
+                >
+                  <WrapTextIcon aria-hidden="true" />
                 </button>
                 <div className="task-tabs" role="tablist" aria-label="Diff view mode">
                   <button
@@ -790,7 +813,7 @@ export function RunDiffsSurface({
                   diffStyle: viewMode,
                   enableLineSelection: true,
                   hunkSeparators: "line-info-basic",
-                  overflow: "wrap",
+                  overflow: wordWrap ? "wrap" : "scroll",
                   stickyHeaders: true,
                   theme: { dark: "pierre-dark", light: "pierre-light" },
                   themeType,

@@ -103,7 +103,8 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Switch to Info",
       },
       {
-        description: "Show the selected run's Diffs tab, or focus changed-file search when Diffs is open.",
+        description:
+          "Show the selected run's Diffs tab, or focus changed-file search when Diffs is open.",
         keys: ["D"],
         title: "Switch to Diffs",
       },

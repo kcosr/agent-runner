@@ -50,7 +50,7 @@ vi.mock("@pierre/diffs/react", async () => {
     {
       className?: string;
       items?: readonly MockCodeViewItem[];
-      options?: { diffStyle?: "unified" | "split" };
+      options?: { diffStyle?: "unified" | "split"; overflow?: "scroll" | "wrap" };
       onSelectedLinesChange?: (
         selection: {
           id: string;
@@ -79,6 +79,7 @@ vi.mock("@pierre/diffs/react", async () => {
         aria-label="Code diff"
         className={className}
         data-diff-style={options?.diffStyle ?? "unified"}
+        data-overflow={options?.overflow ?? "scroll"}
         data-code-view-version={items[0]?.version ?? 0}
       >
         {items.map((item) => {
@@ -163,6 +164,7 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   diffsSidebarWidth: number;
   filesSidebarWidth: number;
   diffsViewMode: "unified" | "split";
+  diffsWordWrap: boolean;
 } = {
   viewMode: "board",
   collapsedColumnKeys: [],
@@ -172,6 +174,7 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   diffsSidebarWidth: 272,
   filesSidebarWidth: 240,
   diffsViewMode: "unified",
+  diffsWordWrap: true,
 };
 
 class MockEventSource {
@@ -3166,14 +3169,14 @@ describe("web app", () => {
       );
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
-    expect(screen.getByRole("button", { name: "Expand all" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all files" }));
+    expect(screen.getByRole("button", { name: "Expand all files" })).toBeInTheDocument();
     expect(
       screen.getByLabelText("Code diff").querySelectorAll('[data-collapsed="true"]').length,
     ).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
-    expect(screen.getByRole("button", { name: "Collapse all" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand all files" }));
+    expect(screen.getByRole("button", { name: "Collapse all files" })).toBeInTheDocument();
     expect(
       screen.getByLabelText("Code diff").querySelectorAll('[data-collapsed="true"]'),
     ).toHaveLength(0);
@@ -3284,6 +3287,7 @@ describe("web app", () => {
 
     const codeDiff = await screen.findByLabelText("Code diff");
     expect(codeDiff).toHaveAttribute("data-diff-style", "split");
+    expect(codeDiff).toHaveAttribute("data-overflow", "wrap");
     expect(screen.getByRole("tab", { name: "Split" })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.click(screen.getByRole("tab", { name: "Unified" }));
@@ -3294,6 +3298,19 @@ describe("web app", () => {
       window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
     );
     expect(stored.diffsViewMode).toBe("unified");
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable word wrap" }));
+    await waitFor(() => {
+      expect(codeDiff).toHaveAttribute("data-overflow", "scroll");
+    });
+    expect(screen.getByRole("button", { name: "Enable word wrap" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    const storedAfterWordWrap = JSON.parse(
+      window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
+    );
+    expect(storedAfterWordWrap.diffsWordWrap).toBe(false);
   });
 
   it("bumps the CodeView version when Collapse all is toggled", async () => {
@@ -3321,7 +3338,7 @@ describe("web app", () => {
     const firstItem = codeDiff.querySelector("[data-collapsed]");
     expect(firstItem).toHaveAttribute("data-collapsed", "false");
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all files" }));
     await waitFor(() => {
       expect(Number(codeDiff.getAttribute("data-code-view-version"))).toBeGreaterThan(
         initialVersion,
@@ -3330,7 +3347,7 @@ describe("web app", () => {
     expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "true");
 
     const collapsedVersion = Number(codeDiff.getAttribute("data-code-view-version"));
-    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand all files" }));
     await waitFor(() => {
       expect(Number(codeDiff.getAttribute("data-code-view-version"))).toBeGreaterThan(
         collapsedVersion,
@@ -9747,6 +9764,7 @@ describe("web app", () => {
       diffsSidebarWidth: 272,
       filesSidebarWidth: 240,
       diffsViewMode: "unified",
+      diffsWordWrap: true,
     });
 
     cleanup();
@@ -12965,6 +12983,7 @@ describe("web app", () => {
         diffsSidebarWidth: 272,
         filesSidebarWidth: 240,
         diffsViewMode: "unified",
+        diffsWordWrap: true,
       }),
     );
     expect(
@@ -12987,6 +13006,7 @@ describe("web app", () => {
         diffsSidebarWidth: 272,
         filesSidebarWidth: 240,
         diffsViewMode: "unified",
+        diffsWordWrap: true,
       }),
     );
     expect(

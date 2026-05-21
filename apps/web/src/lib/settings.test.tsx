@@ -206,6 +206,7 @@ describe("DashboardSettingsProvider", () => {
         diffsSidebarWidth: 272,
         filesSidebarWidth: 240,
         diffsViewMode: "unified",
+        diffsWordWrap: true,
       }),
     );
   });
@@ -517,6 +518,7 @@ describe("DashboardSettingsProvider", () => {
         diffsSidebarWidth: 272,
         filesSidebarWidth: 240,
         diffsViewMode: "unified",
+        diffsWordWrap: true,
       }),
     );
   });

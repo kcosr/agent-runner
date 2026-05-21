@@ -82,6 +82,7 @@ export interface DashboardViewState {
   diffsSidebarWidth: number;
   filesSidebarWidth: number;
   diffsViewMode: DiffsViewMode;
+  diffsWordWrap: boolean;
 }
 
 export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
@@ -126,6 +127,7 @@ const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
   diffsSidebarWidth: DIFFS_SIDEBAR_WIDTH_DEFAULT,
   filesSidebarWidth: FILES_SIDEBAR_WIDTH_DEFAULT,
   diffsViewMode: "unified",
+  diffsWordWrap: true,
 };
 
 function clampDrawerWidth(value: number): number {
@@ -356,6 +358,10 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
       record.diffsViewMode === "unified" || record.diffsViewMode === "split"
         ? record.diffsViewMode
         : DEFAULT_DASHBOARD_VIEW_STATE.diffsViewMode,
+    diffsWordWrap:
+      typeof record.diffsWordWrap === "boolean"
+        ? record.diffsWordWrap
+        : DEFAULT_DASHBOARD_VIEW_STATE.diffsWordWrap,
   };
 }
 
@@ -412,6 +418,7 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
         diffsSidebarWidth: viewState.diffsSidebarWidth,
         filesSidebarWidth: viewState.filesSidebarWidth,
         diffsViewMode: viewState.diffsViewMode,
+        diffsWordWrap: viewState.diffsWordWrap,
       }),
     );
   }, [
@@ -419,6 +426,7 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
     viewState.collapsedColumnKeys,
     viewState.diffsSidebarWidth,
     viewState.diffsViewMode,
+    viewState.diffsWordWrap,
     viewState.drawerFullscreen,
     viewState.drawerWidth,
     viewState.filesSidebarWidth,

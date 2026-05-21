@@ -2246,6 +2246,14 @@ body {
   margin-left: auto;
 }
 
+.diffs-collapse-all-toggle svg {
+  transition: transform 120ms ease;
+}
+
+.diffs-collapse-all-toggle--collapsed svg {
+  transform: rotate(-90deg);
+}
+
 .diffs-file-collapse {
   display: inline-flex;
   width: 24px;
