@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   type MouseEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -15,7 +16,14 @@ import { createApiClient } from "../lib/api-client.js";
 import { formatBytes } from "../lib/format.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import { useDaemonAuthToken } from "../lib/settings.js";
+import {
+  FILES_SIDEBAR_WIDTH_DEFAULT,
+  WORKSPACE_SIDEBAR_WIDTH_MAX,
+  WORKSPACE_SIDEBAR_WIDTH_MIN,
+  clampWorkspaceSidebarWidth,
+  useDaemonAuthToken,
+  useDashboardViewState,
+} from "../lib/settings.js";
 import { isEditableEventTarget, isEditableKeyboardEvent } from "../lib/shortcuts.js";
 import { type TaskReference, defaultTaskTitle, languageForPath } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
@@ -98,7 +106,13 @@ export function RunFilesSurface({
 }) {
   const config = useRuntimeConfig();
   const { daemonToken } = useDaemonAuthToken();
+  const { viewState, updateViewState } = useDashboardViewState();
   const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
+  const persistedSidebarWidth = viewState.filesSidebarWidth;
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const [draggingWidth, setDraggingWidth] = useState<number | null>(null);
+  const sidebarWidth = draggingWidth ?? persistedSidebarWidth;
+  const resizing = draggingWidth !== null;
   const [directoryPath, setDirectoryPath] = useState("");
   const [searchDraft, setSearchDraft] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -449,11 +463,82 @@ export function RunFilesSurface({
     window.getSelection()?.removeAllRanges();
   }
 
+  function handleResizerPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    const layout = layoutRef.current;
+    if (!layout) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const layoutLeft = layout.getBoundingClientRect().left;
+
+    function clamp(clientX: number) {
+      return clampWorkspaceSidebarWidth(clientX - layoutLeft, FILES_SIDEBAR_WIDTH_DEFAULT);
+    }
+
+    setDraggingWidth(clamp(event.clientX));
+
+    function handleMove(moveEvent: PointerEvent) {
+      setDraggingWidth(clamp(moveEvent.clientX));
+    }
+
+    function handleEnd(endEvent: PointerEvent) {
+      const next = clamp(endEvent.clientX);
+      setDraggingWidth(null);
+      updateViewState({ filesSidebarWidth: next });
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleCancel);
+    }
+
+    function handleCancel() {
+      setDraggingWidth(null);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleCancel);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleCancel);
+  }
+
+  function handleResizerKeyDownLocal(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const step = event.shiftKey ? 48 : 16;
+    const delta = event.key === "ArrowLeft" ? -step : step;
+    updateViewState({
+      filesSidebarWidth: clampWorkspaceSidebarWidth(
+        sidebarWidth + delta,
+        FILES_SIDEBAR_WIDTH_DEFAULT,
+      ),
+    });
+  }
+
+  const showResizer = !browserCollapsed && !mobileLayout;
+
   return (
     <section aria-label="Files" className="drawer-panel drawer-panel--files" ref={rootRef}>
       <div
-        className={
-          browserCollapsed ? "files-layout files-layout--browser-collapsed" : "files-layout"
+        className={[
+          "files-layout",
+          browserCollapsed ? "files-layout--browser-collapsed" : null,
+          resizing ? "files-layout--resizing" : null,
+          showResizer ? "files-layout--with-resizer" : null,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        ref={layoutRef}
+        style={
+          showResizer
+            ? ({ "--files-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties)
+            : undefined
         }
       >
         <div className="files-browser-shell">
@@ -562,6 +647,20 @@ export function RunFilesSurface({
             </>
           ) : null}
         </div>
+        {showResizer ? (
+          <div
+            aria-label="Resize workspace files sidebar"
+            aria-orientation="vertical"
+            aria-valuemax={WORKSPACE_SIDEBAR_WIDTH_MAX}
+            aria-valuemin={WORKSPACE_SIDEBAR_WIDTH_MIN}
+            aria-valuenow={sidebarWidth}
+            className="workspace-sidebar-resizer"
+            onKeyDown={handleResizerKeyDownLocal}
+            onPointerDown={handleResizerPointerDown}
+            role="separator"
+            tabIndex={0}
+          />
+        ) : null}
         <div className="files-viewer" aria-label="File preview">
           {!selectedFilePath ? <p className="task-empty">Select a text or Markdown file.</p> : null}
           {selectedFilePath && fileQuery.isPending ? (

@@ -20,15 +20,32 @@ import {
   useFileTreeSelection,
 } from "@pierre/trees/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes } from "../lib/format.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import { useDaemonAuthToken, useDashboardPreferences } from "../lib/settings.js";
+import {
+  DIFFS_SIDEBAR_WIDTH_DEFAULT,
+  WORKSPACE_SIDEBAR_WIDTH_MAX,
+  WORKSPACE_SIDEBAR_WIDTH_MIN,
+  clampWorkspaceSidebarWidth,
+  useDaemonAuthToken,
+  useDashboardPreferences,
+  useDashboardViewState,
+} from "../lib/settings.js";
 import { type TaskReference, defaultTaskTitle } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
-import { CloseIcon, RefreshIcon, SearchIcon } from "./icons.js";
+import { ChevronIcon, CloseIcon, RefreshIcon, SearchIcon } from "./icons.js";
 
 type DiffComparisonMode = "merge-base" | "direct" | "working-tree";
 type DiffViewMode = "unified" | "split";
@@ -48,6 +65,14 @@ interface RunDiffsSurfaceProps {
 
 const DEFAULT_BASE_REF = "main";
 const DEFAULT_HEAD_REF = "HEAD";
+
+function hashCodeViewVersion(input: string): number {
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (Math.imul(hash, 31) + input.charCodeAt(index)) | 0;
+  }
+  return hash >>> 0;
+}
 
 function inputForMode(
   mode: DiffComparisonMode,
@@ -141,17 +166,30 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   const config = useRuntimeConfig();
   const { daemonToken } = useDaemonAuthToken();
   const { preferences } = useDashboardPreferences();
+  const { viewState, updateViewState } = useDashboardViewState();
   const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
   const [comparisonMode, setComparisonMode] = useState<DiffComparisonMode>("merge-base");
   const [branchRefs, setBranchRefs] = useState({ base: DEFAULT_BASE_REF, head: DEFAULT_HEAD_REF });
   const [baseDraft, setBaseDraft] = useState(DEFAULT_BASE_REF);
   const [headDraft, setHeadDraft] = useState(DEFAULT_HEAD_REF);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<DiffViewMode>("unified");
-  const [allDiffItemsCollapsed, setAllDiffItemsCollapsed] = useState(false);
+  const viewMode: DiffViewMode = viewState.diffsViewMode;
+  const setViewMode = useCallback(
+    (mode: DiffViewMode) => updateViewState({ diffsViewMode: mode }),
+    [updateViewState],
+  );
+  const [collapsedDiffItemIds, setCollapsedDiffItemIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [codeViewItemsVersion, setCodeViewItemsVersion] = useState(0);
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
   const codeViewRef = useRef<CodeViewHandle<undefined> | null>(null);
+  const persistedSidebarWidth = viewState.diffsSidebarWidth;
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const [draggingWidth, setDraggingWidth] = useState<number | null>(null);
+  const sidebarWidth = draggingWidth ?? persistedSidebarWidth;
+  const resizing = draggingWidth !== null;
   const activeInput = useMemo(
     () => inputForMode(comparisonMode, branchRefs),
     [branchRefs, comparisonMode],
@@ -208,12 +246,32 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
     () => parsedDiffItems.map((entry) => entry.item),
     [parsedDiffItems],
   );
+  const codeViewItemIds = useMemo(() => codeViewItems.map((item) => item.id), [codeViewItems]);
+  const allDiffItemsCollapsed =
+    codeViewItemIds.length > 0 && codeViewItemIds.every((id) => collapsedDiffItemIds.has(id));
+  const codeViewContentVersionKey = diff ? `${diff.displayRange}\0${diff.patch}` : "";
+  const codeViewContentVersion = useMemo(
+    () => hashCodeViewVersion(codeViewContentVersionKey),
+    [codeViewContentVersionKey],
+  );
+  useEffect(() => {
+    const validIds = new Set(codeViewItemIds);
+    setCollapsedDiffItemIds((current) => {
+      const next = new Set([...current].filter((id) => validIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [codeViewItemIds]);
   const displayedCodeViewItems = useMemo(
     () =>
       codeViewItems.map(
-        (item): CodeViewItem => ({ ...item, collapsed: allDiffItemsCollapsed }) as CodeViewItem,
+        (item): CodeViewItem =>
+          ({
+            ...item,
+            collapsed: collapsedDiffItemIds.has(item.id),
+            version: codeViewContentVersion + codeViewItemsVersion,
+          }) as CodeViewItem,
       ),
-    [allDiffItemsCollapsed, codeViewItems],
+    [codeViewContentVersion, codeViewItems, codeViewItemsVersion, collapsedDiffItemIds],
   );
   const codeViewItemByPath = useMemo(() => {
     const entries = new Map<string, string>();
@@ -351,11 +409,89 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   }
 
   function toggleAllDiffItemsCollapsed() {
-    setAllDiffItemsCollapsed((collapsed) => {
-      if (!collapsed) {
+    setCollapsedDiffItemIds((current) => {
+      const nextCollapsed = !(
+        codeViewItemIds.length > 0 && codeViewItemIds.every((id) => current.has(id))
+      );
+      if (nextCollapsed) {
         setSelectedLines(null);
       }
-      return !collapsed;
+      return nextCollapsed ? new Set(codeViewItemIds) : new Set();
+    });
+    setCodeViewItemsVersion((version) => version + 1);
+  }
+
+  function toggleDiffItemCollapsed(itemId: string) {
+    setCollapsedDiffItemIds((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+        if (selectedLines?.id === itemId) {
+          setSelectedLines(null);
+        }
+      }
+      return next;
+    });
+    setCodeViewItemsVersion((version) => version + 1);
+  }
+
+  function handleResizerPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    const layout = layoutRef.current;
+    if (!layout) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const layoutLeft = layout.getBoundingClientRect().left;
+
+    function clamp(clientX: number) {
+      return clampWorkspaceSidebarWidth(clientX - layoutLeft, DIFFS_SIDEBAR_WIDTH_DEFAULT);
+    }
+
+    setDraggingWidth(clamp(event.clientX));
+
+    function handleMove(moveEvent: PointerEvent) {
+      setDraggingWidth(clamp(moveEvent.clientX));
+    }
+
+    function handleEnd(endEvent: PointerEvent) {
+      const next = clamp(endEvent.clientX);
+      setDraggingWidth(null);
+      updateViewState({ diffsSidebarWidth: next });
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleCancel);
+    }
+
+    function handleCancel() {
+      setDraggingWidth(null);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleCancel);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleCancel);
+  }
+
+  function handleResizerKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      return;
+    }
+    event.preventDefault();
+    const step = event.shiftKey ? 48 : 16;
+    const delta = event.key === "ArrowLeft" ? -step : step;
+    updateViewState({
+      diffsSidebarWidth: clampWorkspaceSidebarWidth(
+        sidebarWidth + delta,
+        DIFFS_SIDEBAR_WIDTH_DEFAULT,
+      ),
     });
   }
 
@@ -454,7 +590,11 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
       {loading ? <p className="task-empty">Loading diff...</p> : null}
       {empty ? <p className="task-empty">No changes in this comparison.</p> : null}
 
-      <div className="diffs-layout">
+      <div
+        className={resizing ? "diffs-layout diffs-layout--resizing" : "diffs-layout"}
+        ref={layoutRef}
+        style={{ "--diffs-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
+      >
         <aside className="diffs-sidebar" aria-label="Changed files">
           {files.length > 0 ? (
             <FileTree className="diffs-file-tree" header={treeHeader} model={tree.model} />
@@ -478,6 +618,19 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
             </dl>
           ) : null}
         </aside>
+
+        <div
+          aria-label="Resize changed-files sidebar"
+          aria-orientation="vertical"
+          aria-valuemax={WORKSPACE_SIDEBAR_WIDTH_MAX}
+          aria-valuemin={WORKSPACE_SIDEBAR_WIDTH_MIN}
+          aria-valuenow={sidebarWidth}
+          className="workspace-sidebar-resizer"
+          onKeyDown={handleResizerKeyDown}
+          onPointerDown={handleResizerPointerDown}
+          role="separator"
+          tabIndex={0}
+        />
 
         <div className="diffs-viewer" aria-label="Diff viewer">
           <div className="diffs-viewer__header">
@@ -564,6 +717,32 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
                 themeType,
               }}
               ref={codeViewRef}
+              renderHeaderPrefix={(item) => {
+                if (item.type !== "diff") {
+                  return null;
+                }
+                const collapsed = collapsedDiffItemIds.has(item.id);
+                return (
+                  <button
+                    aria-expanded={!collapsed}
+                    aria-label={`${collapsed ? "Expand" : "Collapse"} ${item.fileDiff.name}`}
+                    className={
+                      collapsed
+                        ? "diffs-file-collapse diffs-file-collapse--collapsed"
+                        : "diffs-file-collapse"
+                    }
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      toggleDiffItemCollapsed(item.id);
+                    }}
+                    title={collapsed ? "Expand file" : "Collapse file"}
+                    type="button"
+                  >
+                    <ChevronIcon aria-hidden="true" />
+                  </button>
+                );
+              }}
               selectedLines={selectedLines}
             />
           ) : !loading && !diffQuery.isError && !empty ? (

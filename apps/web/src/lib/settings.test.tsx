@@ -203,6 +203,9 @@ describe("DashboardSettingsProvider", () => {
         drawerFullscreen: false,
         drawerViewsByRunId: {},
         activeBoardColumnKey: null,
+        diffsSidebarWidth: 272,
+        filesSidebarWidth: 240,
+        diffsViewMode: "unified",
       }),
     );
   });
@@ -511,6 +514,9 @@ describe("DashboardSettingsProvider", () => {
         drawerWidth: 700,
         activeRightSurface: "chat",
         drawerFullscreen: true,
+        diffsSidebarWidth: 272,
+        filesSidebarWidth: 240,
+        diffsViewMode: "unified",
       }),
     );
   });

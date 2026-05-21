@@ -2032,10 +2032,50 @@ body {
 .diffs-layout {
   display: grid;
   flex: 1 1 0;
-  grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: var(--diffs-sidebar-width, 17rem) auto minmax(0, 1fr);
+  gap: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.diffs-layout--resizing,
+.diffs-layout--resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+.workspace-sidebar-resizer {
+  position: relative;
+  width: 12px;
+  align-self: stretch;
+  cursor: col-resize;
+  background: transparent;
+  outline: none;
+  touch-action: none;
+  margin: 0 2px;
+}
+
+.workspace-sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--border);
+  transform: translateX(-50%);
+  transition: background 120ms ease;
+}
+
+.workspace-sidebar-resizer:hover::after,
+.workspace-sidebar-resizer:focus-visible::after {
+  background: var(--primary);
+}
+
+.workspace-sidebar-resizer:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--primary);
+  border-radius: var(--radius-sm);
 }
 
 .diffs-sidebar,
@@ -2159,6 +2199,35 @@ body {
   margin-left: auto;
 }
 
+.diffs-file-collapse {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+}
+
+.diffs-file-collapse:hover,
+.diffs-file-collapse:focus-visible {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  outline: none;
+}
+
+.diffs-file-collapse svg {
+  width: 17px;
+  height: 17px;
+  transition: transform 120ms ease;
+}
+
+.diffs-file-collapse--collapsed svg {
+  transform: rotate(-90deg);
+}
+
 .diffs-viewer__header h3,
 .diffs-viewer__header p {
   margin: 0;
@@ -2219,9 +2288,21 @@ body {
   min-height: 0;
 }
 
+.files-layout--with-resizer {
+  grid-template-columns: var(--files-sidebar-width, 15rem) auto minmax(0, 1fr);
+  gap: 0;
+}
+
 .files-layout--browser-collapsed {
   grid-template-columns: 1fr;
   grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.files-layout--resizing,
+.files-layout--resizing * {
+  cursor: col-resize !important;
+  user-select: none;
 }
 
 .files-browser-shell,
@@ -2524,6 +2605,10 @@ body {
 
   .files-layout--browser-collapsed .files-browser-shell {
     min-height: 2.75rem;
+  }
+
+  .workspace-sidebar-resizer {
+    display: none;
   }
 
   .files-rendered,

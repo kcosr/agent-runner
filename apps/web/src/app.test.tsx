@@ -42,6 +42,7 @@ vi.mock("@pierre/diffs/react", async () => {
     collapsed?: boolean;
     fileDiff?: { name?: string };
     id: string;
+    version?: number;
   };
 
   const CodeView = React.forwardRef<
@@ -49,14 +50,19 @@ vi.mock("@pierre/diffs/react", async () => {
     {
       className?: string;
       items?: readonly MockCodeViewItem[];
+      options?: { diffStyle?: "unified" | "split" };
       onSelectedLinesChange?: (
         selection: {
           id: string;
           range: { end: number; endSide: "additions"; side: "additions"; start: number };
         } | null,
       ) => void;
+      renderHeaderPrefix?: (item: MockCodeViewItem) => React.ReactNode;
     }
-  >(function MockCodeView({ className, items = [], onSelectedLinesChange }, ref) {
+  >(function MockCodeView(
+    { className, items = [], onSelectedLinesChange, options, renderHeaderPrefix },
+    ref,
+  ) {
     React.useImperativeHandle(ref, () => ({
       clearSelectedLines: () => {},
       getInstance: () => undefined,
@@ -69,11 +75,17 @@ vi.mock("@pierre/diffs/react", async () => {
     }));
 
     return (
-      <div aria-label="Code diff" className={className}>
+      <div
+        aria-label="Code diff"
+        className={className}
+        data-diff-style={options?.diffStyle ?? "unified"}
+        data-code-view-version={items[0]?.version ?? 0}
+      >
         {items.map((item) => {
           const name = item.fileDiff?.name ?? item.id;
           return (
             <div data-collapsed={item.collapsed ? "true" : "false"} key={item.id}>
+              {renderHeaderPrefix?.(item)}
               <span>{name}</span>
               <button
                 onClick={() =>
@@ -148,12 +160,18 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   drawerWidth: number;
   activeRightSurface: "attachments" | "chat" | "detail" | "diffs" | "files" | "notes" | "tasks";
   drawerFullscreen: boolean;
+  diffsSidebarWidth: number;
+  filesSidebarWidth: number;
+  diffsViewMode: "unified" | "split";
 } = {
   viewMode: "board",
   collapsedColumnKeys: [],
   drawerWidth: 540,
   activeRightSurface: "detail",
   drawerFullscreen: false,
+  diffsSidebarWidth: 272,
+  filesSidebarWidth: 240,
+  diffsViewMode: "unified",
 };
 
 class MockEventSource {
@@ -3239,6 +3257,234 @@ describe("web app", () => {
       expect(createdTaskBody?.body).toContain("export const selected = true;");
       expect(createdTaskBody?.body).toContain("Create a follow-up from this diff.");
     });
+  });
+
+  it("restores the persisted diff view mode and persists changes", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs", diffsViewMode: "split" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const codeDiff = await screen.findByLabelText("Code diff");
+    expect(codeDiff).toHaveAttribute("data-diff-style", "split");
+    expect(screen.getByRole("tab", { name: "Split" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Unified" }));
+    await waitFor(() => {
+      expect(codeDiff).toHaveAttribute("data-diff-style", "unified");
+    });
+    const stored = JSON.parse(
+      window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
+    );
+    expect(stored.diffsViewMode).toBe("unified");
+  });
+
+  it("bumps the CodeView version when Collapse all is toggled", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const codeDiff = await screen.findByLabelText("Code diff");
+    const initialVersion = Number(codeDiff.getAttribute("data-code-view-version"));
+    const firstItem = codeDiff.querySelector("[data-collapsed]");
+    expect(firstItem).toHaveAttribute("data-collapsed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    await waitFor(() => {
+      expect(Number(codeDiff.getAttribute("data-code-view-version"))).toBeGreaterThan(
+        initialVersion,
+      );
+    });
+    expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "true");
+
+    const collapsedVersion = Number(codeDiff.getAttribute("data-code-view-version"));
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    await waitFor(() => {
+      expect(Number(codeDiff.getAttribute("data-code-view-version"))).toBeGreaterThan(
+        collapsedVersion,
+      );
+    });
+    expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "false");
+  });
+
+  it("collapses and expands an individual diff file from the header caret", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const codeDiff = await screen.findByLabelText("Code diff");
+    expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "false");
+
+    const collapseButton = screen.getByRole("button", { name: "Collapse src/app.ts" });
+    expect(collapseButton).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(collapseButton);
+
+    await waitFor(() => {
+      expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "true");
+    });
+    expect(screen.getByRole("button", { name: "Expand src/app.ts" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand src/app.ts" }));
+    await waitFor(() => {
+      expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "false");
+    });
+  });
+
+  it("bumps the CodeView version when refreshed diff content changes", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let diff = makeWorkspaceDiff();
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const codeDiff = await screen.findByLabelText("Code diff");
+    const initialVersion = Number(codeDiff.getAttribute("data-code-view-version"));
+    diff = makeWorkspaceDiff({
+      patch: [
+        "diff --git a/src/app.ts b/src/app.ts",
+        "index 1111111..3333333 100644",
+        "--- a/src/app.ts",
+        "+++ b/src/app.ts",
+        "@@ -1,1 +1,2 @@",
+        " export const existing = true;",
+        "+export const refreshed = true;",
+        "",
+      ].join("\n"),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh workspace diff" }));
+    await waitFor(() => {
+      expect(Number(codeDiff.getAttribute("data-code-view-version"))).toBeGreaterThan(
+        initialVersion,
+      );
+    });
+  });
+
+  it("persists the diffs sidebar width when resized via keyboard", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs", diffsSidebarWidth: 300 });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const resizer = await screen.findByRole("separator", {
+      name: "Resize changed-files sidebar",
+    });
+    expect(resizer).toHaveAttribute("aria-valuenow", "300");
+
+    fireEvent.keyDown(resizer, { key: "ArrowRight" });
+    await waitFor(() => {
+      expect(resizer).toHaveAttribute("aria-valuenow", "316");
+    });
+
+    fireEvent.keyDown(resizer, { key: "ArrowLeft", shiftKey: true });
+    await waitFor(() => {
+      expect(resizer).toHaveAttribute("aria-valuenow", "268");
+    });
+
+    const stored = JSON.parse(
+      window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
+    );
+    expect(stored.diffsSidebarWidth).toBe(268);
+  });
+
+  it("persists the files sidebar width when resized via keyboard", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files", filesSidebarWidth: 250 });
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const resizer = await screen.findByRole("separator", {
+      name: "Resize workspace files sidebar",
+    });
+    expect(resizer).toHaveAttribute("aria-valuenow", "250");
+
+    fireEvent.keyDown(resizer, { key: "ArrowRight", shiftKey: true });
+    await waitFor(() => {
+      expect(resizer).toHaveAttribute("aria-valuenow", "298");
+    });
+
+    const stored = JSON.parse(
+      window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
+    );
+    expect(stored.filesSidebarWidth).toBe(298);
   });
 
   it("shows Diffs loading, empty, error, and truncated states", async () => {
@@ -9442,6 +9688,9 @@ describe("web app", () => {
       drawerWidth: 570,
       activeRightSurface: "detail",
       drawerFullscreen: false,
+      diffsSidebarWidth: 272,
+      filesSidebarWidth: 240,
+      diffsViewMode: "unified",
     });
 
     cleanup();
@@ -12657,6 +12906,9 @@ describe("web app", () => {
         drawerWidth: 540,
         activeRightSurface: "detail",
         drawerFullscreen: false,
+        diffsSidebarWidth: 272,
+        filesSidebarWidth: 240,
+        diffsViewMode: "unified",
       }),
     );
     expect(
@@ -12676,6 +12928,9 @@ describe("web app", () => {
         drawerWidth: 540,
         activeRightSurface: "detail",
         drawerFullscreen: false,
+        diffsSidebarWidth: 272,
+        filesSidebarWidth: 240,
+        diffsViewMode: "unified",
       }),
     );
     expect(
