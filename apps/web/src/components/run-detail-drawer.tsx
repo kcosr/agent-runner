@@ -95,10 +95,10 @@ interface RuntimeVarDraftRow {
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
 const SELECTED_RUN_SURFACE_TABS: readonly SelectedRunSurfaceTab[] = [
   { label: "Chat", shortcut: "C", surface: "chat" },
-  { label: "Detail", shortcut: "D", surface: "detail" },
+  { label: "Info", shortcut: "I", surface: "detail" },
   { label: "Notes", shortcut: "N", surface: "notes" },
   { label: "Tasks", shortcut: "T", surface: "tasks" },
-  { label: "Diffs", shortcut: "I", surface: "diffs" },
+  { label: "Diffs", shortcut: "D", surface: "diffs" },
   { label: "Files", shortcut: "F", surface: "files" },
   { label: "Attachments", shortcut: "A", surface: "attachments" },
 ];

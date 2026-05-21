@@ -397,13 +397,25 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "d",
+          key: "i",
           metaKey: false,
           shiftKey: false,
         },
         context,
       ),
     ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showDiffs");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -568,7 +580,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "d",
+          key: "i",
           metaKey: false,
           shiftKey: false,
         },
@@ -696,7 +708,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "d",
+          key: "i",
           metaKey: false,
           shiftKey: false,
         },
@@ -1220,7 +1232,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "d",
+          key: "i",
           metaKey: false,
           shiftKey: false,
         },

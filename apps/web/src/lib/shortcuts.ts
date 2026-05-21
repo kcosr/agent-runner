@@ -239,10 +239,10 @@ function resolveRunSurfaceShortcut(
   if (matchesShortcut(event, { key: "c" })) {
     return "run.showChat";
   }
-  if (matchesShortcut(event, { key: "d" })) {
+  if (matchesShortcut(event, { key: "i" })) {
     return "run.showDetail";
   }
-  if (matchesShortcut(event, { key: "i" })) {
+  if (matchesShortcut(event, { key: "d" })) {
     return "run.showDiffs";
   }
   if (matchesShortcut(event, { key: "f" })) {
