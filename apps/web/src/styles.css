@@ -2120,6 +2120,14 @@ body {
   gap: 4px;
 }
 
+.diffs-view-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .diffs-viewer__header h3,
 .diffs-viewer__header p {
   margin: 0;

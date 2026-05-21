@@ -39,6 +39,7 @@ vi.mock("@pierre/diffs/react", async () => {
   const React = await import("react");
 
   type MockCodeViewItem = {
+    collapsed?: boolean;
     fileDiff?: { name?: string };
     id: string;
   };
@@ -72,7 +73,7 @@ vi.mock("@pierre/diffs/react", async () => {
         {items.map((item) => {
           const name = item.fileDiff?.name ?? item.id;
           return (
-            <div key={item.id}>
+            <div data-collapsed={item.collapsed ? "true" : "false"} key={item.id}>
               <span>{name}</span>
               <button
                 onClick={() =>
@@ -3143,6 +3144,18 @@ describe("web app", () => {
         beforeRefresh,
       );
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.getByRole("button", { name: "Expand all" })).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Code diff").querySelectorAll('[data-collapsed="true"]').length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    expect(screen.getByRole("button", { name: "Collapse all" })).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Code diff").querySelectorAll('[data-collapsed="true"]'),
+    ).toHaveLength(0);
   });
 
   it("creates a task from a diff line selection with the contracted task body", async () => {

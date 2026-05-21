@@ -148,6 +148,7 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   const [headDraft, setHeadDraft] = useState(DEFAULT_HEAD_REF);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<DiffViewMode>("unified");
+  const [allDiffItemsCollapsed, setAllDiffItemsCollapsed] = useState(false);
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
   const codeViewRef = useRef<CodeViewHandle<undefined> | null>(null);
@@ -206,6 +207,13 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   const codeViewItems = useMemo(
     () => parsedDiffItems.map((entry) => entry.item),
     [parsedDiffItems],
+  );
+  const displayedCodeViewItems = useMemo(
+    () =>
+      codeViewItems.map(
+        (item): CodeViewItem => ({ ...item, collapsed: allDiffItemsCollapsed }) as CodeViewItem,
+      ),
+    [allDiffItemsCollapsed, codeViewItems],
   );
   const codeViewItemByPath = useMemo(() => {
     const entries = new Map<string, string>();
@@ -340,6 +348,15 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
         setSelectedPath(parsedItem.path);
       }
     }
+  }
+
+  function toggleAllDiffItemsCollapsed() {
+    setAllDiffItemsCollapsed((collapsed) => {
+      if (!collapsed) {
+        setSelectedLines(null);
+      }
+      return !collapsed;
+    });
   }
 
   const loading = diffQuery.isPending;
@@ -494,25 +511,35 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
                 </button>
               </div>
             ) : null}
-            <div className="task-tabs" role="tablist" aria-label="Diff view mode">
+            <div className="diffs-view-actions">
               <button
-                aria-selected={viewMode === "unified"}
-                className={viewMode === "unified" ? "task-tab active" : "task-tab"}
-                onClick={() => setViewMode("unified")}
-                role="tab"
+                className="btn btn-compact"
+                disabled={codeViewItems.length === 0}
+                onClick={toggleAllDiffItemsCollapsed}
                 type="button"
               >
-                Unified
+                {allDiffItemsCollapsed ? "Expand all" : "Collapse all"}
               </button>
-              <button
-                aria-selected={viewMode === "split"}
-                className={viewMode === "split" ? "task-tab active" : "task-tab"}
-                onClick={() => setViewMode("split")}
-                role="tab"
-                type="button"
-              >
-                Split
-              </button>
+              <div className="task-tabs" role="tablist" aria-label="Diff view mode">
+                <button
+                  aria-selected={viewMode === "unified"}
+                  className={viewMode === "unified" ? "task-tab active" : "task-tab"}
+                  onClick={() => setViewMode("unified")}
+                  role="tab"
+                  type="button"
+                >
+                  Unified
+                </button>
+                <button
+                  aria-selected={viewMode === "split"}
+                  className={viewMode === "split" ? "task-tab active" : "task-tab"}
+                  onClick={() => setViewMode("split")}
+                  role="tab"
+                  type="button"
+                >
+                  Split
+                </button>
+              </div>
             </div>
           </div>
           {selectedFile?.binary ? (
@@ -524,7 +551,7 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
           {codeViewItems.length > 0 ? (
             <CodeView
               className="diffs-code-view"
-              items={codeViewItems}
+              items={displayedCodeViewItems}
               onSelectedLinesChange={updateSelectedLines}
               options={{
                 controlledSelection: true,
