@@ -2612,7 +2612,19 @@ body {
 
 @media (max-width: 760px) {
   .diffs-sidebar {
+    max-height: none;
+  }
+
+  .diffs-layout--browser-collapsed .diffs-sidebar {
     max-height: 18rem;
+  }
+
+  .diffs-layout--mobile-browser-expanded {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .diffs-layout--mobile-browser-expanded .diffs-viewer {
+    display: none;
   }
 
   .diffs-viewer__header {

@@ -23,6 +23,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
@@ -507,6 +508,23 @@ export function RunDiffsSurface({
     });
   }
 
+  function handleBrowserClickCapture(event: ReactMouseEvent<HTMLElement>) {
+    if (!mobileLayout || browserCollapsed) {
+      return;
+    }
+    const clickedFile = event.nativeEvent
+      .composedPath()
+      .some(
+        (target) =>
+          target instanceof Element &&
+          target.matches('[data-type="item"][data-item-type="file"]'),
+      );
+    if (!clickedFile) {
+      return;
+    }
+    window.requestAnimationFrame(() => setBrowserCollapsed(true));
+  }
+
   function handleResizerPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) {
       return;
@@ -631,6 +649,7 @@ export function RunDiffsSurface({
         className={[
           "diffs-layout",
           browserCollapsed ? "diffs-layout--browser-collapsed" : null,
+          mobileLayout && !browserCollapsed ? "diffs-layout--mobile-browser-expanded" : null,
           resizing ? "diffs-layout--resizing" : null,
           showResizer ? "diffs-layout--with-resizer" : null,
         ]
@@ -646,6 +665,7 @@ export function RunDiffsSurface({
         <aside
           className={browserCollapsed ? "diffs-sidebar diffs-sidebar--collapsed" : "diffs-sidebar"}
           aria-label="Changed files"
+          onClickCapture={handleBrowserClickCapture}
         >
           {browserCollapsed ? (
             <div className="diffs-browser__header">

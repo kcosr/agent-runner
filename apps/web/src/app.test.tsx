@@ -3513,6 +3513,7 @@ describe("web app", () => {
     await waitFor(() => {
       expect(sidebar).not.toHaveClass("diffs-sidebar--collapsed");
     });
+    expect(sidebar.closest(".diffs-layout")).toHaveClass("diffs-layout--mobile-browser-expanded");
     expect(screen.getByLabelText("Diff stats")).toBeInTheDocument();
   });
 
