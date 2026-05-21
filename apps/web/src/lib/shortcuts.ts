@@ -49,6 +49,7 @@ interface RunsShortcutContext {
   boardColumns: BoardColumn[];
   drawerFullscreen: boolean;
   hasActiveStructuredFilters: boolean;
+  localNavigationTarget: boolean;
   modalOpen: boolean;
   selectedRunPrimaryActionAvailable: boolean;
   resumeDialogOpen: boolean;
@@ -164,6 +165,7 @@ function canTriggerPrimaryAction(context: RunsShortcutContext): boolean {
   return (
     !context.typingTarget &&
     !context.searchFocused &&
+    !context.localNavigationTarget &&
     !context.modalOpen &&
     !context.resumeDialogOpen &&
     !context.actionPending &&

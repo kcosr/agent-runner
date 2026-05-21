@@ -173,6 +173,8 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   const [baseDraft, setBaseDraft] = useState(DEFAULT_BASE_REF);
   const [headDraft, setHeadDraft] = useState(DEFAULT_HEAD_REF);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [browserCollapsed, setBrowserCollapsed] = useState(false);
+  const [mobileLayout, setMobileLayout] = useState(false);
   const viewMode: DiffViewMode = viewState.diffsViewMode;
   const setViewMode = useCallback(
     (mode: DiffViewMode) => updateViewState({ diffsViewMode: mode }),
@@ -194,6 +196,31 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
     () => inputForMode(comparisonMode, branchRefs),
     [branchRefs, comparisonMode],
   );
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const query = window.matchMedia("(max-width: 760px)");
+    function updateLayout() {
+      setMobileLayout(query.matches);
+    }
+    updateLayout();
+    query.addEventListener("change", updateLayout);
+    return () => query.removeEventListener("change", updateLayout);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileLayout) {
+      setBrowserCollapsed(false);
+    }
+  }, [mobileLayout]);
+
+  useEffect(() => {
+    if (mobileLayout && selectedPath) {
+      setBrowserCollapsed(true);
+    }
+  }, [mobileLayout, selectedPath]);
 
   const diffQuery = useQuery({
     queryKey: runQueryKeys.workspaceDiff(runId, activeInput),
@@ -355,8 +382,11 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
         setSelectedLines(null);
         return selected;
       });
+      if (mobileLayout) {
+        setBrowserCollapsed(true);
+      }
     }
-  }, [filePathSet, selectedTreePaths]);
+  }, [filePathSet, mobileLayout, selectedTreePaths]);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -498,6 +528,7 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   const loading = diffQuery.isPending;
   const empty = diff && diff.files.length === 0 && diff.patch.length === 0;
   const themeType = preferences.themeMode === "auto" ? "system" : preferences.themeMode;
+  const showResizer = !browserCollapsed && !mobileLayout;
   const treeHeader = (
     <div className="diffs-tree-header">
       <span>Files</span>
@@ -591,17 +622,44 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
       {empty ? <p className="task-empty">No changes in this comparison.</p> : null}
 
       <div
-        className={resizing ? "diffs-layout diffs-layout--resizing" : "diffs-layout"}
+        className={[
+          "diffs-layout",
+          browserCollapsed ? "diffs-layout--browser-collapsed" : null,
+          resizing ? "diffs-layout--resizing" : null,
+          showResizer ? "diffs-layout--with-resizer" : null,
+        ]
+          .filter(Boolean)
+          .join(" ")}
         ref={layoutRef}
-        style={{ "--diffs-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
+        style={
+          showResizer
+            ? ({ "--diffs-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties)
+            : undefined
+        }
       >
-        <aside className="diffs-sidebar" aria-label="Changed files">
-          {files.length > 0 ? (
+        <aside
+          className={browserCollapsed ? "diffs-sidebar diffs-sidebar--collapsed" : "diffs-sidebar"}
+          aria-label="Changed files"
+        >
+          {browserCollapsed ? (
+            <div className="diffs-browser__header">
+              <button
+                aria-expanded={!browserCollapsed}
+                className="diffs-browser__toggle"
+                onClick={() => setBrowserCollapsed(false)}
+                title="Show changed files"
+                type="button"
+              >
+                <ChevronIcon aria-hidden="true" />
+                <span>{selectedPath ?? "Changed files"}</span>
+              </button>
+            </div>
+          ) : files.length > 0 ? (
             <FileTree className="diffs-file-tree" header={treeHeader} model={tree.model} />
           ) : (
             <p className="task-empty">No changed files.</p>
           )}
-          {diff ? (
+          {diff && !browserCollapsed ? (
             <dl className="diffs-stats-panel" aria-label="Diff stats">
               <div>
                 <dt>Files</dt>
@@ -619,18 +677,20 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
           ) : null}
         </aside>
 
-        <div
-          aria-label="Resize changed-files sidebar"
-          aria-orientation="vertical"
-          aria-valuemax={WORKSPACE_SIDEBAR_WIDTH_MAX}
-          aria-valuemin={WORKSPACE_SIDEBAR_WIDTH_MIN}
-          aria-valuenow={sidebarWidth}
-          className="workspace-sidebar-resizer"
-          onKeyDown={handleResizerKeyDown}
-          onPointerDown={handleResizerPointerDown}
-          role="separator"
-          tabIndex={0}
-        />
+        {showResizer ? (
+          <div
+            aria-label="Resize changed-files sidebar"
+            aria-orientation="vertical"
+            aria-valuemax={WORKSPACE_SIDEBAR_WIDTH_MAX}
+            aria-valuemin={WORKSPACE_SIDEBAR_WIDTH_MIN}
+            aria-valuenow={sidebarWidth}
+            className="workspace-sidebar-resizer"
+            onKeyDown={handleResizerKeyDown}
+            onPointerDown={handleResizerPointerDown}
+            role="separator"
+            tabIndex={0}
+          />
+        ) : null}
 
         <div className="diffs-viewer" aria-label="Diff viewer">
           <div className="diffs-viewer__header">

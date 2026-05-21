@@ -3462,6 +3462,57 @@ describe("web app", () => {
     expect(stored.diffsSidebarWidth).toBe(268);
   });
 
+  it("collapses the changed-file browser on mobile diffs layouts", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: query === "(max-width: 760px)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+    setStoredDashboardViewState({ activeRightSurface: "diffs", diffsSidebarWidth: 300 });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const sidebar = await screen.findByLabelText("Changed files");
+    await waitFor(() => {
+      expect(sidebar).toHaveClass("diffs-sidebar--collapsed");
+    });
+    expect(sidebar).toHaveTextContent("src/app.ts");
+    const toggle = within(sidebar).getByRole("button");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("separator", { name: "Resize changed-files sidebar" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(sidebar).not.toHaveClass("diffs-sidebar--collapsed");
+    });
+    expect(screen.getByLabelText("Diff stats")).toBeInTheDocument();
+  });
+
   it("persists the files sidebar width when resized via keyboard", async () => {
     setStoredDashboardViewState({ activeRightSurface: "files", filesSidebarWidth: 250 });
     installFetchMock({

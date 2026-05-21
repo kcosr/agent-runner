@@ -2032,10 +2032,19 @@ body {
 .diffs-layout {
   display: grid;
   flex: 1 1 0;
-  grid-template-columns: var(--diffs-sidebar-width, 17rem) auto minmax(0, 1fr);
-  gap: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+
+.diffs-layout--with-resizer {
+  grid-template-columns: var(--diffs-sidebar-width, 17rem) auto minmax(0, 1fr);
+  gap: 0;
+}
+
+.diffs-layout--browser-collapsed {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .diffs-layout--resizing,
@@ -2092,6 +2101,58 @@ body {
   flex-direction: column;
   overflow: hidden;
   padding: 0;
+}
+
+.diffs-sidebar--collapsed {
+  min-height: 2.75rem;
+}
+
+.diffs-browser__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  padding: 0;
+}
+
+.diffs-sidebar--collapsed .diffs-browser__header {
+  border-bottom: 0;
+}
+
+.diffs-browser__toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diffs-browser__toggle svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  transform: rotate(90deg);
+}
+
+.diffs-browser__toggle span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .diffs-file-tree {
@@ -2587,10 +2648,6 @@ body {
 }
 
 @media (max-width: 760px) {
-  .diffs-layout {
-    grid-template-columns: 1fr;
-  }
-
   .diffs-sidebar {
     max-height: 18rem;
   }

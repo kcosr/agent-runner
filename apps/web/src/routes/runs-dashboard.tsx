@@ -67,6 +67,12 @@ function findDashboardRun(
   return state.runs.find((run) => run.runId === runId);
 }
 
+function eventPathContainsSelector(event: KeyboardEvent, selector: string): boolean {
+  return event
+    .composedPath()
+    .some((target) => target instanceof Element && target.matches(selector));
+}
+
 function DashboardSurfaces({
   primary,
   detail,
@@ -336,6 +342,7 @@ export function RunsDashboardRoute() {
         resumeDialogOpen: currentState.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
         searchValue: currentState.viewState.search,
+        localNavigationTarget: eventPathContainsSelector(event, ".diffs-file-tree"),
         selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
         selectedRunId: currentState.selectedRunId,
         typingTarget,

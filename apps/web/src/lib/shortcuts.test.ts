@@ -201,6 +201,7 @@ describe("resolveRunsShortcutCommand", () => {
     boardColumns: makeBoardColumns(),
     drawerFullscreen: false,
     hasActiveStructuredFilters: false,
+    localNavigationTarget: false,
     modalOpen: false,
     resumeDialogOpen: false,
     searchFocused: false,
@@ -775,6 +776,36 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("run.primaryAction");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Enter",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          localNavigationTarget: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          localNavigationTarget: true,
+        },
+      ),
+    ).toBe("run.showFiles");
     expect(
       resolveRunsShortcutCommand(
         {
