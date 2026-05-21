@@ -86,14 +86,32 @@ function findEventPathElement<T extends Element>(
 }
 
 function getDiffsFileTreeSearchInput(event: KeyboardEvent): HTMLInputElement | null {
-  if (!eventPathContainsSelector(event, ".diffs-file-tree")) {
-    return null;
-  }
-  return findEventPathElement(
+  const input = findEventPathElement(
     event,
     (element): element is HTMLInputElement =>
       element instanceof HTMLInputElement && element.matches("[data-file-tree-search-input]"),
   );
+  if (input && eventPathContainsSelector(event, ".diffs-file-tree")) {
+    return input;
+  }
+  return getActiveDiffsFileTreeSearchInput();
+}
+
+function getActiveDiffsFileTreeSearchInput(): HTMLInputElement | null {
+  for (const tree of document.querySelectorAll(".diffs-file-tree")) {
+    const input = tree.shadowRoot?.querySelector("[data-file-tree-search-input]");
+    if (
+      input instanceof HTMLInputElement &&
+      (tree.shadowRoot?.activeElement === input || document.activeElement === tree)
+    ) {
+      return input;
+    }
+    const lightDomInput = tree.querySelector("[data-file-tree-search-input]");
+    if (lightDomInput instanceof HTMLInputElement && document.activeElement === lightDomInput) {
+      return lightDomInput;
+    }
+  }
+  return null;
 }
 
 function DashboardSurfaces({
@@ -354,9 +372,11 @@ export function RunsDashboardRoute() {
         currentState.viewState.drawerFullscreen ||
         document.querySelector(".drawer--fullscreen") !== null;
       const modalOpen = document.querySelector('dialog[open][data-modal="true"]') !== null;
-      const typingTarget =
-        isEditableKeyboardEvent(event) || isEditableEventTarget(document.activeElement);
       const diffsTreeSearchInput = getDiffsFileTreeSearchInput(event);
+      const typingTarget =
+        isEditableKeyboardEvent(event) ||
+        isEditableEventTarget(document.activeElement) ||
+        diffsTreeSearchInput !== null;
 
       if (event.key === "Escape" && diffsTreeSearchInput) {
         if (diffsTreeSearchInput.value.length === 0) {

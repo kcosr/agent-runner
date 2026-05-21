@@ -119,7 +119,11 @@ vi.mock("@pierre/diffs/react", async () => {
 
 vi.mock("@pierre/trees/react", () => {
   return {
-    FileTree: () => <input aria-label="Changed-file search" data-file-tree-search-input="" />,
+    FileTree: ({ className }: { className?: string }) => (
+      <div className={className}>
+        <input aria-label="Changed-file search" data-file-tree-search-input="" />
+      </div>
+    ),
     useFileTree: () => ({
       model: {
         focusPath: fileTreeTestApi.focusPath,
@@ -3328,6 +3332,106 @@ describe("web app", () => {
 
     fireEvent.keyDown(filteredSearchInput, { key: "ArrowUp" });
     expect(fileTreeTestApi.focusPreviousSearchMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("blurs the focused Diffs tree search on Escape before closing the selected run", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const searchInput = await screen.findByLabelText("Changed-file search");
+    searchInput.focus();
+    expect(searchInput).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(searchInput).not.toHaveFocus();
+    expect(screen.getByLabelText("Diffs")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Diffs")).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not resume the selected run with Enter while the Diffs tree search is focused", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let resumeRequestCount = 0;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "diffs-enter",
+            assignmentName: "Diffs enter run",
+            name: "Diffs enter run",
+            status: "success",
+            effectiveStatus: "success",
+          }),
+        ],
+        details: {
+          "diffs-enter": makeDetail({
+            runId: "diffs-enter",
+            status: "success",
+            effectiveStatus: "success",
+            name: "Diffs enter run",
+            assignment: {
+              name: "Diffs enter run",
+              sourcePath: "/tmp/diffs-enter.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canReady: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/diffs-enter/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          if (url.endsWith("/api/runs/diffs-enter/resume")) {
+            resumeRequestCount += 1;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/diffs-enter");
+
+    const searchInput = await screen.findByLabelText("Changed-file search");
+    searchInput.focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    expect(resumeRequestCount).toBe(0);
   });
 
   it("restores the persisted diff view mode and persists changes", async () => {
