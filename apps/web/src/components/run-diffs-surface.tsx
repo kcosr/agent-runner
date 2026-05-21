@@ -61,6 +61,7 @@ interface RunDiffsSurfaceProps {
   canCreateTask: boolean;
   onTaskCreated: (taskId: string) => void;
   runId: string;
+  searchRequestVersion?: number;
 }
 
 const DEFAULT_BASE_REF = "main";
@@ -180,7 +181,12 @@ function selectedTextFromFileDiff(
   return selected.join("\n");
 }
 
-export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiffsSurfaceProps) {
+export function RunDiffsSurface({
+  canCreateTask,
+  onTaskCreated,
+  runId,
+  searchRequestVersion = 0,
+}: RunDiffsSurfaceProps) {
   const config = useRuntimeConfig();
   const { daemonToken } = useDaemonAuthToken();
   const { preferences } = useDashboardPreferences();
@@ -205,8 +211,10 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   const [codeViewItemsVersion, setCodeViewItemsVersion] = useState(0);
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
+  const rootRef = useRef<HTMLElement | null>(null);
   const codeViewRef = useRef<CodeViewHandle<undefined> | null>(null);
   const mobileCollapsedPathRef = useRef<string | null>(null);
+  const searchRequestVersionRef = useRef(searchRequestVersion);
   const persistedSidebarWidth = viewState.diffsSidebarWidth;
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [draggingWidth, setDraggingWidth] = useState<number | null>(null);
@@ -423,6 +431,14 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
     });
   }, [selectedCodeViewItemId]);
 
+  useEffect(() => {
+    if (searchRequestVersion === searchRequestVersionRef.current) {
+      return;
+    }
+    searchRequestVersionRef.current = searchRequestVersion;
+    focusTreeSearchInput();
+  }, [searchRequestVersion]);
+
   function applyRange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const parsed = parseRangeInput(rangeDraft);
@@ -473,6 +489,22 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
       return next;
     });
     setCodeViewItemsVersion((version) => version + 1);
+  }
+
+  function getTreeSearchInput(): HTMLInputElement | null {
+    const treeHost = rootRef.current?.querySelector(".diffs-file-tree");
+    const input = treeHost?.shadowRoot?.querySelector("[data-file-tree-search-input]");
+    return input instanceof HTMLInputElement ? input : null;
+  }
+
+  function focusTreeSearchInput() {
+    setBrowserCollapsed(false);
+    treeSearch.open(treeSearch.value);
+    window.requestAnimationFrame(() => {
+      const input = getTreeSearchInput();
+      input?.focus();
+      input?.select();
+    });
   }
 
   function handleResizerPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -548,7 +580,7 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
             treeSearch.close();
             return;
           }
-          treeSearch.open(treeSearch.value);
+          focusTreeSearchInput();
         }}
         title={treeSearch.isOpen ? "Close search" : "Search files"}
         type="button"
@@ -559,7 +591,7 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   );
 
   return (
-    <section aria-label="Diffs" className="drawer-panel drawer-panel--diffs">
+    <section aria-label="Diffs" className="drawer-panel drawer-panel--diffs" ref={rootRef}>
       <form className="diffs-range-form" onSubmit={applyRange}>
         <label>
           <span>Range</span>

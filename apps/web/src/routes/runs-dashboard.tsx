@@ -323,6 +323,7 @@ export function RunsDashboardRoute() {
   const [runActionMenu, setRunActionMenu] = useState<RunActionMenuState | null>(null);
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
   const [fileSearchRequestVersion, setFileSearchRequestVersion] = useState(0);
+  const [diffsSearchRequestVersion, setDiffsSearchRequestVersion] = useState(0);
   const [noteEditRequestVersion, setNoteEditRequestVersion] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const latestStateRef = useRef(state);
@@ -375,8 +376,7 @@ export function RunsDashboardRoute() {
         resumeDialogOpen: currentState.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
         searchValue: currentState.viewState.search,
-        localNavigationTarget:
-          drawerFullscreen && eventPathContainsSelector(event, ".diffs-file-tree"),
+        localNavigationTarget: diffsTreeSearchInput !== null,
         selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
         selectedRunId: currentState.selectedRunId,
         typingTarget,
@@ -497,6 +497,10 @@ export function RunsDashboardRoute() {
 
       if (command === "run.showDiffs") {
         event.preventDefault();
+        if (currentState.activeRightSurface === "diffs") {
+          setDiffsSearchRequestVersion((current) => current + 1);
+          return;
+        }
         currentState.setActiveRightSurface("diffs");
         return;
       }
@@ -831,6 +835,7 @@ export function RunsDashboardRoute() {
                   drawerWidth={state.viewState.drawerWidth}
                   drawerView={state.selectedDrawerView}
                   attachmentPreviewSelection={state.selectedAttachmentPreview}
+                  diffsSearchRequestVersion={diffsSearchRequestVersion}
                   fileSearchRequestVersion={fileSearchRequestVersion}
                   noteEditRequestVersion={noteEditRequestVersion}
                   runs={state.runs}

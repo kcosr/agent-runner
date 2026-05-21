@@ -585,6 +585,7 @@ export function RunDetailDrawer({
   attachmentPreviewSelection,
   chatSurface,
   dependencyCandidateRuns,
+  diffsSearchRequestVersion,
   fileSearchRequestVersion,
   noteEditRequestVersion,
   onAddDependency,
@@ -630,6 +631,7 @@ export function RunDetailDrawer({
   attachmentPreviewSelection?: AttachmentPreviewSelection;
   chatSurface: ReactNode;
   dependencyCandidateRuns: RunSummary[];
+  diffsSearchRequestVersion: number;
   fileSearchRequestVersion: number;
   noteEditRequestVersion: number;
   onAddDependency: (dependency: RunDependencyRef) => Promise<void>;
@@ -1959,6 +1961,7 @@ export function RunDetailDrawer({
               canCreateTask={run.capabilities.taskMutation.canAdd}
               onTaskCreated={(taskId) => onNotify(`Created task ${taskId}.`, "success")}
               runId={run.runId}
+              searchRequestVersion={diffsSearchRequestVersion}
             />
           ) : null}
         </div>
