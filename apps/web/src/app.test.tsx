@@ -3514,6 +3514,7 @@ describe("web app", () => {
       expect(sidebar).not.toHaveClass("diffs-sidebar--collapsed");
     });
     expect(sidebar.closest(".diffs-layout")).toHaveClass("diffs-layout--mobile-browser-expanded");
+    expect(screen.queryByLabelText("Diff viewer")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Diff stats")).toBeInTheDocument();
   });
 

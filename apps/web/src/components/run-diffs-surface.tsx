@@ -516,8 +516,7 @@ export function RunDiffsSurface({
       .composedPath()
       .some(
         (target) =>
-          target instanceof Element &&
-          target.matches('[data-type="item"][data-item-type="file"]'),
+          target instanceof Element && target.matches('[data-type="item"][data-item-type="file"]'),
       );
     if (!clickedFile) {
       return;
@@ -587,6 +586,7 @@ export function RunDiffsSurface({
   const empty = diff && diff.files.length === 0 && diff.patch.length === 0;
   const themeType = preferences.themeMode === "auto" ? "system" : preferences.themeMode;
   const showResizer = !browserCollapsed && !mobileLayout;
+  const showDiffViewer = !mobileLayout || browserCollapsed;
   const treeHeader = (
     <div className="diffs-tree-header">
       <span>Files</span>
@@ -718,115 +718,117 @@ export function RunDiffsSurface({
           />
         ) : null}
 
-        <div className="diffs-viewer" aria-label="Diff viewer">
-          <div className="diffs-viewer__header">
-            {selectedReference ? (
-              <div className="diffs-selection-controls">
-                {canCreateTask ? (
+        {showDiffViewer ? (
+          <div className="diffs-viewer" aria-label="Diff viewer">
+            <div className="diffs-viewer__header">
+              {selectedReference ? (
+                <div className="diffs-selection-controls">
+                  {canCreateTask ? (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setDialogReference(selectedReference)}
+                      type="button"
+                    >
+                      Add task
+                    </button>
+                  ) : null}
                   <button
-                    className="btn btn-primary"
-                    onClick={() => setDialogReference(selectedReference)}
+                    aria-label="Clear diff selection"
+                    className="icon-btn icon-btn--small"
+                    onClick={() => setSelectedLines(null)}
+                    title="Clear selection"
                     type="button"
                   >
-                    Add task
+                    <CloseIcon aria-hidden="true" />
                   </button>
-                ) : null}
+                </div>
+              ) : null}
+              <div className="diffs-view-actions">
                 <button
-                  aria-label="Clear diff selection"
-                  className="icon-btn icon-btn--small"
-                  onClick={() => setSelectedLines(null)}
-                  title="Clear selection"
+                  className="btn btn-compact"
+                  disabled={codeViewItems.length === 0}
+                  onClick={toggleAllDiffItemsCollapsed}
                   type="button"
                 >
-                  <CloseIcon aria-hidden="true" />
+                  {allDiffItemsCollapsed ? "Expand all" : "Collapse all"}
                 </button>
-              </div>
-            ) : null}
-            <div className="diffs-view-actions">
-              <button
-                className="btn btn-compact"
-                disabled={codeViewItems.length === 0}
-                onClick={toggleAllDiffItemsCollapsed}
-                type="button"
-              >
-                {allDiffItemsCollapsed ? "Expand all" : "Collapse all"}
-              </button>
-              <div className="task-tabs" role="tablist" aria-label="Diff view mode">
-                <button
-                  aria-selected={viewMode === "unified"}
-                  className={viewMode === "unified" ? "task-tab active" : "task-tab"}
-                  onClick={() => setViewMode("unified")}
-                  role="tab"
-                  type="button"
-                >
-                  Unified
-                </button>
-                <button
-                  aria-selected={viewMode === "split"}
-                  className={viewMode === "split" ? "task-tab active" : "task-tab"}
-                  onClick={() => setViewMode("split")}
-                  role="tab"
-                  type="button"
-                >
-                  Split
-                </button>
+                <div className="task-tabs" role="tablist" aria-label="Diff view mode">
+                  <button
+                    aria-selected={viewMode === "unified"}
+                    className={viewMode === "unified" ? "task-tab active" : "task-tab"}
+                    onClick={() => setViewMode("unified")}
+                    role="tab"
+                    type="button"
+                  >
+                    Unified
+                  </button>
+                  <button
+                    aria-selected={viewMode === "split"}
+                    className={viewMode === "split" ? "task-tab active" : "task-tab"}
+                    onClick={() => setViewMode("split")}
+                    role="tab"
+                    type="button"
+                  >
+                    Split
+                  </button>
+                </div>
               </div>
             </div>
+            {selectedFile?.binary ? (
+              <p className="task-empty">This file is binary or too large to preview.</p>
+            ) : null}
+            {!selectedFile?.binary && selectedPath && !selectedCodeViewItemId ? (
+              <p className="task-empty">No text patch is available for this file.</p>
+            ) : null}
+            {codeViewItems.length > 0 ? (
+              <CodeView
+                className="diffs-code-view"
+                items={displayedCodeViewItems}
+                onSelectedLinesChange={updateSelectedLines}
+                options={{
+                  controlledSelection: true,
+                  diffStyle: viewMode,
+                  enableLineSelection: true,
+                  hunkSeparators: "line-info-basic",
+                  overflow: "wrap",
+                  stickyHeaders: true,
+                  theme: { dark: "pierre-dark", light: "pierre-light" },
+                  themeType,
+                }}
+                ref={codeViewRef}
+                renderHeaderPrefix={(item) => {
+                  if (item.type !== "diff") {
+                    return null;
+                  }
+                  const collapsed = collapsedDiffItemIds.has(item.id);
+                  return (
+                    <button
+                      aria-expanded={!collapsed}
+                      aria-label={`${collapsed ? "Expand" : "Collapse"} ${item.fileDiff.name}`}
+                      className={
+                        collapsed
+                          ? "diffs-file-collapse diffs-file-collapse--collapsed"
+                          : "diffs-file-collapse"
+                      }
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleDiffItemCollapsed(item.id);
+                      }}
+                      title={collapsed ? "Expand file" : "Collapse file"}
+                      type="button"
+                    >
+                      <ChevronIcon aria-hidden="true" />
+                    </button>
+                  );
+                }}
+                selectedLines={selectedLines}
+              />
+            ) : !loading && !diffQuery.isError && !empty ? (
+              <p className="task-empty">No text patch content to preview.</p>
+            ) : null}
           </div>
-          {selectedFile?.binary ? (
-            <p className="task-empty">This file is binary or too large to preview.</p>
-          ) : null}
-          {!selectedFile?.binary && selectedPath && !selectedCodeViewItemId ? (
-            <p className="task-empty">No text patch is available for this file.</p>
-          ) : null}
-          {codeViewItems.length > 0 ? (
-            <CodeView
-              className="diffs-code-view"
-              items={displayedCodeViewItems}
-              onSelectedLinesChange={updateSelectedLines}
-              options={{
-                controlledSelection: true,
-                diffStyle: viewMode,
-                enableLineSelection: true,
-                hunkSeparators: "line-info-basic",
-                overflow: "wrap",
-                stickyHeaders: true,
-                theme: { dark: "pierre-dark", light: "pierre-light" },
-                themeType,
-              }}
-              ref={codeViewRef}
-              renderHeaderPrefix={(item) => {
-                if (item.type !== "diff") {
-                  return null;
-                }
-                const collapsed = collapsedDiffItemIds.has(item.id);
-                return (
-                  <button
-                    aria-expanded={!collapsed}
-                    aria-label={`${collapsed ? "Expand" : "Collapse"} ${item.fileDiff.name}`}
-                    className={
-                      collapsed
-                        ? "diffs-file-collapse diffs-file-collapse--collapsed"
-                        : "diffs-file-collapse"
-                    }
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      toggleDiffItemCollapsed(item.id);
-                    }}
-                    title={collapsed ? "Expand file" : "Collapse file"}
-                    type="button"
-                  >
-                    <ChevronIcon aria-hidden="true" />
-                  </button>
-                );
-              }}
-              selectedLines={selectedLines}
-            />
-          ) : !loading && !diffQuery.isError && !empty ? (
-            <p className="task-empty">No text patch content to preview.</p>
-          ) : null}
-        </div>
+        ) : null}
       </div>
       {dialogReference ? (
         <CreateTaskDialog

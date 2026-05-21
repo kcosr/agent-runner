@@ -2026,6 +2026,14 @@ body {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.diffs-layout--mobile-browser-expanded {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.diffs-layout--mobile-browser-expanded .diffs-viewer {
+  display: none;
+}
+
 .diffs-layout--resizing,
 .diffs-layout--resizing * {
   cursor: col-resize !important;
@@ -2617,14 +2625,6 @@ body {
 
   .diffs-layout--browser-collapsed .diffs-sidebar {
     max-height: 18rem;
-  }
-
-  .diffs-layout--mobile-browser-expanded {
-    grid-template-rows: minmax(0, 1fr);
-  }
-
-  .diffs-layout--mobile-browser-expanded .diffs-viewer {
-    display: none;
   }
 
   .diffs-viewer__header {
