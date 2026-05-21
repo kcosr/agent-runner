@@ -100,15 +100,33 @@ function getDiffsFileTreeSearchInput(event: KeyboardEvent): HTMLInputElement | n
 function getActiveDiffsFileTreeSearchInput(): HTMLInputElement | null {
   for (const tree of document.querySelectorAll(".diffs-file-tree")) {
     const input = tree.shadowRoot?.querySelector("[data-file-tree-search-input]");
-    if (
-      input instanceof HTMLInputElement &&
-      (tree.shadowRoot?.activeElement === input || document.activeElement === tree)
-    ) {
+    if (input instanceof HTMLInputElement && tree.shadowRoot?.activeElement === input) {
       return input;
     }
     const lightDomInput = tree.querySelector("[data-file-tree-search-input]");
     if (lightDomInput instanceof HTMLInputElement && document.activeElement === lightDomInput) {
       return lightDomInput;
+    }
+  }
+  return null;
+}
+
+function getActiveDiffsFileTreeElement(): HTMLElement | null {
+  for (const tree of document.querySelectorAll(".diffs-file-tree")) {
+    const shadowActiveElement = tree.shadowRoot?.activeElement;
+    if (
+      shadowActiveElement instanceof HTMLElement &&
+      !shadowActiveElement.matches("[data-file-tree-search-input]")
+    ) {
+      return shadowActiveElement;
+    }
+    if (
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body &&
+      (document.activeElement === tree || tree.contains(document.activeElement)) &&
+      !document.activeElement.matches("[data-file-tree-search-input]")
+    ) {
+      return document.activeElement;
     }
   }
   return null;
@@ -373,6 +391,7 @@ export function RunsDashboardRoute() {
         document.querySelector(".drawer--fullscreen") !== null;
       const modalOpen = document.querySelector('dialog[open][data-modal="true"]') !== null;
       const diffsTreeSearchInput = getDiffsFileTreeSearchInput(event);
+      const diffsTreeFocusedElement = diffsTreeSearchInput ? null : getActiveDiffsFileTreeElement();
       const typingTarget =
         isEditableKeyboardEvent(event) ||
         isEditableEventTarget(document.activeElement) ||
@@ -387,6 +406,16 @@ export function RunsDashboardRoute() {
         return;
       }
 
+      if (event.key === "Escape" && diffsTreeFocusedElement) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        diffsTreeFocusedElement.blur();
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+        return;
+      }
+
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: currentState.activeBoardColumnKey,
         boardColumns: currentBoardColumns,
@@ -396,7 +425,7 @@ export function RunsDashboardRoute() {
         resumeDialogOpen: currentState.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
         searchValue: currentState.viewState.search,
-        localNavigationTarget: diffsTreeSearchInput !== null,
+        localNavigationTarget: diffsTreeSearchInput !== null || diffsTreeFocusedElement !== null,
         selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
         selectedRunId: currentState.selectedRunId,
         typingTarget,
