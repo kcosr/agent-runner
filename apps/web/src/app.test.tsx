@@ -3472,6 +3472,50 @@ describe("web app", () => {
     });
   });
 
+  it("blurs the focused Diffs tree row on Escape before exiting fullscreen", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs", drawerFullscreen: true });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const treeRow = await screen.findByRole("button", { name: "src/app.ts" });
+    treeRow.focus();
+    expect(treeRow).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("{Escape}");
+    expect(treeRow).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByLabelText("Diffs")).toBeInTheDocument();
+  });
+
   it("does not resume the selected run with Enter while a Diffs tree row is focused", async () => {
     setStoredDashboardViewState({ activeRightSurface: "diffs" });
     let resumeRequestCount = 0;

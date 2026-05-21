@@ -27,6 +27,10 @@ import type { ReconfigureRunPatch } from "../lib/api-client.js";
 import { isPreviewableAttachment } from "../lib/attachments.js";
 import { type AuditMessagePart, formatAuditEvent } from "../lib/audit-formatter.js";
 import {
+  getActiveDiffsFileTreeElement,
+  getDiffsFileTreeSearchInput,
+} from "../lib/diffs-file-tree-keyboard.js";
+import {
   formatBytes,
   formatScheduleKind,
   formatScheduleMode,
@@ -1641,15 +1645,37 @@ export function RunDetailDrawer({
   }
 
   function handleDrawerKeyDownCapture(event: ReactKeyboardEvent<HTMLElement>) {
-    if (
-      !isFullscreen ||
-      resumeDialogOpen ||
-      event.defaultPrevented ||
-      isEditableEventTarget(event.target)
-    ) {
+    if (!isFullscreen || resumeDialogOpen || event.defaultPrevented) {
       return;
     }
     if (event.key !== "Escape") {
+      return;
+    }
+
+    const diffsTreeSearchInput = getDiffsFileTreeSearchInput(event.nativeEvent);
+    if (diffsTreeSearchInput) {
+      if (diffsTreeSearchInput.value.length === 0) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.stopImmediatePropagation();
+        diffsTreeSearchInput.blur();
+      }
+      return;
+    }
+
+    const diffsTreeFocusedElement = getActiveDiffsFileTreeElement();
+    if (diffsTreeFocusedElement) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation();
+      diffsTreeFocusedElement.blur();
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      return;
+    }
+
+    if (isEditableEventTarget(event.target)) {
       return;
     }
 
