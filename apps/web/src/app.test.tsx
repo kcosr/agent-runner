@@ -35,6 +35,14 @@ vi.mock("mermaid", () => ({
   },
 }));
 
+const fileTreeTestApi = vi.hoisted(() => ({
+  focusPath: vi.fn(),
+  focusNextSearchMatch: vi.fn(),
+  focusPreviousSearchMatch: vi.fn(),
+  searchMatchingPaths: [] as string[],
+  searchValue: "",
+}));
+
 vi.mock("@pierre/diffs/react", async () => {
   const React = await import("react");
 
@@ -109,25 +117,31 @@ vi.mock("@pierre/diffs/react", async () => {
   return { CodeView };
 });
 
-vi.mock("@pierre/trees/react", () => ({
-  FileTree: () => null,
-  useFileTree: () => ({
-    model: {
-      getItem: () => ({ select: () => {} }),
-      resetPaths: () => {},
-      scrollToPath: () => {},
-      setGitStatus: () => {},
-    },
-  }),
-  useFileTreeSearch: () => ({
-    close: () => {},
-    isOpen: false,
-    open: () => {},
-    setValue: () => {},
-    value: "",
-  }),
-  useFileTreeSelection: () => [],
-}));
+vi.mock("@pierre/trees/react", () => {
+  return {
+    FileTree: () => <input aria-label="Changed-file search" data-file-tree-search-input="" />,
+    useFileTree: () => ({
+      model: {
+        focusPath: fileTreeTestApi.focusPath,
+        getItem: () => ({ select: () => {} }),
+        resetPaths: () => {},
+        scrollToPath: () => {},
+        setGitStatus: () => {},
+      },
+    }),
+    useFileTreeSearch: () => ({
+      close: () => {},
+      focusNextMatch: fileTreeTestApi.focusNextSearchMatch,
+      focusPreviousMatch: fileTreeTestApi.focusPreviousSearchMatch,
+      isOpen: false,
+      matchingPaths: fileTreeTestApi.searchMatchingPaths,
+      open: () => {},
+      setValue: () => {},
+      value: fileTreeTestApi.searchValue,
+    }),
+    useFileTreeSelection: () => [],
+  };
+});
 
 const APP_CONFIG = {
   apiBasePath: "/api",
@@ -2014,6 +2028,11 @@ describe("web app", () => {
     window.localStorage.clear();
     delete document.documentElement.dataset.theme;
     MockEventSource.instances = [];
+    fileTreeTestApi.focusPath.mockClear();
+    fileTreeTestApi.focusNextSearchMatch.mockClear();
+    fileTreeTestApi.focusPreviousSearchMatch.mockClear();
+    fileTreeTestApi.searchMatchingPaths = [];
+    fileTreeTestApi.searchValue = "";
     initializeMermaid.mockClear();
     renderMermaid.mockClear();
     vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
@@ -3146,6 +3165,11 @@ describe("web app", () => {
     );
     expect(await screen.findByLabelText("Diffs")).toBeInTheDocument();
     expect((await screen.findAllByText("src/app.ts")).length).toBeGreaterThan(0);
+    const sourceTabs = screen.getByRole("tablist", { name: "Diff source" });
+    expect(within(sourceTabs).getByRole("tab", { name: "Range" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     const rangeInput = screen.getByRole("textbox", { name: "Diff range" });
     expect(rangeInput).toHaveValue("main...HEAD");
 
@@ -3155,11 +3179,14 @@ describe("web app", () => {
       expect(diffRequests).toContain("?mode=branch&base=main&head=HEAD&comparison=direct");
     });
 
-    fireEvent.change(rangeInput, { target: { value: "working tree" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(within(sourceTabs).getByRole("tab", { name: "Working tree" }));
     await waitFor(() => {
       expect(diffRequests).toContain("?mode=working-tree");
     });
+    expect(within(sourceTabs).getByRole("tab", { name: "Working tree" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
 
     const beforeRefresh = fetchCallCount(fetchMock, (url) => url.includes("/workspace/diff"));
     fireEvent.click(screen.getByRole("button", { name: "Refresh workspace diff" }));
@@ -3263,6 +3290,44 @@ describe("web app", () => {
       expect(createdTaskBody?.body).toContain("export const selected = true;");
       expect(createdTaskBody?.body).toContain("Create a follow-up from this diff.");
     });
+  });
+
+  it("moves keyboard navigation from the focused Diffs search into the changed-file tree", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const { rerender } = await renderApp("/runs/run-1");
+
+    const searchInput = await screen.findByLabelText("Changed-file search");
+    searchInput.focus();
+    fireEvent.keyDown(searchInput, { key: "ArrowDown" });
+    expect(fileTreeTestApi.focusPath).toHaveBeenCalledWith("src/app.ts");
+    expect(fileTreeTestApi.focusNextSearchMatch).not.toHaveBeenCalled();
+
+    fileTreeTestApi.searchValue = "app";
+    fileTreeTestApi.searchMatchingPaths = ["src/app.ts"];
+    rerender(<App />);
+    const filteredSearchInput = await screen.findByLabelText("Changed-file search");
+    filteredSearchInput.focus();
+    fireEvent.keyDown(filteredSearchInput, { key: "ArrowDown" });
+    expect(fileTreeTestApi.focusNextSearchMatch).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(filteredSearchInput, { key: "ArrowUp" });
+    expect(fileTreeTestApi.focusPreviousSearchMatch).toHaveBeenCalledTimes(1);
   });
 
   it("restores the persisted diff view mode and persists changes", async () => {

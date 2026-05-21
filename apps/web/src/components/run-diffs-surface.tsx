@@ -49,6 +49,7 @@ import { CreateTaskDialog } from "./create-task-dialog.js";
 import { ChevronIcon, CloseIcon, RefreshIcon, SearchIcon, WrapTextIcon } from "./icons.js";
 
 type DiffComparisonMode = "merge-base" | "direct";
+type DiffSourceMode = "range" | "working-tree";
 type DiffViewMode = "unified" | "split";
 
 interface ParsedDiffItem {
@@ -99,16 +100,20 @@ function branchRangeInput(
   };
 }
 
+function workingTreeInput(): ParsedRangeInput {
+  return {
+    display: "Working tree",
+    input: { mode: "working-tree" },
+  };
+}
+
 function parseRangeInput(value: string): ParsedRangeInput | null {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
     return null;
   }
   if (/^working[- ]tree$/i.test(trimmed)) {
-    return {
-      display: "working tree",
-      input: { mode: "working-tree" },
-    };
+    return workingTreeInput();
   }
   const mergeBaseParts = trimmed.split("...");
   if (mergeBaseParts.length === 2) {
@@ -227,6 +232,8 @@ export function RunDiffsSurface({
   const sidebarWidth = draggingWidth ?? persistedSidebarWidth;
   const resizing = draggingWidth !== null;
   const activeInput = rangeInput.input;
+  const activeSourceMode: DiffSourceMode =
+    activeInput.mode === "working-tree" ? "working-tree" : "range";
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") {
@@ -296,6 +303,7 @@ export function RunDiffsSurface({
     initialExpansion: "open",
     paths: filePaths,
     search: true,
+    searchBlurBehavior: "retain",
   });
   const selectedTreePaths = useFileTreeSelection(tree.model);
   const treeSearch = useFileTreeSearch(tree.model);
@@ -445,15 +453,87 @@ export function RunDiffsSurface({
     focusTreeSearchInput();
   }, [searchRequestVersion]);
 
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+
+    function treeSearchInputFromEvent(event: KeyboardEvent): HTMLInputElement | null {
+      const target = event
+        .composedPath()
+        .find(
+          (element) =>
+            element instanceof HTMLInputElement && element.matches("[data-file-tree-search-input]"),
+        );
+      return target instanceof HTMLInputElement ? target : null;
+    }
+
+    function handleTreeSearchKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const input = treeSearchInputFromEvent(event);
+      if (!input || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const hasSearch = treeSearch.value.trim().length > 0;
+      if (hasSearch && treeSearch.matchingPaths.length > 0) {
+        if (event.key === "ArrowDown") {
+          treeSearch.focusNextMatch();
+        } else {
+          treeSearch.focusPreviousMatch();
+        }
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        const firstPath = filePaths.at(0);
+        if (firstPath) {
+          tree.model.focusPath(firstPath);
+        }
+      } else {
+        const lastPath = filePaths.at(-1);
+        if (lastPath) {
+          tree.model.focusPath(lastPath);
+        }
+      }
+    }
+
+    root.addEventListener("keydown", handleTreeSearchKeyDown, { capture: true });
+    return () => root.removeEventListener("keydown", handleTreeSearchKeyDown, { capture: true });
+  }, [filePaths, tree.model, treeSearch]);
+
   function applyRange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const parsed = parseRangeInput(rangeDraft);
     if (!parsed) {
-      setRangeError("Use a range like main...HEAD, main..HEAD, or working tree.");
+      setRangeError("Use a range like main...HEAD or main..HEAD.");
       return;
     }
     setRangeInput(parsed);
     setRangeDraft(parsed.display);
+    setRangeError(null);
+    setSelectedLines(null);
+  }
+
+  function selectRangeSource() {
+    const parsed = parseRangeInput(rangeDraft);
+    const next =
+      parsed && parsed.input.mode === "branch"
+        ? parsed
+        : branchRangeInput(DEFAULT_BASE_REF, DEFAULT_HEAD_REF, "merge-base");
+    setRangeInput(next);
+    setRangeDraft(next.display);
+    setRangeError(null);
+    setSelectedLines(null);
+  }
+
+  function selectWorkingTreeSource() {
+    setRangeInput(workingTreeInput());
     setRangeError(null);
     setSelectedLines(null);
   }
@@ -615,21 +695,49 @@ export function RunDiffsSurface({
 
   return (
     <section aria-label="Diffs" className="drawer-panel drawer-panel--diffs" ref={rootRef}>
-      <form className="diffs-range-form" onSubmit={applyRange}>
-        <label>
-          <span>Range</span>
-          <input
-            aria-label="Diff range"
-            onChange={(event) => {
-              setRangeDraft(event.target.value);
-              setRangeError(null);
-            }}
-            value={rangeDraft}
-          />
-        </label>
-        <button className="btn btn-compact" disabled={rangeDraft.trim().length === 0} type="submit">
-          Apply
-        </button>
+      <div className="diffs-range-controls">
+        <div className="task-tabs" role="tablist" aria-label="Diff source">
+          <button
+            aria-selected={activeSourceMode === "range"}
+            className={activeSourceMode === "range" ? "task-tab active" : "task-tab"}
+            onClick={selectRangeSource}
+            role="tab"
+            type="button"
+          >
+            Range
+          </button>
+          <button
+            aria-selected={activeSourceMode === "working-tree"}
+            className={activeSourceMode === "working-tree" ? "task-tab active" : "task-tab"}
+            onClick={selectWorkingTreeSource}
+            role="tab"
+            type="button"
+          >
+            Working tree
+          </button>
+        </div>
+        {activeSourceMode === "range" ? (
+          <form className="diffs-range-form" onSubmit={applyRange}>
+            <label>
+              <span className="sr-only">Range</span>
+              <input
+                aria-label="Diff range"
+                onChange={(event) => {
+                  setRangeDraft(event.target.value);
+                  setRangeError(null);
+                }}
+                value={rangeDraft}
+              />
+            </label>
+            <button
+              className="btn btn-compact"
+              disabled={rangeDraft.trim().length === 0}
+              type="submit"
+            >
+              Apply
+            </button>
+          </form>
+        ) : null}
         <button
           aria-label="Refresh workspace diff"
           className="icon-btn"
@@ -640,7 +748,7 @@ export function RunDiffsSurface({
         >
           <RefreshIcon aria-hidden="true" />
         </button>
-      </form>
+      </div>
 
       {rangeError ? <p className="files-error">{rangeError}</p> : null}
       {diff?.truncated ? (

@@ -1965,6 +1965,7 @@ body {
   overflow: hidden;
 }
 
+.diffs-range-controls,
 .diffs-range-form,
 .diffs-viewer__header {
   display: flex;
@@ -1973,6 +1974,7 @@ body {
   min-width: 0;
 }
 
+.diffs-range-controls,
 .diffs-range-form {
   flex-wrap: wrap;
 }
