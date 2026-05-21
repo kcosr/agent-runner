@@ -3672,6 +3672,14 @@ test("daemon workspace diff HTTP route rejects invalid query shapes and missing 
       assert.equal(missingRef.status, 422);
       assert.equal(missingRef.body.error.code, "INVALID_COMMAND");
       assert.match(missingRef.body.error.message, /missing git base ref "missing"/);
+
+      const optionLikeRef = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/diff?mode=branch&base=--help&head=HEAD&comparison=direct`,
+      );
+      assert.equal(optionLikeRef.status, 400);
+      assert.equal(optionLikeRef.body.error.code, "INVALID_REQUEST");
+      assert.match(optionLikeRef.body.error.message, /base cannot start with "-"/);
     } finally {
       await server.close();
     }

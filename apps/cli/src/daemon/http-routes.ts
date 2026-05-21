@@ -973,6 +973,14 @@ function requiredNonEmptyQueryString(value: string | null, label: string): strin
   return value;
 }
 
+function requiredGitRefQueryString(value: string | null, label: string): string {
+  const ref = requiredNonEmptyQueryString(value, label);
+  if (ref.startsWith("-")) {
+    throw new RequestValidationError(`${label} cannot start with "-"`);
+  }
+  return ref;
+}
+
 function unsupportedQueryParams(
   searchParams: URLSearchParams,
   allowed: readonly string[],
@@ -1010,8 +1018,8 @@ function parseWorkspaceDiffQuery(searchParams: URLSearchParams): WorkspaceDiffIn
     }
     return {
       mode,
-      base: requiredNonEmptyQueryString(searchParams.get("base"), "base"),
-      head: requiredNonEmptyQueryString(searchParams.get("head"), "head"),
+      base: requiredGitRefQueryString(searchParams.get("base"), "base"),
+      head: requiredGitRefQueryString(searchParams.get("head"), "head"),
       comparison,
     };
   }

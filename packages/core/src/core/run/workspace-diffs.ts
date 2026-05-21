@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { promises as fs, realpathSync } from "node:fs";
+import { constants, promises as fs, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   MAX_WORKSPACE_DIFF_BYTES,
@@ -66,6 +66,14 @@ function sanitizedGitEnv(): NodeJS.ProcessEnv {
 
 function codeFromError(err: unknown): unknown {
   return typeof err === "object" && err !== null && "code" in err ? err.code : null;
+}
+
+function binaryWorkspaceDiffFile(path: string): WorkspaceDiffFile {
+  return { path, status: "binary", additions: null, deletions: null, binary: true };
+}
+
+function missingUntrackedWorkspaceDiffFile(path: string): WorkspaceDiffFile {
+  return { path, status: "untracked", additions: 0, deletions: 0, binary: false };
 }
 
 function realCwd(manifest: Pick<RunManifest, "cwd" | "runId">): string {
@@ -421,7 +429,7 @@ async function readUntrackedFile(
   } catch (err) {
     if (codeFromError(err) === "ENOENT") {
       return {
-        file: { path, status: "untracked", additions: 0, deletions: 0, binary: false },
+        file: missingUntrackedWorkspaceDiffFile(path),
         patch: "",
       };
     }
@@ -430,26 +438,46 @@ async function readUntrackedFile(
   if (!isContainedBy(repoRoot, realPath)) {
     throw new WorkspaceDiffInvalidRequestError(`untracked path "${path}" resolves outside repo`);
   }
-  const stats = await fs.stat(realPath);
-  if (!stats.isFile() || stats.size > MAX_WORKSPACE_DIFF_UNTRACKED_FILE_BYTES) {
+
+  let handle: fs.FileHandle | null = null;
+  try {
+    handle = await fs.open(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const openedRealPath = await fs.realpath(absolutePath);
+    if (openedRealPath !== realPath || !isContainedBy(repoRoot, openedRealPath)) {
+      return { file: binaryWorkspaceDiffFile(path), patch: "" };
+    }
+    const stats = await handle.stat();
+    if (!stats.isFile() || stats.size > MAX_WORKSPACE_DIFF_UNTRACKED_FILE_BYTES) {
+      return { file: binaryWorkspaceDiffFile(path), patch: "" };
+    }
+    const buffer = Buffer.alloc(MAX_WORKSPACE_DIFF_UNTRACKED_FILE_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > MAX_WORKSPACE_DIFF_UNTRACKED_FILE_BYTES) {
+      return { file: binaryWorkspaceDiffFile(path), patch: "" };
+    }
+    const text = decodeUtf8(buffer.subarray(0, bytesRead));
+    if (text === null) {
+      return { file: binaryWorkspaceDiffFile(path), patch: "" };
+    }
+    const additions = text.length === 0 ? 0 : text.split("\n").length;
     return {
-      file: { path, status: "binary", additions: null, deletions: null, binary: true },
-      patch: "",
+      file: { path, status: "untracked", additions, deletions: 0, binary: false },
+      patch: untrackedPatch(path, text),
     };
+  } catch (err) {
+    if (codeFromError(err) === "ENOENT") {
+      return {
+        file: missingUntrackedWorkspaceDiffFile(path),
+        patch: "",
+      };
+    }
+    if (codeFromError(err) === "ELOOP") {
+      return { file: binaryWorkspaceDiffFile(path), patch: "" };
+    }
+    throw new WorkspaceDiffError(`untracked file "${path}" is not readable`, { cause: err });
+  } finally {
+    await handle?.close();
   }
-  const buffer = await fs.readFile(realPath);
-  const text = decodeUtf8(buffer);
-  if (text === null) {
-    return {
-      file: { path, status: "binary", additions: null, deletions: null, binary: true },
-      patch: "",
-    };
-  }
-  const additions = text.length === 0 ? 0 : text.split("\n").length;
-  return {
-    file: { path, status: "untracked", additions, deletions: 0, binary: false },
-    patch: untrackedPatch(path, text),
-  };
 }
 
 async function workingTreeDiffFiles(

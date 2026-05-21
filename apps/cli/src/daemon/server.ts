@@ -148,6 +148,7 @@ import {
   advanceRecurringSchedule,
   deriveScheduleState,
 } from "@kcosr/agent-runner-core/core/run/schedule.js";
+import { getWorkspaceDiffForRun } from "@kcosr/agent-runner-core/core/run/workspace-diffs.js";
 import {
   listWorkspaceFiles as listWorkspaceFilesFromManifest,
   readWorkspaceFile as readWorkspaceFileFromManifest,
@@ -1060,6 +1061,14 @@ export async function serveDaemon(
   ): ReturnType<typeof getWorkspaceFile> => {
     const entry = resolveWorkspaceManifestTarget(target);
     return readWorkspaceFileFromManifest(entry.manifest, input);
+  };
+
+  const getDaemonWorkspaceDiff = (
+    target: string,
+    input: Parameters<typeof getWorkspaceDiff>[1],
+  ): ReturnType<typeof getWorkspaceDiff> => {
+    const entry = resolveWorkspaceManifestTarget(target);
+    return getWorkspaceDiffForRun(entry.manifest, input);
   };
 
   const refreshManifestByRunId = (runId: string): RunManifest | undefined => {
@@ -3197,6 +3206,7 @@ export async function serveDaemon(
     getRunList: getDaemonRunList,
     getRunAuditHistory: getProjectedAuditHistory,
     getRunTimelineHistory: getProjectedTimelineHistory,
+    getWorkspaceDiff: getDaemonWorkspaceDiff,
     getWorkspaceFileList: getDaemonWorkspaceFileList,
     getWorkspaceFileSearch: getDaemonWorkspaceFileSearch,
     getWorkspaceFile: getDaemonWorkspaceFile,

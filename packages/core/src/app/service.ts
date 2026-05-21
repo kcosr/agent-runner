@@ -482,8 +482,7 @@ export function getWorkspaceDiff(
   target: string,
   input: WorkspaceDiffInput,
 ): Promise<WorkspaceDiff> {
-  const detail = readStatus(target);
-  const { manifest } = resolveResumeTarget(detail.workspaceDir);
+  const { manifest } = resolveResumeTarget(target);
   return getWorkspaceDiffForRun(manifest, input);
 }
 

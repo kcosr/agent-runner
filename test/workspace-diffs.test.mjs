@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -273,6 +273,26 @@ test("workspace diff service marks binary and oversize untracked files without e
       { status: "binary", binary: true, additions: null, deletions: null },
     );
     assert.doesNotMatch(diff.patch, /large-untracked/);
+  });
+});
+
+test("workspace diff service rejects untracked symlinks that resolve outside the repo", async () => {
+  const dir = tempDir();
+  const outside = tempDir();
+  writeBundle(dir);
+  initGitRepo(dir);
+  writeFileSync(join(dir, "tracked.txt"), "base\n");
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-m", "base"]);
+  writeFileSync(join(outside, "secret.txt"), "outside\n");
+  symlinkSync(join(outside, "secret.txt"), join(dir, "outside-link.txt"));
+  const outcome = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    await assert.rejects(
+      () => getWorkspaceDiff(outcome.workspaceDir, { mode: "working-tree" }),
+      /untracked path "outside-link\.txt" resolves outside repo/,
+    );
   });
 });
 

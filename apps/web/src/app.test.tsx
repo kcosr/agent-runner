@@ -35,6 +35,66 @@ vi.mock("mermaid", () => ({
   },
 }));
 
+vi.mock("@pierre/diffs/react", async () => {
+  const React = await import("react");
+
+  type MockCodeViewItem = {
+    fileDiff?: { name?: string };
+    id: string;
+  };
+
+  const CodeView = React.forwardRef<
+    unknown,
+    {
+      className?: string;
+      items?: readonly MockCodeViewItem[];
+      onSelectedLinesChange?: (
+        selection: {
+          id: string;
+          range: { end: number; endSide: "additions"; side: "additions"; start: number };
+        } | null,
+      ) => void;
+    }
+  >(function MockCodeView({ className, items = [], onSelectedLinesChange }, ref) {
+    React.useImperativeHandle(ref, () => ({
+      clearSelectedLines: () => {},
+      getInstance: () => undefined,
+      getItem: (id: string) => items.find((item) => item.id === id),
+      getSelectedLines: () => null,
+      scrollTo: () => {},
+      setSelectedLines: () => {},
+      updateItem: () => false,
+      updateItemId: () => false,
+    }));
+
+    return (
+      <div aria-label="Code diff" className={className}>
+        {items.map((item) => {
+          const name = item.fileDiff?.name ?? item.id;
+          return (
+            <div key={item.id}>
+              <span>{name}</span>
+              <button
+                onClick={() =>
+                  onSelectedLinesChange?.({
+                    id: item.id,
+                    range: { start: 2, end: 2, side: "additions", endSide: "additions" },
+                  })
+                }
+                type="button"
+              >
+                Select diff line for {name}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  });
+
+  return { CodeView };
+});
+
 vi.mock("@pierre/trees/react", () => ({
   FileTree: () => null,
   useFileTree: () => ({
@@ -1699,14 +1759,23 @@ function makeWorkspaceDiff(overrides: Record<string, unknown> = {}) {
     files: [
       {
         path: "src/app.ts",
-        status: "binary",
-        additions: null,
-        deletions: null,
-        binary: true,
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        binary: false,
       },
     ],
-    stats: { files: 1, additions: 0, deletions: 0 },
-    patch: "",
+    stats: { files: 1, additions: 1, deletions: 0 },
+    patch: [
+      "diff --git a/src/app.ts b/src/app.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/app.ts",
+      "+++ b/src/app.ts",
+      "@@ -1,1 +1,2 @@",
+      " export const existing = true;",
+      "+export const selected = true;",
+      "",
+    ].join("\n"),
     truncated: false,
     maxBytes: 524288,
     ...overrides,
@@ -2968,6 +3037,48 @@ describe("web app", () => {
     expect(screen.getByLabelText("Diffs")).toBeInTheDocument();
   });
 
+  it("restores existing persisted selected-run surfaces and falls back for unknown values", async () => {
+    for (const [activeRightSurface, tabName] of [
+      ["files", "Files"],
+      ["tasks", /Tasks/],
+    ] as const) {
+      setStoredDashboardViewState({ activeRightSurface });
+      installFetchMock({
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      });
+
+      await renderApp("/runs/run-1");
+      const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+      expect(within(tablist).getByRole("tab", { name: tabName })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+
+      cleanup();
+      queryClient.clear();
+    }
+
+    window.localStorage.setItem(
+      "agent-runner:web:dashboard-view-state",
+      JSON.stringify({
+        ...DEFAULT_DASHBOARD_VIEW_STATE,
+        activeRightSurface: "unknown",
+      }),
+    );
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    await renderApp("/runs/run-1");
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    expect(within(tablist).getByRole("tab", { name: "Detail" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   it("renders the Diffs surface, restores it, switches comparisons, and refreshes", async () => {
     setStoredDashboardViewState({ activeRightSurface: "diffs" });
     const diffRequests: string[] = [];
@@ -3031,6 +3142,89 @@ describe("web app", () => {
       expect(fetchCallCount(fetchMock, (url) => url.includes("/workspace/diff"))).toBeGreaterThan(
         beforeRefresh,
       );
+    });
+  });
+
+  it("creates a task from a diff line selection with the contracted task body", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let createdTaskBody: { body?: string; title?: string } | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            capabilities: {
+              taskMutation: {
+                canAdd: true,
+                canEditPending: true,
+                canDeletePending: true,
+                canEditNotes: true,
+                canSetStatus: true,
+              },
+            },
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            capabilities: {
+              taskMutation: {
+                canAdd: true,
+                canEditPending: true,
+                canDeletePending: true,
+                canEditNotes: true,
+                canSetStatus: true,
+              },
+            },
+            lockedFields: [],
+          }),
+        },
+      },
+      {
+        handleRequest(url, init) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          if (parsed.pathname === "/api/runs/run-1/tasks" && init?.method === "POST") {
+            createdTaskBody =
+              typeof init.body === "string"
+                ? (JSON.parse(init.body) as { body?: string; title?: string })
+                : undefined;
+            return new Response(
+              JSON.stringify({
+                task: {
+                  id: "diff-task",
+                  title: createdTaskBody?.title ?? "",
+                  body: createdTaskBody?.body ?? "",
+                  status: "pending",
+                  notes: "",
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    await user.click(
+      await screen.findByRole("button", { name: "Select diff line for src/app.ts" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Description"), "Create a follow-up from this diff.");
+    await user.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => {
+      expect(createdTaskBody?.title).toBe("Update src/app.ts");
+      expect(createdTaskBody?.body).toContain("Diff: `main...HEAD`");
+      expect(createdTaskBody?.body).toContain("File: `src/app.ts`");
+      expect(createdTaskBody?.body).toContain("Side: additions");
+      expect(createdTaskBody?.body).toContain("Range: `src/app.ts:2`");
+      expect(createdTaskBody?.body).toContain("export const selected = true;");
+      expect(createdTaskBody?.body).toContain("Create a follow-up from this diff.");
     });
   });
 
