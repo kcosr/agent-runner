@@ -2082,7 +2082,7 @@ describe("web app", () => {
     expect(screen.getAllByText("CWD").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("/tmp/agent-runner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy cwd path/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copy run id/i })).not.toBeInTheDocument();
   });
 
   it("toggles list mode, filters by status, sorts globally, and preserves row actions", async () => {
@@ -9286,9 +9286,12 @@ describe("web app", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+    const fullscreenDrawer = screen.getByLabelText("Run detail");
+    expect(within(fullscreenDrawer).getByText("initialized")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copy run id/i })).not.toBeInTheDocument();
     expect(screen.getByRole("tablist", { name: "Run surface" })).toBeInTheDocument();
 
     const searchInput = screen.getByPlaceholderText("Search runs");
