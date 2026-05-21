@@ -1656,6 +1656,24 @@ export function RunDetailDrawer({
     toggleFullscreen();
   }
 
+  const surfaceTabs = (
+    <div aria-label="Run surface" className="selected-run-surface-tabs" role="tablist">
+      {SELECTED_RUN_SURFACE_TABS.map((tab) => (
+        <button
+          aria-keyshortcuts={tab.shortcut}
+          aria-selected={activeSurface === tab.surface}
+          className={activeSurface === tab.surface ? "task-tab active" : "task-tab"}
+          key={tab.surface}
+          onClick={() => onSelectSurface(tab.surface)}
+          role="tab"
+          type="button"
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <>
       <button
@@ -1672,181 +1690,201 @@ export function RunDetailDrawer({
         style={drawerStyle}
         tabIndex={-1}
       >
-        <DrawerResizeHandle label="Resize detail drawer" resize={resize} />
-        <header className="drawer-head">
-          <div className="drawer-title">
-            <span className="run-id-large">{runIdLabel}</span>
-            <StatusBadge status={run.effectiveStatus} />
-          </div>
-          <div className="drawer-actions">
-            {run.capabilities.canArchive ? (
-              <button className="btn" disabled={actionsLocked} onClick={onArchive} type="button">
-                <ArchiveIcon aria-hidden="true" />
-                {actionPending === "archive" ? "Archiving..." : "Archive"}
-              </button>
-            ) : null}
-            {run.capabilities.canUnarchive ? (
-              <button className="btn" disabled={actionsLocked} onClick={onUnarchive} type="button">
-                <ArchiveIcon aria-hidden="true" />
-                {actionPending === "unarchive" ? "Restoring..." : "Unarchive"}
-              </button>
-            ) : null}
-            {primaryAction !== null ? (
+        {!isFullscreen ? <DrawerResizeHandle label="Resize detail drawer" resize={resize} /> : null}
+        {!isFullscreen ? (
+          <>
+            <header className="drawer-head">
+              <div className="drawer-title">
+                <span className="run-id-large">{runIdLabel}</span>
+                <StatusBadge status={run.effectiveStatus} />
+              </div>
+              <div className="drawer-actions">
+                {run.capabilities.canArchive ? (
+                  <button
+                    className="btn"
+                    disabled={actionsLocked}
+                    onClick={onArchive}
+                    type="button"
+                  >
+                    <ArchiveIcon aria-hidden="true" />
+                    {actionPending === "archive" ? "Archiving..." : "Archive"}
+                  </button>
+                ) : null}
+                {run.capabilities.canUnarchive ? (
+                  <button
+                    className="btn"
+                    disabled={actionsLocked}
+                    onClick={onUnarchive}
+                    type="button"
+                  >
+                    <ArchiveIcon aria-hidden="true" />
+                    {actionPending === "unarchive" ? "Restoring..." : "Unarchive"}
+                  </button>
+                ) : null}
+                {primaryAction !== null ? (
+                  <button
+                    className="btn"
+                    disabled={actionsLocked}
+                    onClick={() => void onTriggerPrimaryAction()}
+                    type="button"
+                  >
+                    {primaryAction === "ready"
+                      ? readyPending
+                        ? "Readying..."
+                        : "Ready"
+                      : actionPending === "resume"
+                        ? startableRun
+                          ? "Starting..."
+                          : "Resuming..."
+                        : startableRun
+                          ? "Start"
+                          : "Resume"}
+                  </button>
+                ) : null}
+                {run.capabilities.canReset ? (
+                  confirmingReset ? (
+                    <InlineConfirmActions
+                      cancelLabel="Cancel reset run"
+                      cancelTitle={resetPending ? "Reset is pending..." : "Cancel reset run"}
+                      confirmLabel="Confirm reset run"
+                      confirmTitle={resetPending ? "Resetting run..." : "Confirm reset run"}
+                      disabled={actionsLocked}
+                      onCancel={() => setConfirmingReset(false)}
+                      onConfirm={() => {
+                        setConfirmingReset(false);
+                        onReset();
+                      }}
+                    />
+                  ) : (
+                    <button
+                      className="btn"
+                      disabled={actionsLocked}
+                      onClick={() => setConfirmingReset(true)}
+                      type="button"
+                    >
+                      {resetPending ? "Resetting..." : "Reset"}
+                    </button>
+                  )
+                ) : null}
+                {run.capabilities.canAbort ? (
+                  confirmingAbort ? (
+                    <InlineConfirmActions
+                      cancelLabel="Cancel abort run"
+                      cancelTitle={abortPending ? "Abort is pending..." : "Cancel abort run"}
+                      confirmLabel="Confirm abort run"
+                      confirmTitle={abortPending ? "Aborting run..." : "Confirm abort run"}
+                      disabled={actionsLocked}
+                      onCancel={() => setConfirmingAbort(false)}
+                      onConfirm={onAbort}
+                    />
+                  ) : (
+                    <button
+                      className="btn btn-destructive-outline"
+                      disabled={actionsLocked}
+                      onClick={() => setConfirmingAbort(true)}
+                      type="button"
+                    >
+                      <StopIcon aria-hidden="true" />
+                      Abort
+                    </button>
+                  )
+                ) : null}
+                {run.capabilities.canDelete ? (
+                  confirmingDelete ? (
+                    <InlineConfirmActions
+                      cancelLabel="Cancel delete run"
+                      cancelTitle={
+                        actionPending === "delete" ? "Delete is pending..." : "Cancel delete run"
+                      }
+                      confirmLabel="Confirm delete run"
+                      confirmTitle={
+                        actionPending === "delete" ? "Deleting run..." : "Confirm delete run"
+                      }
+                      disabled={actionsLocked}
+                      onCancel={() => setConfirmingDelete(false)}
+                      onConfirm={onDelete}
+                    />
+                  ) : (
+                    <button
+                      className="btn btn-destructive-outline"
+                      disabled={actionsLocked}
+                      onClick={() => setConfirmingDelete(true)}
+                      type="button"
+                    >
+                      <TrashIcon aria-hidden="true" />
+                      Delete
+                    </button>
+                  )
+                ) : null}
+                <button
+                  aria-label={run.pinned ? "Unpin run" : "Pin run"}
+                  aria-pressed={run.pinned}
+                  className="icon-btn"
+                  disabled={pinPending}
+                  onClick={() => void onSetPinned(!run.pinned)}
+                  title={run.pinned ? "Unpin run" : "Pin run"}
+                  type="button"
+                >
+                  <PinIcon aria-hidden="true" />
+                </button>
+                <button
+                  aria-label="Copy run id"
+                  className="icon-btn"
+                  onClick={() => onCopy(run.runId, "run id")}
+                  title="Copy run id"
+                  type="button"
+                >
+                  <CopyIcon aria-hidden="true" />
+                </button>
+                <button
+                  aria-label="Expand drawer to full width"
+                  aria-keyshortcuts="Shift+F"
+                  aria-pressed={isFullscreen}
+                  className="icon-btn drawer-fullscreen-toggle"
+                  onClick={toggleFullscreen}
+                  title="Expand to full width"
+                  type="button"
+                >
+                  <ExpandIcon aria-hidden="true" />
+                </button>
+                <button
+                  aria-label="Close selected run panel"
+                  className="icon-btn"
+                  onClick={onClose}
+                  type="button"
+                >
+                  <CloseIcon aria-hidden="true" />
+                </button>
+              </div>
+            </header>
+            {surfaceTabs}
+          </>
+        ) : (
+          <div className="drawer-fullscreen-bar">
+            {surfaceTabs}
+            <div className="drawer-fullscreen-actions">
               <button
-                className="btn"
-                disabled={actionsLocked}
-                onClick={() => void onTriggerPrimaryAction()}
+                aria-label="Exit full-width drawer"
+                aria-keyshortcuts="Shift+F"
+                aria-pressed={isFullscreen}
+                className="icon-btn drawer-fullscreen-toggle"
+                onClick={toggleFullscreen}
+                title="Restore drawer width"
                 type="button"
               >
-                {primaryAction === "ready"
-                  ? readyPending
-                    ? "Readying..."
-                    : "Ready"
-                  : actionPending === "resume"
-                    ? startableRun
-                      ? "Starting..."
-                      : "Resuming..."
-                    : startableRun
-                      ? "Start"
-                      : "Resume"}
-              </button>
-            ) : null}
-            {run.capabilities.canReset ? (
-              confirmingReset ? (
-                <InlineConfirmActions
-                  cancelLabel="Cancel reset run"
-                  cancelTitle={resetPending ? "Reset is pending..." : "Cancel reset run"}
-                  confirmLabel="Confirm reset run"
-                  confirmTitle={resetPending ? "Resetting run..." : "Confirm reset run"}
-                  disabled={actionsLocked}
-                  onCancel={() => setConfirmingReset(false)}
-                  onConfirm={() => {
-                    setConfirmingReset(false);
-                    onReset();
-                  }}
-                />
-              ) : (
-                <button
-                  className="btn"
-                  disabled={actionsLocked}
-                  onClick={() => setConfirmingReset(true)}
-                  type="button"
-                >
-                  {resetPending ? "Resetting..." : "Reset"}
-                </button>
-              )
-            ) : null}
-            {run.capabilities.canAbort ? (
-              confirmingAbort ? (
-                <InlineConfirmActions
-                  cancelLabel="Cancel abort run"
-                  cancelTitle={abortPending ? "Abort is pending..." : "Cancel abort run"}
-                  confirmLabel="Confirm abort run"
-                  confirmTitle={abortPending ? "Aborting run..." : "Confirm abort run"}
-                  disabled={actionsLocked}
-                  onCancel={() => setConfirmingAbort(false)}
-                  onConfirm={onAbort}
-                />
-              ) : (
-                <button
-                  className="btn btn-destructive-outline"
-                  disabled={actionsLocked}
-                  onClick={() => setConfirmingAbort(true)}
-                  type="button"
-                >
-                  <StopIcon aria-hidden="true" />
-                  Abort
-                </button>
-              )
-            ) : null}
-            {run.capabilities.canDelete ? (
-              confirmingDelete ? (
-                <InlineConfirmActions
-                  cancelLabel="Cancel delete run"
-                  cancelTitle={
-                    actionPending === "delete" ? "Delete is pending..." : "Cancel delete run"
-                  }
-                  confirmLabel="Confirm delete run"
-                  confirmTitle={
-                    actionPending === "delete" ? "Deleting run..." : "Confirm delete run"
-                  }
-                  disabled={actionsLocked}
-                  onCancel={() => setConfirmingDelete(false)}
-                  onConfirm={onDelete}
-                />
-              ) : (
-                <button
-                  className="btn btn-destructive-outline"
-                  disabled={actionsLocked}
-                  onClick={() => setConfirmingDelete(true)}
-                  type="button"
-                >
-                  <TrashIcon aria-hidden="true" />
-                  Delete
-                </button>
-              )
-            ) : null}
-            <button
-              aria-label={run.pinned ? "Unpin run" : "Pin run"}
-              aria-pressed={run.pinned}
-              className="icon-btn"
-              disabled={pinPending}
-              onClick={() => void onSetPinned(!run.pinned)}
-              title={run.pinned ? "Unpin run" : "Pin run"}
-              type="button"
-            >
-              <PinIcon aria-hidden="true" />
-            </button>
-            <button
-              aria-label="Copy run id"
-              className="icon-btn"
-              onClick={() => onCopy(run.runId, "run id")}
-              title="Copy run id"
-              type="button"
-            >
-              <CopyIcon aria-hidden="true" />
-            </button>
-            <button
-              aria-label={isFullscreen ? "Exit full-width drawer" : "Expand drawer to full width"}
-              aria-keyshortcuts="Shift+F"
-              aria-pressed={isFullscreen}
-              className="icon-btn drawer-fullscreen-toggle"
-              onClick={toggleFullscreen}
-              title={isFullscreen ? "Restore drawer width" : "Expand to full width"}
-              type="button"
-            >
-              {isFullscreen ? (
                 <CollapseIcon aria-hidden="true" />
-              ) : (
-                <ExpandIcon aria-hidden="true" />
-              )}
-            </button>
-            <button
-              aria-label="Close selected run panel"
-              className="icon-btn"
-              onClick={onClose}
-              type="button"
-            >
-              <CloseIcon aria-hidden="true" />
-            </button>
+              </button>
+              <button
+                aria-label="Close selected run panel"
+                className="icon-btn"
+                onClick={onClose}
+                type="button"
+              >
+                <CloseIcon aria-hidden="true" />
+              </button>
+            </div>
           </div>
-        </header>
-
-        <div aria-label="Run surface" className="selected-run-surface-tabs" role="tablist">
-          {SELECTED_RUN_SURFACE_TABS.map((tab) => (
-            <button
-              aria-keyshortcuts={tab.shortcut}
-              aria-selected={activeSurface === tab.surface}
-              className={activeSurface === tab.surface ? "task-tab active" : "task-tab"}
-              key={tab.surface}
-              onClick={() => onSelectSurface(tab.surface)}
-              role="tab"
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        )}
 
         <div className="drawer-body" hidden={activeSurface !== "attachments"}>
           <AttachmentPreviewPanel

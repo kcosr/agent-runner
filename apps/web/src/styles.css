@@ -980,10 +980,10 @@ body {
 @media (min-width: 900px) {
   .drawer--fullscreen {
     position: fixed;
-    top: 52px;
+    top: 0;
     right: 0;
     bottom: 0;
-    left: 56px;
+    left: 0;
     z-index: 40;
     flex: initial;
     width: auto;
@@ -1084,6 +1084,37 @@ body {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--background);
+}
+
+.drawer-fullscreen-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+
+.drawer-fullscreen-bar .selected-run-surface-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border-bottom: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.drawer-fullscreen-bar .selected-run-surface-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.drawer-fullscreen-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
 }
 
 .chat-view {

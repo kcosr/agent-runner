@@ -8695,6 +8695,10 @@ describe("web app", () => {
       "aria-pressed",
       "true",
     );
+    expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Run surface" })).toBeInTheDocument();
 
     const searchInput = screen.getByPlaceholderText("Search runs");
     expect(searchInput).not.toHaveFocus();
@@ -12454,7 +12458,9 @@ describe("web app", () => {
     expect(fullscreenDrawerLayer).not.toBeNull();
     expect(resumeDialogLayer?.[1]).toBe("60");
     expect(fullscreenDrawerLayer?.[1]).toBe("40");
-    expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?right:\s*0;[\s\S]*?left:\s*56px;/);
+    expect(css).toMatch(
+      /\.drawer--fullscreen\s*\{[\s\S]*?top:\s*0;[\s\S]*?right:\s*0;[\s\S]*?left:\s*0;/,
+    );
     expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?width:\s*auto;/);
     expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?min-width:\s*0;/);
   });
