@@ -73,6 +73,29 @@ function eventPathContainsSelector(event: KeyboardEvent, selector: string): bool
     .some((target) => target instanceof Element && target.matches(selector));
 }
 
+function findEventPathElement<T extends Element>(
+  event: KeyboardEvent,
+  predicate: (element: Element) => element is T,
+): T | null {
+  for (const target of event.composedPath()) {
+    if (target instanceof Element && predicate(target)) {
+      return target;
+    }
+  }
+  return null;
+}
+
+function getDiffsFileTreeSearchInput(event: KeyboardEvent): HTMLInputElement | null {
+  if (!eventPathContainsSelector(event, ".diffs-file-tree")) {
+    return null;
+  }
+  return findEventPathElement(
+    event,
+    (element): element is HTMLInputElement =>
+      element instanceof HTMLInputElement && element.matches("[data-file-tree-search-input]"),
+  );
+}
+
 function DashboardSurfaces({
   primary,
   detail,
@@ -332,6 +355,16 @@ export function RunsDashboardRoute() {
       const modalOpen = document.querySelector('dialog[open][data-modal="true"]') !== null;
       const typingTarget =
         isEditableKeyboardEvent(event) || isEditableEventTarget(document.activeElement);
+      const diffsTreeSearchInput = getDiffsFileTreeSearchInput(event);
+
+      if (event.key === "Escape" && diffsTreeSearchInput) {
+        if (diffsTreeSearchInput.value.length === 0) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          diffsTreeSearchInput.blur();
+        }
+        return;
+      }
 
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: currentState.activeBoardColumnKey,
@@ -342,7 +375,8 @@ export function RunsDashboardRoute() {
         resumeDialogOpen: currentState.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
         searchValue: currentState.viewState.search,
-        localNavigationTarget: eventPathContainsSelector(event, ".diffs-file-tree"),
+        localNavigationTarget:
+          drawerFullscreen && eventPathContainsSelector(event, ".diffs-file-tree"),
         selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
         selectedRunId: currentState.selectedRunId,
         typingTarget,
