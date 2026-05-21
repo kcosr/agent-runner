@@ -47,7 +47,7 @@ import { type TaskReference, defaultTaskTitle } from "../lib/task-reference.js";
 import { CreateTaskDialog } from "./create-task-dialog.js";
 import { ChevronIcon, CloseIcon, RefreshIcon, SearchIcon } from "./icons.js";
 
-type DiffComparisonMode = "merge-base" | "direct" | "working-tree";
+type DiffComparisonMode = "merge-base" | "direct";
 type DiffViewMode = "unified" | "split";
 
 interface ParsedDiffItem {
@@ -65,6 +65,12 @@ interface RunDiffsSurfaceProps {
 
 const DEFAULT_BASE_REF = "main";
 const DEFAULT_HEAD_REF = "HEAD";
+const DEFAULT_RANGE = `${DEFAULT_BASE_REF}...${DEFAULT_HEAD_REF}`;
+
+interface ParsedRangeInput {
+  display: string;
+  input: WorkspaceDiffInput;
+}
 
 function hashCodeViewVersion(input: string): number {
   let hash = 0;
@@ -74,26 +80,45 @@ function hashCodeViewVersion(input: string): number {
   return hash >>> 0;
 }
 
-function inputForMode(
-  mode: DiffComparisonMode,
-  refs: { base: string; head: string },
-): WorkspaceDiffInput {
-  if (mode === "working-tree") {
-    return { mode: "working-tree" };
-  }
+function branchRangeInput(
+  base: string,
+  head: string,
+  comparison: DiffComparisonMode,
+): ParsedRangeInput {
+  const separator = comparison === "direct" ? ".." : "...";
   return {
-    mode: "branch",
-    base: refs.base,
-    head: refs.head,
-    comparison: mode,
+    display: `${base}${separator}${head}`,
+    input: {
+      mode: "branch",
+      base,
+      head,
+      comparison,
+    },
   };
 }
 
-function statusLabel(status: WorkspaceDiffFileStatus): string {
-  if (status === "binary") {
-    return "Preview unavailable";
+function parseRangeInput(value: string): ParsedRangeInput | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
   }
-  return status.charAt(0).toUpperCase() + status.slice(1);
+  if (/^working[- ]tree$/i.test(trimmed)) {
+    return {
+      display: "working tree",
+      input: { mode: "working-tree" },
+    };
+  }
+  const mergeBaseParts = trimmed.split("...");
+  if (mergeBaseParts.length === 2) {
+    const [base, head] = mergeBaseParts.map((part) => part.trim());
+    return base && head ? branchRangeInput(base, head, "merge-base") : null;
+  }
+  const directParts = trimmed.split("..");
+  if (directParts.length === 2) {
+    const [base, head] = directParts.map((part) => part.trim());
+    return base && head ? branchRangeInput(base, head, "direct") : null;
+  }
+  return null;
 }
 
 function treeGitStatus(status: WorkspaceDiffFileStatus): GitStatusEntry["status"] {
@@ -101,13 +126,6 @@ function treeGitStatus(status: WorkspaceDiffFileStatus): GitStatusEntry["status"
     return "modified";
   }
   return status;
-}
-
-function displayStats(file: WorkspaceDiffFile): string {
-  if (file.binary) {
-    return "Binary";
-  }
-  return `+${file.additions ?? 0} / -${file.deletions ?? 0}`;
 }
 
 function parseDiffItems(diff: WorkspaceDiff): ParsedDiffItem[] {
@@ -168,10 +186,11 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   const { preferences } = useDashboardPreferences();
   const { viewState, updateViewState } = useDashboardViewState();
   const api = useMemo(() => createApiClient(config, { daemonToken }), [config, daemonToken]);
-  const [comparisonMode, setComparisonMode] = useState<DiffComparisonMode>("merge-base");
-  const [branchRefs, setBranchRefs] = useState({ base: DEFAULT_BASE_REF, head: DEFAULT_HEAD_REF });
-  const [baseDraft, setBaseDraft] = useState(DEFAULT_BASE_REF);
-  const [headDraft, setHeadDraft] = useState(DEFAULT_HEAD_REF);
+  const [rangeInput, setRangeInput] = useState<ParsedRangeInput>(() =>
+    branchRangeInput(DEFAULT_BASE_REF, DEFAULT_HEAD_REF, "merge-base"),
+  );
+  const [rangeDraft, setRangeDraft] = useState(DEFAULT_RANGE);
+  const [rangeError, setRangeError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [browserCollapsed, setBrowserCollapsed] = useState(false);
   const [mobileLayout, setMobileLayout] = useState(false);
@@ -187,15 +206,13 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
   const codeViewRef = useRef<CodeViewHandle<undefined> | null>(null);
+  const mobileCollapsedPathRef = useRef<string | null>(null);
   const persistedSidebarWidth = viewState.diffsSidebarWidth;
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [draggingWidth, setDraggingWidth] = useState<number | null>(null);
   const sidebarWidth = draggingWidth ?? persistedSidebarWidth;
   const resizing = draggingWidth !== null;
-  const activeInput = useMemo(
-    () => inputForMode(comparisonMode, branchRefs),
-    [branchRefs, comparisonMode],
-  );
+  const activeInput = rangeInput.input;
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") {
@@ -212,12 +229,12 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
 
   useEffect(() => {
     if (!mobileLayout) {
+      mobileCollapsedPathRef.current = null;
       setBrowserCollapsed(false);
+      return;
     }
-  }, [mobileLayout]);
-
-  useEffect(() => {
-    if (mobileLayout && selectedPath) {
+    if (selectedPath && mobileCollapsedPathRef.current !== selectedPath) {
+      mobileCollapsedPathRef.current = selectedPath;
       setBrowserCollapsed(true);
     }
   }, [mobileLayout, selectedPath]);
@@ -382,11 +399,8 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
         setSelectedLines(null);
         return selected;
       });
-      if (mobileLayout) {
-        setBrowserCollapsed(true);
-      }
     }
-  }, [filePathSet, mobileLayout, selectedTreePaths]);
+  }, [filePathSet, selectedTreePaths]);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -409,22 +423,16 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
     });
   }, [selectedCodeViewItemId]);
 
-  function selectComparisonMode(mode: DiffComparisonMode) {
-    setComparisonMode(mode);
-    setSelectedLines(null);
-  }
-
-  function applyBranchRefs(event: FormEvent<HTMLFormElement>) {
+  function applyRange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const base = baseDraft.trim();
-    const head = headDraft.trim();
-    if (base.length === 0 || head.length === 0) {
+    const parsed = parseRangeInput(rangeDraft);
+    if (!parsed) {
+      setRangeError("Use a range like main...HEAD, main..HEAD, or working tree.");
       return;
     }
-    setBranchRefs({ base, head });
-    if (comparisonMode === "working-tree") {
-      setComparisonMode("merge-base");
-    }
+    setRangeInput(parsed);
+    setRangeDraft(parsed.display);
+    setRangeError(null);
     setSelectedLines(null);
   }
 
@@ -552,36 +560,21 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
 
   return (
     <section aria-label="Diffs" className="drawer-panel drawer-panel--diffs">
-      <div className="diffs-topbar">
-        <div className="task-tabs diffs-mode-tabs" role="tablist" aria-label="Diff comparison">
-          <button
-            aria-selected={comparisonMode === "merge-base"}
-            className={comparisonMode === "merge-base" ? "task-tab active" : "task-tab"}
-            onClick={() => selectComparisonMode("merge-base")}
-            role="tab"
-            type="button"
-          >
-            {branchRefs.base}...{branchRefs.head}
-          </button>
-          <button
-            aria-selected={comparisonMode === "direct"}
-            className={comparisonMode === "direct" ? "task-tab active" : "task-tab"}
-            onClick={() => selectComparisonMode("direct")}
-            role="tab"
-            type="button"
-          >
-            {branchRefs.base}..{branchRefs.head}
-          </button>
-          <button
-            aria-selected={comparisonMode === "working-tree"}
-            className={comparisonMode === "working-tree" ? "task-tab active" : "task-tab"}
-            onClick={() => selectComparisonMode("working-tree")}
-            role="tab"
-            type="button"
-          >
-            Working tree
-          </button>
-        </div>
+      <form className="diffs-range-form" onSubmit={applyRange}>
+        <label>
+          <span>Range</span>
+          <input
+            aria-label="Diff range"
+            onChange={(event) => {
+              setRangeDraft(event.target.value);
+              setRangeError(null);
+            }}
+            value={rangeDraft}
+          />
+        </label>
+        <button className="btn btn-compact" disabled={rangeDraft.trim().length === 0} type="submit">
+          Apply
+        </button>
         <button
           aria-label="Refresh workspace diff"
           className="icon-btn"
@@ -592,28 +585,9 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
         >
           <RefreshIcon aria-hidden="true" />
         </button>
-      </div>
+      </form>
 
-      {comparisonMode === "working-tree" ? null : (
-        <form className="diffs-ref-form" onSubmit={applyBranchRefs}>
-          <label>
-            <span>Base</span>
-            <input onChange={(event) => setBaseDraft(event.target.value)} value={baseDraft} />
-          </label>
-          <label>
-            <span>Head</span>
-            <input onChange={(event) => setHeadDraft(event.target.value)} value={headDraft} />
-          </label>
-          <button
-            className="btn btn-compact"
-            disabled={baseDraft.trim().length === 0 || headDraft.trim().length === 0}
-            type="submit"
-          >
-            Apply
-          </button>
-        </form>
-      )}
-
+      {rangeError ? <p className="files-error">{rangeError}</p> : null}
       {diff?.truncated ? (
         <p className="diffs-notice">Patch output was truncated at {formatBytes(diff.maxBytes)}.</p>
       ) : null}
@@ -694,14 +668,6 @@ export function RunDiffsSurface({ canCreateTask, onTaskCreated, runId }: RunDiff
 
         <div className="diffs-viewer" aria-label="Diff viewer">
           <div className="diffs-viewer__header">
-            <div>
-              <h3>{selectedFile?.path ?? "Patch"}</h3>
-              <p>
-                {selectedFile
-                  ? `${statusLabel(selectedFile.status)} · ${displayStats(selectedFile)}`
-                  : "Select a changed file."}
-              </p>
-            </div>
             {selectedReference ? (
               <div className="diffs-selection-controls">
                 {canCreateTask ? (

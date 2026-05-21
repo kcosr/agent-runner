@@ -1965,8 +1965,7 @@ body {
   overflow: hidden;
 }
 
-.diffs-topbar,
-.diffs-ref-form,
+.diffs-range-form,
 .diffs-viewer__header {
   display: flex;
   align-items: center;
@@ -1974,42 +1973,22 @@ body {
   min-width: 0;
 }
 
-.diffs-topbar {
-  justify-content: space-between;
-}
-
-.diffs-mode-tabs {
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.diffs-mode-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.diffs-mode-tabs .task-tab {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.diffs-ref-form {
+.diffs-range-form {
   flex-wrap: wrap;
 }
 
-.diffs-ref-form label {
+.diffs-range-form label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: min(11rem, 100%);
+  min-width: min(18rem, 100%);
   color: var(--muted-foreground);
   font-size: 12px;
 }
 
-.diffs-ref-form input {
+.diffs-range-form input {
   min-width: 0;
-  width: 8.5rem;
+  width: 13rem;
   height: 30px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2237,8 +2216,7 @@ body {
 }
 
 .diffs-viewer__header {
-  align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
   font-size: 12px;
@@ -2287,21 +2265,6 @@ body {
 
 .diffs-file-collapse--collapsed svg {
   transform: rotate(-90deg);
-}
-
-.diffs-viewer__header h3,
-.diffs-viewer__header p {
-  margin: 0;
-}
-
-.diffs-viewer__header h3 {
-  overflow-wrap: anywhere;
-  color: var(--foreground);
-  font-size: 13px;
-}
-
-.diffs-viewer__header p {
-  margin-top: 3px;
 }
 
 .diffs-code-view {

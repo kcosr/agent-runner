@@ -3143,14 +3143,17 @@ describe("web app", () => {
     );
     expect(await screen.findByLabelText("Diffs")).toBeInTheDocument();
     expect((await screen.findAllByText("src/app.ts")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("main...HEAD").length).toBeGreaterThan(0);
+    const rangeInput = screen.getByRole("textbox", { name: "Diff range" });
+    expect(rangeInput).toHaveValue("main...HEAD");
 
-    fireEvent.click(screen.getByRole("tab", { name: "main..HEAD" }));
+    fireEvent.change(rangeInput, { target: { value: "main..HEAD" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => {
       expect(diffRequests).toContain("?mode=branch&base=main&head=HEAD&comparison=direct");
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "Working tree" }));
+    fireEvent.change(rangeInput, { target: { value: "working tree" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => {
       expect(diffRequests).toContain("?mode=working-tree");
     });
