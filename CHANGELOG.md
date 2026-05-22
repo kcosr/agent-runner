@@ -18,7 +18,7 @@
   preview. ([#159](https://github.com/kcosr/agent-runner/pull/159))
 - Added a dashboard Diffs surface for reviewing selected-run branch and
   working-tree diffs, including changed-file search and task creation from
-  selected diff lines.
+  selected diff lines. ([#160](https://github.com/kcosr/agent-runner/pull/160))
 - Added dashboard task management for manual task creation, pending task
   title/body edits, pending deletes, status changes, and notes replace/append
   actions. ([#157](https://github.com/kcosr/agent-runner/pull/157))
