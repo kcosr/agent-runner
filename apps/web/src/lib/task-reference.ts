@@ -22,7 +22,7 @@ interface DiffTaskReference {
   oldPath?: string;
   path: string;
   selectedText: string;
-  side: "additions" | "deletions";
+  side: "additions" | "deletions" | "mixed";
   startLine: number;
   view: "diff";
 }
@@ -77,10 +77,11 @@ export function buildTaskBody(reference: TaskReference | null, instruction: stri
 
   if (reference.view === "diff") {
     const range =
-      reference.startLine === reference.endLine
-        ? `${reference.path}:${reference.startLine}`
-        : `${reference.path}:${reference.startLine}-${reference.endLine}`;
-    const fenceLanguage = languageForPath(reference.path) ?? "";
+      reference.side === "mixed"
+        ? "selected diff lines"
+        : reference.startLine === reference.endLine
+          ? `${reference.path}:${reference.startLine}`
+          : `${reference.path}:${reference.startLine}-${reference.endLine}`;
     const oldPath = reference.oldPath ? [`Previous file: \`${reference.oldPath}\``] : [];
     return withOptionalInstruction(
       [
@@ -92,7 +93,7 @@ export function buildTaskBody(reference: TaskReference | null, instruction: stri
         "",
         "Selected diff:",
         "",
-        `\`\`\`${fenceLanguage}`,
+        "```diff",
         reference.selectedText,
         "```",
       ].join("\n"),
