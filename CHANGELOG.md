@@ -60,6 +60,7 @@
   ([#157](https://github.com/kcosr/agent-runner/pull/157))
 - Diff task creation now preserves selected raw diff rows, including `+`, `-`,
   and context prefixes, and supports mixed addition/deletion selections.
+  ([#162](https://github.com/kcosr/agent-runner/pull/162))
 
 ### Fixed
 
