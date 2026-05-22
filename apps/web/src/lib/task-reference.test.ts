@@ -58,7 +58,7 @@ describe("task references", () => {
     );
   });
 
-  it("renders diff references with range, side, previous path, selected diff, and instructions", () => {
+  it("renders diff references with range, side, previous path, raw diff, and instructions", () => {
     expect(
       buildTaskBody(
         {
@@ -72,7 +72,7 @@ describe("task references", () => {
           side: "additions",
           startLine: 20,
           endLine: 21,
-          selectedText: "export const value = 1;\nexport const next = 2;",
+          selectedText: "+export const value = 1;\n+export const next = 2;",
         },
         "Create a follow-up task from this diff.",
       ),
@@ -86,9 +86,9 @@ describe("task references", () => {
         "",
         "Selected diff:",
         "",
-        "```ts",
-        "export const value = 1;",
-        "export const next = 2;",
+        "```diff",
+        "+export const value = 1;",
+        "+export const next = 2;",
         "```",
         "",
         "Instructions:",
@@ -111,7 +111,7 @@ describe("task references", () => {
           side: "deletions",
           startLine: 4,
           endLine: 4,
-          selectedText: "removed line",
+          selectedText: "-removed line",
         },
         "   ",
       ),
@@ -124,8 +124,43 @@ describe("task references", () => {
         "",
         "Selected diff:",
         "",
+        "```diff",
+        "-removed line",
         "```",
-        "removed line",
+      ].join("\n"),
+    );
+  });
+
+  it("renders mixed diff references without implying a source-side range", () => {
+    expect(
+      buildTaskBody(
+        {
+          view: "diff",
+          displayRange: "main...HEAD",
+          baseRef: "main",
+          headRef: "HEAD",
+          comparison: "merge-base",
+          path: "src/app.ts",
+          side: "mixed",
+          startLine: 10,
+          endLine: 11,
+          selectedText: "-old value\n+new value\n context",
+        },
+        "",
+      ),
+    ).toBe(
+      [
+        "Diff: `main...HEAD`",
+        "File: `src/app.ts`",
+        "Side: mixed",
+        "Range: `selected diff lines`",
+        "",
+        "Selected diff:",
+        "",
+        "```diff",
+        "-old value",
+        "+new value",
+        " context",
         "```",
       ].join("\n"),
     );

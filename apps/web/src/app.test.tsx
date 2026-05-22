@@ -62,7 +62,12 @@ vi.mock("@pierre/diffs/react", async () => {
       onSelectedLinesChange?: (
         selection: {
           id: string;
-          range: { end: number; endSide: "additions"; side: "additions"; start: number };
+          range: {
+            end: number;
+            endSide?: "additions" | "deletions";
+            side?: "additions" | "deletions";
+            start: number;
+          };
         } | null,
       ) => void;
       renderHeaderPrefix?: (item: MockCodeViewItem) => React.ReactNode;
@@ -106,6 +111,17 @@ vi.mock("@pierre/diffs/react", async () => {
                 type="button"
               >
                 Select diff line for {name}
+              </button>
+              <button
+                onClick={() =>
+                  onSelectedLinesChange?.({
+                    id: item.id,
+                    range: { start: 2, end: 2, side: "deletions", endSide: "additions" },
+                  })
+                }
+                type="button"
+              >
+                Select mixed diff lines for {name}
               </button>
             </div>
           );
@@ -1804,18 +1820,19 @@ function makeWorkspaceDiff(overrides: Record<string, unknown> = {}) {
         path: "src/app.ts",
         status: "modified",
         additions: 1,
-        deletions: 0,
+        deletions: 1,
         binary: false,
       },
     ],
-    stats: { files: 1, additions: 1, deletions: 0 },
+    stats: { files: 1, additions: 1, deletions: 1 },
     patch: [
       "diff --git a/src/app.ts b/src/app.ts",
       "index 1111111..2222222 100644",
       "--- a/src/app.ts",
       "+++ b/src/app.ts",
-      "@@ -1,1 +1,2 @@",
+      "@@ -1,2 +1,2 @@",
       " export const existing = true;",
+      "-export const previous = false;",
       "+export const selected = true;",
       "",
     ].join("\n"),
@@ -3294,8 +3311,92 @@ describe("web app", () => {
       expect(createdTaskBody?.body).toContain("File: `src/app.ts`");
       expect(createdTaskBody?.body).toContain("Side: additions");
       expect(createdTaskBody?.body).toContain("Range: `src/app.ts:2`");
-      expect(createdTaskBody?.body).toContain("export const selected = true;");
+      expect(createdTaskBody?.body).toContain("```diff");
+      expect(createdTaskBody?.body).toContain("+export const selected = true;");
       expect(createdTaskBody?.body).toContain("Create a follow-up from this diff.");
+    });
+  });
+
+  it("creates a task from a mixed diff line selection with raw diff content", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let createdTaskBody: { body?: string; title?: string } | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            capabilities: {
+              taskMutation: {
+                canAdd: true,
+                canEditPending: true,
+                canDeletePending: true,
+                canEditNotes: true,
+                canSetStatus: true,
+              },
+            },
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            capabilities: {
+              taskMutation: {
+                canAdd: true,
+                canEditPending: true,
+                canDeletePending: true,
+                canEditNotes: true,
+                canSetStatus: true,
+              },
+            },
+            lockedFields: [],
+          }),
+        },
+      },
+      {
+        handleRequest(url, init) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          if (parsed.pathname === "/api/runs/run-1/tasks" && init?.method === "POST") {
+            createdTaskBody =
+              typeof init.body === "string"
+                ? (JSON.parse(init.body) as { body?: string; title?: string })
+                : undefined;
+            return new Response(
+              JSON.stringify({
+                task: {
+                  id: "mixed-diff-task",
+                  title: createdTaskBody?.title ?? "",
+                  body: createdTaskBody?.body ?? "",
+                  status: "pending",
+                  notes: "",
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    await user.click(
+      await screen.findByRole("button", { name: "Select mixed diff lines for src/app.ts" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => {
+      expect(createdTaskBody?.title).toBe("Update src/app.ts");
+      expect(createdTaskBody?.body).toContain("Diff: `main...HEAD`");
+      expect(createdTaskBody?.body).toContain("File: `src/app.ts`");
+      expect(createdTaskBody?.body).toContain("Side: mixed");
+      expect(createdTaskBody?.body).toContain("Range: `selected diff lines`");
+      expect(createdTaskBody?.body).toContain("```diff");
+      expect(createdTaskBody?.body).toContain("-export const previous = false;");
+      expect(createdTaskBody?.body).toContain("+export const selected = true;");
     });
   });
 

@@ -51,6 +51,7 @@ import { ChevronIcon, CloseIcon, RefreshIcon, SearchIcon, WrapTextIcon } from ".
 type DiffComparisonMode = "merge-base" | "direct";
 type DiffSourceMode = "range" | "working-tree";
 type DiffViewMode = "unified" | "split";
+type DiffTaskSelectionSide = SelectionSide | "mixed";
 
 interface ParsedDiffItem {
   id: string;
@@ -161,30 +162,126 @@ function firstSelectablePath(files: WorkspaceDiffFile[]): string | null {
   return files[0]?.path ?? null;
 }
 
-function selectedTextFromFileDiff(
-  fileDiff: FileDiffMetadata,
-  side: SelectionSide,
-  startLine: number,
-  endLine: number,
-): string {
-  const sourceLines = side === "additions" ? fileDiff.additionLines : fileDiff.deletionLines;
-  const selected: string[] = [];
-  for (const hunk of fileDiff.hunks) {
-    const hunkStart = side === "additions" ? hunk.additionStart : hunk.deletionStart;
-    const hunkCount = side === "additions" ? hunk.additionCount : hunk.deletionCount;
-    const hunkLineIndex = side === "additions" ? hunk.additionLineIndex : hunk.deletionLineIndex;
-    const hunkEnd = hunkStart + Math.max(0, hunkCount - 1);
-    const from = Math.max(startLine, hunkStart);
-    const to = Math.min(endLine, hunkEnd);
-    if (from > to) {
-      continue;
-    }
-    const offset = from - hunkStart;
-    selected.push(
-      ...sourceLines.slice(hunkLineIndex + offset, hunkLineIndex + offset + to - from + 1),
-    );
+interface VisibleDiffRow {
+  newLine: number | null;
+  oldLine: number | null;
+  prefix: "+" | "-" | " ";
+  text: string;
+}
+
+interface RawDiffSelection {
+  endLine: number;
+  selectedText: string;
+  side: DiffTaskSelectionSide;
+  startLine: number;
+}
+
+function diffRowMatchesSide(row: VisibleDiffRow, side: SelectionSide | undefined, line: number) {
+  if (side === "additions") {
+    return row.newLine === line;
   }
-  return selected.join("\n");
+  if (side === "deletions") {
+    return row.oldLine === line;
+  }
+  return row.newLine === line || row.oldLine === line;
+}
+
+function visibleRowsFromFileDiff(fileDiff: FileDiffMetadata): VisibleDiffRow[] {
+  const rows: VisibleDiffRow[] = [];
+  for (const hunk of fileDiff.hunks) {
+    let oldLine = hunk.deletionStart;
+    let newLine = hunk.additionStart;
+    for (const content of hunk.hunkContent) {
+      if (content.type === "context") {
+        for (let offset = 0; offset < content.lines; offset += 1) {
+          rows.push({
+            newLine,
+            oldLine,
+            prefix: " ",
+            text: fileDiff.additionLines[content.additionLineIndex + offset] ?? "",
+          });
+          oldLine += 1;
+          newLine += 1;
+        }
+        continue;
+      }
+      for (let offset = 0; offset < content.deletions; offset += 1) {
+        rows.push({
+          newLine: null,
+          oldLine,
+          prefix: "-",
+          text: fileDiff.deletionLines[content.deletionLineIndex + offset] ?? "",
+        });
+        oldLine += 1;
+      }
+      for (let offset = 0; offset < content.additions; offset += 1) {
+        rows.push({
+          newLine,
+          oldLine: null,
+          prefix: "+",
+          text: fileDiff.additionLines[content.additionLineIndex + offset] ?? "",
+        });
+        newLine += 1;
+      }
+    }
+  }
+  return rows;
+}
+
+function sideForSelectedRows(rows: readonly VisibleDiffRow[]): DiffTaskSelectionSide {
+  const hasAdditions = rows.some((row) => row.prefix === "+");
+  const hasDeletions = rows.some((row) => row.prefix === "-");
+  if (hasAdditions && !hasDeletions && rows.every((row) => row.prefix === "+")) {
+    return "additions";
+  }
+  if (hasDeletions && !hasAdditions && rows.every((row) => row.prefix === "-")) {
+    return "deletions";
+  }
+  return "mixed";
+}
+
+function primaryLineForSelection(
+  row: VisibleDiffRow,
+  side: DiffTaskSelectionSide,
+  fallback: number,
+) {
+  if (side === "additions") {
+    return row.newLine ?? fallback;
+  }
+  if (side === "deletions") {
+    return row.oldLine ?? fallback;
+  }
+  return row.newLine ?? row.oldLine ?? fallback;
+}
+
+function rawDiffSelectionFromFileDiff(
+  fileDiff: FileDiffMetadata,
+  range: CodeViewLineSelection["range"],
+): RawDiffSelection | null {
+  const rows = visibleRowsFromFileDiff(fileDiff);
+  const startSide = range.side ?? range.endSide;
+  const endSide = range.endSide ?? range.side;
+  const startIndex = rows.findIndex((row) => diffRowMatchesSide(row, startSide, range.start));
+  const endIndex = rows.findIndex((row) => diffRowMatchesSide(row, endSide, range.end));
+  if (startIndex < 0 || endIndex < 0) {
+    return null;
+  }
+  const fromIndex = Math.min(startIndex, endIndex);
+  const toIndex = Math.max(startIndex, endIndex);
+  const selectedRows = rows.slice(fromIndex, toIndex + 1);
+  const firstSelectedRow = selectedRows[0];
+  if (!firstSelectedRow) {
+    return null;
+  }
+  const selectedText = selectedRows.map((row) => `${row.prefix}${row.text}`).join("\n");
+  const side = sideForSelectedRows(selectedRows);
+  const lastSelectedRow = selectedRows[selectedRows.length - 1] ?? firstSelectedRow;
+  return {
+    endLine: primaryLineForSelection(lastSelectedRow, side, range.end),
+    selectedText,
+    side,
+    startLine: primaryLineForSelection(firstSelectedRow, side, range.start),
+  };
 }
 
 export function RunDiffsSurface({
@@ -365,17 +462,8 @@ export function RunDiffsSurface({
     if (!parsedItem) {
       return null;
     }
-    const side = selectedLines.range.side ?? selectedLines.range.endSide;
-    if (
-      (side !== "additions" && side !== "deletions") ||
-      (selectedLines.range.endSide !== undefined && selectedLines.range.endSide !== side)
-    ) {
-      return null;
-    }
-    const startLine = Math.min(selectedLines.range.start, selectedLines.range.end);
-    const endLine = Math.max(selectedLines.range.start, selectedLines.range.end);
-    const selectedText = selectedTextFromFileDiff(parsedItem.fileDiff, side, startLine, endLine);
-    if (selectedText.trim().length === 0) {
+    const rawSelection = rawDiffSelectionFromFileDiff(parsedItem.fileDiff, selectedLines.range);
+    if (!rawSelection || rawSelection.selectedText.trim().length === 0) {
       return null;
     }
     const file = files.find((entry) => entry.path === parsedItem.path);
@@ -383,13 +471,13 @@ export function RunDiffsSurface({
       baseRef: diff.baseRef,
       comparison: diff.comparison,
       displayRange: diff.displayRange,
-      endLine,
+      endLine: rawSelection.endLine,
       headRef: diff.headRef,
       oldPath: file?.oldPath ?? parsedItem.fileDiff.prevName,
       path: parsedItem.path,
-      selectedText,
-      side,
-      startLine,
+      selectedText: rawSelection.selectedText,
+      side: rawSelection.side,
+      startLine: rawSelection.startLine,
       view: "diff",
     };
   }, [diff, files, parsedDiffItemById, selectedLines]);

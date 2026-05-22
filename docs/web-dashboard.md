@@ -226,7 +226,8 @@ The drawer surfaces:
   in unified or split mode. Binary and unpreviewable files remain visible in the
   file list but do not render binary content. Selecting diff lines can seed the
   shared Create Task dialog with the diff range, side, file path, and selected
-  text.
+  raw diff rows, preserving `+`, `-`, and context prefixes for mixed
+  addition/deletion selections.
 - Attachments surface: preview-only view of the selected run's
   group-scoped attachments. It shows one attachment at a time under the
   selected-run header and tabs, supports previous/next controls, and
