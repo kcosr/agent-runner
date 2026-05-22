@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -125,6 +126,27 @@ function unusedPidCandidate() {
   throw new Error("failed to find unused pid candidate");
 }
 
+function startLivePidProcess() {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000);"], {
+    stdio: "ignore",
+  });
+  if (!child.pid) {
+    throw new Error("failed to start live pid process");
+  }
+  process.kill(child.pid, 0);
+  return child;
+}
+
+async function stopLivePidProcess(child) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  child.kill("SIGTERM");
+  await new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
 async function waitFor(condition, message, timeoutMs = 3_000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -242,10 +264,11 @@ async function startCodexThreadStatusServer({
 
 test("daemon startup skips running runs owned by a different live daemon pid", async () => {
   const dir = tempDir();
+  const liveOwner = startLivePidProcess();
   writeAgent(dir, "local-agent", "claude");
   writeAssignment(dir);
   const run = await initRun(dir, "local-agent");
-  const ownerId = `daemon-${process.pid}-owner`;
+  const ownerId = `daemon-${liveOwner.pid}-owner`;
   markRunning(run.workspaceDir, {
     execution: {
       hostMode: "daemon",
@@ -264,8 +287,8 @@ test("daemon startup skips running runs owned by a different live daemon pid", a
         assert.deepEqual(manifest, before);
         const events = auditEvents(run.workspaceDir, run.runId);
         assert.equal(
-          events.some((event) => event.type === "run.controller_reconciled"),
-          false,
+          events.find((event) => event.type === "run.controller_reconciled")?.fields.decision,
+          "skipped_live_owner",
         );
         assert.equal(
           events.some((event) => event.type === "run.finished"),
@@ -276,6 +299,98 @@ test("daemon startup skips running runs owned by a different live daemon pid", a
       }
     });
   } finally {
+    await stopLivePidProcess(liveOwner);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("daemon startup reconciles running runs owned by the current pid with a different daemon id", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "local-agent", "claude");
+  writeAssignment(dir);
+  const run = await initRun(dir, "local-agent");
+  markRunning(run.workspaceDir, {
+    execution: {
+      hostMode: "daemon",
+      controller: { kind: "daemon", daemonInstanceId: `daemon-${process.pid}-owner` },
+    },
+  });
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  try {
+    await withEnv(sharedRuntimeEnv(dir), async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const manifest = readManifest(run.workspaceDir);
+        assert.equal(manifest.status, "error");
+        assert.equal(manifest.exitCode, 4);
+        const events = auditEvents(run.workspaceDir, run.runId);
+        assert.equal(
+          events.find((event) => event.type === "run.controller_reconciled")?.fields.reason,
+          "stale_local_controller",
+        );
+        assert.equal(
+          events.some((event) => event.type === "run.finished"),
+          true,
+        );
+      } finally {
+        await server.close();
+      }
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("daemon startup skips Codex websocket runs owned by a different live daemon pid", async () => {
+  const dir = tempDir();
+  const liveOwner = startLivePidProcess();
+  writeAgent(dir, "codex-agent", "codex");
+  writeAssignment(dir);
+  const codexServer = await startCodexThreadStatusServer({
+    status: CODEX_THREAD_STATUS.active,
+  });
+  const run = await initRun(dir, "codex-agent");
+  markRunning(run.workspaceDir, {
+    backendSessionId: "thread-active",
+    backendConfig: { transport: { type: "ws", url: codexServer.url } },
+    cwd: "/repo",
+    execution: {
+      hostMode: "daemon",
+      controller: { kind: "daemon", daemonInstanceId: `daemon-${liveOwner.pid}-owner` },
+    },
+  });
+  const before = readManifest(run.workspaceDir);
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  try {
+    await withEnv(sharedRuntimeEnv(dir), async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const manifest = readManifest(run.workspaceDir);
+        assert.deepEqual(manifest, before);
+        assert.equal(
+          codexServer.calls.some((call) => call.method === "thread/read"),
+          false,
+        );
+        const events = auditEvents(run.workspaceDir, run.runId);
+        assert.equal(
+          events.find((event) => event.type === "run.controller_reconciled")?.fields.decision,
+          "skipped_live_owner",
+        );
+        assert.equal(
+          events.some((event) => event.type === "run.finished"),
+          false,
+        );
+      } finally {
+        await server.close();
+      }
+    });
+  } finally {
+    await stopLivePidProcess(liveOwner);
+    await codexServer.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

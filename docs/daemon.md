@@ -53,7 +53,10 @@ reconciles manifests still persisted as `running`. As a best-effort
 multi-daemon guard, it first checks daemon-owned runs whose persisted
 controller id includes another daemon's pid. If that other pid is still
 alive, startup leaves the manifest untouched so the existing controller
-can continue:
+can continue and records `run.controller_reconciled` with
+`decision: skipped_live_owner`. Manifests whose persisted owner id predates
+the pid-bearing daemon id format fall through to the existing reconciliation
+path:
 
 - non-recoverable runs, including non-Codex backends and Codex `stdio`,
   are finalized as `error` with a `run.controller_reconciled` audit event
@@ -72,8 +75,8 @@ The recovery audit events are structured for tooling. `run.controller_detached`
 records `backend`, `backendSessionId`, `transportType`, and `reason`.
 `run.controller_reconciled` records those fields plus `decision`,
 `remoteStatus`, `error`, and a reconciliation `reason` such as
-`remote_active`, `remote_unreachable`, `thread_read_failed`, or
-`aborted_after_recovery`.
+`owner_pid_alive`, `remote_active`, `remote_unreachable`,
+`thread_read_failed`, or `aborted_after_recovery`.
 
 Codex `ws`/`uds` Idle history import depends on the Codex session file being
 available on the agent-runner host. Remote-only session history cannot be

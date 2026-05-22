@@ -334,7 +334,7 @@ function runningRunHasLiveDifferentDaemonOwner(
     return false;
   }
   const ownerPid = parseDaemonInstanceOwnerPid(controller.daemonInstanceId);
-  return ownerPid !== null && processIsAlive(ownerPid);
+  return ownerPid !== null && ownerPid !== process.pid && processIsAlive(ownerPid);
 }
 
 function formatQueuedResumePrompt(messages: readonly QueuedResumeMessage[]): string {
@@ -2499,6 +2499,14 @@ export async function serveDaemon(
       return;
     }
     if (runningRunHasLiveDifferentDaemonOwner(manifest, daemonInstanceId)) {
+      emitControllerReconciled({
+        manifest,
+        transportType: null,
+        decision: "skipped_live_owner",
+        reason: "owner_pid_alive",
+        remoteStatus: null,
+        error: null,
+      });
       return;
     }
     let transportType: "stdio" | "ws" | "uds" | null = null;

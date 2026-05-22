@@ -25,6 +25,8 @@
 
 ### Changed
 
+- Daemon instance ids now include the daemon process pid, for example
+  `daemon-12345-abc123`, while retaining a random suffix for diagnostics.
 - Dashboard keyboard shortcuts now use `F` for the selected run Files tab,
   press `F` again to focus file search, and `Shift+F` for fullscreen drawer
   toggle. ([#157](https://github.com/kcosr/agent-runner/pull/157))
@@ -59,7 +61,8 @@
 ### Fixed
 
 - Fixed daemon startup recovery so a second daemon process does not finalize a
-  live `running` run owned by another still-alive daemon process.
+  live `running` run owned by another still-alive daemon process, and records
+  skipped live-owner decisions in the run audit history.
 - Fixed daemon workspace file APIs so selected-run file browsing works for
   runs stored in repo buckets outside the daemon's current repo.
   ([#158](https://github.com/kcosr/agent-runner/pull/158))
