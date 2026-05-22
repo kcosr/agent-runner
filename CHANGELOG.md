@@ -61,6 +61,9 @@
 - Diff task creation now preserves selected raw diff rows, including `+`, `-`,
   and context prefixes, and supports mixed addition/deletion selections.
   ([#162](https://github.com/kcosr/agent-runner/pull/162))
+- Mobile fullscreen drawer headers now keep run controls and surface tabs on
+  separate rows, preserving status/action visibility when space is tight.
+  ([#163](https://github.com/kcosr/agent-runner/pull/163))
 
 ### Fixed
 

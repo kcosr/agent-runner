@@ -1098,6 +1098,7 @@ body {
 }
 
 .drawer-fullscreen-bar .selected-run-surface-tabs {
+  order: 1;
   flex: 1 1 auto;
   min-width: 0;
   padding: 0;
@@ -1110,11 +1111,73 @@ body {
   display: none;
 }
 
+.drawer-fullscreen-controls {
+  display: inline-flex;
+  order: 2;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.drawer-fullscreen-title {
+  display: none;
+}
+
 .drawer-fullscreen-actions {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
+}
+
+@media (max-width: 899px) {
+  .drawer-fullscreen-bar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
+  }
+
+  .drawer-fullscreen-bar .selected-run-surface-tabs {
+    order: 2;
+    flex: 0 0 auto;
+    width: 100%;
+    padding: 0 12px 8px;
+  }
+
+  .drawer-fullscreen-controls {
+    order: 1;
+    display: flex;
+    width: 100%;
+    gap: 8px;
+    justify-content: flex-start;
+    padding: 8px 12px;
+  }
+
+  .drawer-fullscreen-title {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    align-items: center;
+  }
+
+  .drawer-fullscreen-title .run-id-large {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .drawer-fullscreen-actions {
+    flex: 0 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .drawer-fullscreen-actions::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .chat-view {

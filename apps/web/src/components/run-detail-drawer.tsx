@@ -1702,10 +1702,10 @@ export function RunDetailDrawer({
     </div>
   );
 
-  function renderRunActions(fullscreen: boolean) {
+  function renderRunActions(fullscreen: boolean, showStatus = fullscreen) {
     return (
       <>
-        {fullscreen ? <StatusBadge status={run.effectiveStatus} /> : null}
+        {showStatus ? <StatusBadge status={run.effectiveStatus} /> : null}
         {run.capabilities.canArchive ? (
           <button className="btn" disabled={actionsLocked} onClick={onArchive} type="button">
             <ArchiveIcon aria-hidden="true" />
@@ -1875,8 +1875,14 @@ export function RunDetailDrawer({
           </>
         ) : (
           <div className="drawer-fullscreen-bar">
+            <div className="drawer-fullscreen-controls">
+              <div className="drawer-fullscreen-title">
+                <span className="run-id-large">{runIdLabel}</span>
+              </div>
+              <StatusBadge status={run.effectiveStatus} />
+              <div className="drawer-fullscreen-actions">{renderRunActions(true, false)}</div>
+            </div>
             {surfaceTabs}
-            <div className="drawer-fullscreen-actions">{renderRunActions(true)}</div>
           </div>
         )}
 
