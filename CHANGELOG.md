@@ -58,6 +58,8 @@
 
 ### Fixed
 
+- Fixed daemon startup recovery so a second daemon process does not finalize a
+  live `running` run owned by another still-alive daemon process.
 - Fixed daemon workspace file APIs so selected-run file browsing works for
   runs stored in repo buckets outside the daemon's current repo.
   ([#158](https://github.com/kcosr/agent-runner/pull/158))

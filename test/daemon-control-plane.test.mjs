@@ -784,7 +784,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
     try {
       const info = await client.call("daemon.info");
       assert.equal(info.listenUrl, listenUrl);
-      assert.match(info.daemonInstanceId, /^daemon-/);
+      assert.equal(info.pid, process.pid);
+      assert.match(info.daemonInstanceId, new RegExp(`^daemon-${info.pid}-[0-9a-z]+$`));
 
       const runs = await client.call("runs.list", {});
       assert.ok(runs.runs.some((run) => run.runId === init.runId));
@@ -1279,7 +1280,11 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const daemon = await httpJson(httpBaseUrl, "/api/daemon");
       assert.equal(daemon.status, 200);
       assert.equal(daemon.body.daemon.listenUrl, listenUrl);
-      assert.match(daemon.body.daemon.daemonInstanceId, /^daemon-/);
+      assert.equal(daemon.body.daemon.pid, process.pid);
+      assert.match(
+        daemon.body.daemon.daemonInstanceId,
+        new RegExp(`^daemon-${daemon.body.daemon.pid}-[0-9a-z]+$`),
+      );
 
       const runs = await httpJson(httpBaseUrl, "/api/runs");
       assert.equal(runs.status, 200);
@@ -8393,7 +8398,10 @@ test("daemon init uses the remote caller cwd when the agent omits cwd", async ()
     assert.equal(run.cwd, clientDir);
     assert.equal(run.execution.hostMode, "daemon");
     assert.equal(run.execution.controller.kind, "daemon");
-    assert.match(run.execution.controller.daemonInstanceId, /^daemon-/);
+    assert.match(
+      run.execution.controller.daemonInstanceId,
+      new RegExp(`^daemon-${daemon.child.pid}-[0-9a-z]+$`),
+    );
   } finally {
     await daemon.stop();
   }

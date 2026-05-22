@@ -334,7 +334,7 @@ function daemonAuthHint(connectUrl: string): string {
 }
 
 function isDaemonAuthFailureMessage(message: string): boolean {
-  return /401|Unauthorized/i.test(message);
+  return /\b401\b|Unauthorized/i.test(message);
 }
 
 type DaemonConnectContext = Extract<ResolvedHostMode, { mode: "daemon" }> & {

@@ -49,7 +49,11 @@ connection, and leaves the run manifest `running` so the remote Codex
 app-server thread can continue.
 
 On startup, before serving clients or evaluating schedules, the daemon
-reconciles manifests still persisted as `running`:
+reconciles manifests still persisted as `running`. As a best-effort
+multi-daemon guard, it first checks daemon-owned runs whose persisted
+controller id includes another daemon's pid. If that other pid is still
+alive, startup leaves the manifest untouched so the existing controller
+can continue:
 
 - non-recoverable runs, including non-Codex backends and Codex `stdio`,
   are finalized as `error` with a `run.controller_reconciled` audit event
@@ -117,13 +121,13 @@ Anyone with the token has full daemon access. This is not per-user
 isolation or RBAC. Do not log token values or Authorization
 headers.
 
-On startup the daemon mints a short `daemonInstanceId` and exposes it via
-`GET /api/daemon`:
+On startup the daemon mints a `daemonInstanceId` containing its process
+id and a short random suffix, and exposes it via `GET /api/daemon`:
 
 ```json
 {
   "daemon": {
-    "daemonInstanceId": "daemon-<shortid>",
+    "daemonInstanceId": "daemon-12345-<shortid>",
     "pid": 12345,
     "listenUrl": "ws://127.0.0.1:4773/",
     "version": "0.1.0",
