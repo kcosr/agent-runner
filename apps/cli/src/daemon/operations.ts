@@ -25,6 +25,7 @@ import type {
   getRunTimelineHistory,
   getTask,
   getTaskList,
+  getWorkspaceDiff,
   getWorkspaceFile,
   getWorkspaceFileList,
   getWorkspaceFileSearch,
@@ -76,6 +77,7 @@ export interface DaemonHandlers {
   getRunSummary: typeof getRunSummary;
   getRunAuditHistory: typeof getRunAuditHistory;
   getRunTimelineHistory: typeof getRunTimelineHistory;
+  getWorkspaceDiff: typeof getWorkspaceDiff;
   getWorkspaceFileList: typeof getWorkspaceFileList;
   getWorkspaceFileSearch: typeof getWorkspaceFileSearch;
   getWorkspaceFile: typeof getWorkspaceFile;
@@ -146,6 +148,9 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     getRunTimelineHistory(target: string) {
       return { history: ctx.getRunTimelineHistory(target) };
+    },
+    async getWorkspaceDiff(target: string, input: Parameters<typeof getWorkspaceDiff>[1]) {
+      return { diff: await ctx.getWorkspaceDiff(target, input) };
     },
     listWorkspaceFiles(target: string, input?: { path?: string }) {
       return { directory: ctx.getWorkspaceFileList(target, input) };

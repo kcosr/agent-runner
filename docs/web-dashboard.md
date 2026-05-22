@@ -51,8 +51,8 @@ normal run detail/status DTOs do not expose the run's frozen
 
 ## Views
 
-- `/` — Runs dashboard with Board/List plus Chat, Detail, Notes, Tasks,
-  Files, and Attachments selected-run surfaces.
+- `/` — Runs dashboard with Board/List plus Chat, Info, Notes, Tasks,
+  Diffs, Files, and Attachments selected-run surfaces.
 - `/runs/:runId` — Same dashboard with a specific run selected for the
   selected-run surfaces.
 - `/settings/general` — General preferences.
@@ -64,26 +64,26 @@ A multi-surface workspace:
 
 - **Left** — search, grouped Filters control, and preference toggles.
 - **Center** — Board or List, switchable from the toolbar.
-- **Right** — one selected-run panel with Chat, Detail, Notes, Tasks,
-  Files, and Attachments tabs.
+- **Right** — one selected-run panel with Chat, Info, Notes, Tasks,
+  Diffs, Files, and Attachments tabs.
 
 The center surface defaults to Board. The toolbar view-mode toggle switches
 between Board and List, and the durable mode choice persists in
 `agent-runner:web:dashboard-view-state.viewMode`. Selecting a run opens one
 resizable selected-run panel. Its header owns the run identity plus action
-toolbar, and the tabs below the toolbar switch between Chat, Detail,
-Notes, Tasks, Files, and Attachments. Chat does not create a separate chat route
-or backend chat contract; it follows the selected run, derives messages
-from `RunDetail` plus timeline history, and streams live output through
-the existing timeline stream.
+toolbar, and the tabs below the toolbar switch between Chat, Info,
+Notes, Tasks, Diffs, Files, and Attachments. Chat does not create a
+separate chat route or backend chat contract; it follows the selected
+run, derives messages from `RunDetail` plus timeline history, and
+streams live output through the existing timeline stream.
 
 Closing the selected-run panel navigates back to `/` and clears the
-selected run. Chat, Detail, Notes, Tasks, Files, and Attachments tab choice
-persists as the active right surface.
+selected run. Chat, Info, Notes, Tasks, Diffs, Files, and Attachments tab
+choice persists as the active right surface.
 
 Dashboard view state persists the durable surface layout fields:
 center-surface view mode, collapsed board columns, selected-run panel width,
-fullscreen state, and the active Chat/Detail/Notes/Tasks/Files/Attachments tab.
+fullscreen state, and the active Chat/Info/Notes/Tasks/Diffs/Files/Attachments tab.
 Search text, per-run drawer tabs, the active board column, and the active
 list status chip remain transient.
 
@@ -216,6 +216,17 @@ The drawer surfaces:
   file errors such as binary files, invalid UTF-8, oversized reads, missing
   files, and unsafe paths inline instead of falling back to raw filesystem
   access.
+- Diffs surface: selected-run workspace diff review. Branch merge-base mode
+  starts at `main...HEAD`, branch direct mode shows `main..HEAD`, and
+  working-tree mode shows current staged, unstaged, deleted, renamed, copied
+  when Git detects copies, untracked text, and binary/unpreviewable entries.
+  Branch modes use explicit editable base/head refs; missing requested refs
+  surface as daemon errors instead of falling back to another branch. The
+  changed-file tree supports search and status signals, and text patches render
+  in unified or split mode. Binary and unpreviewable files remain visible in the
+  file list but do not render binary content. Selecting diff lines can seed the
+  shared Create Task dialog with the diff range, side, file path, and selected
+  text.
 - Attachments surface: preview-only view of the selected run's
   group-scoped attachments. It shows one attachment at a time under the
   selected-run header and tabs, supports previous/next controls, and
@@ -389,7 +400,8 @@ The dashboard's shortcut system is customizable from
 | `P` | Pin or unpin the selected run |
 | `A` | Show the selected run's Attachments tab |
 | `C` | Show the selected run's Chat tab, or focus its composer when Chat is open |
-| `D` | Show the selected run's Detail tab |
+| `I` | Show the selected run's Info tab |
+| `D` | Show the selected run's Diffs tab, or focus changed-file search when Diffs is open |
 | `F` | Show the selected run's Files tab, or focus file search when Files is open |
 | `N` | Show the selected run's Notes tab, or focus its editor when Notes is open |
 | `T` | Show the selected run's Tasks tab |

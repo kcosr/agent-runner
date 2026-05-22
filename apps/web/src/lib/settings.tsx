@@ -59,8 +59,16 @@ export interface AttachmentPreviewSelection {
   attachmentOwnerRunId: string;
 }
 
-export type DashboardRightSurface = "attachments" | "chat" | "detail" | "files" | "notes" | "tasks";
+export type DashboardRightSurface =
+  | "attachments"
+  | "chat"
+  | "detail"
+  | "diffs"
+  | "files"
+  | "notes"
+  | "tasks";
 export type DashboardViewMode = "board" | "list";
+export type DiffsViewMode = "unified" | "split";
 
 export interface DashboardViewState {
   viewMode: DashboardViewMode;
@@ -71,6 +79,10 @@ export interface DashboardViewState {
   drawerFullscreen: boolean;
   drawerViewsByRunId: Record<string, RunDrawerView>;
   activeBoardColumnKey: string | null;
+  diffsSidebarWidth: number;
+  filesSidebarWidth: number;
+  diffsViewMode: DiffsViewMode;
+  diffsWordWrap: boolean;
 }
 
 export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
@@ -82,6 +94,11 @@ const DRAWER_WIDTH_MAX = 2400;
 const DRAWER_WIDTH_DEFAULT = 540;
 const DRAWER_SIDEBAR_ALLOWANCE = 56;
 const DRAWER_BOARD_MIN = 280;
+
+export const WORKSPACE_SIDEBAR_WIDTH_MIN = 160;
+export const WORKSPACE_SIDEBAR_WIDTH_MAX = 720;
+export const DIFFS_SIDEBAR_WIDTH_DEFAULT = 272;
+export const FILES_SIDEBAR_WIDTH_DEFAULT = 240;
 
 export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   hideEmptyColumns: true,
@@ -107,6 +124,10 @@ const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
   drawerFullscreen: false,
   drawerViewsByRunId: {},
   activeBoardColumnKey: null,
+  diffsSidebarWidth: DIFFS_SIDEBAR_WIDTH_DEFAULT,
+  filesSidebarWidth: FILES_SIDEBAR_WIDTH_DEFAULT,
+  diffsViewMode: "unified",
+  diffsWordWrap: true,
 };
 
 function clampDrawerWidth(value: number): number {
@@ -114,6 +135,16 @@ function clampDrawerWidth(value: number): number {
     return DRAWER_WIDTH_DEFAULT;
   }
   return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(value)));
+}
+
+export function clampWorkspaceSidebarWidth(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(
+    WORKSPACE_SIDEBAR_WIDTH_MAX,
+    Math.max(WORKSPACE_SIDEBAR_WIDTH_MIN, Math.round(value)),
+  );
 }
 
 export function computeDrawerMaxWidth(viewportWidth: number): number {
@@ -295,6 +326,7 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
     activeRightSurface:
       record.activeRightSurface === "attachments" ||
       record.activeRightSurface === "detail" ||
+      record.activeRightSurface === "diffs" ||
       record.activeRightSurface === "files" ||
       record.activeRightSurface === "chat" ||
       record.activeRightSurface === "notes" ||
@@ -308,6 +340,28 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
     collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)
       ? record.collapsedColumnKeys.filter((key): key is string => typeof key === "string")
       : DEFAULT_DASHBOARD_VIEW_STATE.collapsedColumnKeys,
+    diffsSidebarWidth:
+      typeof record.diffsSidebarWidth === "number"
+        ? clampWorkspaceSidebarWidth(
+            record.diffsSidebarWidth,
+            DEFAULT_DASHBOARD_VIEW_STATE.diffsSidebarWidth,
+          )
+        : DEFAULT_DASHBOARD_VIEW_STATE.diffsSidebarWidth,
+    filesSidebarWidth:
+      typeof record.filesSidebarWidth === "number"
+        ? clampWorkspaceSidebarWidth(
+            record.filesSidebarWidth,
+            DEFAULT_DASHBOARD_VIEW_STATE.filesSidebarWidth,
+          )
+        : DEFAULT_DASHBOARD_VIEW_STATE.filesSidebarWidth,
+    diffsViewMode:
+      record.diffsViewMode === "unified" || record.diffsViewMode === "split"
+        ? record.diffsViewMode
+        : DEFAULT_DASHBOARD_VIEW_STATE.diffsViewMode,
+    diffsWordWrap:
+      typeof record.diffsWordWrap === "boolean"
+        ? record.diffsWordWrap
+        : DEFAULT_DASHBOARD_VIEW_STATE.diffsWordWrap,
   };
 }
 
@@ -361,13 +415,21 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
         drawerWidth: viewState.drawerWidth,
         activeRightSurface: viewState.activeRightSurface,
         drawerFullscreen: viewState.drawerFullscreen,
+        diffsSidebarWidth: viewState.diffsSidebarWidth,
+        filesSidebarWidth: viewState.filesSidebarWidth,
+        diffsViewMode: viewState.diffsViewMode,
+        diffsWordWrap: viewState.diffsWordWrap,
       }),
     );
   }, [
     viewState.activeRightSurface,
     viewState.collapsedColumnKeys,
+    viewState.diffsSidebarWidth,
+    viewState.diffsViewMode,
+    viewState.diffsWordWrap,
     viewState.drawerFullscreen,
     viewState.drawerWidth,
+    viewState.filesSidebarWidth,
     viewState.viewMode,
   ]);
 

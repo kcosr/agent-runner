@@ -98,9 +98,15 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Switch to Chat",
       },
       {
-        description: "Show the selected run's Detail tab.",
+        description: "Show the selected run's Info tab.",
+        keys: ["I"],
+        title: "Switch to Info",
+      },
+      {
+        description:
+          "Show the selected run's Diffs tab, or focus changed-file search when Diffs is open.",
         keys: ["D"],
-        title: "Switch to Detail",
+        title: "Switch to Diffs",
       },
       {
         description: "Show the selected run's Files tab, or focus file search when Files is open.",

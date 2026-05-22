@@ -405,6 +405,7 @@ updatedAt } }`.
 | `GET` | `/api/runs/:runId/workspace/files` | List a cwd-relative directory. Query: optional `path` |
 | `GET` | `/api/runs/:runId/workspace/search` | Search cwd-relative workspace paths. Query: `q`, optional `limit` |
 | `GET` | `/api/runs/:runId/workspace/file` | Attempt to preview a cwd-relative file as text. Query: `path` |
+| `GET` | `/api/runs/:runId/workspace/diff` | Read workspace diffs. Query: branch mode `mode=branch&base=<ref>&head=<ref>&comparison=merge-base\|direct`, or working-tree mode `mode=working-tree` |
 
 Workspace file routes are scoped to the selected run's `cwd`. Paths are
 cwd-relative and must stay inside that tree after normalization and symlink
@@ -416,6 +417,20 @@ return the normal daemon error envelope; the daemon never serves arbitrary
 absolute paths from these routes. Because valid UTF-8 files can include secrets,
 expose the daemon only to trusted clients, bind it to `127.0.0.1`, or enable
 daemon auth before sharing dashboard access.
+
+Workspace diff routes are scoped to the selected run's `cwd` and require that
+cwd to be inside a Git work tree. Branch merge-base mode uses explicit refs,
+for example
+`/api/runs/abc123/workspace/diff?mode=branch&base=main&head=HEAD&comparison=merge-base`
+for `main...HEAD`; direct mode uses `comparison=direct` for `main..HEAD`.
+Missing requested refs return a clear daemon error and are not replaced with a
+guessed branch. Working-tree mode is
+`/api/runs/abc123/workspace/diff?mode=working-tree` and returns one bounded
+patch/list for staged, unstaged, deleted, renamed, copied when Git detects
+copies, untracked text files, and binary/unpreviewable entries. Binary or
+unpreviewable entries are listed with null line stats and do not include binary
+content in the patch. Oversized patch output returns a successful truncated
+response when a safe partial patch can be produced.
 
 ### Attachments
 

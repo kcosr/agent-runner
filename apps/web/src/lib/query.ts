@@ -1,3 +1,4 @@
+import type { WorkspaceDiffInput } from "@kcosr/agent-runner-core/contracts/workspace-diffs.js";
 import { QueryClient } from "@tanstack/react-query";
 
 interface RunListKeyOptions {
@@ -17,6 +18,20 @@ export const runQueryKeys = {
     [...runQueryKeys.all, "workspace-search", runId, { query, limit: limit ?? null }] as const,
   workspaceFile: (runId: string, path: string) =>
     [...runQueryKeys.all, "workspace-file", runId, path] as const,
+  workspaceDiff: (runId: string, input: WorkspaceDiffInput) =>
+    input.mode === "branch"
+      ? ([
+          ...runQueryKeys.all,
+          "workspace-diff",
+          runId,
+          {
+            mode: input.mode,
+            base: input.base,
+            head: input.head,
+            comparison: input.comparison,
+          },
+        ] as const)
+      : ([...runQueryKeys.all, "workspace-diff", runId, { mode: input.mode }] as const),
   inputSurface: (agent: string, assignment: string, cwd?: string) =>
     [...runQueryKeys.all, "input-surface", { agent, assignment, cwd: cwd ?? null }] as const,
   definitions: ["definitions"] as const,

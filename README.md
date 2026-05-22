@@ -527,3 +527,6 @@ style bootstrapping:
 - [earendil-works/pi](https://github.com/earendil-works/pi)
 - [pingdotgg/t3code](https://github.com/pingdotgg/t3code)
 - [openai/codex](https://github.com/openai/codex)
+- The web dashboard Diffs view is powered by Pierre's
+  [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs) and
+  [`@pierre/trees`](https://www.npmjs.com/package/@pierre/trees) packages.

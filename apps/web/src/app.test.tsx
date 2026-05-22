@@ -35,6 +35,121 @@ vi.mock("mermaid", () => ({
   },
 }));
 
+const fileTreeTestApi = vi.hoisted(() => ({
+  focusPath: vi.fn(),
+  focusNextSearchMatch: vi.fn(),
+  focusPreviousSearchMatch: vi.fn(),
+  searchMatchingPaths: [] as string[],
+  searchValue: "",
+}));
+
+vi.mock("@pierre/diffs/react", async () => {
+  const React = await import("react");
+
+  type MockCodeViewItem = {
+    collapsed?: boolean;
+    fileDiff?: { name?: string };
+    id: string;
+    version?: number;
+  };
+
+  const CodeView = React.forwardRef<
+    unknown,
+    {
+      className?: string;
+      items?: readonly MockCodeViewItem[];
+      options?: { diffStyle?: "unified" | "split"; overflow?: "scroll" | "wrap" };
+      onSelectedLinesChange?: (
+        selection: {
+          id: string;
+          range: { end: number; endSide: "additions"; side: "additions"; start: number };
+        } | null,
+      ) => void;
+      renderHeaderPrefix?: (item: MockCodeViewItem) => React.ReactNode;
+    }
+  >(function MockCodeView(
+    { className, items = [], onSelectedLinesChange, options, renderHeaderPrefix },
+    ref,
+  ) {
+    React.useImperativeHandle(ref, () => ({
+      clearSelectedLines: () => {},
+      getInstance: () => undefined,
+      getItem: (id: string) => items.find((item) => item.id === id),
+      getSelectedLines: () => null,
+      scrollTo: () => {},
+      setSelectedLines: () => {},
+      updateItem: () => false,
+      updateItemId: () => false,
+    }));
+
+    return (
+      <div
+        aria-label="Code diff"
+        className={className}
+        data-diff-style={options?.diffStyle ?? "unified"}
+        data-overflow={options?.overflow ?? "scroll"}
+        data-code-view-version={items[0]?.version ?? 0}
+      >
+        {items.map((item) => {
+          const name = item.fileDiff?.name ?? item.id;
+          return (
+            <div data-collapsed={item.collapsed ? "true" : "false"} key={item.id}>
+              {renderHeaderPrefix?.(item)}
+              <span>{name}</span>
+              <button
+                onClick={() =>
+                  onSelectedLinesChange?.({
+                    id: item.id,
+                    range: { start: 2, end: 2, side: "additions", endSide: "additions" },
+                  })
+                }
+                type="button"
+              >
+                Select diff line for {name}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  });
+
+  return { CodeView };
+});
+
+vi.mock("@pierre/trees/react", () => {
+  return {
+    FileTree: ({ className }: { className?: string }) => (
+      <div className={className}>
+        <input aria-label="Changed-file search" data-file-tree-search-input="" />
+        <button data-item-type="file" data-type="item" type="button">
+          src/app.ts
+        </button>
+      </div>
+    ),
+    useFileTree: () => ({
+      model: {
+        focusPath: fileTreeTestApi.focusPath,
+        getItem: () => ({ select: () => {} }),
+        resetPaths: () => {},
+        scrollToPath: () => {},
+        setGitStatus: () => {},
+      },
+    }),
+    useFileTreeSearch: () => ({
+      close: () => {},
+      focusNextMatch: fileTreeTestApi.focusNextSearchMatch,
+      focusPreviousMatch: fileTreeTestApi.focusPreviousSearchMatch,
+      isOpen: false,
+      matchingPaths: fileTreeTestApi.searchMatchingPaths,
+      open: () => {},
+      setValue: () => {},
+      value: fileTreeTestApi.searchValue,
+    }),
+    useFileTreeSelection: () => [],
+  };
+});
+
 const APP_CONFIG = {
   apiBasePath: "/api",
   webBasePath: "/",
@@ -65,14 +180,22 @@ const DEFAULT_DASHBOARD_VIEW_STATE: {
   viewMode: "board" | "list";
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  activeRightSurface: "attachments" | "chat" | "detail" | "files" | "notes" | "tasks";
+  activeRightSurface: "attachments" | "chat" | "detail" | "diffs" | "files" | "notes" | "tasks";
   drawerFullscreen: boolean;
+  diffsSidebarWidth: number;
+  filesSidebarWidth: number;
+  diffsViewMode: "unified" | "split";
+  diffsWordWrap: boolean;
 } = {
   viewMode: "board",
   collapsedColumnKeys: [],
   drawerWidth: 540,
   activeRightSurface: "detail",
   drawerFullscreen: false,
+  diffsSidebarWidth: 272,
+  filesSidebarWidth: 240,
+  diffsViewMode: "unified",
+  diffsWordWrap: true,
 };
 
 class MockEventSource {
@@ -103,6 +226,14 @@ class MockEventSource {
   emitOpen() {
     this.onopen?.(new Event("open"));
   }
+}
+
+class MockResizeObserver {
+  disconnect() {}
+
+  observe() {}
+
+  unobserve() {}
 }
 
 function setStoredDashboardPreferences(overrides: Partial<typeof DEFAULT_DASHBOARD_PREFERENCES>) {
@@ -1658,6 +1789,42 @@ function fetchMutationUrls(fetchMock: ReturnType<typeof installFetchMock>) {
     .map(([url]) => String(url));
 }
 
+function makeWorkspaceDiff(overrides: Record<string, unknown> = {}) {
+  return {
+    runId: "run-1",
+    cwd: "/tmp/agent-runner",
+    repoRoot: "/tmp/agent-runner",
+    mode: "branch",
+    baseRef: "main",
+    headRef: "HEAD",
+    comparison: "merge-base",
+    displayRange: "main...HEAD",
+    files: [
+      {
+        path: "src/app.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        binary: false,
+      },
+    ],
+    stats: { files: 1, additions: 1, deletions: 0 },
+    patch: [
+      "diff --git a/src/app.ts b/src/app.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/app.ts",
+      "+++ b/src/app.ts",
+      "@@ -1,1 +1,2 @@",
+      " export const existing = true;",
+      "+export const selected = true;",
+      "",
+    ].join("\n"),
+    truncated: false,
+    maxBytes: 524288,
+    ...overrides,
+  };
+}
+
 function getRunActionMenuElement() {
   const menu = document.querySelector(".run-action-menu");
   expect(menu).toBeInTheDocument();
@@ -1868,13 +2035,26 @@ describe("web app", () => {
     window.localStorage.clear();
     delete document.documentElement.dataset.theme;
     MockEventSource.instances = [];
+    fileTreeTestApi.focusPath.mockClear();
+    fileTreeTestApi.focusNextSearchMatch.mockClear();
+    fileTreeTestApi.focusPreviousSearchMatch.mockClear();
+    fileTreeTestApi.searchMatchingPaths = [];
+    fileTreeTestApi.searchValue = "";
     initializeMermaid.mockClear();
     renderMermaid.mockClear();
     vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
     vi.stubGlobal("scrollTo", vi.fn());
+    HTMLElement.prototype.scrollTo = vi.fn();
     vi.stubGlobal("CSS", {
       escape: (value: string) => value.replace(/["\\]/g, "\\$&"),
     } satisfies Pick<typeof CSS, "escape">);
+    if (window.CSSStyleSheet && !CSSStyleSheet.prototype.replaceSync) {
+      Object.defineProperty(CSSStyleSheet.prototype, "replaceSync", {
+        configurable: true,
+        value: vi.fn(),
+      });
+    }
   });
 
   afterEach(async () => {
@@ -1902,7 +2082,7 @@ describe("web app", () => {
     expect(screen.getAllByText("CWD").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("/tmp/agent-runner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy cwd path/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copy run id/i })).not.toBeInTheDocument();
   });
 
   it("toggles list mode, filters by status, sorts globally, and preserves row actions", async () => {
@@ -2652,7 +2832,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
@@ -2675,7 +2855,7 @@ describe("web app", () => {
         text: " while away",
       },
     });
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Deferred response while away",
@@ -2739,7 +2919,7 @@ describe("web app", () => {
     expect(container.querySelector(".dashboard-right-surfaces")).toBeNull();
   });
 
-  it("opens a selected-run panel and switches between Chat, Detail, Notes, and Tasks tabs", async () => {
+  it("opens a selected-run panel and switches between Chat, Info, Notes, and Tasks tabs", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -2758,7 +2938,7 @@ describe("web app", () => {
     expect(await screen.findByLabelText("Run chat")).toBeInTheDocument();
     await user.type(await screen.findByLabelText("Message"), "keep this draft");
 
-    await user.click(within(tablist).getByRole("tab", { name: "Detail" }));
+    await user.click(within(tablist).getByRole("tab", { name: "Info" }));
     expect(screen.getByLabelText("Attachments")).toBeInTheDocument();
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
@@ -2779,7 +2959,7 @@ describe("web app", () => {
     });
   });
 
-  it("switches the active selected-run surface from the Attachments, Chat, Detail, Notes, and Tasks tabs", async () => {
+  it("switches the active selected-run surface from the Attachments, Chat, Info, Notes, and Tasks tabs", async () => {
     setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock({
       runs: [makeRun()],
@@ -2790,7 +2970,7 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
-    const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
+    const detailTab = within(tablist).getByRole("tab", { name: "Info" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
     const notesTab = within(tablist).getByRole("tab", { name: "Notes" });
     const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
@@ -2798,7 +2978,7 @@ describe("web app", () => {
       within(tablist)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Chat", "Detail", "Notes", "Tasks", "Files", "Attachments"]);
+    ).toEqual(["Chat", "Info", "Notes", "Tasks", "Diffs", "Files", "Attachments"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
     expect(notesTab).toHaveAttribute("aria-selected", "false");
@@ -2839,11 +3019,12 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
-    const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
+    const detailTab = within(tablist).getByRole("tab", { name: "Info" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
     const notesTab = within(tablist).getByRole("tab", { name: "Notes" });
     const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
     const filesTab = within(tablist).getByRole("tab", { name: "Files" });
+    const diffsTab = within(tablist).getByRole("tab", { name: "Diffs" });
     expect(detailTab).toHaveAttribute("aria-selected", "true");
 
     await user.keyboard("c");
@@ -2863,7 +3044,7 @@ describe("web app", () => {
     await user.keyboard("{Escape}");
     expect(message).not.toHaveFocus();
 
-    await user.keyboard("d");
+    await user.keyboard("i");
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
@@ -2898,6 +3079,874 @@ describe("web app", () => {
     await user.keyboard("f");
     expect(filesTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Files")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "d" });
+    expect(diffsTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Diffs")).toBeInTheDocument();
+  });
+
+  it("restores existing persisted selected-run surfaces and falls back for unknown values", async () => {
+    for (const [activeRightSurface, tabName] of [
+      ["files", "Files"],
+      ["tasks", /Tasks/],
+    ] as const) {
+      setStoredDashboardViewState({ activeRightSurface });
+      installFetchMock({
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      });
+
+      await renderApp("/runs/run-1");
+      const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+      expect(within(tablist).getByRole("tab", { name: tabName })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+
+      cleanup();
+      queryClient.clear();
+    }
+
+    window.localStorage.setItem(
+      "agent-runner:web:dashboard-view-state",
+      JSON.stringify({
+        ...DEFAULT_DASHBOARD_VIEW_STATE,
+        activeRightSurface: "unknown",
+      }),
+    );
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    await renderApp("/runs/run-1");
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    expect(within(tablist).getByRole("tab", { name: "Info" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("renders the Diffs surface, restores it, switches comparisons, and refreshes", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    const diffRequests: string[] = [];
+    const fetchMock = installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            diffRequests.push(parsed.search);
+            const mode = parsed.searchParams.get("mode");
+            const comparison = parsed.searchParams.get("comparison");
+            const diff =
+              mode === "working-tree"
+                ? makeWorkspaceDiff({
+                    mode: "working-tree",
+                    baseRef: null,
+                    headRef: null,
+                    comparison: null,
+                    displayRange: "Working tree",
+                  })
+                : makeWorkspaceDiff({
+                    comparison,
+                    displayRange: comparison === "direct" ? "main..HEAD" : "main...HEAD",
+                  });
+            return new Response(JSON.stringify({ diff }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    expect(within(tablist).getByRole("tab", { name: "Diffs" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(await screen.findByLabelText("Diffs")).toBeInTheDocument();
+    expect((await screen.findAllByText("src/app.ts")).length).toBeGreaterThan(0);
+    const sourceTabs = screen.getByRole("tablist", { name: "Diff source" });
+    expect(within(sourceTabs).getByRole("tab", { name: "Range" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const rangeInput = screen.getByRole("textbox", { name: "Diff range" });
+    expect(rangeInput).toHaveValue("main...HEAD");
+
+    fireEvent.change(rangeInput, { target: { value: "main..HEAD" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => {
+      expect(diffRequests).toContain("?mode=branch&base=main&head=HEAD&comparison=direct");
+    });
+
+    fireEvent.click(within(sourceTabs).getByRole("tab", { name: "Working tree" }));
+    await waitFor(() => {
+      expect(diffRequests).toContain("?mode=working-tree");
+    });
+    expect(within(sourceTabs).getByRole("tab", { name: "Working tree" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    const beforeRefresh = fetchCallCount(fetchMock, (url) => url.includes("/workspace/diff"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh workspace diff" }));
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.includes("/workspace/diff"))).toBeGreaterThan(
+        beforeRefresh,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all files" }));
+    expect(screen.getByRole("button", { name: "Expand all files" })).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Code diff").querySelectorAll('[data-collapsed="true"]').length,
+    ).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand all files" }));
+    expect(screen.getByRole("button", { name: "Collapse all files" })).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Code diff").querySelectorAll('[data-collapsed="true"]'),
+    ).toHaveLength(0);
+  });
+
+  it("creates a task from a diff line selection with the contracted task body", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let createdTaskBody: { body?: string; title?: string } | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            capabilities: {
+              taskMutation: {
+                canAdd: true,
+                canEditPending: true,
+                canDeletePending: true,
+                canEditNotes: true,
+                canSetStatus: true,
+              },
+            },
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            capabilities: {
+              taskMutation: {
+                canAdd: true,
+                canEditPending: true,
+                canDeletePending: true,
+                canEditNotes: true,
+                canSetStatus: true,
+              },
+            },
+            lockedFields: [],
+          }),
+        },
+      },
+      {
+        handleRequest(url, init) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          if (parsed.pathname === "/api/runs/run-1/tasks" && init?.method === "POST") {
+            createdTaskBody =
+              typeof init.body === "string"
+                ? (JSON.parse(init.body) as { body?: string; title?: string })
+                : undefined;
+            return new Response(
+              JSON.stringify({
+                task: {
+                  id: "diff-task",
+                  title: createdTaskBody?.title ?? "",
+                  body: createdTaskBody?.body ?? "",
+                  status: "pending",
+                  notes: "",
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+    await user.click(
+      await screen.findByRole("button", { name: "Select diff line for src/app.ts" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    expect(await screen.findByRole("dialog", { name: "Create task" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Description"), "Create a follow-up from this diff.");
+    await user.click(screen.getByRole("button", { name: "Create task" }));
+
+    await waitFor(() => {
+      expect(createdTaskBody?.title).toBe("Update src/app.ts");
+      expect(createdTaskBody?.body).toContain("Diff: `main...HEAD`");
+      expect(createdTaskBody?.body).toContain("File: `src/app.ts`");
+      expect(createdTaskBody?.body).toContain("Side: additions");
+      expect(createdTaskBody?.body).toContain("Range: `src/app.ts:2`");
+      expect(createdTaskBody?.body).toContain("export const selected = true;");
+      expect(createdTaskBody?.body).toContain("Create a follow-up from this diff.");
+    });
+  });
+
+  it("moves keyboard navigation from the focused Diffs search into the changed-file tree", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const { rerender } = await renderApp("/runs/run-1");
+
+    const searchInput = await screen.findByLabelText("Changed-file search");
+    searchInput.focus();
+    fireEvent.keyDown(searchInput, { key: "ArrowDown" });
+    expect(fileTreeTestApi.focusPath).toHaveBeenCalledWith("src/app.ts");
+    expect(fileTreeTestApi.focusNextSearchMatch).not.toHaveBeenCalled();
+
+    fileTreeTestApi.searchValue = "app";
+    fileTreeTestApi.searchMatchingPaths = ["src/app.ts"];
+    rerender(<App />);
+    const filteredSearchInput = await screen.findByLabelText("Changed-file search");
+    filteredSearchInput.focus();
+    fireEvent.keyDown(filteredSearchInput, { key: "ArrowDown" });
+    expect(fileTreeTestApi.focusNextSearchMatch).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(filteredSearchInput, { key: "ArrowUp" });
+    expect(fileTreeTestApi.focusPreviousSearchMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("blurs the focused Diffs tree search on Escape before closing the selected run", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const searchInput = await screen.findByLabelText("Changed-file search");
+    searchInput.focus();
+    expect(searchInput).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(searchInput).not.toHaveFocus();
+    expect(screen.getByLabelText("Diffs")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Diffs")).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not resume the selected run with Enter while the Diffs tree search is focused", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let resumeRequestCount = 0;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "diffs-enter",
+            assignmentName: "Diffs enter run",
+            name: "Diffs enter run",
+            status: "success",
+            effectiveStatus: "success",
+          }),
+        ],
+        details: {
+          "diffs-enter": makeDetail({
+            runId: "diffs-enter",
+            status: "success",
+            effectiveStatus: "success",
+            name: "Diffs enter run",
+            assignment: {
+              name: "Diffs enter run",
+              sourcePath: "/tmp/diffs-enter.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canReady: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/diffs-enter/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          if (url.endsWith("/api/runs/diffs-enter/resume")) {
+            resumeRequestCount += 1;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/diffs-enter");
+
+    const searchInput = await screen.findByLabelText("Changed-file search");
+    searchInput.focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    expect(resumeRequestCount).toBe(0);
+  });
+
+  it("blurs the focused Diffs tree row on Escape before closing the selected run", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const treeRow = await screen.findByRole("button", { name: "src/app.ts" });
+    treeRow.focus();
+    expect(treeRow).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(treeRow).not.toHaveFocus();
+    expect(screen.getByLabelText("Diffs")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Diffs")).not.toBeInTheDocument();
+    });
+  });
+
+  it("blurs the focused Diffs tree row on Escape before exiting fullscreen", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs", drawerFullscreen: true });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const treeRow = await screen.findByRole("button", { name: "src/app.ts" });
+    treeRow.focus();
+    expect(treeRow).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("{Escape}");
+    expect(treeRow).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByLabelText("Diffs")).toBeInTheDocument();
+  });
+
+  it("does not resume the selected run with Enter while a Diffs tree row is focused", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let resumeRequestCount = 0;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "diffs-row-enter",
+            assignmentName: "Diffs row enter run",
+            name: "Diffs row enter run",
+            status: "success",
+            effectiveStatus: "success",
+          }),
+        ],
+        details: {
+          "diffs-row-enter": makeDetail({
+            runId: "diffs-row-enter",
+            status: "success",
+            effectiveStatus: "success",
+            name: "Diffs row enter run",
+            assignment: {
+              name: "Diffs row enter run",
+              sourcePath: "/tmp/diffs-row-enter.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canReady: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/diffs-row-enter/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          if (url.endsWith("/api/runs/diffs-row-enter/resume")) {
+            resumeRequestCount += 1;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/diffs-row-enter");
+
+    const treeRow = await screen.findByRole("button", { name: "src/app.ts" });
+    treeRow.focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    expect(resumeRequestCount).toBe(0);
+  });
+
+  it("restores the persisted diff view mode and persists changes", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs", diffsViewMode: "split" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const codeDiff = await screen.findByLabelText("Code diff");
+    expect(codeDiff).toHaveAttribute("data-diff-style", "split");
+    expect(codeDiff).toHaveAttribute("data-overflow", "wrap");
+    expect(screen.getByRole("tab", { name: "Split" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Unified" }));
+    await waitFor(() => {
+      expect(codeDiff).toHaveAttribute("data-diff-style", "unified");
+    });
+    const stored = JSON.parse(
+      window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
+    );
+    expect(stored.diffsViewMode).toBe("unified");
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable word wrap" }));
+    await waitFor(() => {
+      expect(codeDiff).toHaveAttribute("data-overflow", "scroll");
+    });
+    expect(screen.getByRole("button", { name: "Enable word wrap" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    const storedAfterWordWrap = JSON.parse(
+      window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
+    );
+    expect(storedAfterWordWrap.diffsWordWrap).toBe(false);
+  });
+
+  it("bumps the CodeView version when Collapse all is toggled", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const codeDiff = await screen.findByLabelText("Code diff");
+    const initialVersion = Number(codeDiff.getAttribute("data-code-view-version"));
+    const firstItem = codeDiff.querySelector("[data-collapsed]");
+    expect(firstItem).toHaveAttribute("data-collapsed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all files" }));
+    await waitFor(() => {
+      expect(Number(codeDiff.getAttribute("data-code-view-version"))).toBeGreaterThan(
+        initialVersion,
+      );
+    });
+    expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "true");
+
+    const collapsedVersion = Number(codeDiff.getAttribute("data-code-view-version"));
+    fireEvent.click(screen.getByRole("button", { name: "Expand all files" }));
+    await waitFor(() => {
+      expect(Number(codeDiff.getAttribute("data-code-view-version"))).toBeGreaterThan(
+        collapsedVersion,
+      );
+    });
+    expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "false");
+  });
+
+  it("collapses and expands an individual diff file from the header caret", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const codeDiff = await screen.findByLabelText("Code diff");
+    expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "false");
+
+    const collapseButton = screen.getByRole("button", { name: "Collapse src/app.ts" });
+    expect(collapseButton).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(collapseButton);
+
+    await waitFor(() => {
+      expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "true");
+    });
+    expect(screen.getByRole("button", { name: "Expand src/app.ts" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand src/app.ts" }));
+    await waitFor(() => {
+      expect(codeDiff.querySelector("[data-collapsed]")).toHaveAttribute("data-collapsed", "false");
+    });
+  });
+
+  it("bumps the CodeView version when refreshed diff content changes", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let diff = makeWorkspaceDiff();
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const codeDiff = await screen.findByLabelText("Code diff");
+    const initialVersion = Number(codeDiff.getAttribute("data-code-view-version"));
+    diff = makeWorkspaceDiff({
+      patch: [
+        "diff --git a/src/app.ts b/src/app.ts",
+        "index 1111111..3333333 100644",
+        "--- a/src/app.ts",
+        "+++ b/src/app.ts",
+        "@@ -1,1 +1,2 @@",
+        " export const existing = true;",
+        "+export const refreshed = true;",
+        "",
+      ].join("\n"),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh workspace diff" }));
+    await waitFor(() => {
+      expect(Number(codeDiff.getAttribute("data-code-view-version"))).toBeGreaterThan(
+        initialVersion,
+      );
+    });
+  });
+
+  it("persists the diffs sidebar width when resized via keyboard", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs", diffsSidebarWidth: 300 });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const resizer = await screen.findByRole("separator", {
+      name: "Resize changed-files sidebar",
+    });
+    expect(resizer).toHaveAttribute("aria-valuenow", "300");
+
+    fireEvent.keyDown(resizer, { key: "ArrowRight" });
+    await waitFor(() => {
+      expect(resizer).toHaveAttribute("aria-valuenow", "316");
+    });
+
+    fireEvent.keyDown(resizer, { key: "ArrowLeft", shiftKey: true });
+    await waitFor(() => {
+      expect(resizer).toHaveAttribute("aria-valuenow", "268");
+    });
+
+    const stored = JSON.parse(
+      window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
+    );
+    expect(stored.diffsSidebarWidth).toBe(268);
+  });
+
+  it("collapses the changed-file browser on mobile diffs layouts", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: query === "(max-width: 760px)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+    setStoredDashboardViewState({ activeRightSurface: "diffs", diffsSidebarWidth: 300 });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(JSON.stringify({ diff: makeWorkspaceDiff() }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const sidebar = await screen.findByLabelText("Changed files");
+    await waitFor(() => {
+      expect(sidebar).toHaveClass("diffs-sidebar--collapsed");
+    });
+    expect(sidebar).toHaveTextContent("src/app.ts");
+    const toggle = within(sidebar).getByRole("button");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("separator", { name: "Resize changed-files sidebar" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(sidebar).not.toHaveClass("diffs-sidebar--collapsed");
+    });
+    expect(sidebar.closest(".diffs-layout")).toHaveClass("diffs-layout--mobile-browser-expanded");
+    expect(screen.queryByLabelText("Diff viewer")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Diff stats")).toBeInTheDocument();
+  });
+
+  it("persists the files sidebar width when resized via keyboard", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "files", filesSidebarWidth: 250 });
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const resizer = await screen.findByRole("separator", {
+      name: "Resize workspace files sidebar",
+    });
+    expect(resizer).toHaveAttribute("aria-valuenow", "250");
+
+    fireEvent.keyDown(resizer, { key: "ArrowRight", shiftKey: true });
+    await waitFor(() => {
+      expect(resizer).toHaveAttribute("aria-valuenow", "298");
+    });
+
+    const stored = JSON.parse(
+      window.localStorage.getItem("agent-runner:web:dashboard-view-state") ?? "{}",
+    );
+    expect(stored.filesSidebarWidth).toBe(298);
+  });
+
+  it("shows Diffs loading, empty, error, and truncated states", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    let resolveDiff: (response: Response) => void = () => {};
+    const pendingDiff = new Promise<Response>((resolve) => {
+      resolveDiff = resolve;
+    });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return pendingDiff;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+    expect(await screen.findByText("Loading diff...")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveDiff(
+        new Response(
+          JSON.stringify({
+            diff: makeWorkspaceDiff({
+              files: [],
+              stats: { files: 0, additions: 0, deletions: 0 },
+              patch: "",
+              truncated: true,
+            }),
+          }),
+          { status: 200 },
+        ),
+      );
+      await pendingDiff;
+    });
+
+    expect(await screen.findByText("No changes in this comparison.")).toBeInTheDocument();
+    expect(screen.getByText("Patch output was truncated at 512 KB.")).toBeInTheDocument();
+
+    cleanup();
+    queryClient.clear();
+    setStoredDashboardViewState({ activeRightSurface: "diffs" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest(url) {
+          const parsed = new URL(url, "http://agent-runner.test");
+          if (parsed.pathname === "/api/runs/run-1/workspace/diff") {
+            return new Response(
+              JSON.stringify({
+                error: { code: "INVALID_COMMAND", message: 'missing git base ref "main"' },
+              }),
+              { status: 422 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+    expect(await screen.findByText('missing git base ref "main"')).toBeInTheDocument();
   });
 
   it("renders the Files surface with loading, empty, error, and accessible controls", async () => {
@@ -3857,7 +4906,7 @@ describe("web app", () => {
 
     await user.click(
       within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
-        name: "Detail",
+        name: "Info",
       }),
     );
     await user.click(screen.getByRole("button", { name: "Attempts" }));
@@ -5287,7 +6336,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -5414,7 +6463,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     expect(await screen.findByRole("tab", { name: "Pending" })).toBeInTheDocument();
@@ -5610,7 +6659,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Completed attempt",
@@ -5755,7 +6804,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -5820,7 +6869,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -5871,7 +6920,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -5894,7 +6943,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(await screen.findByRole("tab", { name: "Detail" }));
+    await user.click(await screen.findByRole("tab", { name: "Info" }));
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections).toHaveClass("tabs", "tabs--scrollable");
@@ -5919,7 +6968,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(await screen.findByRole("tab", { name: "Detail" }));
+    await user.click(await screen.findByRole("tab", { name: "Info" }));
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(4);
@@ -6728,7 +7777,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -8281,6 +9330,13 @@ describe("web app", () => {
       "aria-pressed",
       "true",
     );
+    const fullscreenDrawer = screen.getByLabelText("Run detail");
+    expect(within(fullscreenDrawer).getByText("initialized")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copy run id/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Run surface" })).toBeInTheDocument();
 
     const searchInput = screen.getByPlaceholderText("Search runs");
     expect(searchInput).not.toHaveFocus();
@@ -8786,10 +9842,12 @@ describe("web app", () => {
     expect(screen.getByLabelText("Shortcut: C")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: D")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: F")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: I")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: Shift + F")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: T")).toBeInTheDocument();
     expect(screen.getByText("Switch to Chat")).toBeInTheDocument();
-    expect(screen.getByText("Switch to Detail")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Diffs")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Info")).toBeInTheDocument();
     expect(screen.getByText("Switch to Files")).toBeInTheDocument();
     expect(screen.getByText("Switch to Tasks")).toBeInTheDocument();
 
@@ -9022,6 +10080,10 @@ describe("web app", () => {
       drawerWidth: 570,
       activeRightSurface: "detail",
       drawerFullscreen: false,
+      diffsSidebarWidth: 272,
+      filesSidebarWidth: 240,
+      diffsViewMode: "unified",
+      diffsWordWrap: true,
     });
 
     cleanup();
@@ -9414,7 +10476,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     await user.click(card);
-    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(screen.getByRole("tab", { name: "Info" }));
     await user.click(
       within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
         name: "Notes",
@@ -12038,7 +13100,9 @@ describe("web app", () => {
     expect(fullscreenDrawerLayer).not.toBeNull();
     expect(resumeDialogLayer?.[1]).toBe("60");
     expect(fullscreenDrawerLayer?.[1]).toBe("40");
-    expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?right:\s*0;[\s\S]*?left:\s*56px;/);
+    expect(css).toMatch(
+      /\.drawer--fullscreen\s*\{[\s\S]*?top:\s*0;[\s\S]*?right:\s*0;[\s\S]*?left:\s*0;/,
+    );
     expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?width:\s*auto;/);
     expect(css).toMatch(/\.drawer--fullscreen\s*\{[\s\S]*?min-width:\s*0;/);
   });
@@ -12235,6 +13299,10 @@ describe("web app", () => {
         drawerWidth: 540,
         activeRightSurface: "detail",
         drawerFullscreen: false,
+        diffsSidebarWidth: 272,
+        filesSidebarWidth: 240,
+        diffsViewMode: "unified",
+        diffsWordWrap: true,
       }),
     );
     expect(
@@ -12254,6 +13322,10 @@ describe("web app", () => {
         drawerWidth: 540,
         activeRightSurface: "detail",
         drawerFullscreen: false,
+        diffsSidebarWidth: 272,
+        filesSidebarWidth: 240,
+        diffsViewMode: "unified",
+        diffsWordWrap: true,
       }),
     );
     expect(
@@ -14823,7 +15895,7 @@ describe("web app", () => {
     expect(screen.getByLabelText("Attachment preview")).not.toBeVisible();
     await user.click(
       within(secondRunTablist).getByRole("tab", {
-        name: "Detail",
+        name: "Info",
       }),
     );
 
@@ -14838,7 +15910,7 @@ describe("web app", () => {
 
     await user.click(
       within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
-        name: "Detail",
+        name: "Info",
       }),
     );
     expect(await screen.findByRole("button", { name: /^Upload$/ })).toBeInTheDocument();
@@ -15385,7 +16457,7 @@ describe("web app", () => {
 
     await user.click(
       within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
-        name: "Detail",
+        name: "Info",
       }),
     );
     await user.click(screen.getByRole("button", { name: /^Remove beta\.txt$/ }));

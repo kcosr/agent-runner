@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { BoardColumn } from "../components/run-column.js";
 import {
+  isEditableEventTarget,
+  isEditableKeyboardEvent,
   resolveBoardEntryRunId,
   resolveBoardNeighborRunId,
   resolveListNeighborRunId,
@@ -160,6 +162,38 @@ describe("resolveListNeighborRunId", () => {
   });
 });
 
+describe("editable keyboard targets", () => {
+  it("treats focused inputs inside a shadow host as editable targets", () => {
+    const host = document.createElement("div");
+    const shadowRoot = host.attachShadow({ mode: "open" });
+    const input = document.createElement("input");
+    shadowRoot.append(input);
+    document.body.append(host);
+
+    input.focus();
+
+    expect(isEditableEventTarget(host)).toBe(true);
+
+    host.remove();
+  });
+
+  it("detects editable inputs from a composed keyboard event path", () => {
+    const host = document.createElement("div");
+    const shadowRoot = host.attachShadow({ mode: "open" });
+    const input = document.createElement("input");
+    shadowRoot.append(input);
+    document.body.append(host);
+    const event = new KeyboardEvent("keydown", { bubbles: true, composed: true, key: "t" });
+    Object.defineProperty(event, "composedPath", {
+      value: () => [input, shadowRoot, host, document.body, document, window],
+    });
+
+    expect(isEditableKeyboardEvent(event)).toBe(true);
+
+    host.remove();
+  });
+});
+
 describe("resolveRunsShortcutCommand", () => {
   const context = {
     actionPending: false,
@@ -167,6 +201,7 @@ describe("resolveRunsShortcutCommand", () => {
     boardColumns: makeBoardColumns(),
     drawerFullscreen: false,
     hasActiveStructuredFilters: false,
+    localNavigationTarget: false,
     modalOpen: false,
     resumeDialogOpen: false,
     searchFocused: false,
@@ -363,13 +398,25 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "d",
+          key: "i",
           metaKey: false,
           shiftKey: false,
         },
         context,
       ),
     ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showDiffs");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -534,7 +581,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "d",
+          key: "i",
           metaKey: false,
           shiftKey: false,
         },
@@ -662,7 +709,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "d",
+          key: "i",
           metaKey: false,
           shiftKey: false,
         },
@@ -729,6 +776,36 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("run.primaryAction");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Enter",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          localNavigationTarget: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          localNavigationTarget: true,
+        },
+      ),
+    ).toBe("run.showFiles");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -1186,7 +1263,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "d",
+          key: "i",
           metaKey: false,
           shiftKey: false,
         },

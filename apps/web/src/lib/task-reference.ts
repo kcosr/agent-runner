@@ -13,7 +13,21 @@ interface SourceTaskReference {
   view: "source";
 }
 
-export type TaskReference = RenderedTaskReference | SourceTaskReference;
+interface DiffTaskReference {
+  baseRef: string | null;
+  comparison: "merge-base" | "direct" | null;
+  displayRange: string;
+  endLine: number;
+  headRef: string | null;
+  oldPath?: string;
+  path: string;
+  selectedText: string;
+  side: "additions" | "deletions";
+  startLine: number;
+  view: "diff";
+}
+
+export type TaskReference = DiffTaskReference | RenderedTaskReference | SourceTaskReference;
 
 const EXTENSION_LANGUAGES = new Map<string, string>([
   ["cjs", "js"],
@@ -56,6 +70,31 @@ export function buildTaskBody(reference: TaskReference | null, instruction: stri
         "Selected text:",
         "",
         blockquote(reference.selectedText),
+      ].join("\n"),
+      trimmedInstruction,
+    );
+  }
+
+  if (reference.view === "diff") {
+    const range =
+      reference.startLine === reference.endLine
+        ? `${reference.path}:${reference.startLine}`
+        : `${reference.path}:${reference.startLine}-${reference.endLine}`;
+    const fenceLanguage = languageForPath(reference.path) ?? "";
+    const oldPath = reference.oldPath ? [`Previous file: \`${reference.oldPath}\``] : [];
+    return withOptionalInstruction(
+      [
+        `Diff: \`${reference.displayRange}\``,
+        `File: \`${reference.path}\``,
+        ...oldPath,
+        `Side: ${reference.side}`,
+        `Range: \`${range}\``,
+        "",
+        "Selected diff:",
+        "",
+        `\`\`\`${fenceLanguage}`,
+        reference.selectedText,
+        "```",
       ].join("\n"),
       trimmedInstruction,
     );

@@ -983,6 +983,95 @@ describe("api client", () => {
     );
   });
 
+  it("reads workspace diffs with encoded branch and working-tree query parameters and bearer auth", async () => {
+    const branchDiff = {
+      runId: "run-1",
+      cwd: "/tmp/project",
+      repoRoot: "/tmp/project",
+      mode: "branch",
+      baseRef: "main branch",
+      headRef: "HEAD",
+      comparison: "merge-base",
+      displayRange: "main branch...HEAD",
+      files: [
+        {
+          path: "src/app.ts",
+          status: "modified",
+          additions: 2,
+          deletions: 1,
+          binary: false,
+        },
+      ],
+      stats: { files: 1, additions: 2, deletions: 1 },
+      patch: "diff --git a/src/app.ts b/src/app.ts\n",
+      truncated: false,
+      maxBytes: 524288,
+    };
+    const directDiff = {
+      ...branchDiff,
+      comparison: "direct",
+      displayRange: "main..feature/head",
+      baseRef: "main",
+      headRef: "feature/head",
+    };
+    const workingTreeDiff = {
+      ...branchDiff,
+      mode: "working-tree",
+      baseRef: null,
+      headRef: null,
+      comparison: null,
+      displayRange: "Working tree",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ diff: branchDiff }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ diff: directDiff }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ diff: workingTreeDiff }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config, { daemonToken: " token-1 " });
+
+    await expect(
+      api.getWorkspaceDiff("run-1", {
+        mode: "branch",
+        base: "main branch",
+        head: "HEAD",
+        comparison: "merge-base",
+      }),
+    ).resolves.toEqual(branchDiff);
+    await expect(
+      api.getWorkspaceDiff("run-1", {
+        mode: "branch",
+        base: "main",
+        head: "feature/head",
+        comparison: "direct",
+      }),
+    ).resolves.toEqual(directDiff);
+    await expect(api.getWorkspaceDiff("run-1", { mode: "working-tree" })).resolves.toEqual(
+      workingTreeDiff,
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/runs/run-1/workspace/diff?mode=branch&base=main+branch&head=HEAD&comparison=merge-base",
+      { headers: { accept: "application/json", authorization: "Bearer token-1" } },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/runs/run-1/workspace/diff?mode=branch&base=main&head=feature%2Fhead&comparison=direct",
+      { headers: { accept: "application/json", authorization: "Bearer token-1" } },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/runs/run-1/workspace/diff?mode=working-tree",
+      {
+        headers: { accept: "application/json", authorization: "Bearer token-1" },
+      },
+    );
+  });
+
   it("rejects invalid workspace file API payloads", async () => {
     const fetchMock = vi
       .fn()
@@ -1009,6 +1098,23 @@ describe("api client", () => {
     });
     await expect(api.getWorkspaceFile("run-1", "docs/api.md")).rejects.toMatchObject({
       message: "Workspace file response payload is invalid",
+      status: 200,
+    });
+  });
+
+  it("rejects invalid workspace diff API payloads", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ diff: { runId: "run-1" } }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.getWorkspaceDiff("run-1", { mode: "working-tree" })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      message: "Workspace diff response payload is invalid",
       status: 200,
     });
   });

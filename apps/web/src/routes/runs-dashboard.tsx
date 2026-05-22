@@ -5,6 +5,10 @@ import { AppShell } from "../components/app-shell.js";
 import { useNativeModalDialog } from "../components/native-dialog.js";
 import { RunFilters } from "../components/run-filters.js";
 import {
+  getActiveDiffsFileTreeElement,
+  getDiffsFileTreeSearchInput,
+} from "../lib/diffs-file-tree-keyboard.js";
+import {
   type RunActionMenuItem,
   type RunDestructiveCleanupAction,
   getRunActionMenuItems,
@@ -14,6 +18,7 @@ import type { DashboardPreferences } from "../lib/settings.js";
 import type { DashboardViewMode } from "../lib/settings.js";
 import {
   isEditableEventTarget,
+  isEditableKeyboardEvent,
   resolveBoardNeighborRunId,
   resolveListNeighborRunId,
   resolveRunsShortcutCommand,
@@ -293,6 +298,7 @@ export function RunsDashboardRoute() {
   const [runActionMenu, setRunActionMenu] = useState<RunActionMenuState | null>(null);
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
   const [fileSearchRequestVersion, setFileSearchRequestVersion] = useState(0);
+  const [diffsSearchRequestVersion, setDiffsSearchRequestVersion] = useState(0);
   const [noteEditRequestVersion, setNoteEditRequestVersion] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const latestStateRef = useRef(state);
@@ -323,8 +329,31 @@ export function RunsDashboardRoute() {
         currentState.viewState.drawerFullscreen ||
         document.querySelector(".drawer--fullscreen") !== null;
       const modalOpen = document.querySelector('dialog[open][data-modal="true"]') !== null;
+      const diffsTreeSearchInput = getDiffsFileTreeSearchInput(event);
+      const diffsTreeFocusedElement = diffsTreeSearchInput ? null : getActiveDiffsFileTreeElement();
       const typingTarget =
-        isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement);
+        isEditableKeyboardEvent(event) ||
+        isEditableEventTarget(document.activeElement) ||
+        diffsTreeSearchInput !== null;
+
+      if (event.key === "Escape" && diffsTreeSearchInput) {
+        if (diffsTreeSearchInput.value.length === 0) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          diffsTreeSearchInput.blur();
+        }
+        return;
+      }
+
+      if (event.key === "Escape" && diffsTreeFocusedElement) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        diffsTreeFocusedElement.blur();
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+        return;
+      }
 
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: currentState.activeBoardColumnKey,
@@ -335,6 +364,7 @@ export function RunsDashboardRoute() {
         resumeDialogOpen: currentState.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
         searchValue: currentState.viewState.search,
+        localNavigationTarget: diffsTreeSearchInput !== null || diffsTreeFocusedElement !== null,
         selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
         selectedRunId: currentState.selectedRunId,
         typingTarget,
@@ -450,6 +480,16 @@ export function RunsDashboardRoute() {
       if (command === "run.showDetail") {
         event.preventDefault();
         currentState.setActiveRightSurface("detail");
+        return;
+      }
+
+      if (command === "run.showDiffs") {
+        event.preventDefault();
+        if (currentState.activeRightSurface === "diffs") {
+          setDiffsSearchRequestVersion((current) => current + 1);
+          return;
+        }
+        currentState.setActiveRightSurface("diffs");
         return;
       }
 
@@ -783,6 +823,7 @@ export function RunsDashboardRoute() {
                   drawerWidth={state.viewState.drawerWidth}
                   drawerView={state.selectedDrawerView}
                   attachmentPreviewSelection={state.selectedAttachmentPreview}
+                  diffsSearchRequestVersion={diffsSearchRequestVersion}
                   fileSearchRequestVersion={fileSearchRequestVersion}
                   noteEditRequestVersion={noteEditRequestVersion}
                   runs={state.runs}

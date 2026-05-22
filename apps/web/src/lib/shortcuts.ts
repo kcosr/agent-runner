@@ -16,6 +16,7 @@ type RunsShortcutCommand =
   | "run.showAttachments"
   | "run.showChat"
   | "run.showDetail"
+  | "run.showDiffs"
   | "run.showFiles"
   | "run.showNotes"
   | "run.showTasks"
@@ -48,6 +49,7 @@ interface RunsShortcutContext {
   boardColumns: BoardColumn[];
   drawerFullscreen: boolean;
   hasActiveStructuredFilters: boolean;
+  localNavigationTarget: boolean;
   modalOpen: boolean;
   selectedRunPrimaryActionAvailable: boolean;
   resumeDialogOpen: boolean;
@@ -81,12 +83,27 @@ const BOARD_FILTER_SHORTCUTS: readonly {
   { command: "ui.toggleHideEmptyColumns", key: "e" },
 ];
 
+const EDITABLE_TARGET_SELECTOR =
+  'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
+
 export function isEditableEventTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
-  return Boolean(
-    target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'),
+  if (target.closest(EDITABLE_TARGET_SELECTOR)) {
+    return true;
+  }
+
+  const shadowActiveElement = target.shadowRoot?.activeElement;
+  return shadowActiveElement instanceof HTMLElement
+    ? isEditableEventTarget(shadowActiveElement)
+    : false;
+}
+
+export function isEditableKeyboardEvent(event: Event): boolean {
+  return (
+    event.composedPath().some((target) => isEditableEventTarget(target)) ||
+    isEditableEventTarget(event.target)
   );
 }
 
@@ -148,6 +165,7 @@ function canTriggerPrimaryAction(context: RunsShortcutContext): boolean {
   return (
     !context.typingTarget &&
     !context.searchFocused &&
+    !context.localNavigationTarget &&
     !context.modalOpen &&
     !context.resumeDialogOpen &&
     !context.actionPending &&
@@ -203,6 +221,7 @@ function resolveRunSurfaceShortcut(
   | "run.showAttachments"
   | "run.showChat"
   | "run.showDetail"
+  | "run.showDiffs"
   | "run.showFiles"
   | "run.showNotes"
   | "run.showTasks"
@@ -222,8 +241,11 @@ function resolveRunSurfaceShortcut(
   if (matchesShortcut(event, { key: "c" })) {
     return "run.showChat";
   }
-  if (matchesShortcut(event, { key: "d" })) {
+  if (matchesShortcut(event, { key: "i" })) {
     return "run.showDetail";
+  }
+  if (matchesShortcut(event, { key: "d" })) {
+    return "run.showDiffs";
   }
   if (matchesShortcut(event, { key: "f" })) {
     return "run.showFiles";

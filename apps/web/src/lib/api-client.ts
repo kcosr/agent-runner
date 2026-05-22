@@ -51,6 +51,11 @@ import type {
   RunTaskSummary,
 } from "@kcosr/agent-runner-core/contracts/runs.js";
 import type {
+  WorkspaceDiff,
+  WorkspaceDiffInput,
+} from "@kcosr/agent-runner-core/contracts/workspace-diffs.js";
+import { workspaceDiffResponseSchema } from "@kcosr/agent-runner-core/contracts/workspace-diffs.js";
+import type {
   WorkspaceFileContent,
   WorkspaceFileDirectory,
   WorkspaceFileSearch,
@@ -481,6 +486,23 @@ async function readWorkspaceFile(response: Response): Promise<WorkspaceFileConte
     );
   }
   return parsed.data.file;
+}
+
+async function readWorkspaceDiff(response: Response): Promise<WorkspaceDiff> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  const parsed = workspaceDiffResponseSchema.safeParse(
+    await parseResponseJson(response, "Workspace diff"),
+  );
+  if (!parsed.success) {
+    throw invalidResponse(
+      "Workspace diff response payload is invalid",
+      response.status,
+      parsed.error.flatten(),
+    );
+  }
+  return parsed.data.diff;
 }
 
 async function readQueueResumeMessageResult(
@@ -960,6 +982,29 @@ export function createApiClient(config: AppRuntimeConfig, options: ApiClientOpti
         },
       );
       return await readWorkspaceFile(response);
+    },
+    async getWorkspaceDiff(
+      runId: string,
+      input: WorkspaceDiffInput,
+      options: RequestOptions = {},
+    ): Promise<WorkspaceDiff> {
+      const params = new URLSearchParams({ mode: input.mode });
+      if (input.mode === "branch") {
+        params.set("base", input.base);
+        params.set("head", input.head);
+        params.set("comparison", input.comparison);
+      }
+      const response = await apiFetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/workspace/diff?${params.toString()}`,
+        ),
+        {
+          headers: { accept: "application/json" },
+          signal: options.signal,
+        },
+      );
+      return await readWorkspaceDiff(response);
     },
     async listAttachments(
       runId: string,

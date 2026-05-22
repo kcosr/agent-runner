@@ -119,6 +119,20 @@ function tempDir() {
   return mkdtempSync(join(tmpdir(), "agent-runner-daemon-"));
 }
 
+function git(cwd, args) {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function initGitRepo(dir) {
+  git(dir, ["init", "-b", "main"]);
+  git(dir, ["config", "user.email", "agent-runner@example.invalid"]);
+  git(dir, ["config", "user.name", "Agent Runner"]);
+}
+
 function writeAgent(baseDir, name, body) {
   const dir = join(baseDir, "agents", name);
   mkdirSync(dir, { recursive: true });
@@ -3563,6 +3577,115 @@ test("daemon resumes unique cross-bucket short ids through RPC and HTTP", async 
   });
 });
 
+test("daemon workspace diff HTTP route returns branch and working-tree diffs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  initGitRepo(dir);
+  writeFileSync(join(dir, "branch.txt"), "base\n");
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-m", "base"]);
+  git(dir, ["checkout", "-b", "feature"]);
+  writeFileSync(join(dir, "branch.txt"), "base\nfeature\n");
+  git(dir, ["commit", "-am", "feature"]);
+  writeFileSync(join(dir, "working.txt"), "working tree\n");
+  const init = await initRun(dir);
+  moveRunToRepoBucket(dir, init.workspaceDir, "agent-runner", { cwd: dir });
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const branch = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/diff?mode=branch&base=main&head=HEAD&comparison=merge-base`,
+      );
+      assert.equal(branch.status, 200, JSON.stringify(branch.body));
+      assert.equal(branch.body.diff.runId, init.runId);
+      assert.equal(branch.body.diff.displayRange, "main...HEAD");
+      assert.deepEqual(
+        branch.body.diff.files.map((file) => [file.path, file.status]),
+        [["branch.txt", "modified"]],
+      );
+
+      const workingTree = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/diff?mode=working-tree`,
+      );
+      assert.equal(workingTree.status, 200, JSON.stringify(workingTree.body));
+      assert.equal(workingTree.body.diff.displayRange, "Working tree");
+      assert.deepEqual(
+        workingTree.body.diff.files
+          .filter((file) => file.path === "working.txt")
+          .map((file) => [file.path, file.status]),
+        [["working.txt", "untracked"]],
+      );
+      assert.match(workingTree.body.diff.patch, /diff --git a\/working\.txt b\/working\.txt/);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon workspace diff HTTP route rejects invalid query shapes and missing refs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  initGitRepo(dir);
+  writeFileSync(join(dir, "tracked.txt"), "base\n");
+  git(dir, ["add", "."]);
+  git(dir, ["commit", "-m", "base"]);
+  const init = await initRun(dir);
+  moveRunToRepoBucket(dir, init.workspaceDir, "agent-runner", { cwd: dir });
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const missingQuery = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/diff?mode=branch&base=main`,
+      );
+      assert.equal(missingQuery.status, 400, JSON.stringify(missingQuery.body));
+      assert.equal(missingQuery.body.error.code, "INVALID_REQUEST");
+      assert.match(
+        missingQuery.body.error.message,
+        /comparison must be one of: merge-base, direct/,
+      );
+
+      const irrelevantQuery = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/diff?mode=working-tree&base=main`,
+      );
+      assert.equal(irrelevantQuery.status, 400);
+      assert.equal(irrelevantQuery.body.error.code, "INVALID_REQUEST");
+      assert.match(irrelevantQuery.body.error.message, /working-tree diff does not support query/);
+
+      const missingRef = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/diff?mode=branch&base=missing&head=HEAD&comparison=direct`,
+      );
+      assert.equal(missingRef.status, 422);
+      assert.equal(missingRef.body.error.code, "INVALID_COMMAND");
+      assert.match(missingRef.body.error.message, /missing git base ref "missing"/);
+
+      const optionLikeRef = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/workspace/diff?mode=branch&base=--help&head=HEAD&comparison=direct`,
+      );
+      assert.equal(optionLikeRef.status, 400);
+      assert.equal(optionLikeRef.body.error.code, "INVALID_REQUEST");
+      assert.match(optionLikeRef.body.error.message, /base cannot start with "-"/);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("daemon workspace APIs resolve unique cross-bucket short ids", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
@@ -3571,6 +3694,13 @@ test("daemon workspace APIs resolve unique cross-bucket short ids", async () => 
   const workspaceCwd = join(dir, "assistant-cwd");
   mkdirSync(join(workspaceCwd, "docs"), { recursive: true });
   writeFileSync(join(workspaceCwd, "docs", "api.md"), "# API\n\nCross-bucket workspace text.\n");
+  initGitRepo(workspaceCwd);
+  git(workspaceCwd, ["add", "."]);
+  git(workspaceCwd, ["commit", "-m", "base"]);
+  writeFileSync(
+    join(workspaceCwd, "docs", "api.md"),
+    "# API\n\nCross-bucket workspace text.\nUpdated through short id.\n",
+  );
   moveRunToRepoBucket(dir, run.workspaceDir, "assistant", { cwd: workspaceCwd });
 
   const port = await freePort();
@@ -3593,7 +3723,7 @@ test("daemon workspace APIs resolve unique cross-bucket short ids", async () => 
       assert.equal(workspaceRoot.body.directory.cwd, workspaceCwd);
       assert.deepEqual(
         workspaceRoot.body.directory.entries.map((entry) => entry.path),
-        ["docs"],
+        [".git", "docs"],
       );
 
       const workspaceSearch = await httpJson(
@@ -3611,7 +3741,21 @@ test("daemon workspace APIs resolve unique cross-bucket short ids", async () => 
         `/api/runs/${run.runId}/workspace/file?path=docs%2Fapi.md`,
       );
       assert.equal(workspaceFile.status, 200);
-      assert.equal(workspaceFile.body.file.text, "# API\n\nCross-bucket workspace text.\n");
+      assert.equal(
+        workspaceFile.body.file.text,
+        "# API\n\nCross-bucket workspace text.\nUpdated through short id.\n",
+      );
+
+      const workspaceDiff = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${run.runId}/workspace/diff?mode=working-tree`,
+      );
+      assert.equal(workspaceDiff.status, 200, JSON.stringify(workspaceDiff.body));
+      assert.equal(workspaceDiff.body.diff.cwd, workspaceCwd);
+      assert.deepEqual(
+        workspaceDiff.body.diff.files.map((entry) => [entry.path, entry.status]),
+        [["docs/api.md", "modified"]],
+      );
     } finally {
       await server.close();
     }

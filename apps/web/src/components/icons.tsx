@@ -271,6 +271,17 @@ export function ChevronIcon(props: IconProps) {
   );
 }
 
+export function WrapTextIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 7h16" />
+      <path d="M4 12h11a3 3 0 1 1 0 6h-1" />
+      <path d="m16 16-2 2 2 2" />
+      <path d="M4 18h6" />
+    </IconBase>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <IconBase {...props}>
