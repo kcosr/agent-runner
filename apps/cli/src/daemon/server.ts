@@ -303,6 +303,40 @@ function daemonFilesystemLocksEnabled(env: NodeJS.ProcessEnv = process.env): boo
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
+function createDaemonInstanceId(): string {
+  return `daemon-${process.pid}-${shortId()}`;
+}
+
+function parseDaemonInstanceOwnerPid(daemonInstanceId: string): number | null {
+  const match = /^daemon-(\d+)-[0-9a-z]+$/.exec(daemonInstanceId);
+  if (!match) {
+    return null;
+  }
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function runningRunHasLiveDifferentDaemonOwner(
+  manifest: RunManifest,
+  currentDaemonInstanceId: string,
+): boolean {
+  const { controller } = manifest.execution;
+  if (controller.kind !== "daemon" || controller.daemonInstanceId === currentDaemonInstanceId) {
+    return false;
+  }
+  const ownerPid = parseDaemonInstanceOwnerPid(controller.daemonInstanceId);
+  return ownerPid !== null && ownerPid !== process.pid && processIsAlive(ownerPid);
+}
+
 function formatQueuedResumePrompt(messages: readonly QueuedResumeMessage[]): string {
   return messages.map((message) => message.text).join("\n\n");
 }
@@ -842,7 +876,7 @@ export async function serveDaemon(
   const { host, port, path } = listenSocketConfig(listenUrl);
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const startedAt = new Date().toISOString();
-  const daemonInstanceId = `daemon-${shortId()}`;
+  const daemonInstanceId = createDaemonInstanceId();
   const mutationAuditContext = daemonMutationContext(daemonInstanceId);
   const version = packageVersion();
   const useDaemonFilesystemLocks = daemonFilesystemLocksEnabled();
@@ -2462,6 +2496,17 @@ export async function serveDaemon(
   const reconcileStartupRunningRun = async (entry: ListedRunManifest): Promise<void> => {
     const manifest = entry.manifest;
     if (manifest.status !== "running") {
+      return;
+    }
+    if (runningRunHasLiveDifferentDaemonOwner(manifest, daemonInstanceId)) {
+      emitControllerReconciled({
+        manifest,
+        transportType: null,
+        decision: "skipped_live_owner",
+        reason: "owner_pid_alive",
+        remoteStatus: null,
+        error: null,
+      });
       return;
     }
     let transportType: "stdio" | "ws" | "uds" | null = null;

@@ -88,10 +88,12 @@ export type BackendSessionHistorySyncReason = "bootstrap" | "pre_resume" | "subs
 export type RunControllerTransportType = "stdio" | "ws" | "uds" | null;
 export type RunControllerReconciliationDecision =
   | "marked_error"
+  | "skipped_live_owner"
   | "adopted_active"
   | "adopted_aborted"
   | "finalized_idle";
 export type RunControllerReconciliationReason =
+  | "owner_pid_alive"
   | "stale_local_controller"
   | "missing_backend_session"
   | "unsupported_transport"
