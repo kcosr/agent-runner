@@ -58,6 +58,8 @@
 - Dashboard task rows now use per-task edit controls and ask for confirmation
   before deleting a pending task.
   ([#157](https://github.com/kcosr/agent-runner/pull/157))
+- Diff task creation now preserves selected raw diff rows, including `+`, `-`,
+  and context prefixes, and supports mixed addition/deletion selections.
 
 ### Fixed
 
