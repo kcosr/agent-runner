@@ -453,6 +453,7 @@ function upsertCompleteTurn(params: {
     maxAttemptsPerSession: 1,
     backendSessionIdAtStart: backendSessionId,
     backendSessionIdAtEnd: backendSessionId,
+    resumeSource: null,
     provenance,
   };
   const attempt: AttemptRecord = {

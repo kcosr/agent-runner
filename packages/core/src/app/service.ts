@@ -54,6 +54,7 @@ import {
   clearRunDependencies,
   clearRunGroup,
   clearRunSchedule as clearRunScheduleCommand,
+  createParentCompletionNotification as createParentCompletionNotificationCommand,
   deleteRun,
   deleteTask,
   downloadAttachment,
@@ -62,6 +63,9 @@ import {
   listDefinitions,
   listRuns,
   listTasks,
+  markParentCompletionNotificationDelivered as markParentCompletionNotificationDeliveredCommand,
+  markParentCompletionNotificationFailed as markParentCompletionNotificationFailedCommand,
+  markParentCompletionNotificationSkipped as markParentCompletionNotificationSkippedCommand,
   readyRun as markRunReady,
   queueResumeMessage as queueResumeMessageCommand,
   readAttachment,
@@ -94,7 +98,11 @@ import type {
   EnvironmentDefinitionConfig,
   TaskDef,
 } from "../core/config/schema.js";
-import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
+import type {
+  AttemptLog,
+  AttemptRecord,
+  ParentCompletionResumeSource,
+} from "../core/run/manifest.js";
 import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
 import { reconfigureInitializedRun } from "../core/run/reconfigure.js";
 import type { RunEventOrigin } from "../core/run/run-events.js";
@@ -165,6 +173,7 @@ export interface StartRunRequest {
   callerCwd?: string;
   parentRunId?: string | null;
   runGroupId?: string | null;
+  noInheritRunGroup?: boolean;
   backendSessionId?: string;
   cliVars: Record<string, string>;
   webVars: Record<string, string>;
@@ -179,6 +188,7 @@ export interface StartRunRequest {
 export interface ResumeRunRequest {
   target: string;
   parentRunId?: string | null;
+  resumeSource?: ParentCompletionResumeSource | null;
   overrides: RunCommandOverrides;
   execution?: RunExecution;
   abortSignal?: AbortSignal;
@@ -389,7 +399,7 @@ export function getRunList(filter: RunListFilter = {}): RunSummary[] {
 }
 
 export function queueResumeMessage(
-  input: { target: string; message: string },
+  input: { target: string; message: string; source?: ParentCompletionResumeSource | null },
   auditContext?: MutationAuditContext,
   emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): QueueResumeMessageResult {
@@ -413,6 +423,38 @@ export function drainQueuedResumeMessages(
   removedMessageIds: string[];
 } {
   return drainQueuedResumeMessagesCommand(input, auditContext, emitAuditEnvelope);
+}
+
+export function createParentCompletionNotification(
+  input: Parameters<typeof createParentCompletionNotificationCommand>[0],
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): ReturnType<typeof createParentCompletionNotificationCommand> {
+  return createParentCompletionNotificationCommand(input, auditContext, emitAuditEnvelope);
+}
+
+export function markParentCompletionNotificationDelivered(
+  input: Parameters<typeof markParentCompletionNotificationDeliveredCommand>[0],
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): ReturnType<typeof markParentCompletionNotificationDeliveredCommand> {
+  return markParentCompletionNotificationDeliveredCommand(input, auditContext, emitAuditEnvelope);
+}
+
+export function markParentCompletionNotificationSkipped(
+  input: Parameters<typeof markParentCompletionNotificationSkippedCommand>[0],
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): ReturnType<typeof markParentCompletionNotificationSkippedCommand> {
+  return markParentCompletionNotificationSkippedCommand(input, auditContext, emitAuditEnvelope);
+}
+
+export function markParentCompletionNotificationFailed(
+  input: Parameters<typeof markParentCompletionNotificationFailedCommand>[0],
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): ReturnType<typeof markParentCompletionNotificationFailedCommand> {
+  return markParentCompletionNotificationFailedCommand(input, auditContext, emitAuditEnvelope);
 }
 
 export function getTaskList(target: string): RunTaskSummary[] {
@@ -751,6 +793,7 @@ export async function initRun(request: StartRunRequest): Promise<RunDetail> {
     callerCwd: request.callerCwd,
     parentRunId: request.parentRunId,
     runGroupId: request.runGroupId,
+    noInheritRunGroup: request.noInheritRunGroup,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     webVars: request.webVars,
@@ -773,6 +816,7 @@ export function startRun(request: StartRunRequest): Promise<RunOutcome> {
     callerCwd: request.callerCwd,
     parentRunId: request.parentRunId,
     runGroupId: request.runGroupId,
+    noInheritRunGroup: request.noInheritRunGroup,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     webVars: request.webVars,
@@ -792,6 +836,7 @@ export function resumeRun(request: ResumeRunRequest): Promise<RunOutcome> {
     cliVars: {},
     webVars: {},
     parentRunId: request.parentRunId,
+    resumeSource: request.resumeSource ?? null,
     overrides: request.overrides,
     execution: request.execution,
     abortSignal: request.abortSignal,

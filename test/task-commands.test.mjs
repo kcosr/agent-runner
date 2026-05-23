@@ -962,6 +962,7 @@ test("run reset: json output restores initialized state and removes attempt arti
         maxAttemptsPerSession: 9,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "sess-after-run",
+        resumeSource: null,
         provenance: { kind: "task_runner" },
       },
     ];

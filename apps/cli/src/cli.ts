@@ -150,6 +150,7 @@ import { DaemonHttpError, daemonGetRunAuditHistory } from "./daemon/http-client.
 import {
   AGENT_RUNNER_DAEMON_TOKEN_ENV,
   type DaemonInfo,
+  type ParentCompletionNotificationRequest,
   RPC_ERROR_COMMAND,
 } from "./daemon/protocol.js";
 import { serveDaemon } from "./daemon/server.js";
@@ -266,6 +267,8 @@ Execution options:
   --parent-run <run-id>   Set the lineage parent for a fresh run/init.
   --group-id <group-id>   Set the explicit run group for a fresh run/init,
                           or scope list runs to a run group.
+  --no-inherit-run-group  (run/init only) Preserve parent lineage but start
+                          a fresh run/init in its own run group.
   --run-id <id|path>      (init only) Overwrite an initialized run in place.
   --var <key>=<value>     Set an input variable (repeatable).
                           Nested child runs usually inherit parent-owned
@@ -300,6 +303,9 @@ Execution options:
   --clear                 (run set-name) Clear the persisted run name.
   --detach                (run only, daemon mode only) Dispatch and exit
                           after the daemon accepts the run.
+  --no-notify-parent-on-complete
+                          (run --detach only) Do not notify the parent run
+                          when the detached child completes.
   --repo <name>           (list runs only) Scope runs to an exact repo.
   --global                (list runs only) Disable default cwd scoping.
   --output-format <fmt>   Output format: "text" (default) or "json".
@@ -316,6 +322,9 @@ Exit codes:
   4    Backend / runtime error
   130  Run interrupted by user (Ctrl+C) or external cancellation
 `;
+
+const NO_NOTIFY_PARENT_ON_COMPLETE_USAGE_ERROR =
+  "agent-runner: --no-notify-parent-on-complete is only valid with `run --detach`\n";
 
 function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -499,6 +508,41 @@ function getDefinitionShowDescriptor(
 function resolveParentRunId(parsed: ParsedArgs): string | undefined {
   const explicit = normalizeRunIdTarget(parsed.parentRun, "--parent-run");
   return explicit ?? readParentRunIdFromEnv() ?? undefined;
+}
+
+function parentCompletionNotificationForDetachedInvocation(
+  parsed: ParsedArgs,
+): ParentCompletionNotificationRequest | undefined {
+  if (parsed.noNotifyParentOnComplete) {
+    return undefined;
+  }
+  const parentRunId = resolveParentRunId(parsed);
+  return parentRunId === undefined
+    ? undefined
+    : {
+        source: "detached_invocation",
+        parentRunId,
+      };
+}
+
+function acceptsNoNotifyParentOnComplete(
+  parsed: ParsedArgs,
+  daemonConnect: DaemonConnectContext | undefined,
+): boolean {
+  return (
+    parsed.command === "run" &&
+    parsed.subcommand === undefined &&
+    parsed.detach === true &&
+    daemonConnect !== undefined
+  );
+}
+
+function acceptsNoInheritRunGroup(parsed: ParsedArgs): boolean {
+  return (
+    (parsed.command === "run" || parsed.command === "init") &&
+    parsed.subcommand === undefined &&
+    parsed.resumeRun === undefined
+  );
 }
 
 function resolvedOverrides(parsed: ParsedArgs) {
@@ -1528,10 +1572,14 @@ async function startOrResumeDaemonRun(
   parsed: ParsedArgs,
   overrides: RunCommandOverrides,
 ): Promise<{ runId: string }> {
+  const parentCompletionNotification = parsed.detach
+    ? parentCompletionNotificationForDetachedInvocation(parsed)
+    : undefined;
   return parsed.resumeRun
     ? await client.call<{ runId: string }>("runs.resume", {
         target: normalizeTarget(parsed.resumeRun) ?? parsed.resumeRun,
         overrides,
+        parentCompletionNotification,
       })
     : await client.call<{ runId: string }>("runs.start", {
         agent: normalizeTarget(parsed.agent),
@@ -1539,10 +1587,12 @@ async function startOrResumeDaemonRun(
         definitionCwd: process.cwd(),
         callerCwd: process.cwd(),
         parentRunId: resolveParentRunId(parsed),
+        noInheritRunGroup: parsed.noInheritRunGroup,
         runGroupId: parsed.groupId,
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         overrides,
+        parentCompletionNotification,
       });
 }
 
@@ -2717,6 +2767,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
         definitionCwd: process.cwd(),
         parentRunId: resolveParentRunId(parsed),
         runGroupId: parsed.groupId,
+        noInheritRunGroup: parsed.noInheritRunGroup,
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         webVars: {},
@@ -2743,6 +2794,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
           definitionCwd: process.cwd(),
           parentRunId: resolveParentRunId(parsed),
           runGroupId: parsed.groupId,
+          noInheritRunGroup: parsed.noInheritRunGroup,
           backendSessionId: parsed.backendSessionId,
           cliVars: parsed.vars,
           webVars: {},
@@ -2819,6 +2871,7 @@ async function runExecuteCommandDaemon(
         callerCwd: process.cwd(),
         parentRunId: resolveParentRunId(parsed),
         runGroupId: parsed.groupId,
+        noInheritRunGroup: parsed.noInheritRunGroup,
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         overrides: daemonOverrides,
@@ -2976,6 +3029,21 @@ async function main(): Promise<void> {
     }
   }
 
+  if (parsed.noInheritRunGroup) {
+    if (!acceptsNoInheritRunGroup(parsed)) {
+      process.stderr.write(
+        "agent-runner: --no-inherit-run-group is only valid with fresh `run` or `init`\n",
+      );
+      process.exit(3);
+    }
+    if (parsed.groupId !== undefined) {
+      process.stderr.write(
+        "agent-runner: --group-id cannot be combined with --no-inherit-run-group\n",
+      );
+      process.exit(3);
+    }
+  }
+
   if (parsed.command === "serve") {
     await runServe(parsed);
   }
@@ -3005,6 +3073,11 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     process.stderr.write(`agent-runner: ${errorMessage(err)}\n`);
+    process.exit(3);
+  }
+
+  if (parsed.noNotifyParentOnComplete && !acceptsNoNotifyParentOnComplete(parsed, daemonConnect)) {
+    process.stderr.write(NO_NOTIFY_PARENT_ON_COMPLETE_USAGE_ERROR);
     process.exit(3);
   }
 

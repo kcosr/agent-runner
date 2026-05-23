@@ -17,6 +17,7 @@ import type {
   AttachmentsUploadFinishParams,
   AttachmentsUploadOpenParams,
   CliRunsStartParams,
+  ParentCompletionNotificationRequest,
   RunInputSurfaceParams,
   RunQueueResumeMessageParams,
   RunReadyParams,
@@ -296,6 +297,18 @@ function optionalRunGroupId(value: unknown, label: string): string | undefined {
   return value === undefined ? undefined : requiredRunGroupId(value, label);
 }
 
+function assertAllowedKeys(
+  record: Record<string, unknown>,
+  label: string,
+  allowedKeys: ReadonlySet<string>,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+}
+
 export function parseDependencyRef(value: unknown, label: string): RunDependencyRef {
   const record = asRecord(value, label);
   const type = requiredString(record.type, `${label}.type`);
@@ -417,8 +430,47 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
   };
 }
 
-function parseStartRunBaseParams(value: unknown, label: string) {
+const START_RUN_BASE_KEYS = new Set([
+  "runId",
+  "agent",
+  "assignment",
+  "definitionCwd",
+  "callerCwd",
+  "parentRunId",
+  "runGroupId",
+  "backendSessionId",
+  "overrides",
+]);
+
+const CLI_START_RUN_KEYS = new Set([
+  ...START_RUN_BASE_KEYS,
+  "cliVars",
+  "noInheritRunGroup",
+  "parentCompletionNotification",
+]);
+
+const WEB_START_RUN_KEYS = new Set([...START_RUN_BASE_KEYS, "webVars"]);
+
+function optionalParentCompletionNotificationRequest(
+  value: unknown,
+  label: string,
+): ParentCompletionNotificationRequest | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
   const record = asRecord(value, label);
+  assertAllowedKeys(record, label, new Set(["source", "parentRunId"]));
+  const source = requiredString(record.source, `${label}.source`);
+  if (source !== "detached_invocation") {
+    throw new RequestValidationError(`${label}.source must be detached_invocation`);
+  }
+  return {
+    source,
+    parentRunId: requiredRunIdString(record.parentRunId, `${label}.parentRunId`),
+  };
+}
+
+function parseStartRunBaseParams(record: Record<string, unknown>) {
   return {
     runId: optionalString(record.runId, "runId"),
     agent: optionalString(record.agent, "agent"),
@@ -434,32 +486,41 @@ function parseStartRunBaseParams(value: unknown, label: string) {
 
 export function parseCliStartRunParams(value: unknown, label: string): CliRunsStartParams {
   const record = asRecord(value, label);
+  assertAllowedKeys(record, label, CLI_START_RUN_KEYS);
   return {
-    ...parseStartRunBaseParams(record, label),
+    ...parseStartRunBaseParams(record),
     cliVars: stringRecord(record.cliVars, "cliVars"),
+    noInheritRunGroup: optionalBoolean(record.noInheritRunGroup, `${label}.noInheritRunGroup`),
+    parentCompletionNotification: optionalParentCompletionNotificationRequest(
+      record.parentCompletionNotification,
+      `${label}.parentCompletionNotification`,
+    ),
   };
 }
 
 export function parseWebStartRunParams(value: unknown, label: string): WebRunsStartParams {
   const record = asRecord(value, label);
+  assertAllowedKeys(record, label, WEB_START_RUN_KEYS);
   return {
-    ...parseStartRunBaseParams(record, label),
+    ...parseStartRunBaseParams(record),
     webVars: stringRecord(record.webVars, "webVars"),
   };
 }
 
 export function parseResumeRunParams(value: unknown, label: string): RunsResumeParams {
   const record = asRecord(value, label);
-  const allowedKeys = new Set(["target", "parentRunId", "overrides"]);
-  for (const key of Object.keys(record)) {
-    if (!allowedKeys.has(key)) {
-      throw new RequestValidationError(`${label}.${key} is not supported`);
-    }
-  }
+  assertAllowedKeys(
+    record,
+    label,
+    new Set(["target", "overrides", "parentCompletionNotification"]),
+  );
   return {
     target: requiredString(record.target, `${label}.target`),
-    parentRunId: optionalRunIdString(record.parentRunId, `${label}.parentRunId`),
     overrides: optionalOverrides(record.overrides),
+    parentCompletionNotification: optionalParentCompletionNotificationRequest(
+      record.parentCompletionNotification,
+      `${label}.parentCompletionNotification`,
+    ),
   };
 }
 

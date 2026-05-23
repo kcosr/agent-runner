@@ -15,6 +15,7 @@ import type {
   RunSchedule,
   TaskSnapshot,
 } from "../core/run/manifest.js";
+import { cloneParentCompletionResumeSource } from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
 import { type RunScheduleState, deriveScheduleState } from "../core/run/schedule.js";
 import { deriveEffectiveStatus } from "../core/run/status.js";
@@ -606,7 +607,10 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
     attachments: manifest.attachments.map((attachment) => ({ ...attachment })),
-    queuedResumeMessages: manifest.queuedResumeMessages.map((message) => ({ ...message })),
+    queuedResumeMessages: manifest.queuedResumeMessages.map((message) => ({
+      ...message,
+      source: cloneParentCompletionResumeSource(message.source),
+    })),
     resolvedHooks: manifest.resolvedHooks.map((descriptor) => ({
       hookId: descriptor.hookId,
       phase: descriptor.phase,

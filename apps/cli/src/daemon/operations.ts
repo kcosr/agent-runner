@@ -51,10 +51,12 @@ import type {
   updateTask,
   validateRunEnvironment,
 } from "@kcosr/agent-runner-core/app/service.js";
+import type { ParentCompletionResumeSource } from "@kcosr/agent-runner-core/core/run/manifest.js";
 import type {
   CliRunsStartParams,
   DaemonInfo,
   DefinitionGetParams,
+  ParentCompletionNotificationRequest,
   RunInputSurfaceParams,
   RunQueueResumeMessageParams,
   RunReadyParams,
@@ -67,7 +69,13 @@ import type {
   WebRunsStartParams,
 } from "./protocol.js";
 
-type InternalStartRunRequest = Parameters<DaemonHandlers["startRun"]>[0];
+type InternalStartRunRequest = Parameters<DaemonHandlers["startRun"]>[0] & {
+  parentCompletionNotification?: ParentCompletionNotificationRequest;
+};
+type InternalResumeRunRequest = Parameters<DaemonHandlers["resumeRun"]>[0] & {
+  parentCompletionNotification?: ParentCompletionNotificationRequest;
+  resumeSource?: ParentCompletionResumeSource | null;
+};
 
 export interface DaemonHandlers {
   getRun: typeof getRun;
@@ -126,7 +134,7 @@ export interface DaemonHandlers {
 interface DaemonOperationContext extends DaemonHandlers {
   daemonInfo: DaemonInfo;
   startManagedRun(request: InternalStartRunRequest): Promise<{ runId: string }>;
-  resumeManagedRun(request: RunsResumeParams): Promise<{ runId: string }>;
+  resumeManagedRun(request: InternalResumeRunRequest): Promise<{ runId: string }>;
   abortRun(target: string): { runId: string; accepted: true };
 }
 

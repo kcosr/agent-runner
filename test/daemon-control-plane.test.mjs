@@ -333,6 +333,127 @@ function markRunSuccessful(workspaceDir) {
   });
 }
 
+function setSyntheticSession(workspaceDir, options = {}) {
+  const sessionIndex = options.sessionIndex ?? 0;
+  patchManifest(workspaceDir, (manifest) => {
+    manifest.status = options.status ?? "running";
+    manifest.endedAt = options.endedAt ?? null;
+    manifest.exitCode = options.exitCode ?? null;
+    manifest.totalSessionCount = Math.max(manifest.totalSessionCount, sessionIndex + 1);
+    const existingIndex = manifest.sessions.findIndex(
+      (session) => session.sessionIndex === sessionIndex,
+    );
+    const session = {
+      sessionIndex,
+      startedAt: options.startedAt ?? "2026-04-21T12:00:00.000Z",
+      endedAt: options.sessionEndedAt ?? null,
+      status: options.sessionStatus ?? manifest.status,
+      exitCode: options.sessionExitCode ?? manifest.exitCode,
+      message: options.message ?? null,
+      brief: options.brief ?? manifest.brief,
+      firstAttemptNumber: options.firstAttemptNumber ?? null,
+      lastAttemptNumber: options.lastAttemptNumber ?? null,
+      maxAttemptsPerSession: manifest.maxAttemptsPerSession,
+      backendSessionIdAtStart: options.backendSessionIdAtStart ?? manifest.backendSessionId,
+      backendSessionIdAtEnd: options.backendSessionIdAtEnd ?? null,
+      resumeSource: options.resumeSource ?? null,
+      provenance: { kind: "task_runner" },
+    };
+    if (existingIndex >= 0) {
+      manifest.sessions[existingIndex] = session;
+    } else {
+      manifest.sessions.push(session);
+    }
+  });
+}
+
+function completeSyntheticSession(workspaceDir, options = {}) {
+  const sessionIndex = options.sessionIndex ?? 0;
+  const status = options.status ?? "success";
+  const exitCode = options.exitCode ?? (status === "success" ? 0 : status === "blocked" ? 2 : 4);
+  patchManifest(workspaceDir, (manifest) => {
+    manifest.status = status;
+    manifest.endedAt = options.endedAt ?? "2026-04-21T12:05:00.000Z";
+    manifest.exitCode = exitCode;
+    manifest.tasksCompleted = status === "success" ? manifest.tasksTotal : manifest.tasksCompleted;
+    if (status === "success") {
+      for (const task of Object.values(manifest.finalTasks)) {
+        task.status = "completed";
+      }
+    }
+    const attemptNumber =
+      options.attemptNumber ??
+      Math.max(0, ...manifest.attemptRecords.map((record) => record.attemptNumber)) + 1;
+    const session = manifest.sessions.find((record) => record.sessionIndex === sessionIndex);
+    if (session) {
+      session.endedAt = options.sessionEndedAt ?? manifest.endedAt;
+      session.status = status;
+      session.exitCode = exitCode;
+      session.firstAttemptNumber ??= attemptNumber;
+      session.lastAttemptNumber = attemptNumber;
+      session.backendSessionIdAtEnd = manifest.backendSessionId;
+    } else {
+      manifest.sessions.push({
+        sessionIndex,
+        startedAt: options.startedAt ?? "2026-04-21T12:00:00.000Z",
+        endedAt: options.sessionEndedAt ?? manifest.endedAt,
+        status,
+        exitCode,
+        message: options.message ?? null,
+        brief: options.brief ?? manifest.brief,
+        firstAttemptNumber: attemptNumber,
+        lastAttemptNumber: attemptNumber,
+        maxAttemptsPerSession: manifest.maxAttemptsPerSession,
+        backendSessionIdAtStart: manifest.backendSessionId,
+        backendSessionIdAtEnd: manifest.backendSessionId,
+        resumeSource: options.resumeSource ?? null,
+        provenance: { kind: "task_runner" },
+      });
+    }
+    manifest.attemptRecords = manifest.attemptRecords.filter(
+      (record) => record.attemptNumber !== attemptNumber,
+    );
+    manifest.attemptRecords.push({
+      attemptNumber,
+      sessionIndex,
+      attemptIndexInSession: options.attemptIndexInSession ?? 0,
+      startedAt: options.startedAt ?? "2026-04-21T12:00:00.000Z",
+      endedAt: options.endedAt ?? "2026-04-21T12:05:00.000Z",
+      prompt: options.prompt ?? "synthetic prompt",
+      sessionIdAtStart: null,
+      sessionIdCaptured: null,
+      exitCode,
+      signal: null,
+      timedOut: false,
+      transcript: options.transcript ?? null,
+      logPath: `attempts/${String(attemptNumber).padStart(2, "0")}.json`,
+      invalidStatuses: [],
+      provenance: { kind: "task_runner" },
+    });
+    manifest.totalAttemptCount = manifest.attemptRecords.length;
+    manifest.totalSessionCount = manifest.sessions.length;
+  });
+}
+
+function addPendingParentCompletionNotification(workspaceDir, options) {
+  const notification = {
+    id: options.id,
+    parentRunId: options.parentRunId,
+    sessionIndex: options.sessionIndex ?? 0,
+    source: "detached_invocation",
+    status: "pending",
+    createdAt: options.createdAt ?? "2026-04-21T12:06:00.000Z",
+    deliveredAt: null,
+    terminalStatus: null,
+    deliveryReason: null,
+    failureReason: null,
+  };
+  patchManifest(workspaceDir, (manifest) => {
+    manifest.parentCompletionNotifications.push(notification);
+  });
+  return notification;
+}
+
 function markRunReady(workspaceDir) {
   patchManifest(workspaceDir, (manifest) => {
     manifest.status = "ready";
@@ -4217,6 +4338,7 @@ test("daemon drains queued resume messages before evaluating a due schedule", as
           id: newerQueuedMessageId,
           text: "Newer queued follow-up.",
           createdAt: drained.queuedResumeMessages[0].createdAt,
+          source: null,
         },
       ]);
       assert.equal(resumeMessages.length, 1);
@@ -4289,6 +4411,448 @@ test("daemon keeps queued resume messages when automatic resume start fails", as
     } finally {
       console.error = originalConsoleError;
       releaseInitialRun?.();
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon parent completion delivery queues active parents once with compact child audit", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const parent = await initRun(dir);
+  const child = await initRun(dir, "daemon-agent", { parentRunId: parent.runId });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let releaseParent;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async startRun({ runId, emitEvent }) {
+        if (runId === parent.runId) {
+          setSyntheticSession(parent.workspaceDir, { status: "running" });
+          emitRunStarted(emitEvent, parent.runId, dir);
+          await new Promise((resolve) => {
+            releaseParent = resolve;
+          });
+          return { runId: parent.runId };
+        }
+        assert.equal(runId, child.runId);
+        setSyntheticSession(child.workspaceDir, { status: "running" });
+        emitRunStarted(emitEvent, child.runId, dir);
+        completeSyntheticSession(child.workspaceDir, {
+          transcript: "child final transcript for parent",
+        });
+        emitRunFinished(emitEvent, child.runId);
+        return { runId: child.runId };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.start", {
+        runId: parent.runId,
+        cliVars: {},
+        overrides: {},
+      });
+      await client.call("runs.start", {
+        runId: child.runId,
+        parentRunId: parent.runId,
+        parentCompletionNotification: {
+          source: "detached_invocation",
+          parentRunId: parent.runId,
+        },
+        cliVars: {},
+        overrides: {},
+      });
+
+      const notification = await waitForValue(() => {
+        const record = readManifest(child.workspaceDir).parentCompletionNotifications[0];
+        return record?.status === "delivered_queued" ? record : null;
+      }, "child notification delivered_queued");
+      assert.match(notification.id, /^pcn/);
+      assert.equal(notification.parentRunId, parent.runId);
+      assert.equal(notification.deliveryReason, "parent_active_queued");
+
+      const parentDetail = await httpJson(httpBaseUrl, `/api/runs/${parent.runId}`);
+      assert.equal(parentDetail.status, 200);
+      assert.equal(parentDetail.body.run.queuedResumeMessages.length, 1);
+      const [queued] = parentDetail.body.run.queuedResumeMessages;
+      assert.equal(queued.source.childRunId, child.runId);
+      assert.equal(queued.source.notificationId, notification.id);
+      assert.match(queued.text, /Detached child run .* finished with status success/);
+      assert.match(queued.text, /Inspect the child:/);
+      assert.match(queued.text, /Child result:/);
+      assert.match(queued.text, /agent-runner run status/);
+      assert.match(queued.text, /child final transcript for parent/);
+
+      const childAudit = await httpJson(httpBaseUrl, `/api/runs/${child.runId}/audit`);
+      assert.equal(childAudit.status, 200);
+      assert.equal(
+        JSON.stringify(childAudit.body).includes("child final transcript for parent"),
+        false,
+      );
+    } finally {
+      releaseParent?.();
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon parent completion delivery resumes idle parents with source metadata and truncation marker", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const parent = await initRun(dir);
+  const child = await initRun(dir, "daemon-agent", { parentRunId: parent.runId });
+  completeSyntheticSession(parent.workspaceDir, { transcript: "parent completed earlier" });
+
+  const longTranscript = `${"x".repeat(12_100)}tail marker`;
+  const resumeRequests = [];
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async startRun({ runId, emitEvent }) {
+        assert.equal(runId, child.runId);
+        setSyntheticSession(child.workspaceDir, { status: "running" });
+        emitRunStarted(emitEvent, child.runId, dir);
+        completeSyntheticSession(child.workspaceDir, { transcript: longTranscript });
+        emitRunFinished(emitEvent, child.runId);
+        return { runId: child.runId };
+      },
+      async resumeRun({ target, overrides, resumeSource, emitEvent }) {
+        assert.equal(target, parent.workspaceDir);
+        resumeRequests.push({ message: overrides.message, resumeSource });
+        setSyntheticSession(parent.workspaceDir, {
+          sessionIndex: 1,
+          status: "running",
+          resumeSource,
+        });
+        emitEvent({
+          type: "run_started",
+          runId: parent.runId,
+          agentName: "daemon-agent",
+          assignmentSourcePath: null,
+          name: "daemon-work",
+          cwd: dir,
+          sessionIndex: 1,
+        });
+        return { runId: parent.runId };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.start", {
+        runId: child.runId,
+        parentRunId: parent.runId,
+        parentCompletionNotification: {
+          source: "detached_invocation",
+          parentRunId: parent.runId,
+        },
+        cliVars: {},
+        overrides: {},
+      });
+      const notification = await waitForValue(() => {
+        const record = readManifest(child.workspaceDir).parentCompletionNotifications[0];
+        return record?.status === "delivered_resumed" ? record : null;
+      }, "child notification delivered_resumed");
+      assert.equal(notification.deliveryReason, "parent_resumed");
+      assert.equal(resumeRequests.length, 1);
+      assert.deepEqual(resumeRequests[0].resumeSource, {
+        kind: "parent_completion_notification",
+        childRunId: child.runId,
+        notificationId: notification.id,
+      });
+      assert.match(resumeRequests[0].message, /Detached child run/);
+      assert.match(resumeRequests[0].message, /\[truncated\]/);
+      assert.doesNotMatch(resumeRequests[0].message, /tail marker/);
+      assert.deepEqual(readManifest(parent.workspaceDir).sessions[0].resumeSource, null);
+      assert.deepEqual(readManifest(parent.workspaceDir).sessions[1].resumeSource, {
+        kind: "parent_completion_notification",
+        childRunId: child.runId,
+        notificationId: notification.id,
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon parent completion startup sweep is delivered-once and restart safe", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const parent = await initRun(dir);
+  const child = await initRun(dir, "daemon-agent", { parentRunId: parent.runId });
+  completeSyntheticSession(child.workspaceDir, { transcript: "already queued child result" });
+  const notification = addPendingParentCompletionNotification(child.workspaceDir, {
+    id: "pcn-restart-safe",
+    parentRunId: parent.runId,
+  });
+  patchManifest(parent.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.queuedResumeMessages.push({
+      id: "qmsg-existing-child-delivery",
+      text: "Existing delivery from before daemon crash.",
+      createdAt: "2026-04-21T12:07:00.000Z",
+      source: {
+        kind: "parent_completion_notification",
+        childRunId: child.runId,
+        notificationId: notification.id,
+      },
+    });
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const delivered = await waitForValue(() => {
+        const record = readManifest(child.workspaceDir).parentCompletionNotifications[0];
+        return record.status === "delivered_queued" ? record : null;
+      }, "restart-safe notification delivered");
+      assert.equal(delivered.deliveryReason, "parent_active_queued");
+      assert.equal(readManifest(parent.workspaceDir).queuedResumeMessages.length, 1);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon parent completion skips missing, not-resumable, stale, and non-terminal child sessions", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const notResumableParent = await initRun(dir);
+  const missingParentChild = await initRun(dir);
+  const notResumableChild = await initRun(dir);
+  const staleChild = await initRun(dir);
+  const nonTerminalChild = await initRun(dir);
+
+  completeSyntheticSession(missingParentChild.workspaceDir);
+  addPendingParentCompletionNotification(missingParentChild.workspaceDir, {
+    id: "pcn-missing-parent",
+    parentRunId: "missing-parent-run",
+  });
+
+  completeSyntheticSession(notResumableChild.workspaceDir);
+  addPendingParentCompletionNotification(notResumableChild.workspaceDir, {
+    id: "pcn-not-resumable",
+    parentRunId: notResumableParent.runId,
+  });
+
+  completeSyntheticSession(staleChild.workspaceDir, { sessionIndex: 0, attemptNumber: 1 });
+  completeSyntheticSession(staleChild.workspaceDir, { sessionIndex: 1, attemptNumber: 2 });
+  addPendingParentCompletionNotification(staleChild.workspaceDir, {
+    id: "pcn-stale-session",
+    parentRunId: notResumableParent.runId,
+    sessionIndex: 0,
+  });
+
+  setSyntheticSession(nonTerminalChild.workspaceDir, {
+    status: "success",
+    endedAt: "2026-04-21T12:05:00.000Z",
+    sessionStatus: "running",
+    sessionEndedAt: null,
+  });
+  addPendingParentCompletionNotification(nonTerminalChild.workspaceDir, {
+    id: "pcn-child-not-terminal",
+    parentRunId: notResumableParent.runId,
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      await waitForValue(() => {
+        const missing = readManifest(missingParentChild.workspaceDir)
+          .parentCompletionNotifications[0];
+        const notResumable = readManifest(notResumableChild.workspaceDir)
+          .parentCompletionNotifications[0];
+        const stale = readManifest(staleChild.workspaceDir).parentCompletionNotifications[0];
+        return missing.status === "skipped" &&
+          notResumable.status === "skipped" &&
+          stale.status === "skipped"
+          ? true
+          : null;
+      }, "skipped parent completion notifications");
+
+      assert.equal(
+        readManifest(missingParentChild.workspaceDir).parentCompletionNotifications[0]
+          .deliveryReason,
+        "parent_not_found",
+      );
+      assert.equal(
+        readManifest(notResumableChild.workspaceDir).parentCompletionNotifications[0]
+          .deliveryReason,
+        "parent_not_resumable",
+      );
+      assert.equal(
+        readManifest(staleChild.workspaceDir).parentCompletionNotifications[0].deliveryReason,
+        "notification_session_not_current",
+      );
+      assert.equal(
+        readManifest(nonTerminalChild.workspaceDir).parentCompletionNotifications[0].status,
+        "skipped",
+      );
+      assert.equal(
+        readManifest(nonTerminalChild.workspaceDir).parentCompletionNotifications[0].deliveryReason,
+        "child_session_not_terminal",
+      );
+
+      const audit = await httpJson(httpBaseUrl, `/api/runs/${nonTerminalChild.runId}/audit`);
+      assert.equal(audit.status, 200);
+      assert.ok(
+        audit.body.history.events.some(
+          (event) =>
+            event.event.type === "run.parent_completion_notification_skipped" &&
+            event.event.fields.deliveryReason === "child_session_not_terminal",
+        ),
+      );
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon parent completion marks unexpected delivery exceptions failed", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const parent = await initRun(dir);
+  const child = await initRun(dir, "daemon-agent", { parentRunId: parent.runId });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let releaseParent;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async startRun({ runId, emitEvent }) {
+        if (runId === parent.runId) {
+          setSyntheticSession(parent.workspaceDir, { status: "running" });
+          emitRunStarted(emitEvent, parent.runId, dir);
+          await new Promise((resolve) => {
+            releaseParent = resolve;
+          });
+          return { runId: parent.runId };
+        }
+        assert.equal(runId, child.runId);
+        setSyntheticSession(child.workspaceDir, { status: "running" });
+        emitRunStarted(emitEvent, child.runId, dir);
+        patchManifest(parent.workspaceDir, (manifest) => {
+          manifest.status = "success";
+          manifest.endedAt = "2026-04-21T12:04:00.000Z";
+          manifest.exitCode = 0;
+        });
+        completeSyntheticSession(child.workspaceDir, { transcript: "failure-path child result" });
+        emitRunFinished(emitEvent, child.runId);
+        return { runId: child.runId };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.start", {
+        runId: parent.runId,
+        cliVars: {},
+        overrides: {},
+      });
+      await client.call("runs.start", {
+        runId: child.runId,
+        parentRunId: parent.runId,
+        parentCompletionNotification: {
+          source: "detached_invocation",
+          parentRunId: parent.runId,
+        },
+        cliVars: {},
+        overrides: {},
+      });
+      const failed = await waitForValue(() => {
+        const record = readManifest(child.workspaceDir).parentCompletionNotifications[0];
+        return record?.status === "failed" ? record : null;
+      }, "failed parent completion notification");
+      assert.equal(failed.deliveryReason, "delivery_exception");
+      assert.match(failed.failureReason, /queue is only available while the run is live/);
+      const audit = await httpJson(httpBaseUrl, `/api/runs/${child.runId}/audit`);
+      assert.equal(audit.status, 200);
+      assert.ok(
+        audit.body.history.events.some(
+          (event) =>
+            event.event.type === "run.parent_completion_notification_failed" &&
+            event.event.fields.deliveryReason === "delivery_exception",
+        ),
+      );
+    } finally {
+      releaseParent?.();
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("attached and web starts preserve parent lineage without completion notification intent", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const parent = await initRun(dir);
+  const attachedChild = await initRun(dir, "daemon-agent", { parentRunId: parent.runId });
+  const webChild = await initRun(dir, "daemon-agent", { parentRunId: parent.runId });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async startRun({ runId, emitEvent }) {
+        assert.ok(runId === attachedChild.runId || runId === webChild.runId);
+        const workspaceDir =
+          runId === attachedChild.runId ? attachedChild.workspaceDir : webChild.workspaceDir;
+        setSyntheticSession(workspaceDir, { status: "running" });
+        emitRunStarted(emitEvent, runId, dir);
+        completeSyntheticSession(workspaceDir);
+        emitRunFinished(emitEvent, runId);
+        return { runId };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.start", {
+        runId: attachedChild.runId,
+        parentRunId: parent.runId,
+        cliVars: {},
+        overrides: {},
+      });
+      const webStarted = await httpJson(httpBaseUrl, "/api/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          runId: webChild.runId,
+          parentRunId: parent.runId,
+          webVars: {},
+          overrides: {},
+        }),
+      });
+      assert.equal(webStarted.status, 200);
+      await waitForValue(() => {
+        const attached = readManifest(attachedChild.workspaceDir);
+        const web = readManifest(webChild.workspaceDir);
+        return attached.status === "success" && web.status === "success" ? true : null;
+      }, "attached and web children complete");
+      assert.deepEqual(readManifest(attachedChild.workspaceDir).parentCompletionNotifications, []);
+      assert.deepEqual(readManifest(webChild.workspaceDir).parentCompletionNotifications, []);
+      assert.deepEqual(readManifest(parent.workspaceDir).queuedResumeMessages, []);
+    } finally {
       await client.close();
       await server.close();
     }
@@ -4886,6 +5450,7 @@ test("daemon scheduler resumes recurring reuse runs with a synthetic message aft
         maxAttemptsPerSession: 2,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "thread-reuse",
+        resumeSource: null,
         provenance: { kind: "task_runner" },
       },
     ];
@@ -9214,7 +9779,7 @@ test("daemon-target CLI does not forward local AGENT_RUNNER_CODEX_WS_URL on star
   }
 });
 
-test("daemon-target CLI forwards --parent-run as structured start parentRunId", async () => {
+test("daemon-target CLI forwards --parent-run as structured start parentRunId and notification intent", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -9247,9 +9812,162 @@ test("daemon-target CLI forwards --parent-run as structured start parentRunId", 
       "daemon-agent",
       "--parent-run",
       "parent-123",
+      "--no-inherit-run-group",
     ]);
     assert.equal(result.code, 0);
     assert.equal(requests[0].params.parentRunId, "parent-123");
+    assert.equal(requests[0].params.noInheritRunGroup, true);
+    assert.deepEqual(requests[0].params.parentCompletionNotification, {
+      source: "detached_invocation",
+      parentRunId: "parent-123",
+    });
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI does not send parent notification intent for attached runs", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  const runId = "attached-start-run";
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      if (request.method === "runs.start") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { runId },
+          }),
+        );
+        return;
+      }
+      if (request.method === "events.subscribe") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { subscriptionId: "sub-1" },
+          }),
+        );
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            method: "run.timeline",
+            params: {
+              subscriptionId: "sub-1",
+              runId,
+              cursor: 1,
+              event: {
+                type: "run_finished",
+                summary: {
+                  runId,
+                  status: "success",
+                  sessionAttemptCount: 1,
+                  totalAttemptCount: 1,
+                  maxAttemptsPerSession: 1,
+                  totalSessionCount: 1,
+                  tasksCompleted: 1,
+                  tasksTotal: 1,
+                  tasks: [],
+                },
+              },
+            },
+          }),
+        );
+        return;
+      }
+      if (request.method === "runs.get") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { run: { runId } },
+          }),
+        );
+        return;
+      }
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {},
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync([
+      "run",
+      "--connect",
+      listenUrl,
+      "--agent",
+      "daemon-agent",
+      "--parent-run",
+      "parent-123",
+    ]);
+    assert.equal(result.code, 0);
+    const startRequest = requests.find((request) => request.method === "runs.start");
+    assert.equal(startRequest.params.parentRunId, "parent-123");
+    assert.equal(startRequest.params.parentCompletionNotification, undefined);
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI honors detached parent notification opt-out", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: "detached-start-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync([
+      "run",
+      "--connect",
+      listenUrl,
+      "--detach",
+      "--agent",
+      "daemon-agent",
+      "--parent-run",
+      "parent-123",
+      "--no-notify-parent-on-complete",
+    ]);
+    assert.equal(result.code, 0);
+    assert.equal(requests[0].params.parentRunId, "parent-123");
+    assert.equal(requests[0].params.parentCompletionNotification, undefined);
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();
@@ -9377,7 +10095,7 @@ test("daemon-target CLI does not forward local Codex transport env on resume req
   }
 });
 
-test("daemon-target CLI does not forward AGENT_RUNNER_PARENT_RUN_ID on resume requests", async () => {
+test("daemon-target CLI forwards parent notification intent but not lineage on resume requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -9420,6 +10138,10 @@ test("daemon-target CLI does not forward AGENT_RUNNER_PARENT_RUN_ID on resume re
     );
     assert.equal(result.code, 0);
     assert.equal(requests[0].params.parentRunId, undefined);
+    assert.deepEqual(requests[0].params.parentCompletionNotification, {
+      source: "detached_invocation",
+      parentRunId: "parent-123",
+    });
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();
@@ -9690,6 +10412,39 @@ test("daemon-target CLI rejects --detach on grouped run subcommands", () => {
     /run reset only supports <id-or-path>, --connect, and --output-format/,
   );
   assert.match(failure.stderr, /--detach/);
+});
+
+test("daemon-target CLI rejects --no-notify-parent-on-complete outside plain detached run", () => {
+  const expected =
+    "agent-runner: --no-notify-parent-on-complete is only valid with `run --detach`\n";
+  for (const args of [
+    ["init", "--no-notify-parent-on-complete"],
+    ["run", "status", "abc123", "--no-notify-parent-on-complete"],
+    ["run", "--agent", "daemon-agent", "--no-notify-parent-on-complete"],
+    ["run", "--detach", "--no-notify-parent-on-complete"],
+  ]) {
+    const failure = runCliExpectFail(args);
+    assert.equal(failure.status, 3);
+    assert.equal(failure.stdout, "");
+    assert.equal(failure.stderr, expected);
+  }
+});
+
+test("daemon-target CLI rejects explicit group with no-inherit run group", () => {
+  const failure = runCliExpectFail([
+    "run",
+    "--agent",
+    "daemon-agent",
+    "--group-id",
+    "explicit-group",
+    "--no-inherit-run-group",
+  ]);
+  assert.equal(failure.status, 3);
+  assert.equal(failure.stdout, "");
+  assert.equal(
+    failure.stderr,
+    "agent-runner: --group-id cannot be combined with --no-inherit-run-group\n",
+  );
 });
 
 test("daemon-target CLI surfaces Ctrl+C cancel failures instead of exiting as a clean interrupt", async () => {

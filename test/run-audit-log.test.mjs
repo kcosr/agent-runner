@@ -14,7 +14,11 @@ import { test } from "node:test";
 import { updateTask as updateTaskViaApp } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
+  createParentCompletionNotification,
   drainQueuedResumeMessages,
+  markParentCompletionNotificationDelivered,
+  markParentCompletionNotificationFailed,
+  markParentCompletionNotificationSkipped,
   queueResumeMessage,
   readyRun,
   removeQueuedResumeMessage,
@@ -883,6 +887,98 @@ test("queued resume message mutations append compact audit records without messa
   assert.deepEqual(queueRecords[3].messageIds, [queueRecords[1].messageId]);
   assert.equal(queueRecords[3].messageCount, 1);
   assert.equal(readAuditRaw(init.workspaceDir).includes("secret queued text"), false);
+});
+
+test("parent completion notification mutations append compact audit records", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const delivered = createParentCompletionNotification({
+      target: init.runId,
+      parentRunId: "parent-delivered",
+      sessionIndex: 0,
+      source: "detached_invocation",
+    });
+    markParentCompletionNotificationDelivered({
+      target: init.runId,
+      notificationId: delivered.notification.id,
+      status: "delivered_queued",
+      terminalStatus: "success",
+      deliveryReason: "parent_active_queued",
+    });
+
+    const skipped = createParentCompletionNotification({
+      target: init.runId,
+      parentRunId: "parent-skipped",
+      sessionIndex: 1,
+      source: "detached_invocation",
+    });
+    markParentCompletionNotificationSkipped({
+      target: init.runId,
+      notificationId: skipped.notification.id,
+      terminalStatus: "blocked",
+      deliveryReason: "parent_not_resumable",
+    });
+
+    const failed = createParentCompletionNotification({
+      target: init.runId,
+      parentRunId: "parent-failed",
+      sessionIndex: 2,
+      source: "detached_invocation",
+    });
+    markParentCompletionNotificationFailed({
+      target: init.runId,
+      notificationId: failed.notification.id,
+      terminalStatus: "error",
+      deliveryReason: "delivery_exception",
+      failureReason: "delivery rpc failed",
+    });
+  });
+
+  const records = readAuditRecords(init.workspaceDir).filter((record) =>
+    record.eventType.startsWith("run.parent_completion_notification_"),
+  );
+  assert.deepEqual(
+    records.map((record) => record.eventType),
+    [
+      "run.parent_completion_notification_created",
+      "run.parent_completion_notification_delivered",
+      "run.parent_completion_notification_created",
+      "run.parent_completion_notification_skipped",
+      "run.parent_completion_notification_created",
+      "run.parent_completion_notification_failed",
+    ],
+  );
+  assert.match(records[0].notificationId, /^pcn/);
+  assert.equal(records[0].parentRunId, "parent-delivered");
+  assert.equal(records[0].source, "detached_invocation");
+  assert.equal(records[0].sessionIndex, 0);
+  assert.equal(records[1].status, "delivered_queued");
+  assert.equal(records[1].terminalStatus, "success");
+  assert.equal(records[1].deliveryReason, "parent_active_queued");
+  assert.equal(records[3].terminalStatus, "blocked");
+  assert.equal(records[3].deliveryReason, "parent_not_resumable");
+  assert.equal(records[5].terminalStatus, "error");
+  assert.equal(records[5].deliveryReason, "delivery_exception");
+  assert.equal(records[5].failureReason, "delivery rpc failed");
+
+  const raw = readAuditRaw(init.workspaceDir);
+  assert.equal(raw.includes("transcript"), false);
+  assert.equal(raw.includes("delivered prompt body"), false);
+
+  const text = runCli(["run", "audit", init.runId], { cwd: dir });
+  assert.match(text, /run\.parent_completion_notification_delivered/);
+  assert.match(text, /run\.parent_completion_notification_skipped/);
+  assert.match(text, /run\.parent_completion_notification_failed/);
 });
 
 test("task-transition hooks skip unmatched transitions and append compact run.hook_recorded records with task ids once matched", async () => {

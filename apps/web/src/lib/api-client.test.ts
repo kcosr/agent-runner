@@ -863,6 +863,7 @@ describe("api client", () => {
           id: "qmsg1",
           text: "Check the worker logs",
           createdAt: "2026-04-30T15:20:00.000Z",
+          source: null,
         },
       ],
     });

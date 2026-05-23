@@ -32,6 +32,7 @@ import {
   clearRunDependencies,
   clearRunGroup,
   clearRunSchedule,
+  createParentCompletionNotification,
   deleteRun,
   deleteTask,
   downloadAttachment,
@@ -41,6 +42,9 @@ import {
   listDefinitions,
   listRuns,
   listTasks,
+  markParentCompletionNotificationDelivered,
+  markParentCompletionNotificationFailed,
+  markParentCompletionNotificationSkipped,
   queueResumeMessage,
   readStatus,
   readyRun,
@@ -304,6 +308,7 @@ test("command services: passive backend session mutations update only metadata a
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "thread-original",
         provenance: { kind: "task_runner" },
+        resumeSource: null,
       },
       {
         sessionIndex: 1,
@@ -328,6 +333,7 @@ test("command services: passive backend session mutations update only metadata a
           mode: "sync",
           source: { kind: "custom", label: "test", changeToken: { version: 1 } },
         },
+        resumeSource: null,
       },
     ];
     manifest.attemptRecords = [
@@ -654,6 +660,7 @@ test("command services: getRunTimelineHistory reads schema v3 attempt logs", asy
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
         provenance: { kind: "task_runner" },
+        resumeSource: null,
       },
     ];
     manifest.totalSessionCount = 1;
@@ -767,6 +774,7 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
         provenance: { kind: "task_runner" },
+        resumeSource: null,
       },
     ];
     manifest.totalSessionCount = 1;
@@ -1043,6 +1051,7 @@ test("command services: readStatus and timeline history resolve bare run ids acr
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
         provenance: { kind: "task_runner" },
+        resumeSource: null,
       },
     ];
     manifest.totalSessionCount = 1;
@@ -1984,6 +1993,7 @@ test("command services: queued resume messages are live-only, ordered, removable
 
     assert.match(first.queuedResumeMessage.id, /^qmsg/);
     assert.equal(first.queuedResumeMessage.text, "first follow-up");
+    assert.equal(first.queuedResumeMessage.source, null);
     assert.equal(typeof first.queuedResumeMessage.createdAt, "string");
     assert.equal(first.run.isLive, true);
     assert.deepEqual(
@@ -2051,6 +2061,116 @@ test("command services: queued resume messages are live-only, ordered, removable
     assert.equal(removedAfterFinish.removedMessageId, newer.queuedResumeMessage.id);
     assert.equal(removedAfterFinish.run.isLive, false);
     assert.deepEqual(removedAfterFinish.run.queuedResumeMessages, []);
+  });
+});
+
+test("command services: parent completion notifications create and mark under lock", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const created = createParentCompletionNotification({
+      target: target.runId,
+      parentRunId: "parent-123",
+      sessionIndex: 0,
+      source: "detached_invocation",
+    });
+
+    assert.equal(created.changed, true);
+    assert.match(created.notification.id, /^pcn/);
+    assert.equal(created.notification.status, "pending");
+    assert.equal(created.notification.parentRunId, "parent-123");
+    assert.equal(created.notification.sessionIndex, 0);
+    assert.equal(created.notification.deliveredAt, null);
+    assert.deepEqual(readManifest(target.workspaceDir).parentCompletionNotifications, [
+      created.notification,
+    ]);
+
+    const delivered = markParentCompletionNotificationDelivered({
+      target: target.runId,
+      notificationId: created.notification.id,
+      status: "delivered_queued",
+      terminalStatus: "success",
+      deliveryReason: "parent_active_queued",
+    });
+    assert.equal(delivered.changed, true);
+    assert.equal(delivered.notification.status, "delivered_queued");
+    assert.equal(delivered.notification.terminalStatus, "success");
+    assert.equal(delivered.notification.deliveryReason, "parent_active_queued");
+    assert.equal(typeof delivered.notification.deliveredAt, "string");
+
+    const confirmed = markParentCompletionNotificationDelivered({
+      target: target.runId,
+      notificationId: created.notification.id,
+      status: "delivered_queued",
+      terminalStatus: "success",
+      deliveryReason: "parent_active_queued",
+    });
+    assert.equal(confirmed.changed, false);
+    assert.deepEqual(confirmed.notification, delivered.notification);
+
+    assert.throws(
+      () =>
+        markParentCompletionNotificationSkipped({
+          target: target.runId,
+          notificationId: created.notification.id,
+          terminalStatus: "success",
+          deliveryReason: "parent_not_resumable",
+        }),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(
+          `parent completion notification "${created.notification.id}" in run ${target.runId} is delivered_queued, not pending`,
+        ).test(err.message),
+    );
+
+    const skippedSource = createParentCompletionNotification({
+      target: target.runId,
+      parentRunId: "parent-456",
+      sessionIndex: 1,
+      source: "detached_invocation",
+    });
+    const skipped = markParentCompletionNotificationSkipped({
+      target: target.runId,
+      notificationId: skippedSource.notification.id,
+      terminalStatus: "blocked",
+      deliveryReason: "parent_not_active_in_daemon",
+    });
+    assert.equal(skipped.notification.status, "skipped");
+    assert.equal(skipped.notification.deliveryReason, "parent_not_active_in_daemon");
+
+    const failedSource = createParentCompletionNotification({
+      target: target.runId,
+      parentRunId: "parent-789",
+      sessionIndex: 2,
+      source: "detached_invocation",
+    });
+    const failed = markParentCompletionNotificationFailed({
+      target: target.runId,
+      notificationId: failedSource.notification.id,
+      terminalStatus: "error",
+      deliveryReason: "delivery_exception",
+      failureReason: "resume rpc failed",
+    });
+    assert.equal(failed.notification.status, "failed");
+    assert.equal(failed.notification.failureReason, "resume rpc failed");
+
+    assert.throws(
+      () =>
+        markParentCompletionNotificationDelivered({
+          target: target.runId,
+          notificationId: "missing-pcn",
+          status: "delivered_resumed",
+          terminalStatus: "success",
+          deliveryReason: "parent_resumed",
+        }),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(
+          `parent completion notification "missing-pcn" not found in run ${target.runId}`,
+        ).test(err.message),
+    );
   });
 });
 

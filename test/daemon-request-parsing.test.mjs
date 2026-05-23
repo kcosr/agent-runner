@@ -175,12 +175,14 @@ test("parseCliStartRunParams accepts structured parentRunId", () => {
   const parsed = parseCliStartRunParams(
     {
       parentRunId: "parent-123",
+      noInheritRunGroup: true,
       cliVars: {},
       overrides: {},
     },
     "runs.start params",
   );
   assert.equal(parsed.parentRunId, "parent-123");
+  assert.equal(parsed.noInheritRunGroup, true);
 });
 
 test("parseCliStartRunParams rejects path-like parentRunId", () => {
@@ -214,12 +216,62 @@ test("parseWebStartRunParams accepts structured parentRunId", () => {
   assert.equal(parsed.parentRunId, "parent-123");
 });
 
+test("parseCliStartRunParams accepts parent completion notification intent", () => {
+  const parsed = parseCliStartRunParams(
+    {
+      cliVars: {},
+      overrides: {},
+      parentCompletionNotification: {
+        source: "detached_invocation",
+        parentRunId: "parent-123",
+      },
+    },
+    "runs.start params",
+  );
+  assert.deepEqual(parsed.parentCompletionNotification, {
+    source: "detached_invocation",
+    parentRunId: "parent-123",
+  });
+});
+
+test("parseWebStartRunParams rejects parent completion notification intent", () => {
+  assert.throws(
+    () =>
+      parseWebStartRunParams(
+        {
+          webVars: {},
+          overrides: {},
+          parentCompletionNotification: {
+            source: "detached_invocation",
+            parentRunId: "parent-123",
+          },
+        },
+        "request body",
+      ),
+    /request body\.parentCompletionNotification is not supported/,
+  );
+});
+
+test("parseWebStartRunParams rejects CLI-only noInheritRunGroup", () => {
+  assert.throws(
+    () =>
+      parseWebStartRunParams(
+        {
+          webVars: {},
+          overrides: {},
+          noInheritRunGroup: true,
+        },
+        "request body",
+      ),
+    /request body\.noInheritRunGroup is not supported/,
+  );
+});
+
 test("parseCliStartRunParams requires cliVars", () => {
   assert.throws(
     () =>
       parseCliStartRunParams(
         {
-          webVars: {},
           overrides: {},
         },
         "runs.start params",
@@ -233,7 +285,6 @@ test("parseWebStartRunParams requires webVars", () => {
     () =>
       parseWebStartRunParams(
         {
-          cliVars: {},
           overrides: {},
         },
         "request body",
@@ -242,17 +293,38 @@ test("parseWebStartRunParams requires webVars", () => {
   );
 });
 
-test("parseResumeRunParams accepts optional parentRunId", () => {
+test("parseResumeRunParams accepts parent completion notification intent", () => {
   const parsed = parseResumeRunParams(
     {
       target: "run-123",
-      parentRunId: "parent-123",
       overrides: {},
+      parentCompletionNotification: {
+        source: "detached_invocation",
+        parentRunId: "parent-123",
+      },
     },
     "runs.resume params",
   );
   assert.equal(parsed.target, "run-123");
-  assert.equal(parsed.parentRunId, "parent-123");
+  assert.deepEqual(parsed.parentCompletionNotification, {
+    source: "detached_invocation",
+    parentRunId: "parent-123",
+  });
+});
+
+test("parseResumeRunParams rejects parentRunId", () => {
+  assert.throws(
+    () =>
+      parseResumeRunParams(
+        {
+          target: "run-123",
+          parentRunId: "parent-123",
+          overrides: {},
+        },
+        "runs.resume params",
+      ),
+    /runs\.resume params\.parentRunId is not supported/,
+  );
 });
 
 test("parseResumeRunParams rejects runGroupId", () => {

@@ -41,7 +41,7 @@ import {
   resolveFreshExecutionEnvironment,
   resolveFreshExecutionEnvironmentDefinition,
 } from "./execution-environments.js";
-import { validateRunGroupId } from "./groups.js";
+import { RunGroupValidationError, validateRunGroupId } from "./groups.js";
 import {
   interpolateResolvedLauncher,
   launcherAppliesToBackend,
@@ -49,6 +49,7 @@ import {
 } from "./launchers.js";
 import {
   type AttemptRecord,
+  type ParentCompletionResumeSource,
   type ResolvedResumeTarget,
   ResumeError,
   type RunExecution,
@@ -60,6 +61,7 @@ import {
   applyRunResetSeed,
   attemptStdoutLogRelativePath,
   buildRunResetSeed,
+  cloneParentCompletionResumeSource,
   cloneRunDependencyRefs,
   cloneRunExecutionEnvironment,
   cloneRuntimeVarSources,
@@ -175,10 +177,12 @@ export interface RunOptions {
   webVars: Record<string, string>;
   parentRunId?: string | null;
   runGroupId?: string | null;
+  noInheritRunGroup?: boolean;
   backend: Backend;
   callerCwd?: string;
   overrides?: RunOverrides;
   resume?: ResolvedResumeTarget;
+  resumeSource?: ParentCompletionResumeSource | null;
   initialize?: boolean;
   /**
    * Adopt an existing backend session id (claude session UUID, codex
@@ -468,7 +472,13 @@ function refreshMutableManifestMetadata(manifest: RunManifest): void {
   manifest.note = latest.note;
   manifest.pinned = latest.pinned;
   manifest.schedule = latest.schedule;
-  manifest.queuedResumeMessages = latest.queuedResumeMessages.map((message) => ({ ...message }));
+  manifest.queuedResumeMessages = latest.queuedResumeMessages.map((message) => ({
+    ...message,
+    source: cloneParentCompletionResumeSource(message.source),
+  }));
+  manifest.parentCompletionNotifications = latest.parentCompletionNotifications.map(
+    (notification) => ({ ...notification }),
+  );
   manifest.resetSeed.name = latest.resetSeed.name;
   manifest.resetSeed.note = latest.resetSeed.note;
   manifest.resetSeed.pinned = latest.resetSeed.pinned;
@@ -662,7 +672,7 @@ function buildRecurringCloneManifest(params: {
     runId,
   );
   return {
-    schemaVersion: 24,
+    schemaVersion: 25,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -702,6 +712,7 @@ function buildRecurringCloneManifest(params: {
     parentRunId: seed.parentRunId,
     schedule: cloneRunSchedule(schedule),
     queuedResumeMessages: [],
+    parentCompletionNotifications: [],
     exitCode: null,
     totalAttemptCount: 0,
     maxAttemptsPerSession: seed.maxAttemptsPerSession,
@@ -1520,6 +1531,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     if (opts.runGroupId !== undefined && opts.runGroupId !== null) {
       throw new ResumeError("--group-id cannot be combined with --resume-run");
     }
+    if (opts.noInheritRunGroup) {
+      throw new ResumeError("--no-inherit-run-group cannot be combined with --resume-run");
+    }
     if (overrides?.cwd !== undefined) {
       throw new ResumeError(
         "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. Create a fresh run if you need a different cwd.",
@@ -1595,12 +1609,22 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const parentRunId = reusesFrozenSetup
     ? (resume?.manifest.parentRunId ?? null)
     : (opts.parentRunId ?? readParentRunIdFromEnv() ?? null);
+  if (
+    !reusesFrozenSetup &&
+    opts.runGroupId !== undefined &&
+    opts.runGroupId !== null &&
+    opts.noInheritRunGroup
+  ) {
+    throw new RunGroupValidationError("--group-id cannot be combined with --no-inherit-run-group");
+  }
   const explicitRunGroupId =
     !reusesFrozenSetup && opts.runGroupId !== undefined && opts.runGroupId !== null
       ? validateRunGroupId(opts.runGroupId)
       : null;
   const envRunGroupId =
-    !reusesFrozenSetup && explicitRunGroupId === null ? readRunGroupIdFromEnv() : null;
+    !reusesFrozenSetup && explicitRunGroupId === null && !opts.noInheritRunGroup
+      ? readRunGroupIdFromEnv()
+      : null;
   let effectiveBackendName = backend.id;
   let currentBackend = backend;
   // When --backend overrides the agent's backend, the agent's `model`
@@ -1648,8 +1672,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     reusingWorkspace && resume
       ? resume.manifest.runGroupId
       : (explicitRunGroupId ??
-        (envRunGroupId === null ? null : validateRunGroupId(envRunGroupId)) ??
-        lineageChain[0]?.manifest.runGroupId ??
+        (opts.noInheritRunGroup
+          ? null
+          : ((envRunGroupId === null ? null : validateRunGroupId(envRunGroupId)) ??
+            lineageChain[0]?.manifest.runGroupId)) ??
         runId);
   const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
   let cwd = initialCwd;
@@ -1820,7 +1846,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 24,
+      schemaVersion: 25,
       runId,
       repo,
       agent: {
@@ -1860,6 +1886,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       parentRunId,
       schedule: initialSchedule,
       queuedResumeMessages: [],
+      parentCompletionNotifications: [],
       exitCode: null,
       totalAttemptCount: 0,
       maxAttemptsPerSession,
@@ -2145,7 +2172,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 24,
+      schemaVersion: 25,
       runId,
       repo,
       agent: {
@@ -2189,6 +2216,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       parentRunId,
       schedule: initialSchedule,
       queuedResumeMessages: [],
+      parentCompletionNotifications: [],
       exitCode: null,
       totalAttemptCount: 0,
       maxAttemptsPerSession,
@@ -2646,6 +2674,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           maxAttemptsPerSession,
           backendSessionIdAtStart: latest.backendSessionId,
           backendSessionIdAtEnd: null,
+          resumeSource: cloneParentCompletionResumeSource(opts.resumeSource ?? null),
           provenance: { kind: "task_runner" },
         };
         manifest.sessions.push(sessionRecord);
@@ -2688,6 +2717,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       maxAttemptsPerSession,
       backendSessionIdAtStart: opts.bootstrapBackendSessionId ?? null,
       backendSessionIdAtEnd: null,
+      resumeSource: cloneParentCompletionResumeSource(opts.resumeSource ?? null),
       provenance: { kind: "task_runner" },
     };
     manifest.sessions.push(sessionRecord);

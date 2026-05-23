@@ -1169,6 +1169,7 @@ function installFetchMock(
         id: `qmsg${detail.queuedResumeMessages.length + 1}`,
         text: body.message ?? "",
         createdAt: "2026-04-30T15:20:00.000Z",
+        source: null,
       };
       detail.queuedResumeMessages = [...detail.queuedResumeMessages, queuedResumeMessage];
       syncRunSummary(runId);
@@ -6180,6 +6181,7 @@ describe("web app", () => {
       id: "qmsg1",
       text: "Already queued",
       createdAt: "2026-04-30T15:20:00.000Z",
+      source: null,
     };
     installFetchMock({
       runs: [makeRun({ capabilities: { canResume: false }, queuedResumeMessageCount: 1 })],
@@ -6218,6 +6220,7 @@ describe("web app", () => {
       id: "qmsg1",
       text: "Already queued",
       createdAt: "2026-04-30T15:20:00.000Z",
+      source: null,
     };
     const baseSession = makeDetail().sessions[0];
     if (!baseSession) {

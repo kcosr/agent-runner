@@ -170,21 +170,22 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 24, captures repo, initializes updatedAt, and starts with no queued resume messages", async () => {
+test("manifest schemaVersion is 25, captures repo, initializes updatedAt, and starts with no queued resume messages", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 24);
+  assert.equal(outcome.manifest.schemaVersion, 25);
   assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.updatedAt, outcome.manifest.startedAt);
   assert.equal(outcome.manifest.archivedAt, null);
   assert.equal(outcome.manifest.schedule, null);
   assert.deepEqual(outcome.manifest.queuedResumeMessages, []);
+  assert.deepEqual(outcome.manifest.parentCompletionNotifications, []);
   assert.equal(outcome.manifest.backendSessionSync, null);
 });
 
-test("manifest reset clears queued resume messages while resume preserves them for daemon drain", async () => {
+test("manifest reset clears queued resume messages and parent completion notifications while resume preserves them for daemon drain", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -195,11 +196,27 @@ test("manifest reset clears queued resume messages while resume preserves them f
       id: "qmsg-reset",
       text: "Follow up after this attempt.",
       createdAt: "2026-04-30T15:20:00.000Z",
+      source: null,
+    },
+  ];
+  const notifications = [
+    {
+      id: "pcn-reset",
+      parentRunId: "parent-reset",
+      sessionIndex: 0,
+      source: "detached_invocation",
+      status: "pending",
+      createdAt: "2026-04-30T15:22:00.000Z",
+      deliveredAt: null,
+      terminalStatus: null,
+      deliveryReason: null,
+      failureReason: null,
     },
   ];
   writeManifest(initial.workspaceDir, {
     ...readManifest(initial.workspaceDir),
     queuedResumeMessages: queued,
+    parentCompletionNotifications: notifications,
   });
 
   const resumed = await freshRun(dir, {
@@ -207,15 +224,20 @@ test("manifest reset clears queued resume messages while resume preserves them f
     overrides: { message: "continue" },
   });
   assert.deepEqual(resumed.manifest.queuedResumeMessages, queued);
+  assert.deepEqual(resumed.manifest.parentCompletionNotifications, notifications);
   assert.deepEqual(readManifest(initial.workspaceDir).queuedResumeMessages, queued);
+  assert.deepEqual(readManifest(initial.workspaceDir).parentCompletionNotifications, notifications);
 
   writeManifest(initial.workspaceDir, {
     ...readManifest(initial.workspaceDir),
     queuedResumeMessages: queued,
+    parentCompletionNotifications: notifications,
   });
   const reset = resetWorkspaceRun(initial.workspaceDir);
   assert.deepEqual(reset.queuedResumeMessages, []);
+  assert.deepEqual(reset.parentCompletionNotifications, []);
   assert.deepEqual(readManifest(initial.workspaceDir).queuedResumeMessages, []);
+  assert.deepEqual(readManifest(initial.workspaceDir).parentCompletionNotifications, []);
 });
 
 test("refreshManifestTaskState preserves live queued resume message mutations", async () => {
@@ -229,6 +251,7 @@ test("refreshManifestTaskState preserves live queued resume message mutations", 
       id: "qmsg-live",
       text: "Please include this.",
       createdAt: "2026-04-30T15:21:00.000Z",
+      source: null,
     },
   ];
 
@@ -777,7 +800,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 24/);
+        assert.match(err.message, /requires schemaVersion 25/);
         return true;
       },
     );
@@ -828,7 +851,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 24/);
+        assert.match(err.message, /requires schemaVersion 25/);
         return true;
       },
     );
@@ -880,7 +903,7 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 24/);
+        assert.match(err.message, /requires schemaVersion 25/);
         return true;
       },
     );
@@ -932,7 +955,7 @@ test("schemaVersion mismatch: resume rejects a v10 manifest with a clear error",
       () => resolveResumeTarget("stale10", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 10/);
-        assert.match(err.message, /requires schemaVersion 24/);
+        assert.match(err.message, /requires schemaVersion 25/);
         return true;
       },
     );
@@ -953,7 +976,7 @@ test("schemaVersion mismatch: resume rejects a v12 manifest with the v17 migrati
       () => resolveResumeTarget("stale12", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 12/);
-        assert.match(err.message, /requires schemaVersion 24/);
+        assert.match(err.message, /requires schemaVersion 25/);
         return true;
       },
     );
@@ -974,7 +997,7 @@ test("schemaVersion mismatch: resume rejects a v13 manifest with the v17 migrati
       () => resolveResumeTarget("stale13", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 13/);
-        assert.match(err.message, /requires schemaVersion 24/);
+        assert.match(err.message, /requires schemaVersion 25/);
         return true;
       },
     );
@@ -995,7 +1018,7 @@ test("schemaVersion mismatch: resume rejects a v15 manifest with the v17 migrati
       () => resolveResumeTarget("stale15", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 15/);
-        assert.match(err.message, /requires schemaVersion 24/);
+        assert.match(err.message, /requires schemaVersion 25/);
         return true;
       },
     );
