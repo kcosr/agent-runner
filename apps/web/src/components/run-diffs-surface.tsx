@@ -71,6 +71,7 @@ const DEFAULT_BASE_REF = "main";
 const DEFAULT_HEAD_REF = "HEAD";
 const DEFAULT_RANGE = `${DEFAULT_BASE_REF}...${DEFAULT_HEAD_REF}`;
 const DIFF_CODE_LINE_HEIGHT = 19.2;
+const DIFF_FILE_HEADER_HEIGHT = 32;
 
 interface ParsedRangeInput {
   display: string;
@@ -1010,7 +1011,10 @@ export function RunDiffsSurface({
                   diffStyle: viewMode,
                   enableLineSelection: true,
                   hunkSeparators: "line-info-basic",
-                  itemMetrics: { lineHeight: DIFF_CODE_LINE_HEIGHT },
+                  itemMetrics: {
+                    diffHeaderHeight: DIFF_FILE_HEADER_HEIGHT,
+                    lineHeight: DIFF_CODE_LINE_HEIGHT,
+                  },
                   overflow: wordWrap ? "wrap" : "scroll",
                   stickyHeaders: true,
                   theme: { dark: "pierre-dark", light: "pierre-light" },

@@ -2357,6 +2357,7 @@ body {
 .diffs-code-view {
   --diffs-font-family: var(--mono);
   --diffs-font-size: 12px;
+  --diffs-gap-block: 4px;
   --diffs-line-height: 19.2px;
 
   flex: 1 1 0;
