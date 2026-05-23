@@ -568,7 +568,7 @@ test("executeRunCommand treats ready runs with prior sessions as resumes for mes
     );
   }));
 
-test("executeRunCommand allows empty resume preflight when incomplete tasks remain", async () =>
+test("executeRunCommand allows empty resume preflight when non-blocked runnable tasks remain", async () =>
   withRuntimeRoots("agent-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
       initialize: true,
@@ -581,6 +581,53 @@ test("executeRunCommand allows empty resume preflight when incomplete tasks rema
 
     const manifestPath = join(outcome.workspaceDir, "run.json");
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-13T00:00:00.000Z";
+    manifest.exitCode = 0;
+    manifest.brief = "Resume the remaining task.";
+    manifest.finalTasks = {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "",
+        status: "pending",
+        notes: "",
+      },
+    };
+    manifest.tasksCompleted = 0;
+    manifest.tasksTotal = 1;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: false,
+          resumeRun: outcome.runId,
+          cliVars: {},
+          overrides: {},
+        }),
+      (err) =>
+        err instanceof Error &&
+        /cannot run passive agent/.test(err.message) &&
+        !/follow-up message/.test(err.message),
+    );
+  }));
+
+test("executeRunCommand requires a message before resuming blocked runs", async () =>
+  withRuntimeRoots("agent-runner-run-command-", async () => {
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: {},
+      overrides: {
+        backend: "passive",
+        message: "Seed a blocked passive run.",
+      },
+    });
+
+    const manifestPath = join(outcome.workspaceDir, "run.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.backend = "claude";
+    manifest.resetSeed.backend = "claude";
     manifest.status = "blocked";
     manifest.endedAt = "2026-04-13T00:00:00.000Z";
     manifest.exitCode = 2;
@@ -608,8 +655,8 @@ test("executeRunCommand allows empty resume preflight when incomplete tasks rema
         }),
       (err) =>
         err instanceof Error &&
-        /cannot run passive agent/.test(err.message) &&
-        !/follow-up message/.test(err.message),
+        /blocked run/.test(err.message) &&
+        /follow-up message/.test(err.message),
     );
   }));
 

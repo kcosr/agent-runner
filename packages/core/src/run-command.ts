@@ -23,7 +23,11 @@ import {
   resolveResumeTarget,
 } from "./core/run/manifest.js";
 import { readParentRunIdFromEnv } from "./core/run/recursion-guard.js";
-import { hasRunnableTasks, missingResumeInputMessage } from "./core/run/resume-policy.js";
+import {
+  canResumeWithoutMessage,
+  missingBlockedResumeMessage,
+  missingResumeInputMessage,
+} from "./core/run/resume-policy.js";
 import type { RunAuditEnvelope } from "./core/run/run-events.js";
 import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./core/run/run-loop.js";
 
@@ -146,8 +150,17 @@ function validateResumeOverrides(
 
   const hasMessage = Boolean(opts.overrides.message && opts.overrides.message.trim().length > 0);
   const hasAddedTasks = (opts.overrides.addedTasks?.length ?? 0) > 0;
-  if (!hasMessage && !hasAddedTasks && !hasRunnableTasks(manifest.finalTasks)) {
-    return missingResumeInputMessage();
+  if (
+    !hasMessage &&
+    !canResumeWithoutMessage({
+      finalTasks: manifest.finalTasks,
+      hasAddedTasks,
+      status: manifest.status,
+    })
+  ) {
+    return manifest.status === "blocked"
+      ? missingBlockedResumeMessage()
+      : missingResumeInputMessage();
   }
   return null;
 }
