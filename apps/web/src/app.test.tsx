@@ -14913,7 +14913,7 @@ describe("web app", () => {
     });
   });
 
-  it("shows an optional-message disclosure for ready resumes and can send without a message", async () => {
+  it("starts never-run ready runs without a message", async () => {
     let resumeBody: { overrides?: { message?: string } } | undefined;
     installFetchMock(
       {
@@ -14943,7 +14943,12 @@ describe("web app", () => {
             ],
             tasksCompleted: 1,
             tasksTotal: 1,
-            totalAttemptCount: 1,
+            backendSessionId: null,
+            currentSession: null,
+            lastSession: null,
+            sessions: [],
+            totalAttemptCount: 0,
+            totalSessionCount: 0,
             capabilities: {
               canArchive: true,
               canUnarchive: false,
@@ -14975,20 +14980,104 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Ready resume"));
-    await user.click(await screen.findByRole("button", { name: "Resume" }));
-
-    const sendButton = await screen.findByRole("button", { name: "Send" });
-    expect(screen.getByRole("button", { name: "Optional message" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    expect(sendButton).toBeEnabled();
-
-    await user.click(sendButton);
+    await user.click(await screen.findByRole("button", { name: "Start" }));
 
     await waitFor(() => {
       expect(resumeBody).toEqual({ overrides: {} });
     });
+  });
+
+  it("requires a resume message for ready runs with prior sessions and no runnable tasks", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "ready-retry",
+          assignmentName: "Ready retry",
+          status: "ready",
+        }),
+      ],
+      details: {
+        "ready-retry": makeDetail({
+          runId: "ready-retry",
+          status: "ready",
+          assignment: {
+            name: "Ready retry",
+            sourcePath: "/tmp/ready.md",
+          },
+          currentSession: null,
+          lastSession: {
+            sessionIndex: 0,
+            status: "success",
+            startedAt: "2026-04-13T05:00:00.000Z",
+            endedAt: "2026-04-13T05:01:00.000Z",
+            exitCode: 0,
+            message: null,
+            firstAttemptNumber: 1,
+            lastAttemptNumber: 1,
+            attemptCount: 1,
+            maxAttemptsPerSession: 3,
+            backendSessionIdAtStart: "thread-1",
+            backendSessionIdAtEnd: "thread-1",
+            resumeSource: null,
+          },
+          sessions: [
+            {
+              sessionIndex: 0,
+              status: "success",
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:01:00.000Z",
+              exitCode: 0,
+              message: null,
+              firstAttemptNumber: 1,
+              lastAttemptNumber: 1,
+              attemptCount: 1,
+              maxAttemptsPerSession: 3,
+              backendSessionIdAtStart: "thread-1",
+              backendSessionIdAtEnd: "thread-1",
+              resumeSource: null,
+            },
+          ],
+          tasks: [
+            {
+              id: "done",
+              title: "Done",
+              body: "Completed setup",
+              status: "completed",
+              notes: "done",
+            },
+          ],
+          tasksCompleted: 1,
+          tasksTotal: 1,
+          totalAttemptCount: 1,
+          totalSessionCount: 1,
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: true,
+            taskMutation: {
+              canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
+              canEditNotes: false,
+              canSetStatus: false,
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Ready retry"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    const sendButton = await screen.findByRole("button", { name: "Send" });
+    expect(screen.queryByRole("button", { name: "Optional message" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeInTheDocument();
+    expect(sendButton).toBeDisabled();
+    expect(
+      screen.getByText("Send a follow-up message describing what the run should do next."),
+    ).toBeInTheDocument();
   });
 
   it("sends an optional resume message when the disclosure is expanded", async () => {

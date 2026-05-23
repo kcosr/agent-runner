@@ -134,6 +134,20 @@ describe("MarkdownContent", () => {
     expect(screen.getByRole("heading", { name: "Body" })).toBeInTheDocument();
   });
 
+  it("falls back to a fenced YAML code block for oversized front matter", () => {
+    const oversizedValue = "a".repeat(17_000);
+    const { container } = render(
+      <MarkdownContent
+        frontmatterMode="metadata-table"
+        text={`---\ntitle: ${oversizedValue}\n---\n# Body`}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Front matter")).not.toBeInTheDocument();
+    expect(container.querySelector("pre code")?.textContent).toContain(`title: ${oversizedValue}`);
+    expect(screen.getByRole("heading", { name: "Body" })).toBeInTheDocument();
+  });
+
   it("copies non-Mermaid fenced code blocks", async () => {
     const writeText = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     stubClipboard(writeText);

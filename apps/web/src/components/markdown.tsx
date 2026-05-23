@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -31,6 +32,7 @@ interface FrontmatterTableRow {
 
 const MERMAID_ERROR_MESSAGE = "Failed to render Mermaid diagram.";
 const MERMAID_LANGUAGE_CLASS = "language-mermaid";
+const FRONTMATTER_TABLE_PARSE_MAX_LENGTH = 16 * 1024;
 const MERMAID_CONFIG = {
   securityLevel: "strict",
   startOnLoad: false,
@@ -103,6 +105,9 @@ function formatFrontmatterScalar(value: unknown): string | null {
 }
 
 function readFrontmatterTableRows(yaml: string): FrontmatterTableRow[] | null {
+  if (yaml.length > FRONTMATTER_TABLE_PARSE_MAX_LENGTH) {
+    return null;
+  }
   try {
     const document = parseDocument(yaml, { prettyErrors: false });
     if (document.errors.length > 0) {
@@ -394,11 +399,17 @@ function MarkdownContentInner({
   className?: string;
   frontmatterMode?: FrontmatterMode;
 }) {
-  const frontmatter = frontmatterMode === "none" ? null : readLeadingFrontmatter(text);
-  const frontmatterRows =
-    frontmatterMode === "metadata-table" && frontmatter
-      ? readFrontmatterTableRows(frontmatter.yaml)
-      : null;
+  const frontmatter = useMemo(
+    () => (frontmatterMode === "none" ? null : readLeadingFrontmatter(text)),
+    [frontmatterMode, text],
+  );
+  const frontmatterRows = useMemo(
+    () =>
+      frontmatterMode === "metadata-table" && frontmatter
+        ? readFrontmatterTableRows(frontmatter.yaml)
+        : null,
+    [frontmatter, frontmatterMode],
+  );
   const bodyText = frontmatter ? frontmatter.body : text;
 
   return (
