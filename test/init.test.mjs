@@ -438,6 +438,7 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
       maxAttemptsPerSession: 2,
       backendSessionIdAtStart: null,
       backendSessionIdAtEnd: "sess-stale",
+      resumeSource: null,
       provenance: { kind: "task_runner" },
     },
   ];

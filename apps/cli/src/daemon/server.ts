@@ -13,6 +13,7 @@ import {
   clearDependencies,
   clearGroup,
   clearRunSchedule,
+  createParentCompletionNotification,
   createTask,
   deleteArchivedRun,
   drainQueuedResumeMessages,
@@ -35,6 +36,9 @@ import {
   getWorkspaceFileList,
   getWorkspaceFileSearch,
   initRun,
+  markParentCompletionNotificationDelivered,
+  markParentCompletionNotificationFailed,
+  markParentCompletionNotificationSkipped,
   queueResumeMessage,
   readyRun,
   reconfigureRun,
@@ -113,6 +117,9 @@ import {
 } from "@kcosr/agent-runner-core/core/run/dependencies.js";
 import {
   type ListedRunManifest,
+  type ManifestStatus,
+  type ParentCompletionNotification,
+  type ParentCompletionResumeSource,
   ResumeError,
   type RunManifest,
   RunNotFoundError,
@@ -177,6 +184,7 @@ import { type DaemonHandlers, createDaemonOperations } from "./operations.js";
 import {
   type JsonRpcRequest,
   type JsonRpcResponse,
+  type ParentCompletionNotificationRequest,
   RPC_ERROR_COMMAND,
   RPC_ERROR_RUNTIME,
   type RunAuditNotificationParams,
@@ -252,6 +260,15 @@ interface ActiveRunRecord {
   currentAttempt: RunTimelineAttempt | null;
 }
 
+type ManagedStartRunRequest = Parameters<DaemonHandlers["startRun"]>[0] & {
+  parentCompletionNotification?: ParentCompletionNotificationRequest;
+};
+
+type ManagedResumeRunRequest = Parameters<DaemonHandlers["resumeRun"]>[0] & {
+  parentCompletionNotification?: ParentCompletionNotificationRequest;
+  resumeSource?: ParentCompletionResumeSource | null;
+};
+
 interface RecentTimelineRecord {
   events: RunTimelineEnvelope[];
   cleanupTimer: ReturnType<typeof setTimeout>;
@@ -293,6 +310,8 @@ const COMPLETED_TIMELINE_BUFFER_TTL_MS = 5_000;
 const MAX_SCHEDULE_TIMER_DELAY_MS = 2_147_483_647;
 const SCHEDULED_RESUME_MESSAGE = "Resuming after scheduled delay.";
 const AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS_ENV = "AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS";
+const PARENT_COMPLETION_TRANSCRIPT_MAX_CHARS = 12_000;
+const PARENT_COMPLETION_FAILURE_REASON_MAX_CHARS = 1_000;
 
 function roundMetric(value: number): number {
   return Math.round(value * 1_000) / 1_000;
@@ -360,6 +379,80 @@ function daemonMutationContext(daemonInstanceId: string) {
 
 function formatDaemonError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function compactParentCompletionFailureReason(error: unknown): string {
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  if (message.length <= PARENT_COMPLETION_FAILURE_REASON_MAX_CHARS) {
+    return message;
+  }
+  return `${message.slice(0, PARENT_COMPLETION_FAILURE_REASON_MAX_CHARS)}\n[truncated]`;
+}
+
+function parentCompletionResumeSource(
+  childRunId: string,
+  notificationId: string,
+): ParentCompletionResumeSource {
+  return {
+    kind: "parent_completion_notification",
+    childRunId,
+    notificationId,
+  };
+}
+
+function parentCompletionSourceMatches(
+  source: ParentCompletionResumeSource | null,
+  childRunId: string,
+  notificationId: string,
+): boolean {
+  return (
+    source !== null &&
+    source.kind === "parent_completion_notification" &&
+    source.childRunId === childRunId &&
+    source.notificationId === notificationId
+  );
+}
+
+function lastTranscriptForSession(manifest: RunManifest, sessionIndex: number): string | null {
+  let latest: RunManifest["attemptRecords"][number] | null = null;
+  for (const record of manifest.attemptRecords) {
+    if (
+      record.sessionIndex === sessionIndex &&
+      record.transcript !== null &&
+      (latest === null || record.attemptNumber > latest.attemptNumber)
+    ) {
+      latest = record;
+    }
+  }
+  return latest?.transcript ?? null;
+}
+
+function boundedParentCompletionTranscript(transcript: string | null): string {
+  const value = transcript?.trimEnd() ?? "";
+  if (value.length === 0) {
+    return "No final transcript was captured for this child session.";
+  }
+  if (value.length <= PARENT_COMPLETION_TRANSCRIPT_MAX_CHARS) {
+    return value;
+  }
+  return `${value.slice(0, PARENT_COMPLETION_TRANSCRIPT_MAX_CHARS)}\n[truncated]`;
+}
+
+function buildParentCompletionMessage(params: {
+  childRunId: string;
+  terminalStatus: ManifestStatus;
+  transcript: string | null;
+}): string {
+  const transcript = boundedParentCompletionTranscript(params.transcript);
+  return [
+    `Detached child run ${params.childRunId} finished with status ${params.terminalStatus}.`,
+    "",
+    "Inspect the child:",
+    `- agent-runner run audit ${params.childRunId}`,
+    "",
+    "Child result:",
+    transcript,
+  ].join("\n");
 }
 
 function taskCounts(manifest: RunManifest): { completed: number; total: number } {
@@ -2478,7 +2571,7 @@ export async function serveDaemon(
           error: formatDaemonError(error),
         });
       })
-      .finally(() => {
+      .finally(async () => {
         const active = activeRuns.get(manifest.runId);
         if (active?.auditBuffer.length) {
           rememberRecentAuditBuffer(manifest.runId, active.auditBuffer);
@@ -2488,6 +2581,7 @@ export async function serveDaemon(
         }
         activeRuns.delete(manifest.runId);
         lastTimelineCursorByRun.delete(manifest.runId);
+        await deliverPendingParentCompletionNotificationsForRun(manifest.runId);
         publishMutationResult(manifest.runId);
         resolveDone?.();
       });
@@ -2730,6 +2824,341 @@ export async function serveDaemon(
       queueScheduleEvaluation?.(runId);
     }
     return result;
+  };
+
+  const publishParentCompletionChildMutation = (childRunId: string): void => {
+    try {
+      refreshManifestIndexEntry(childRunId);
+      publishMutationResult(childRunId, {
+        summary: getProjectedSummary(childRunId),
+        detail: getProjectedDetail(childRunId),
+      });
+    } catch (error) {
+      console.error(
+        `agent-runner daemon: failed to publish parent completion notification update for child run ${childRunId}: ${formatAutoStartError(error)}`,
+      );
+    }
+  };
+
+  const markParentCompletionSkipped = (
+    childRunId: string,
+    notification: ParentCompletionNotification,
+    terminalStatus: ManifestStatus,
+    deliveryReason: Parameters<typeof markParentCompletionNotificationSkipped>[0]["deliveryReason"],
+  ): void => {
+    markParentCompletionNotificationSkipped(
+      {
+        target: childRunId,
+        notificationId: notification.id,
+        terminalStatus,
+        deliveryReason,
+      },
+      mutationAuditContext,
+      publishAudit,
+    );
+    publishParentCompletionChildMutation(childRunId);
+  };
+
+  const markParentCompletionDelivered = (
+    childRunId: string,
+    notification: ParentCompletionNotification,
+    terminalStatus: ManifestStatus,
+    status: Parameters<typeof markParentCompletionNotificationDelivered>[0]["status"],
+    deliveryReason: Parameters<
+      typeof markParentCompletionNotificationDelivered
+    >[0]["deliveryReason"],
+  ): void => {
+    const result = markParentCompletionNotificationDelivered(
+      {
+        target: childRunId,
+        notificationId: notification.id,
+        status,
+        terminalStatus,
+        deliveryReason,
+      },
+      mutationAuditContext,
+      publishAudit,
+    );
+    if (result.changed) {
+      publishParentCompletionChildMutation(childRunId);
+    }
+  };
+
+  const markParentCompletionFailed = (
+    childRunId: string,
+    notification: ParentCompletionNotification,
+    terminalStatus: ManifestStatus,
+    error: unknown,
+  ): void => {
+    markParentCompletionNotificationFailed(
+      {
+        target: childRunId,
+        notificationId: notification.id,
+        terminalStatus,
+        deliveryReason: "delivery_exception",
+        failureReason: compactParentCompletionFailureReason(error),
+      },
+      mutationAuditContext,
+      publishAudit,
+    );
+    publishParentCompletionChildMutation(childRunId);
+  };
+
+  const findExistingParentCompletionDelivery = (
+    parentManifest: RunManifest,
+    childRunId: string,
+    notificationId: string,
+  ): "delivered_queued" | "delivered_resumed" | null => {
+    if (
+      parentManifest.queuedResumeMessages.some((message) =>
+        parentCompletionSourceMatches(message.source, childRunId, notificationId),
+      )
+    ) {
+      return "delivered_queued";
+    }
+    if (
+      parentManifest.sessions.some((session) =>
+        parentCompletionSourceMatches(session.resumeSource, childRunId, notificationId),
+      )
+    ) {
+      return "delivered_resumed";
+    }
+    return null;
+  };
+
+  const resolveParentCompletionSessionIndex = (
+    childRunId: string,
+    eventSessionIndex: number | null,
+  ): number => {
+    if (eventSessionIndex !== null) {
+      return eventSessionIndex;
+    }
+    const latestSession = resolveManifestTarget(childRunId).manifest.sessions.at(-1);
+    if (!latestSession) {
+      throw new Error(`run ${childRunId} started without an identifiable session`);
+    }
+    return latestSession.sessionIndex;
+  };
+
+  const deliverPendingParentCompletionNotification = async (
+    childRunId: string,
+    notificationId: string,
+  ): Promise<void> => {
+    const child = resolveManifestTarget(childRunId).manifest;
+    const notification = child.parentCompletionNotifications.find(
+      (candidate) => candidate.id === notificationId,
+    );
+    if (!notification || notification.status !== "pending") {
+      return;
+    }
+
+    const currentSession =
+      child.sessions.length === 0
+        ? null
+        : child.sessions.reduce((latest, candidate) =>
+            candidate.sessionIndex > latest.sessionIndex ? candidate : latest,
+          );
+    const referencedSession =
+      child.sessions.find((session) => session.sessionIndex === notification.sessionIndex) ?? null;
+    const auditStatus = referencedSession?.status ?? child.status;
+    if (
+      !currentSession ||
+      !referencedSession ||
+      referencedSession.endedAt === null ||
+      !isTerminalStatus(referencedSession.status) ||
+      !isTerminalStatus(child.status)
+    ) {
+      markParentCompletionSkipped(
+        childRunId,
+        notification,
+        auditStatus,
+        "child_session_not_terminal",
+      );
+      return;
+    }
+    if (notification.sessionIndex !== currentSession.sessionIndex) {
+      markParentCompletionSkipped(
+        childRunId,
+        notification,
+        currentSession.status,
+        "notification_session_not_current",
+      );
+      return;
+    }
+
+    const source = parentCompletionResumeSource(childRunId, notification.id);
+    const message = buildParentCompletionMessage({
+      childRunId,
+      terminalStatus: referencedSession.status,
+      transcript: lastTranscriptForSession(child, notification.sessionIndex),
+    });
+
+    let parent: ListedRunManifest;
+    try {
+      parent = resolveManifestTarget(notification.parentRunId);
+    } catch (error) {
+      if (error instanceof RunNotFoundError || error instanceof ResumeError) {
+        markParentCompletionSkipped(
+          childRunId,
+          notification,
+          referencedSession.status,
+          "parent_not_found",
+        );
+        return;
+      }
+      throw error;
+    }
+
+    const existingDelivery = findExistingParentCompletionDelivery(
+      parent.manifest,
+      childRunId,
+      notification.id,
+    );
+    if (existingDelivery === "delivered_queued") {
+      markParentCompletionDelivered(
+        childRunId,
+        notification,
+        referencedSession.status,
+        "delivered_queued",
+        "parent_active_queued",
+      );
+      return;
+    }
+    if (existingDelivery === "delivered_resumed") {
+      markParentCompletionDelivered(
+        childRunId,
+        notification,
+        referencedSession.status,
+        "delivered_resumed",
+        "parent_resumed",
+      );
+      return;
+    }
+
+    try {
+      if (activeRuns.has(parent.manifest.runId)) {
+        withPublishedMutation(
+          parent.manifest.runId,
+          () =>
+            app.queueResumeMessage(
+              {
+                target: parent.manifest.runId,
+                message,
+                source,
+              },
+              mutationAuditContext,
+              publishAudit,
+            ),
+          { scheduleEvaluation: false },
+        );
+        markParentCompletionDelivered(
+          childRunId,
+          notification,
+          referencedSession.status,
+          "delivered_queued",
+          "parent_active_queued",
+        );
+        return;
+      }
+
+      if (parent.manifest.status === "running") {
+        markParentCompletionSkipped(
+          childRunId,
+          notification,
+          referencedSession.status,
+          "parent_not_active_in_daemon",
+        );
+        return;
+      }
+
+      const parentDependencyGraph = dependencyGraphFromIndex();
+      parentDependencyGraph.set(parent.manifest.runId, parent.manifest);
+      const parentCapabilities = deriveRunCapabilities(
+        parent.manifest,
+        deriveDependencyState(parent.manifest, parentDependencyGraph),
+      );
+      if (!parentCapabilities.canResume) {
+        markParentCompletionSkipped(
+          childRunId,
+          notification,
+          referencedSession.status,
+          "parent_not_resumable",
+        );
+        return;
+      }
+
+      try {
+        await resumeManagedRun({
+          target: parent.manifest.runId,
+          overrides: { message },
+          resumeSource: source,
+        });
+      } catch (error) {
+        if (error instanceof ConflictError || error instanceof ResumeError) {
+          markParentCompletionSkipped(
+            childRunId,
+            notification,
+            referencedSession.status,
+            "parent_resume_rejected",
+          );
+          return;
+        }
+        throw error;
+      }
+      markParentCompletionDelivered(
+        childRunId,
+        notification,
+        referencedSession.status,
+        "delivered_resumed",
+        "parent_resumed",
+      );
+    } catch (error) {
+      markParentCompletionFailed(childRunId, notification, referencedSession.status, error);
+    }
+  };
+
+  const deliverPendingParentCompletionNotificationsForRun = async (
+    runId: string,
+  ): Promise<void> => {
+    let manifest: RunManifest;
+    try {
+      manifest = resolveManifestTarget(runId).manifest;
+    } catch (error) {
+      if (error instanceof RunNotFoundError || error instanceof ResumeError) {
+        return;
+      }
+      throw error;
+    }
+    if (!isTerminalStatus(manifest.status)) {
+      return;
+    }
+    const pendingIds = manifest.parentCompletionNotifications
+      .filter((notification) => notification.status === "pending")
+      .map((notification) => notification.id);
+    for (const notificationId of pendingIds) {
+      await deliverPendingParentCompletionNotification(runId, notificationId);
+    }
+  };
+
+  const sweepPendingParentCompletionNotifications = async (): Promise<void> => {
+    const childRunIds = Array.from(manifestEntriesByRunId.values())
+      .filter(
+        (entry) =>
+          isTerminalStatus(entry.manifest.status) &&
+          entry.manifest.parentCompletionNotifications.some(
+            (notification) => notification.status === "pending",
+          ),
+      )
+      .map((entry) => entry.manifest.runId);
+    for (const childRunId of childRunIds) {
+      try {
+        await deliverPendingParentCompletionNotificationsForRun(childRunId);
+      } catch (error) {
+        console.error(
+          `agent-runner daemon: parent completion notification sweep failed for child run ${childRunId}: ${formatAutoStartError(error)}`,
+        );
+      }
+    }
   };
 
   const withPublishedDetailMutation = <T>(runId: string, mutate: () => T): T => {
@@ -2988,6 +3417,7 @@ export async function serveDaemon(
 
   const executeManagedRun = async (
     kind: "start" | "resume",
+    parentCompletionNotification: ParentCompletionNotificationRequest | undefined,
     startManagedRun: (
       emitEvent: (event: RunEvent) => void,
       abortSignal: AbortSignal,
@@ -3010,6 +3440,7 @@ export async function serveDaemon(
     let resolveRunId: ((value: string) => void) | undefined;
     let rejectRunId: ((reason: unknown) => void) | undefined;
     let resolveDone: (() => void) | undefined;
+    let parentCompletionNotificationCreated = false;
     const runIdPromise = new Promise<string>((resolve, reject) => {
       resolveRunId = resolve;
       rejectRunId = reject;
@@ -3030,6 +3461,24 @@ export async function serveDaemon(
         }
         const resolvedRunId =
           runId ?? (event.type === "run_finished" ? event.summary.runId : undefined);
+        if (
+          resolvedRunId &&
+          event.type === "run_started" &&
+          parentCompletionNotification &&
+          !parentCompletionNotificationCreated
+        ) {
+          createParentCompletionNotification(
+            {
+              target: resolvedRunId,
+              parentRunId: parentCompletionNotification.parentRunId,
+              sessionIndex: resolveParentCompletionSessionIndex(resolvedRunId, event.sessionIndex),
+              source: parentCompletionNotification.source,
+            },
+            mutationAuditContext,
+            publishAudit,
+          );
+          parentCompletionNotificationCreated = true;
+        }
         if (resolvedRunId) {
           publishTimeline(resolvedRunId, event);
           if (
@@ -3098,6 +3547,13 @@ export async function serveDaemon(
           }
           activeRuns.delete(runId);
           lastTimelineCursorByRun.delete(runId);
+          const currentBeforeNotificationDelivery = getProjectedDetail(runId);
+          if (
+            currentBeforeNotificationDelivery &&
+            isTerminalStatus(currentBeforeNotificationDelivery.status)
+          ) {
+            await deliverPendingParentCompletionNotificationsForRun(runId);
+          }
           const current = getProjectedDetail(runId);
           const queuedResumeHandled = await drainQueuedResumeMessagesAfterFinish(
             runId,
@@ -3137,31 +3593,41 @@ export async function serveDaemon(
     }
   };
 
-  const startManagedRun = (request: Parameters<DaemonHandlers["startRun"]>[0]) =>
-    executeManagedRun("start", (emitEvent, abortSignal, detachSignal, emitAuditEnvelope) =>
-      app.startRun({
-        ...request,
-        execution: daemonExecution(daemonInstanceId),
-        abortSignal,
-        detachSignal,
-        emitEvent,
-        emitAuditEnvelope,
-      }),
+  const startManagedRun = (request: ManagedStartRunRequest) => {
+    const { parentCompletionNotification, ...startRequest } = request;
+    return executeManagedRun(
+      "start",
+      parentCompletionNotification,
+      (emitEvent, abortSignal, detachSignal, emitAuditEnvelope) =>
+        app.startRun({
+          ...startRequest,
+          execution: daemonExecution(daemonInstanceId),
+          abortSignal,
+          detachSignal,
+          emitEvent,
+          emitAuditEnvelope,
+        }),
     );
+  };
 
-  const executeResumeManagedRun = (request: Parameters<DaemonHandlers["resumeRun"]>[0]) =>
-    executeManagedRun("resume", (emitEvent, abortSignal, detachSignal, emitAuditEnvelope) =>
-      app.resumeRun({
-        ...request,
-        execution: daemonExecution(daemonInstanceId),
-        abortSignal,
-        detachSignal,
-        emitEvent,
-        emitAuditEnvelope,
-      }),
+  const executeResumeManagedRun = (request: ManagedResumeRunRequest) => {
+    const { parentCompletionNotification, ...resumeRequest } = request;
+    return executeManagedRun(
+      "resume",
+      parentCompletionNotification,
+      (emitEvent, abortSignal, detachSignal, emitAuditEnvelope) =>
+        app.resumeRun({
+          ...resumeRequest,
+          execution: daemonExecution(daemonInstanceId),
+          abortSignal,
+          detachSignal,
+          emitEvent,
+          emitAuditEnvelope,
+        }),
     );
+  };
 
-  const resumeManagedRun = (request: Parameters<DaemonHandlers["resumeRun"]>[0]) => {
+  const resumeManagedRun = (request: ManagedResumeRunRequest) => {
     const resolved = resolveManifestTarget(request.target);
     assertNoPendingScheduleStart(resolved.manifest.runId);
     return executeResumeManagedRun({
@@ -3440,6 +3906,7 @@ export async function serveDaemon(
   };
   rebuildManifestIndex();
   await reconcileStartupRunningRuns();
+  await sweepPendingParentCompletionNotifications();
   dependencyAutoStartSweepsEnabled = true;
   queueReadyDependencyAutoStartSweep?.();
   await evaluateSchedules(null, { startup: true });

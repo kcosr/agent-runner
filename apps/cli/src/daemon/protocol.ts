@@ -254,8 +254,15 @@ interface RunsStartBaseParams {
   overrides: RunCommandOverrides;
 }
 
+export interface ParentCompletionNotificationRequest {
+  source: "detached_invocation";
+  parentRunId: string;
+}
+
 export interface CliRunsStartParams extends RunsStartBaseParams {
   cliVars: Record<string, string>;
+  noInheritRunGroup?: boolean;
+  parentCompletionNotification?: ParentCompletionNotificationRequest;
 }
 
 export interface WebRunsStartParams extends RunsStartBaseParams {
@@ -264,8 +271,8 @@ export interface WebRunsStartParams extends RunsStartBaseParams {
 
 export interface RunsResumeParams {
   target: string;
-  parentRunId?: string;
   overrides: RunCommandOverrides;
+  parentCompletionNotification?: ParentCompletionNotificationRequest;
 }
 
 export interface EventsSubscribeParams {

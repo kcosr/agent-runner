@@ -21,6 +21,7 @@ function makeSession(overrides: Partial<RunSessionSummary>): RunSessionSummary {
     maxAttemptsPerSession: 3,
     backendSessionIdAtStart: null,
     backendSessionIdAtEnd: null,
+    resumeSource: null,
     ...overrides,
   };
 }

@@ -11,7 +11,7 @@ ${AGENT_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 24)
+├── run.json               # canonical manifest (schema version 25)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── agent-seed.md          # only when the run started from an agent file
@@ -43,7 +43,7 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `24`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `25`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath }` or `null` |
@@ -69,9 +69,11 @@ The manifest is the source of truth. Important fields:
 | `runGroupId` | grouping key for run-group filters, group attachments, and group dependencies |
 | `dependencies` | typed upstream run or group refs that must be satisfied before execution |
 | `parentRunId` | direct lineage edge to the parent run when this run was launched from another run |
+| `queuedResumeMessages` | daemon-owned pending resume messages; ordinary messages have `source: null`, while detached child completion messages identify the child notification source |
+| `parentCompletionNotifications` | child-owned delivery records for detached parent-completion callbacks |
 | `attachments` | metadata for files under `attachments/` |
 | `totalAttemptCount`, `attemptRecords` | per-attempt execution log with `task_runner` or `backend_session` provenance |
-| `totalSessionCount`, `sessions` | session-level summaries with `task_runner` or `backend_session` provenance |
+| `totalSessionCount`, `sessions` | session-level summaries with `task_runner` or `backend_session` provenance; daemon-delivered parent-completion resumes set `resumeSource` |
 | `runtimeVars` | frozen resolved vars |
 | `runtimeVarSources` | frozen provenance for each resolved var |
 | `resetSeed` | snapshot used by `run reset` |
@@ -180,6 +182,29 @@ implementer → descendant worktree flows reuse values such as
 Fresh child runs also inherit the parent's `runGroupId` by default. That
 group controls group-scoped attachments, filtering, and group
 dependencies; it is separate from parent lineage.
+
+Use `--no-inherit-run-group` with fresh `run` or `init` when a child
+should keep parent lineage through `parentRunId` but start in its own run
+group. The group resolution order is explicit `--group-id`, then
+`AGENT_RUNNER_RUN_GROUP_ID`, then the parent lineage run group, then the
+new run id. `--no-inherit-run-group` is mutually exclusive with
+`--group-id` and skips both ambient and parent group inheritance, so the
+new run's own id becomes its group id.
+
+Manifest schema v25 adds detached parent-completion notification state and
+session/queued-message source metadata. Existing v24 manifests must be
+migrated explicitly with `node scripts/migrate-manifests-v25.mjs --write`;
+older manifests are not upgraded by readers.
+
+Detached child runs started through a daemon also preserve parent callback
+lineage. Unless `--no-notify-parent-on-complete` is set, the child
+manifest stores a pending `parentCompletionNotifications[]` record after
+the child session is allocated. When that session reaches terminal state,
+daemon delivery either queues a sourced resume message on an active parent
+or starts a sourced resume session on an idle resumable parent. Reset
+clears `parentCompletionNotifications`, since notifications are tied to
+specific sessions that no longer exist after reset. Recurring clones start
+without stale delivery records from the completed source run.
 
 ### Init, then execute later
 

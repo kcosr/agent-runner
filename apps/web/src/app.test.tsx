@@ -327,6 +327,7 @@ function makeRun(
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     },
     lastSession: {
       sessionIndex: 0,
@@ -341,6 +342,7 @@ function makeRun(
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     },
     tasksCompleted: 1,
     tasksTotal: 4,
@@ -474,6 +476,7 @@ function makeDetail(
         maxAttemptsPerSession: 3,
         backendSessionIdAtStart: "thread-1",
         backendSessionIdAtEnd: null,
+        resumeSource: null,
       },
     ],
     currentSession: {
@@ -489,6 +492,7 @@ function makeDetail(
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     },
     lastSession: {
       sessionIndex: 0,
@@ -503,6 +507,7 @@ function makeDetail(
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     },
     tasksCompleted: 1,
     tasksTotal: 4,
@@ -1169,6 +1174,7 @@ function installFetchMock(
         id: `qmsg${detail.queuedResumeMessages.length + 1}`,
         text: body.message ?? "",
         createdAt: "2026-04-30T15:20:00.000Z",
+        source: null,
       };
       detail.queuedResumeMessages = [...detail.queuedResumeMessages, queuedResumeMessage];
       syncRunSummary(runId);
@@ -6180,6 +6186,7 @@ describe("web app", () => {
       id: "qmsg1",
       text: "Already queued",
       createdAt: "2026-04-30T15:20:00.000Z",
+      source: null,
     };
     installFetchMock({
       runs: [makeRun({ capabilities: { canResume: false }, queuedResumeMessageCount: 1 })],
@@ -6218,6 +6225,7 @@ describe("web app", () => {
       id: "qmsg1",
       text: "Already queued",
       createdAt: "2026-04-30T15:20:00.000Z",
+      source: null,
     };
     const baseSession = makeDetail().sessions[0];
     if (!baseSession) {
@@ -6813,6 +6821,7 @@ describe("web app", () => {
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: "thread-1",
+      resumeSource: null,
     } satisfies RunDetail["sessions"][number];
     const runningSession = {
       sessionIndex: 1,
@@ -6827,6 +6836,7 @@ describe("web app", () => {
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-2",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     } satisfies RunDetail["sessions"][number];
     const timelineHistory: RunTimelineHistory = {
       runId: "run-1",

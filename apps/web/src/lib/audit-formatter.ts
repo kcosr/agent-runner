@@ -409,6 +409,54 @@ export function formatAuditEvent(
           text(" queued resume messages."),
         ],
       };
+    case "run.parent_completion_notification_created":
+      return {
+        message: [
+          text("Created parent completion notification "),
+          code(fields.notificationId ?? "unknown"),
+          text(" for parent "),
+          code(fields.parentRunId ?? "unknown"),
+          text("."),
+        ],
+      };
+    case "run.parent_completion_notification_delivered":
+      return {
+        message: [
+          text("Delivered parent completion notification "),
+          code(fields.notificationId ?? "unknown"),
+          text(" to parent "),
+          code(fields.parentRunId ?? "unknown"),
+          text(" as "),
+          code(fields.status ?? "unknown"),
+          text(" ("),
+          code(fields.deliveryReason ?? "unknown"),
+          text(")."),
+        ],
+      };
+    case "run.parent_completion_notification_skipped":
+      return {
+        message: [
+          text("Skipped parent completion notification "),
+          code(fields.notificationId ?? "unknown"),
+          text(" for parent "),
+          code(fields.parentRunId ?? "unknown"),
+          text(" ("),
+          code(fields.deliveryReason ?? "unknown"),
+          text(")."),
+        ],
+      };
+    case "run.parent_completion_notification_failed":
+      return {
+        message: [
+          text("Failed parent completion notification "),
+          code(fields.notificationId ?? "unknown"),
+          text(" for parent "),
+          code(fields.parentRunId ?? "unknown"),
+          text(" ("),
+          code(fields.deliveryReason ?? "unknown"),
+          text(")."),
+        ],
+      };
     case "run.renamed":
       return {
         message: [

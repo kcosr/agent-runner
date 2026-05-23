@@ -16,7 +16,7 @@ function findEventPathElement<T extends Element>(
   return null;
 }
 
-export function getActiveDiffsFileTreeSearchInput(): HTMLInputElement | null {
+function getActiveDiffsFileTreeSearchInput(): HTMLInputElement | null {
   for (const tree of document.querySelectorAll(".diffs-file-tree")) {
     const input = tree.shadowRoot?.querySelector("[data-file-tree-search-input]");
     if (input instanceof HTMLInputElement && tree.shadowRoot?.activeElement === input) {

@@ -150,6 +150,34 @@ describe("formatAuditEvent", () => {
     ]);
   });
 
+  it("formats parent completion notification audit events", () => {
+    const formatted = formatAuditEvent({
+      type: "run.parent_completion_notification_delivered",
+      recordedAt: "2026-04-21T16:09:00.000Z",
+      source: "daemon",
+      hostMode: "daemon",
+      fields: {
+        notificationId: "pcn123",
+        parentRunId: "parent-123",
+        status: "delivered_queued",
+        terminalStatus: "success",
+        deliveryReason: "parent_active_queued",
+      },
+    });
+
+    expect(formatted.message).toEqual([
+      { type: "text", text: "Delivered parent completion notification " },
+      { type: "code", text: "pcn123" },
+      { type: "text", text: " to parent " },
+      { type: "code", text: "parent-123" },
+      { type: "text", text: " as " },
+      { type: "code", text: "delivered_queued" },
+      { type: "text", text: " (" },
+      { type: "code", text: "parent_active_queued" },
+      { type: "text", text: ")." },
+    ]);
+  });
+
   it("falls back to the raw task id when a hook task cannot be resolved", () => {
     const formatted = formatAuditEvent({
       type: "run.hook_recorded",

@@ -580,6 +580,35 @@ function formatRunAuditEventLine(event: RunAuditHistory["events"][number]["event
         ["messageIds", event.fields.messageIds],
         ["messageCount", event.fields.messageCount],
       ])}`;
+    case "run.parent_completion_notification_created":
+      return `${event.type}${formatAuditDetails([
+        ["notificationId", event.fields.notificationId],
+        ["parentRunId", event.fields.parentRunId],
+        ["source", event.fields.source],
+      ])}`;
+    case "run.parent_completion_notification_delivered":
+      return `${event.type}${formatAuditDetails([
+        ["notificationId", event.fields.notificationId],
+        ["parentRunId", event.fields.parentRunId],
+        ["status", event.fields.status],
+        ["terminalStatus", event.fields.terminalStatus],
+        ["deliveryReason", event.fields.deliveryReason],
+      ])}`;
+    case "run.parent_completion_notification_skipped":
+      return `${event.type}${formatAuditDetails([
+        ["notificationId", event.fields.notificationId],
+        ["parentRunId", event.fields.parentRunId],
+        ["terminalStatus", event.fields.terminalStatus],
+        ["deliveryReason", event.fields.deliveryReason],
+      ])}`;
+    case "run.parent_completion_notification_failed":
+      return `${event.type}${formatAuditDetails([
+        ["notificationId", event.fields.notificationId],
+        ["parentRunId", event.fields.parentRunId],
+        ["terminalStatus", event.fields.terminalStatus],
+        ["deliveryReason", event.fields.deliveryReason],
+        ["failureReason", event.fields.failureReason],
+      ])}`;
     case "run.renamed":
       return `${event.type}${formatAuditDetails([
         ["previous", event.fields.previousName],

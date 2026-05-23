@@ -9,12 +9,14 @@ import {
   resolveDependents,
 } from "../core/run/dependencies.js";
 import type {
+  ParentCompletionResumeSource,
   QueuedResumeMessage,
   RunDependencyRef,
   RunExecution,
   RunSchedule,
   TaskSnapshot,
 } from "../core/run/manifest.js";
+import { cloneParentCompletionResumeSource } from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
 import { type RunScheduleState, deriveScheduleState } from "../core/run/schedule.js";
 import { deriveEffectiveStatus } from "../core/run/status.js";
@@ -51,6 +53,7 @@ export interface RunSessionSummary {
   maxAttemptsPerSession: number;
   backendSessionIdAtStart: string | null;
   backendSessionIdAtEnd: string | null;
+  resumeSource: ParentCompletionResumeSource | null;
 }
 
 export interface RunSummary {
@@ -338,6 +341,7 @@ function toRunSessionSummaries(manifest: RunManifest): RunSessionSummary[] {
       maxAttemptsPerSession: session.maxAttemptsPerSession,
       backendSessionIdAtStart: session.backendSessionIdAtStart,
       backendSessionIdAtEnd: session.backendSessionIdAtEnd,
+      resumeSource: cloneParentCompletionResumeSource(session.resumeSource),
     }));
 }
 
@@ -606,7 +610,10 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
     attachments: manifest.attachments.map((attachment) => ({ ...attachment })),
-    queuedResumeMessages: manifest.queuedResumeMessages.map((message) => ({ ...message })),
+    queuedResumeMessages: manifest.queuedResumeMessages.map((message) => ({
+      ...message,
+      source: cloneParentCompletionResumeSource(message.source),
+    })),
     resolvedHooks: manifest.resolvedHooks.map((descriptor) => ({
       hookId: descriptor.hookId,
       phase: descriptor.phase,

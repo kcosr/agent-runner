@@ -68,7 +68,7 @@ export type DashboardRightSurface =
   | "notes"
   | "tasks";
 export type DashboardViewMode = "board" | "list";
-export type DiffsViewMode = "unified" | "split";
+type DiffsViewMode = "unified" | "split";
 
 export interface DashboardViewState {
   viewMode: DashboardViewMode;

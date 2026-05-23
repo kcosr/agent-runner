@@ -282,10 +282,19 @@ const runAttachmentObjectSchema = z.object({
 
 export const runAttachmentSchema: z.ZodType<RunAttachment> = runAttachmentObjectSchema;
 
+const parentCompletionResumeSourceSchema = z
+  .object({
+    kind: z.literal("parent_completion_notification"),
+    childRunId: z.string(),
+    notificationId: z.string(),
+  })
+  .nullable();
+
 export const queuedResumeMessageSchema: z.ZodType<QueuedResumeMessage> = z.object({
   id: z.string(),
   text: z.string(),
   createdAt: z.string(),
+  source: parentCompletionResumeSourceSchema,
 });
 
 const resolvedHookSourceSchema = z
@@ -331,6 +340,7 @@ const runSessionSummarySchema: z.ZodType<RunSessionSummary> = z.object({
   maxAttemptsPerSession: z.number(),
   backendSessionIdAtStart: z.string().nullable(),
   backendSessionIdAtEnd: z.string().nullable(),
+  resumeSource: parentCompletionResumeSourceSchema,
 });
 
 export const attachmentListEntrySchema: z.ZodType<AttachmentListEntry> =

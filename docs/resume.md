@@ -4,9 +4,10 @@ Resume continues an existing run from its frozen manifest state.
 agent-runner does *not* re-read the source agent or assignment files on
 resume — everything the backend needs is in `run.json`, including the
 selected backend name, frozen backendConfig, resolved backend args, and
-backend session id. Current manifests use schema version 24, which also
-stores frozen execution environment workspace/session-mount state and
-backend-session sync provenance.
+backend session id. Current manifests use schema version 25, which also
+stores frozen execution environment workspace/session-mount state,
+backend-session sync provenance, queued resume source metadata, and
+detached parent-completion notification records.
 
 ## Command
 
@@ -37,7 +38,10 @@ On resume, the following flags are rejected:
 - `--backend` — backend identity is tied to the session.
 - `--backend-session-id` — the run already carries its own session id.
 - `--cwd` — sessions are bound to the cwd they were created in.
+- `--group-id` and `--no-inherit-run-group` — run group membership is
+  frozen in the manifest.
 - `--name` — cannot be changed on resume; use `run set-name` instead.
+- `--parent-run` — parent lineage is frozen in the manifest.
 - `--var` — runtime vars are frozen at first write.
 
 For custom backends, resume uses the backend already frozen on the
@@ -143,6 +147,16 @@ session with those message texts joined by a blank line in one follow-up
 prompt. The messages are removed from the manifest only after that resume
 start is accepted, so a failed automatic resume keeps the queue available
 for retry or manual cleanup.
+
+Detached child completion uses the same resume machinery. When a detached
+child finishes while its parent is active in the daemon, the daemon queues
+a parent resume message whose `source` identifies the child run and
+notification id. When the parent is idle and resumable, the daemon starts
+the parent resume immediately and records the same source on the new
+parent session. Ordinary operator-authored queued messages keep
+`source: null`. Source metadata lets restart recovery distinguish already
+delivered child notifications from new pending work without parsing
+message text.
 
 ## Backend session history sync
 

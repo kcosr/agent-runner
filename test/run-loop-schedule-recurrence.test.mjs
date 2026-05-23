@@ -210,6 +210,20 @@ test("run-loop schedules: future clone recurrence moves schedule to clone", asyn
   });
   readyInitializedRun(dir, source.runId);
   const before = readManifest(source.workspaceDir).schedule;
+  patchManifest(source.workspaceDir, (manifest) => {
+    manifest.parentCompletionNotifications.push({
+      id: "pcn-stale-clone-source",
+      parentRunId: "parent-stale",
+      sessionIndex: 0,
+      source: "detached_invocation",
+      status: "pending",
+      createdAt: "2026-04-30T15:23:00.000Z",
+      deliveredAt: null,
+      terminalStatus: null,
+      deliveryReason: null,
+      failureReason: null,
+    });
+  });
 
   await runReady(dir, source.runId, (ctx) => completeAllTasksFromPrompt(ctx.prompt, dir));
 
@@ -225,8 +239,9 @@ test("run-loop schedules: future clone recurrence moves schedule to clone", asyn
   assert.equal(sourceAfter.status, "success");
   assert.equal(sourceAfter.schedule, null);
   assert.ok(cloneManifest);
-  assert.equal(cloneManifest.schemaVersion, 24);
+  assert.equal(cloneManifest.schemaVersion, 25);
   assert.deepEqual(cloneManifest.queuedResumeMessages, []);
+  assert.deepEqual(cloneManifest.parentCompletionNotifications, []);
   assert.equal(typeof cloneManifest.updatedAt, "string");
   assert.deepEqual(cloneManifest.assignment, {
     name: "scheduled-work",
@@ -471,8 +486,9 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   assert.ok(cloneManifest);
   assert.equal(readManifest(clone.workspaceDir).status, "success");
   assert.equal(readManifest(clone.workspaceDir).schedule, null);
-  assert.equal(cloneManifest.schemaVersion, 24);
+  assert.equal(cloneManifest.schemaVersion, 25);
   assert.deepEqual(cloneManifest.queuedResumeMessages, []);
+  assert.deepEqual(cloneManifest.parentCompletionNotifications, []);
   assert.equal(typeof cloneManifest.updatedAt, "string");
   assert.deepEqual(cloneManifest.assignment, {
     name: "scheduled-work",

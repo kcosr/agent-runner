@@ -758,6 +758,12 @@ async function parseStartRunBody(req: IncomingMessage): Promise<WebRunsStartPara
 
 async function parseResumeRunBody(req: IncomingMessage): Promise<ResumeRunBody> {
   const body = asRecord(await readJsonBody(req), "request body");
+  const allowedKeys = new Set(["overrides"]);
+  for (const key of Object.keys(body)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`request body.${key} is not supported`);
+    }
+  }
   return {
     overrides: optionalOverrides(body.overrides),
   };

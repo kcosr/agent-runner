@@ -17,6 +17,7 @@ import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js"
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
   resolveRunFromPrompt,
+  sharedRuntimeEnv,
   updateTasksForPrompt,
   withEnv,
   withSharedRuntimeEnv,
@@ -91,7 +92,7 @@ function writeAgentAndAssignment(baseDir) {
   writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
-async function runWithMock(baseDir, mockInvoke, overrides = {}) {
+async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   const backendId = overrides.__backendId ?? "claude";
   const backend = {
     id: backendId,
@@ -99,7 +100,8 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
     invoke: mockInvoke,
   };
   const { __backendId, ...runOverrides } = overrides;
-  return withSharedRuntimeEnv(baseDir, async () => {
+  const { env, ...runOptions } = options;
+  return withEnv({ ...sharedRuntimeEnv(baseDir), ...(env ?? {}) }, async () => {
     const loaded = loadAgentConfig("three", baseDir);
     const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
     const originalCwd = process.cwd();
@@ -111,6 +113,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
         cliVars: {},
         backend,
         overrides: runOverrides,
+        ...runOptions,
         stderr: () => {},
         stdout: () => {},
       });
@@ -177,6 +180,129 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   assert.equal("stdout" in log, false);
   assert.equal(log.stderr, "raw stderr text");
   assert.equal(existsSync(join(outcome.workspaceDir, "attempts", "01.stdout.log")), false);
+});
+
+test("manifest: noInheritRunGroup preserves parent lineage while isolating group", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const parent = await runWithMock(dir, async (ctx) => {
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "completed" },
+      t2: { status: "completed" },
+      t3: { status: "completed" },
+    });
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "sess-parent",
+      transcript: "parent done",
+    };
+  });
+
+  const child = await runWithMock(
+    dir,
+    async (ctx) => {
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-child",
+        transcript: "child done",
+      };
+    },
+    {},
+    {
+      noInheritRunGroup: true,
+      env: {
+        AGENT_RUNNER_PARENT_RUN_ID: parent.runId,
+        AGENT_RUNNER_RUN_GROUP_ID: "ambient-group",
+      },
+    },
+  );
+
+  assert.equal(child.manifest.parentRunId, parent.runId);
+  assert.equal(child.manifest.runGroupId, child.runId);
+});
+
+test("manifest: run group inheritance precedence keeps env before parent lineage", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const parent = await runWithMock(
+    dir,
+    async (ctx) => {
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-parent",
+        transcript: "parent done",
+      };
+    },
+    {},
+    { runGroupId: "parent-group" },
+  );
+  const child = await runWithMock(
+    dir,
+    async (ctx) => {
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-child",
+        transcript: "child done",
+      };
+    },
+    {},
+    {
+      env: {
+        AGENT_RUNNER_PARENT_RUN_ID: parent.runId,
+        AGENT_RUNNER_RUN_GROUP_ID: "ambient-group",
+      },
+    },
+  );
+
+  assert.equal(child.manifest.parentRunId, parent.runId);
+  assert.equal(child.manifest.runGroupId, "ambient-group");
+});
+
+test("manifest: explicit run group conflicts with noInheritRunGroup", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => ({
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: "sess-conflict",
+          transcript: "not reached",
+        }),
+        {},
+        { runGroupId: "explicit-group", noInheritRunGroup: true },
+      ),
+    /--group-id cannot be combined with --no-inherit-run-group/,
+  );
 });
 
 test("manifest: current manifests missing parentRunId are rejected on resume", async () => {

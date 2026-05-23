@@ -211,6 +211,43 @@ Nested invocations also preserve run grouping through
 `AGENT_RUNNER_RUN_GROUP_ID`. Shared payloads surface that grouping key as
 `runGroupId`; it is independent of parent lineage.
 
+### Detached parent completion
+
+When a connected CLI starts or resumes a run with `run --detach`, the
+client may still resolve parent lineage from `--parent-run` or
+`AGENT_RUNNER_PARENT_RUN_ID`. Unless
+`--no-notify-parent-on-complete` is set, the daemon records a pending
+parent-completion notification on the detached child after the child
+session is allocated. This notification is daemon-owned state, not text
+injected into the child backend prompt.
+
+After that child session reaches terminal state, the daemon delivers one
+compact message to the parent. If the parent is active in the same daemon,
+delivery appends a structured queued resume message. If the parent is
+idle and resumable, delivery starts a managed resume with the same
+structured source metadata. The message includes the child run id, terminal
+status, inspect commands, and the last transcript captured for the child
+session. Bounded transcript text includes the literal `[truncated]` marker
+when shortened. Audit records stay compact and do not store the delivered
+prompt body or transcript.
+
+Startup recovery sweeps terminal child manifests that still have pending
+parent-completion notifications. Existing queued messages or resume
+sessions with matching source metadata are treated as already delivered,
+so a crash between parent delivery and child marking does not enqueue or
+resume the parent twice. If the pending notification points at an older
+child session, recovery marks it skipped with
+`notification_session_not_current`; if recovery cannot confirm that the
+referenced child session is terminal, it leaves the notification pending
+and records `child_session_not_terminal`.
+
+Use `--no-inherit-run-group` together with detached child planners or
+reviewers when they need `parentRunId` callback lineage without joining
+the parent's run group. Execution environments that perform internal
+reviews should launch one nested agent-runner run for that review; the
+parent-completion path reports that nested run's result back to the
+planner rather than moving review responsibility into task notes.
+
 Connected-mode runtime selection stays explicit:
 
 - the client does not forward arbitrary env vars to the daemon

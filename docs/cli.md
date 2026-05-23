@@ -73,8 +73,10 @@ agent-runner run \
   [--add-task <title> ...] \
   [--backend-session-id <id>] \
   [--parent-run <run-id>] \
+  [--no-inherit-run-group] \
   [--resume-run <id|path>] \
   [--detach] \
+  [--no-notify-parent-on-complete] \
   [--message-file <path>] \
   [<message tokens...>]
 ```
@@ -117,10 +119,18 @@ Flags:
   session. Forbidden on resume.
 - `--parent-run <run-id>` — set the lineage parent for a fresh run/init.
   If omitted, `AGENT_RUNNER_PARENT_RUN_ID` is honored.
+- `--no-inherit-run-group` — fresh run/init only. Keep resolved
+  `parentRunId` lineage, but ignore ambient and parent run-group
+  inheritance so the new run becomes its own group root. Mutually
+  exclusive with `--group-id`.
 - `--resume-run <id|path>` — continue an existing run. Many flags are
   forbidden in combination with this; see [resume.md](resume.md).
 - `--detach` — daemon mode only; dispatch the run and exit after the
   daemon accepts it.
+- `--no-notify-parent-on-complete` — `run --detach` in daemon mode only.
+  Suppress the default parent-completion notification when the detached
+  child resolves a parent from `--parent-run` or
+  `AGENT_RUNNER_PARENT_RUN_ID`.
 - `--message-file <path>` — read UTF-8 message text from a file instead
   of positional message text.
 
@@ -559,4 +569,7 @@ equivalent secure channel, and keep tokens and Authorization headers out
 of logs. The MVP does not provide per-user isolation.
 
 `run --detach` is daemon-only: the CLI dispatches the run and exits
-after the daemon accepts it.
+after the daemon accepts it. If the detached invocation resolves a parent
+run and `--no-notify-parent-on-complete` is not set, the daemon records a
+pending parent-completion notification on the child session and delivers
+it when that session reaches terminal state.

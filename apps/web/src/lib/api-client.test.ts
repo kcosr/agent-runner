@@ -140,6 +140,7 @@ describe("api client", () => {
                     maxAttemptsPerSession: 2,
                     backendSessionIdAtStart: null,
                     backendSessionIdAtEnd: null,
+                    resumeSource: null,
                   },
                   lastSession: {
                     sessionIndex: 0,
@@ -154,6 +155,7 @@ describe("api client", () => {
                     maxAttemptsPerSession: 2,
                     backendSessionIdAtStart: null,
                     backendSessionIdAtEnd: null,
+                    resumeSource: null,
                   },
                   tasksCompleted: 1,
                   tasksTotal: 4,
@@ -253,6 +255,7 @@ describe("api client", () => {
                     maxAttemptsPerSession: 2,
                     backendSessionIdAtStart: null,
                     backendSessionIdAtEnd: null,
+                    resumeSource: null,
                   },
                   lastSession: {
                     sessionIndex: 0,
@@ -267,6 +270,7 @@ describe("api client", () => {
                     maxAttemptsPerSession: 2,
                     backendSessionIdAtStart: null,
                     backendSessionIdAtEnd: null,
+                    resumeSource: null,
                   },
                   tasksCompleted: 1,
                   tasksTotal: 4,
@@ -481,6 +485,7 @@ describe("api client", () => {
                   maxAttemptsPerSession: 2,
                   backendSessionIdAtStart: null,
                   backendSessionIdAtEnd: null,
+                  resumeSource: null,
                 },
               ],
               currentSession: {
@@ -496,6 +501,7 @@ describe("api client", () => {
                 maxAttemptsPerSession: 2,
                 backendSessionIdAtStart: null,
                 backendSessionIdAtEnd: null,
+                resumeSource: null,
               },
               lastSession: {
                 sessionIndex: 0,
@@ -510,6 +516,7 @@ describe("api client", () => {
                 maxAttemptsPerSession: 2,
                 backendSessionIdAtStart: null,
                 backendSessionIdAtEnd: null,
+                resumeSource: null,
               },
               tasksCompleted: 1,
               tasksTotal: 1,
@@ -863,6 +870,7 @@ describe("api client", () => {
           id: "qmsg1",
           text: "Check the worker logs",
           createdAt: "2026-04-30T15:20:00.000Z",
+          source: null,
         },
       ],
     });

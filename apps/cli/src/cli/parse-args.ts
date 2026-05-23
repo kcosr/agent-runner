@@ -14,6 +14,7 @@ export interface ParsedArgs {
   resumeRun?: string;
   parentRun?: string;
   groupId?: string;
+  noInheritRunGroup?: boolean;
   runId?: string;
   dependencyRun?: string;
   dependencyGroupId?: string;
@@ -43,6 +44,7 @@ export interface ParsedArgs {
   continueOnFailure?: boolean;
   clear?: boolean;
   detach?: boolean;
+  noNotifyParentOnComplete?: boolean;
   outputFormat: OutputFormat;
   outputFormatExplicit: boolean;
   message?: string;
@@ -170,6 +172,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (next === undefined) throw new Error("--group-id requires a value");
       if (next.trim().length === 0) throw new Error("--group-id cannot be empty");
       result.groupId = next;
+    } else if (arg === "--no-inherit-run-group") {
+      result.noInheritRunGroup = true;
     } else if (arg === "--run-id") {
       const next = args.shift();
       if (next === undefined) throw new Error("--run-id requires a value");
@@ -345,6 +349,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       result.clear = true;
     } else if (arg === "--detach") {
       result.detach = true;
+    } else if (arg === "--no-notify-parent-on-complete") {
+      result.noNotifyParentOnComplete = true;
     } else if (arg === "--field") {
       const next = args.shift();
       if (next === undefined) throw new Error("--field requires a value");

@@ -50,6 +50,10 @@ const RUN_EVENT_TYPES = [
   "run.queued_resume_message_added",
   "run.queued_resume_message_removed",
   "run.queued_resume_messages_drained",
+  "run.parent_completion_notification_created",
+  "run.parent_completion_notification_delivered",
+  "run.parent_completion_notification_skipped",
+  "run.parent_completion_notification_failed",
   "run.environment.validated",
   "run.environment.validation_failed",
   "run.container.created",
@@ -1137,6 +1141,104 @@ export function appendRunQueuedResumeMessagesDrainedEvent(params: {
     fields: {
       messageIds: [...params.messageIds],
       messageCount: params.messageIds.length,
+    },
+  });
+}
+
+export function appendRunParentCompletionNotificationCreatedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  notificationId: string;
+  parentRunId: string;
+  source: string;
+  sessionIndex: number;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.parent_completion_notification_created",
+    context: params.context,
+    sessionIndex: params.sessionIndex,
+    fields: {
+      notificationId: params.notificationId,
+      parentRunId: params.parentRunId,
+      source: params.source,
+    },
+  });
+}
+
+export function appendRunParentCompletionNotificationDeliveredEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  notificationId: string;
+  parentRunId: string;
+  sessionIndex: number;
+  status: string;
+  terminalStatus: string;
+  deliveryReason: string;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.parent_completion_notification_delivered",
+    context: params.context,
+    sessionIndex: params.sessionIndex,
+    fields: {
+      notificationId: params.notificationId,
+      parentRunId: params.parentRunId,
+      status: params.status,
+      terminalStatus: params.terminalStatus,
+      deliveryReason: params.deliveryReason,
+    },
+  });
+}
+
+export function appendRunParentCompletionNotificationSkippedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  notificationId: string;
+  parentRunId: string;
+  sessionIndex: number;
+  terminalStatus: string;
+  deliveryReason: string;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.parent_completion_notification_skipped",
+    context: params.context,
+    sessionIndex: params.sessionIndex,
+    fields: {
+      notificationId: params.notificationId,
+      parentRunId: params.parentRunId,
+      terminalStatus: params.terminalStatus,
+      deliveryReason: params.deliveryReason,
+    },
+  });
+}
+
+export function appendRunParentCompletionNotificationFailedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  notificationId: string;
+  parentRunId: string;
+  sessionIndex: number;
+  terminalStatus: string;
+  deliveryReason: string;
+  failureReason: string;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.parent_completion_notification_failed",
+    context: params.context,
+    sessionIndex: params.sessionIndex,
+    fields: {
+      notificationId: params.notificationId,
+      parentRunId: params.parentRunId,
+      terminalStatus: params.terminalStatus,
+      deliveryReason: params.deliveryReason,
+      failureReason: params.failureReason,
     },
   });
 }

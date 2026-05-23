@@ -94,13 +94,22 @@ import {
 } from "../run/execution-environments.js";
 import { RunGroupValidationError, listRunGroupMembers, validateRunGroupId } from "../run/groups.js";
 import {
+  type ManifestStatus,
+  type ParentCompletionDeliveryReason,
+  type ParentCompletionNotification,
+  type ParentCompletionNotificationSource,
+  type ParentCompletionNotificationStatus,
+  type ParentCompletionResumeSource,
   ResumeError,
   type RunDependencyRef,
   type RunManifest,
   RunNotFoundError,
   type RunSchedule,
   type TaskSnapshot,
+  cloneParentCompletionResumeSource,
   findRunManifestsById,
+  isManifestStatus,
+  isParentCompletionDeliveryReason,
   listRunManifests,
   resolveResumeTarget,
   runBackendCwd,
@@ -116,6 +125,10 @@ import {
   appendRunContainerRemovedEvent,
   appendRunFinishedEvent,
   appendRunGroupChangedEvent,
+  appendRunParentCompletionNotificationCreatedEvent,
+  appendRunParentCompletionNotificationDeliveredEvent,
+  appendRunParentCompletionNotificationFailedEvent,
+  appendRunParentCompletionNotificationSkippedEvent,
   appendRunQueuedResumeMessageAddedEvent,
   appendRunQueuedResumeMessageRemovedEvent,
   appendRunQueuedResumeMessagesDrainedEvent,
@@ -306,6 +319,12 @@ export interface AttachmentReadResult {
 
 type AuditEnvelopeEmitter = (envelope: RunAuditEnvelope) => void;
 
+export interface ParentCompletionNotificationMutationResult {
+  run: RunDetail;
+  notification: ParentCompletionNotification;
+  changed: boolean;
+}
+
 function emitPersistedAudit(
   emitAuditEnvelope: AuditEnvelopeEmitter | undefined,
   envelope: RunAuditEnvelope,
@@ -361,6 +380,22 @@ export class QueuedResumeMessageNotFoundError extends CommandError {
   constructor(runId: string, messageId: string) {
     super(`queued resume message "${messageId}" not found in run ${runId}`);
     this.name = "QueuedResumeMessageNotFoundError";
+  }
+}
+
+export class ParentCompletionNotificationNotFoundError extends CommandError {
+  constructor(runId: string, notificationId: string) {
+    super(`parent completion notification "${notificationId}" not found in run ${runId}`);
+    this.name = "ParentCompletionNotificationNotFoundError";
+  }
+}
+
+export class ParentCompletionNotificationMutationError extends CommandError {
+  constructor(runId: string, notificationId: string, status: ParentCompletionNotificationStatus) {
+    super(
+      `parent completion notification "${notificationId}" in run ${runId} is ${status}, not pending`,
+    );
+    this.name = "ParentCompletionNotificationMutationError";
   }
 }
 
@@ -486,6 +521,85 @@ function nextQueuedResumeMessageId(manifest: Pick<RunManifest, "queuedResumeMess
     id = `qmsg${shortId()}`;
   } while (manifest.queuedResumeMessages.some((message) => message.id === id));
   return id;
+}
+
+function nextParentCompletionNotificationId(
+  manifest: Pick<RunManifest, "parentCompletionNotifications">,
+): string {
+  let id: string;
+  do {
+    id = `pcn${shortId()}`;
+  } while (manifest.parentCompletionNotifications.some((notification) => notification.id === id));
+  return id;
+}
+
+function requireParentCompletionSource(
+  source: ParentCompletionNotificationSource,
+): ParentCompletionNotificationSource {
+  if (source !== "detached_invocation") {
+    throw new CommandError("parent completion notification source must be detached_invocation");
+  }
+  return source;
+}
+
+function requireParentCompletionParentRunId(parentRunId: string): string {
+  const normalized = parentRunId.trim();
+  if (normalized.length === 0) {
+    throw new CommandError("parent completion notification parentRunId cannot be empty");
+  }
+  return normalized;
+}
+
+function requireParentCompletionSessionIndex(sessionIndex: number): number {
+  if (!Number.isInteger(sessionIndex) || sessionIndex < 0) {
+    throw new CommandError(
+      "parent completion notification sessionIndex must be a non-negative integer",
+    );
+  }
+  return sessionIndex;
+}
+
+function requireParentCompletionFailureReason(failureReason: string): string {
+  const normalized = failureReason.trim();
+  if (normalized.length === 0) {
+    throw new CommandError("parent completion notification failureReason cannot be empty");
+  }
+  return normalized;
+}
+
+function requireManifestStatus(status: ManifestStatus): ManifestStatus {
+  if (!isManifestStatus(status)) {
+    throw new CommandError("parent completion notification terminalStatus is not valid");
+  }
+  return status;
+}
+
+function requireParentCompletionDeliveryReason(
+  reason: ParentCompletionDeliveryReason,
+): ParentCompletionDeliveryReason {
+  if (!isParentCompletionDeliveryReason(reason)) {
+    throw new CommandError("parent completion notification deliveryReason is not valid");
+  }
+  return reason;
+}
+
+function findParentCompletionNotification(
+  manifest: RunManifest,
+  notificationId: string,
+): ParentCompletionNotification {
+  const notification = manifest.parentCompletionNotifications.find(
+    (candidate) => candidate.id === notificationId,
+  );
+  if (!notification) {
+    throw new ParentCompletionNotificationNotFoundError(manifest.runId, notificationId);
+  }
+  return notification;
+}
+
+function cloneParentCompletionNotification(
+  notification: ParentCompletionNotification,
+): ParentCompletionNotification {
+  return { ...notification };
 }
 
 function readRunGraph(): ReadonlyMap<string, RunManifest> {
@@ -923,22 +1037,235 @@ export function readRunSummary(target: string): SummaryCommandResult {
   return summary;
 }
 
+function notificationMutationResult(
+  manifest: RunManifest,
+  notification: ParentCompletionNotification,
+  changed: boolean,
+): ParentCompletionNotificationMutationResult {
+  return {
+    run: toRunDetail({
+      manifest,
+      isLive: manifest.status === "running",
+    }),
+    notification: cloneParentCompletionNotification(notification),
+    changed,
+  };
+}
+
+export function createParentCompletionNotification(
+  input: {
+    target: string;
+    parentRunId: string;
+    sessionIndex: number;
+    source: ParentCompletionNotificationSource;
+  },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): ParentCompletionNotificationMutationResult {
+  const resolved = resolveRun(input.target);
+  let notification!: ParentCompletionNotification;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    notification = {
+      id: nextParentCompletionNotificationId(resolved.manifest),
+      parentRunId: requireParentCompletionParentRunId(input.parentRunId),
+      sessionIndex: requireParentCompletionSessionIndex(input.sessionIndex),
+      source: requireParentCompletionSource(input.source),
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      deliveredAt: null,
+      terminalStatus: null,
+      deliveryReason: null,
+      failureReason: null,
+    };
+    resolved.manifest.parentCompletionNotifications = [
+      ...resolved.manifest.parentCompletionNotifications,
+      notification,
+    ];
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunParentCompletionNotificationCreatedEvent({
+        manifest: resolved.manifest,
+        context: systemRunEventContext(auditOrigin),
+        notificationId: notification.id,
+        parentRunId: notification.parentRunId,
+        source: notification.source,
+        sessionIndex: notification.sessionIndex,
+      }),
+    );
+  });
+
+  return notificationMutationResult(resolved.manifest, notification, true);
+}
+
+export function markParentCompletionNotificationDelivered(
+  input: {
+    target: string;
+    notificationId: string;
+    status: Extract<ParentCompletionNotificationStatus, "delivered_queued" | "delivered_resumed">;
+    terminalStatus: ManifestStatus;
+    deliveryReason: ParentCompletionDeliveryReason;
+  },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): ParentCompletionNotificationMutationResult {
+  const resolved = resolveRun(input.target);
+  let notification!: ParentCompletionNotification;
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    notification = findParentCompletionNotification(resolved.manifest, input.notificationId);
+    if (notification.status !== "pending") {
+      return;
+    }
+    notification.status = input.status;
+    notification.deliveredAt = new Date().toISOString();
+    notification.terminalStatus = requireManifestStatus(input.terminalStatus);
+    notification.deliveryReason = requireParentCompletionDeliveryReason(input.deliveryReason);
+    notification.failureReason = null;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunParentCompletionNotificationDeliveredEvent({
+        manifest: resolved.manifest,
+        context: systemRunEventContext(auditOrigin),
+        notificationId: notification.id,
+        parentRunId: notification.parentRunId,
+        sessionIndex: notification.sessionIndex,
+        status: notification.status,
+        terminalStatus: notification.terminalStatus,
+        deliveryReason: notification.deliveryReason,
+      }),
+    );
+    changed = true;
+  });
+
+  return notificationMutationResult(resolved.manifest, notification, changed);
+}
+
+export function markParentCompletionNotificationSkipped(
+  input: {
+    target: string;
+    notificationId: string;
+    terminalStatus: ManifestStatus;
+    deliveryReason: ParentCompletionDeliveryReason;
+  },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): ParentCompletionNotificationMutationResult {
+  const resolved = resolveRun(input.target);
+  let notification!: ParentCompletionNotification;
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    notification = findParentCompletionNotification(resolved.manifest, input.notificationId);
+    if (notification.status !== "pending") {
+      return;
+    }
+    notification.status = "skipped";
+    notification.deliveredAt = new Date().toISOString();
+    notification.terminalStatus = requireManifestStatus(input.terminalStatus);
+    notification.deliveryReason = requireParentCompletionDeliveryReason(input.deliveryReason);
+    notification.failureReason = null;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunParentCompletionNotificationSkippedEvent({
+        manifest: resolved.manifest,
+        context: systemRunEventContext(auditOrigin),
+        notificationId: notification.id,
+        parentRunId: notification.parentRunId,
+        sessionIndex: notification.sessionIndex,
+        terminalStatus: notification.terminalStatus,
+        deliveryReason: notification.deliveryReason,
+      }),
+    );
+    changed = true;
+  });
+
+  return notificationMutationResult(resolved.manifest, notification, changed);
+}
+
+export function markParentCompletionNotificationFailed(
+  input: {
+    target: string;
+    notificationId: string;
+    terminalStatus: ManifestStatus;
+    deliveryReason: ParentCompletionDeliveryReason;
+    failureReason: string;
+  },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): ParentCompletionNotificationMutationResult {
+  const resolved = resolveRun(input.target);
+  let notification!: ParentCompletionNotification;
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    notification = findParentCompletionNotification(resolved.manifest, input.notificationId);
+    if (notification.status !== "pending") {
+      return;
+    }
+    notification.status = "failed";
+    notification.deliveredAt = new Date().toISOString();
+    notification.terminalStatus = requireManifestStatus(input.terminalStatus);
+    notification.deliveryReason = requireParentCompletionDeliveryReason(input.deliveryReason);
+    notification.failureReason = requireParentCompletionFailureReason(input.failureReason);
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunParentCompletionNotificationFailedEvent({
+        manifest: resolved.manifest,
+        context: systemRunEventContext(auditOrigin),
+        notificationId: notification.id,
+        parentRunId: notification.parentRunId,
+        sessionIndex: notification.sessionIndex,
+        terminalStatus: notification.terminalStatus,
+        deliveryReason: notification.deliveryReason,
+        failureReason: notification.failureReason,
+      }),
+    );
+    changed = true;
+  });
+
+  return notificationMutationResult(resolved.manifest, notification, changed);
+}
+
 export function queueResumeMessage(
-  input: { target: string; message: string },
+  input: { target: string; message: string; source?: ParentCompletionResumeSource | null },
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
   emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): QueueResumeMessageResult {
   const resolved = resolveRun(input.target);
   const text = normalizeQueuedResumeText(input.message);
+  const source = cloneParentCompletionResumeSource(input.source ?? null);
   let queuedResumeMessage!: RunManifest["queuedResumeMessages"][number];
 
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     requireQueuedResumeMessageAppendAllowed(resolved.manifest);
+    if (source !== null) {
+      const existing = resolved.manifest.queuedResumeMessages.find(
+        (message) =>
+          message.source?.kind === source.kind &&
+          message.source.childRunId === source.childRunId &&
+          message.source.notificationId === source.notificationId,
+      );
+      if (existing) {
+        queuedResumeMessage = existing;
+        return;
+      }
+    }
     queuedResumeMessage = {
       id: nextQueuedResumeMessageId(resolved.manifest),
       text,
       createdAt: new Date().toISOString(),
+      source,
     };
     resolved.manifest.queuedResumeMessages = [
       ...resolved.manifest.queuedResumeMessages,

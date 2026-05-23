@@ -134,6 +134,45 @@ export interface BackendSessionSyncState {
   openTurnIds: string[];
 }
 
+export type ParentCompletionNotificationSource = "detached_invocation";
+
+export type ParentCompletionNotificationStatus =
+  | "pending"
+  | "delivered_queued"
+  | "delivered_resumed"
+  | "failed"
+  | "skipped";
+
+export type ParentCompletionDeliveryReason =
+  | "parent_active_queued"
+  | "parent_resumed"
+  | "parent_not_found"
+  | "parent_not_active_in_daemon"
+  | "parent_not_resumable"
+  | "parent_resume_rejected"
+  | "child_session_not_terminal"
+  | "notification_session_not_current"
+  | "delivery_exception";
+
+export interface ParentCompletionNotification {
+  id: string;
+  parentRunId: string;
+  sessionIndex: number;
+  source: ParentCompletionNotificationSource;
+  status: ParentCompletionNotificationStatus;
+  createdAt: string;
+  deliveredAt: string | null;
+  terminalStatus: ManifestStatus | null;
+  deliveryReason: ParentCompletionDeliveryReason | null;
+  failureReason: string | null;
+}
+
+export interface ParentCompletionResumeSource {
+  kind: "parent_completion_notification";
+  childRunId: string;
+  notificationId: string;
+}
+
 export type RunDependencyRef =
   | {
       type: "run";
@@ -175,6 +214,7 @@ export interface SessionRecord {
   maxAttemptsPerSession: number;
   backendSessionIdAtStart: string | null;
   backendSessionIdAtEnd: string | null;
+  resumeSource: ParentCompletionResumeSource | null;
   provenance: RunHistoryProvenance;
 }
 
@@ -346,15 +386,16 @@ export interface QueuedResumeMessage {
   id: string;
   text: string;
   createdAt: string;
+  source: ParentCompletionResumeSource | null;
 }
 
-// schemaVersion: 24 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 25 is the current manifest-canonical generation. Manifests written
 // by earlier agent-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // reinitialize or run an explicit migration if one is added.
 export interface RunManifest {
-  schemaVersion: 24;
+  schemaVersion: 25;
   runId: string;
   repo: string;
   agent: {
@@ -399,6 +440,7 @@ export interface RunManifest {
   parentRunId: string | null;
   schedule: RunSchedule | null;
   queuedResumeMessages: QueuedResumeMessage[];
+  parentCompletionNotifications: ParentCompletionNotification[];
   exitCode: number | null;
   totalAttemptCount: number;
   maxAttemptsPerSession: number;
@@ -476,6 +518,15 @@ export function cloneRunDependencyRefs(
       ? { type: "run", runId: dependency.runId }
       : { type: "group", groupId: dependency.groupId },
   );
+}
+
+export function cloneParentCompletionResumeSource(
+  source: ParentCompletionResumeSource | null,
+): ParentCompletionResumeSource | null {
+  if (source === null) {
+    return null;
+  }
+  return { ...source };
 }
 
 export function cloneBackendSessionHistorySource(
@@ -598,6 +649,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.timeoutSec = seed.timeoutSec;
   manifest.maxAttemptsPerSession = seed.maxAttemptsPerSession;
   manifest.queuedResumeMessages = [];
+  manifest.parentCompletionNotifications = [];
   manifest.endedAt = null;
   manifest.status = "initialized";
   manifest.exitCode = null;
@@ -619,7 +671,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.backendSessionSync = null;
 }
 
-function isManifestStatus(value: unknown): value is ManifestStatus {
+export function isManifestStatus(value: unknown): value is ManifestStatus {
   return (
     value === "initialized" ||
     value === "ready" ||
@@ -699,6 +751,73 @@ function isValidRunHistoryProvenance(value: unknown): value is RunHistoryProvena
     typeof provenance.lastSyncedAt === "string" &&
     (provenance.mode === "bootstrap" || provenance.mode === "sync") &&
     isValidBackendSessionHistorySource(provenance.source)
+  );
+}
+
+function isParentCompletionNotificationSource(
+  value: unknown,
+): value is ParentCompletionNotificationSource {
+  return value === "detached_invocation";
+}
+
+function isParentCompletionNotificationStatus(
+  value: unknown,
+): value is ParentCompletionNotificationStatus {
+  return (
+    value === "pending" ||
+    value === "delivered_queued" ||
+    value === "delivered_resumed" ||
+    value === "failed" ||
+    value === "skipped"
+  );
+}
+
+export function isParentCompletionDeliveryReason(
+  value: unknown,
+): value is ParentCompletionDeliveryReason {
+  return (
+    value === "parent_active_queued" ||
+    value === "parent_resumed" ||
+    value === "parent_not_found" ||
+    value === "parent_not_active_in_daemon" ||
+    value === "parent_not_resumable" ||
+    value === "parent_resume_rejected" ||
+    value === "child_session_not_terminal" ||
+    value === "notification_session_not_current" ||
+    value === "delivery_exception"
+  );
+}
+
+function isValidParentCompletionResumeSource(
+  value: unknown,
+): value is ParentCompletionResumeSource | null {
+  if (value === null) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const source = value as Record<string, unknown>;
+  return (
+    source.kind === "parent_completion_notification" &&
+    typeof source.childRunId === "string" &&
+    typeof source.notificationId === "string"
+  );
+}
+
+function isValidParentCompletionNotification(
+  value: unknown,
+): value is ParentCompletionNotification {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const notification = value as Record<string, unknown>;
+  return (
+    typeof notification.id === "string" &&
+    typeof notification.parentRunId === "string" &&
+    typeof notification.sessionIndex === "number" &&
+    isParentCompletionNotificationSource(notification.source) &&
+    isParentCompletionNotificationStatus(notification.status) &&
+    typeof notification.createdAt === "string" &&
+    (notification.deliveredAt === null || typeof notification.deliveredAt === "string") &&
+    (notification.terminalStatus === null || isManifestStatus(notification.terminalStatus)) &&
+    (notification.deliveryReason === null ||
+      isParentCompletionDeliveryReason(notification.deliveryReason)) &&
+    (notification.failureReason === null || typeof notification.failureReason === "string")
   );
 }
 
@@ -815,11 +934,18 @@ function normalizeRunManifest(parsed: RunManifest): RunManifest {
     launcher: cloneResolvedLauncherConfig(parsed.launcher),
     executionEnvironment: cloneRunExecutionEnvironment(parsed.executionEnvironment),
     dependencies: cloneRunDependencyRefs(parsed.dependencies),
-    queuedResumeMessages: parsed.queuedResumeMessages.map((message) => ({ ...message })),
+    queuedResumeMessages: parsed.queuedResumeMessages.map((message) => ({
+      ...message,
+      source: cloneParentCompletionResumeSource(message.source),
+    })),
+    parentCompletionNotifications: parsed.parentCompletionNotifications.map((notification) => ({
+      ...notification,
+    })),
     backendSessionSync: cloneBackendSessionSyncState(parsed.backendSessionSync),
     runtimeVarSources: cloneRuntimeVarSources(parsed.runtimeVarSources),
     sessions: parsed.sessions.map((session) => ({
       ...session,
+      resumeSource: cloneParentCompletionResumeSource(session.resumeSource),
       provenance: cloneRunHistoryProvenance(session.provenance),
     })),
     attemptRecords: parsed.attemptRecords.map((attempt) => ({
@@ -855,11 +981,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 24
+    (parsed as { schemaVersion: number }).schemaVersion !== 25
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of agent-runner requires schemaVersion 24.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of agent-runner requires schemaVersion 25.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -1011,7 +1137,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 24) return false;
+  if (obj.schemaVersion !== 25) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -1041,9 +1167,18 @@ function isRunManifest(value: unknown): value is RunManifest {
       return (
         typeof queued.id !== "string" ||
         typeof queued.text !== "string" ||
-        typeof queued.createdAt !== "string"
+        typeof queued.createdAt !== "string" ||
+        !isValidParentCompletionResumeSource(queued.source)
       );
     })
+  ) {
+    return false;
+  }
+  if (!Array.isArray(obj.parentCompletionNotifications)) return false;
+  if (
+    obj.parentCompletionNotifications.some(
+      (notification) => !isValidParentCompletionNotification(notification),
+    )
   ) {
     return false;
   }
@@ -1131,6 +1266,7 @@ function isRunManifest(value: unknown): value is RunManifest {
           typeof record.backendSessionIdAtStart !== "string") ||
         (record.backendSessionIdAtEnd !== null &&
           typeof record.backendSessionIdAtEnd !== "string") ||
+        !isValidParentCompletionResumeSource(record.resumeSource) ||
         !isValidRunHistoryProvenance(record.provenance)
       );
     })

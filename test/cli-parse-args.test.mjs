@@ -94,6 +94,18 @@ test("parseArgs: --parent-run captures a fresh-run lineage parent", () => {
   assert.equal(parsed.parentRun, "parent-123");
 });
 
+test("parseArgs: --no-inherit-run-group captures fresh-run group isolation", () => {
+  const parsed = parseArgs(argv("run", "--agent", "x", "--no-inherit-run-group"));
+  assert.equal(parsed.noInheritRunGroup, true);
+});
+
+test("parseArgs: --no-notify-parent-on-complete captures detached parent notification opt-out", () => {
+  const parsed = parseArgs(
+    argv("run", "--detach", "--agent", "x", "--no-notify-parent-on-complete"),
+  );
+  assert.equal(parsed.noNotifyParentOnComplete, true);
+});
+
 test("parseArgs: --parent-run requires a non-empty value", () => {
   assert.throws(() => parseArgs(argv("run", "--agent", "x", "--parent-run")), /requires a value/);
   assert.throws(

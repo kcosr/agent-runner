@@ -16,6 +16,7 @@ import {
 import { loadedAgentFromManifest, synthesizeAdHocAgent } from "./core/config/loaded.js";
 import { buildRunDependencyGraph, countUnsatisfiedDependencies } from "./core/run/dependencies.js";
 import {
+  type ParentCompletionResumeSource,
   ResumeError,
   type RunExecution,
   type RunManifest,
@@ -49,6 +50,8 @@ export interface ExecuteRunCommandOptions {
   callerCwd?: string;
   parentRunId?: string | null;
   runGroupId?: string | null;
+  noInheritRunGroup?: boolean;
+  resumeSource?: ParentCompletionResumeSource | null;
   resumeRun?: string;
   backendSessionId?: string;
   cliVars: Record<string, string>;
@@ -103,6 +106,9 @@ function validateResumeOverrides(
   }
   if (opts.runGroupId !== undefined && opts.runGroupId !== null) {
     return "--group-id cannot be combined with --resume-run";
+  }
+  if (opts.noInheritRunGroup) {
+    return "--no-inherit-run-group cannot be combined with --resume-run";
   }
   if (opts.overrides.cwd !== undefined) {
     return "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. If you need a different cwd, create a fresh run instead.";
@@ -256,9 +262,11 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     webVars,
     parentRunId: opts.parentRunId,
     runGroupId: opts.runGroupId,
+    noInheritRunGroup: opts.noInheritRunGroup,
     backend,
     callerCwd: opts.callerCwd,
     resume: resumeTarget,
+    resumeSource: opts.resumeSource ?? null,
     initialize: opts.initialize,
     bootstrapBackendSessionId: opts.backendSessionId,
     execution: opts.execution,

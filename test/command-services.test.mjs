@@ -32,6 +32,7 @@ import {
   clearRunDependencies,
   clearRunGroup,
   clearRunSchedule,
+  createParentCompletionNotification,
   deleteRun,
   deleteTask,
   downloadAttachment,
@@ -41,6 +42,9 @@ import {
   listDefinitions,
   listRuns,
   listTasks,
+  markParentCompletionNotificationDelivered,
+  markParentCompletionNotificationFailed,
+  markParentCompletionNotificationSkipped,
   queueResumeMessage,
   readStatus,
   readyRun,
@@ -304,6 +308,7 @@ test("command services: passive backend session mutations update only metadata a
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "thread-original",
         provenance: { kind: "task_runner" },
+        resumeSource: null,
       },
       {
         sessionIndex: 1,
@@ -328,6 +333,7 @@ test("command services: passive backend session mutations update only metadata a
           mode: "sync",
           source: { kind: "custom", label: "test", changeToken: { version: 1 } },
         },
+        resumeSource: null,
       },
     ];
     manifest.attemptRecords = [
@@ -654,6 +660,7 @@ test("command services: getRunTimelineHistory reads schema v3 attempt logs", asy
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
         provenance: { kind: "task_runner" },
+        resumeSource: null,
       },
     ];
     manifest.totalSessionCount = 1;
@@ -767,6 +774,7 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
         provenance: { kind: "task_runner" },
+        resumeSource: null,
       },
     ];
     manifest.totalSessionCount = 1;
@@ -1043,9 +1051,18 @@ test("command services: readStatus and timeline history resolve bare run ids acr
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: null,
         provenance: { kind: "task_runner" },
+        resumeSource: null,
       },
     ];
     manifest.totalSessionCount = 1;
+  });
+  const resumeSource = {
+    kind: "parent_completion_notification",
+    childRunId: "child-run",
+    notificationId: "pcn-session",
+  };
+  patchManifest(relocatedWorkspaceDir, (manifest) => {
+    manifest.sessions[0].resumeSource = resumeSource;
   });
   mkdirSync(join(relocatedWorkspaceDir, "attempts"), { recursive: true });
   writeFileSync(
@@ -1070,6 +1087,8 @@ test("command services: readStatus and timeline history resolve bare run ids acr
     assert.equal(status.runId, outcome.runId);
     assert.equal(status.repo, "assistant");
     assert.equal(status.workspaceDir, relocatedWorkspaceDir);
+    assert.deepEqual(status.sessions[0]?.resumeSource, resumeSource);
+    assert.deepEqual(status.lastSession?.resumeSource, resumeSource);
     assert.equal(history.runId, outcome.runId);
     assert.equal(history.attempts.length, 1);
     assert.equal(history.attempts[0]?.transcript, "First output");
@@ -1981,18 +2000,37 @@ test("command services: queued resume messages are live-only, ordered, removable
       target: target.runId,
       message: "second follow-up",
     });
+    const source = {
+      kind: "parent_completion_notification",
+      childRunId: "child-run",
+      notificationId: "pcn-dedupe",
+    };
+    const sourced = queueResumeMessage({
+      target: target.runId,
+      message: "parent completion",
+      source,
+    });
+    const duplicateSource = queueResumeMessage({
+      target: target.runId,
+      message: "duplicate parent completion",
+      source,
+    });
 
     assert.match(first.queuedResumeMessage.id, /^qmsg/);
     assert.equal(first.queuedResumeMessage.text, "first follow-up");
+    assert.equal(first.queuedResumeMessage.source, null);
     assert.equal(typeof first.queuedResumeMessage.createdAt, "string");
     assert.equal(first.run.isLive, true);
+    assert.deepEqual(sourced.queuedResumeMessage.source, source);
+    assert.equal(duplicateSource.queuedResumeMessage.id, sourced.queuedResumeMessage.id);
+    assert.equal(duplicateSource.queuedResumeMessage.text, "parent completion");
     assert.deepEqual(
-      second.run.queuedResumeMessages.map((message) => message.text),
-      ["first follow-up", "second follow-up"],
+      duplicateSource.run.queuedResumeMessages.map((message) => message.text),
+      ["first follow-up", "second follow-up", "parent completion"],
     );
     assert.deepEqual(
       readStatus(target.runId).queuedResumeMessages.map((message) => message.text),
-      ["first follow-up", "second follow-up"],
+      ["first follow-up", "second follow-up", "parent completion"],
     );
 
     assert.throws(
@@ -2016,7 +2054,7 @@ test("command services: queued resume messages are live-only, ordered, removable
     assert.equal(removed.removedMessageId, first.queuedResumeMessage.id);
     assert.deepEqual(
       removed.run.queuedResumeMessages.map((message) => message.id),
-      [second.queuedResumeMessage.id],
+      [second.queuedResumeMessage.id, sourced.queuedResumeMessage.id],
     );
 
     const newer = queueResumeMessage({
@@ -2025,9 +2063,16 @@ test("command services: queued resume messages are live-only, ordered, removable
     });
     const drained = drainQueuedResumeMessages({
       target: target.runId,
-      messageIds: [second.queuedResumeMessage.id, "already-removed"],
+      messageIds: [
+        second.queuedResumeMessage.id,
+        sourced.queuedResumeMessage.id,
+        "already-removed",
+      ],
     });
-    assert.deepEqual(drained.removedMessageIds, [second.queuedResumeMessage.id]);
+    assert.deepEqual(drained.removedMessageIds, [
+      second.queuedResumeMessage.id,
+      sourced.queuedResumeMessage.id,
+    ]);
     assert.deepEqual(
       drained.run.queuedResumeMessages.map((message) => message.id),
       [newer.queuedResumeMessage.id],
@@ -2051,6 +2096,110 @@ test("command services: queued resume messages are live-only, ordered, removable
     assert.equal(removedAfterFinish.removedMessageId, newer.queuedResumeMessage.id);
     assert.equal(removedAfterFinish.run.isLive, false);
     assert.deepEqual(removedAfterFinish.run.queuedResumeMessages, []);
+  });
+});
+
+test("command services: parent completion notifications create and mark under lock", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const created = createParentCompletionNotification({
+      target: target.runId,
+      parentRunId: "parent-123",
+      sessionIndex: 0,
+      source: "detached_invocation",
+    });
+
+    assert.equal(created.changed, true);
+    assert.match(created.notification.id, /^pcn/);
+    assert.equal(created.notification.status, "pending");
+    assert.equal(created.notification.parentRunId, "parent-123");
+    assert.equal(created.notification.sessionIndex, 0);
+    assert.equal(created.notification.deliveredAt, null);
+    assert.deepEqual(readManifest(target.workspaceDir).parentCompletionNotifications, [
+      created.notification,
+    ]);
+
+    const delivered = markParentCompletionNotificationDelivered({
+      target: target.runId,
+      notificationId: created.notification.id,
+      status: "delivered_queued",
+      terminalStatus: "success",
+      deliveryReason: "parent_active_queued",
+    });
+    assert.equal(delivered.changed, true);
+    assert.equal(delivered.notification.status, "delivered_queued");
+    assert.equal(delivered.notification.terminalStatus, "success");
+    assert.equal(delivered.notification.deliveryReason, "parent_active_queued");
+    assert.equal(typeof delivered.notification.deliveredAt, "string");
+
+    const confirmed = markParentCompletionNotificationDelivered({
+      target: target.runId,
+      notificationId: created.notification.id,
+      status: "delivered_queued",
+      terminalStatus: "success",
+      deliveryReason: "parent_active_queued",
+    });
+    assert.equal(confirmed.changed, false);
+    assert.deepEqual(confirmed.notification, delivered.notification);
+
+    const skippedAfterDelivery = markParentCompletionNotificationSkipped({
+      target: target.runId,
+      notificationId: created.notification.id,
+      terminalStatus: "success",
+      deliveryReason: "parent_not_resumable",
+    });
+    assert.equal(skippedAfterDelivery.changed, false);
+    assert.deepEqual(skippedAfterDelivery.notification, delivered.notification);
+
+    const skippedSource = createParentCompletionNotification({
+      target: target.runId,
+      parentRunId: "parent-456",
+      sessionIndex: 1,
+      source: "detached_invocation",
+    });
+    const skipped = markParentCompletionNotificationSkipped({
+      target: target.runId,
+      notificationId: skippedSource.notification.id,
+      terminalStatus: "blocked",
+      deliveryReason: "parent_not_active_in_daemon",
+    });
+    assert.equal(skipped.notification.status, "skipped");
+    assert.equal(skipped.notification.deliveryReason, "parent_not_active_in_daemon");
+
+    const failedSource = createParentCompletionNotification({
+      target: target.runId,
+      parentRunId: "parent-789",
+      sessionIndex: 2,
+      source: "detached_invocation",
+    });
+    const failed = markParentCompletionNotificationFailed({
+      target: target.runId,
+      notificationId: failedSource.notification.id,
+      terminalStatus: "error",
+      deliveryReason: "delivery_exception",
+      failureReason: "resume rpc failed",
+    });
+    assert.equal(failed.notification.status, "failed");
+    assert.equal(failed.notification.failureReason, "resume rpc failed");
+
+    assert.throws(
+      () =>
+        markParentCompletionNotificationDelivered({
+          target: target.runId,
+          notificationId: "missing-pcn",
+          status: "delivered_resumed",
+          terminalStatus: "success",
+          deliveryReason: "parent_resumed",
+        }),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(
+          `parent completion notification "missing-pcn" not found in run ${target.runId}`,
+        ).test(err.message),
+    );
   });
 });
 

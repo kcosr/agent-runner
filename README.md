@@ -390,7 +390,7 @@ The rest are focused topic pages:
 | `AGENT_RUNNER_DAEMON_TOKEN` | Shared daemon bearer token for auth-enabled daemon servers and clients |
 | `AGENT_RUNNER_WEB_BASE_PATH` | External mount path for the bundled web dashboard when served behind a reverse proxy, for example `/agent-runner` |
 | `AGENT_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks |
-| `AGENT_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
+| `AGENT_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted; detached daemon children notify this parent on completion unless opted out, and `--no-inherit-run-group` keeps lineage while starting a singleton run group |
 | `AGENT_RUNNER_RUN_ID` | Active run id provided to backend wrapper processes |
 | `AGENT_RUNNER_RUN_GROUP_ID` | Default run group for fresh runs when `--group-id` is omitted; active run group id provided to backend wrapper processes |
 | `AGENT_RUNNER_CWD` | Active backend attempt cwd provided to backend wrapper processes |
