@@ -40,6 +40,9 @@
 
 ### Changed
 
+- Markdown document previews now render simple leading front matter as a compact
+  metadata table, falling back to a YAML code block for nested or complex
+  front matter.
 - Daemon instance ids now include the daemon process pid, for example
   `daemon-12345-abc123`, while retaining a random suffix for diagnostics.
   ([#161](https://github.com/kcosr/agent-runner/pull/161))

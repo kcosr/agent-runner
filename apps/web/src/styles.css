@@ -3744,6 +3744,28 @@ body {
   font-weight: 600;
 }
 
+.markdown-frontmatter-table-wrap {
+  max-width: 100%;
+  margin: 0 0 0.8em;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown-frontmatter-table {
+  width: max-content;
+  min-width: 0;
+}
+
+.markdown-frontmatter-table th,
+.markdown-frontmatter-table td {
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-frontmatter-table th {
+  white-space: nowrap;
+}
+
 .markdown hr {
   margin: 0.8em 0;
   border: 0;

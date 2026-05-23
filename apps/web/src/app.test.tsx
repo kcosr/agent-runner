@@ -16508,12 +16508,11 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
-    const frontmatterCode = screen.getByText((_, element) => {
-      return (
-        element?.tagName === "CODE" && element.textContent === "title: Notes\nsource: attachment\n"
-      );
-    });
-    expect(frontmatterCode.closest("pre")).not.toBeNull();
+    const frontmatterTable = screen.getByLabelText("Front matter");
+    expect(frontmatterTable).toHaveTextContent("title");
+    expect(frontmatterTable).toHaveTextContent("Notes");
+    expect(frontmatterTable).toHaveTextContent("source");
+    expect(frontmatterTable).toHaveTextContent("attachment");
     expect(await screen.findByLabelText("Mermaid diagram")).toBeInTheDocument();
     expect(renderMermaid).toHaveBeenCalledWith(
       expect.stringMatching(/^mermaid-/),

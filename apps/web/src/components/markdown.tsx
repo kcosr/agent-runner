@@ -12,10 +12,22 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { parseDocument } from "yaml";
 import { writeToClipboard } from "../lib/clipboard.js";
 import { CheckIcon, CopyIcon } from "./icons.js";
 
 type MermaidApi = typeof import("mermaid").default;
+type FrontmatterMode = "none" | "code-block" | "metadata-table";
+
+interface FrontmatterParts {
+  body: string;
+  yaml: string;
+}
+
+interface FrontmatterTableRow {
+  key: string;
+  value: string;
+}
 
 const MERMAID_ERROR_MESSAGE = "Failed to render Mermaid diagram.";
 const MERMAID_LANGUAGE_CLASS = "language-mermaid";
@@ -56,24 +68,62 @@ function normalizeReactNodeText(value: ReactNode): string {
     .replace(/\n$/, "");
 }
 
-function codeFenceFor(code: string): string {
-  const longestBacktickRun = (code.match(/`+/g) ?? []).reduce(
-    (longest, run) => Math.max(longest, run.length),
-    0,
-  );
-  return "`".repeat(Math.max(3, longestBacktickRun + 1));
-}
-
-function renderLeadingFrontmatterAsCodeBlock(text: string): string {
+function readLeadingFrontmatter(text: string): FrontmatterParts | null {
   const match = FRONTMATTER_PATTERN.exec(text);
   if (!match) {
-    return text;
+    return null;
   }
   const yaml = match[1] ?? "";
   const body = text.slice(match[0].length).replace(/^\r?\n/, "");
-  const fence = codeFenceFor(yaml);
-  const frontmatterBlock = `${fence}yaml\n${yaml}\n${fence}`;
-  return body.length > 0 ? `${frontmatterBlock}\n\n${body}` : frontmatterBlock;
+  return { body, yaml };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function formatFrontmatterScalar(value: unknown): string | null {
+  if (value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.includes("\n") ? null : value;
+  }
+  switch (typeof value) {
+    case "boolean":
+    case "number":
+      return String(value);
+    default:
+      return null;
+  }
+}
+
+function readFrontmatterTableRows(yaml: string): FrontmatterTableRow[] | null {
+  try {
+    const document = parseDocument(yaml, { prettyErrors: false });
+    if (document.errors.length > 0) {
+      return null;
+    }
+    const parsed = document.toJSON();
+    if (!isPlainRecord(parsed)) {
+      return null;
+    }
+    const rows: FrontmatterTableRow[] = [];
+    for (const [key, value] of Object.entries(parsed)) {
+      const formattedValue = formatFrontmatterScalar(value);
+      if (formattedValue === null) {
+        return null;
+      }
+      rows.push({ key, value: formattedValue });
+    }
+    return rows.length > 0 ? rows : null;
+  } catch {
+    return null;
+  }
 }
 
 function shouldResetCopyStatusOnTimer(): boolean {
@@ -290,6 +340,31 @@ function CodeBlock({
   );
 }
 
+function FrontmatterCodeBlock({ yaml }: { yaml: string }) {
+  return (
+    <CodeBlock preProps={{}}>
+      <code className="language-yaml">{`${yaml}\n`}</code>
+    </CodeBlock>
+  );
+}
+
+function FrontmatterTable({ rows }: { rows: FrontmatterTableRow[] }) {
+  return (
+    <div aria-label="Front matter" className="markdown-frontmatter-table-wrap">
+      <table className="markdown-frontmatter-table">
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <th scope="row">{row.key}</th>
+              <td>{row.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const components: Components = {
   a({ node: _node, href, ...props }) {
     return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
@@ -313,21 +388,28 @@ const components: Components = {
 function MarkdownContentInner({
   text,
   className,
-  renderFrontmatterAsCodeBlock = false,
+  frontmatterMode = "none",
 }: {
   text: string;
   className?: string;
-  renderFrontmatterAsCodeBlock?: boolean;
+  frontmatterMode?: FrontmatterMode;
 }) {
-  const renderedText = renderFrontmatterAsCodeBlock
-    ? renderLeadingFrontmatterAsCodeBlock(text)
-    : text;
+  const frontmatter = frontmatterMode === "none" ? null : readLeadingFrontmatter(text);
+  const frontmatterRows =
+    frontmatterMode === "metadata-table" && frontmatter
+      ? readFrontmatterTableRows(frontmatter.yaml)
+      : null;
+  const bodyText = frontmatter ? frontmatter.body : text;
 
   return (
     <div className={className ? `markdown ${className}` : "markdown"}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {renderedText}
-      </ReactMarkdown>
+      {frontmatterRows ? <FrontmatterTable rows={frontmatterRows} /> : null}
+      {frontmatter && !frontmatterRows ? <FrontmatterCodeBlock yaml={frontmatter.yaml} /> : null}
+      {bodyText.length > 0 ? (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+          {bodyText}
+        </ReactMarkdown>
+      ) : null}
     </div>
   );
 }
