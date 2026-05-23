@@ -8,15 +8,17 @@
   notification metadata. Existing manifests must be migrated with
   `node scripts/migrate-manifests-v25.mjs --write`; the daemon resume wire
   contract no longer accepts `parentRunId` on `runs.resume`.
+  ([#165](https://github.com/kcosr/agent-runner/pull/165))
 
 ### Added
 
 - Added `--no-inherit-run-group` for fresh `run` and `init` commands so
   child runs can preserve `parentRunId` lineage while starting in their own
-  run group.
+  run group. ([#165](https://github.com/kcosr/agent-runner/pull/165))
 - Added daemon parent-completion delivery for detached child runs, with
   `--no-notify-parent-on-complete` to opt out when a detached child should
   keep lineage without notifying its parent on completion.
+  ([#165](https://github.com/kcosr/agent-runner/pull/165))
 - Added `AGENT_RUNNER_WEB_BASE_PATH` so `agent-runner serve` can expose the
   bundled web dashboard from a reverse-proxy subpath such as `/agent-runner`,
   including prefixed daemon HTTP routes for pass-through proxies.
