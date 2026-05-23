@@ -4495,7 +4495,9 @@ test("daemon parent completion delivery queues active parents once with compact 
       assert.match(queued.text, /Detached child run .* finished with status success/);
       assert.match(queued.text, /Inspect the child:/);
       assert.match(queued.text, /Child result:/);
-      assert.match(queued.text, /agent-runner run status/);
+      assert.match(queued.text, /agent-runner run audit/);
+      assert.doesNotMatch(queued.text, /agent-runner run status/);
+      assert.doesNotMatch(queued.text, /agent-runner run brief/);
       assert.match(queued.text, /child final transcript for parent/);
 
       const childAudit = await httpJson(httpBaseUrl, `/api/runs/${child.runId}/audit`);
