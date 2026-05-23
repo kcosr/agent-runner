@@ -63,10 +63,15 @@ For non-initialized (previously-run) runs, resume requires at least one of:
 
 - an explicit follow-up message (positional arg)
 - newly added tasks via `--add-task` (repeatable)
-- incomplete tasks remaining in the manifest
+- runnable tasks remaining in the manifest (`pending` or `in_progress`)
 
 If all tasks are already `completed` and no follow-up message or new tasks
 are supplied, resume errors rather than re-sending a stale prompt.
+
+Blocked runs are the exception: once the run status is `blocked`, resume
+requires an explicit follow-up message. A blocked run does not resume from
+`--add-task` alone, and blocked tasks do not count as runnable work for
+message-less resume.
 
 If the run has incomplete tasks or newly added tasks and no explicit message,
 agent-runner injects an implicit continue message:
@@ -114,9 +119,14 @@ On resume, the brief sent to the backend is composed as follows:
 1. If this is the first attempt with tasks (tasks were absent and are now
    present), the worker workflow template is prepended.
 2. If the stopped run still has pending or in-progress tasks, a task CLI
-   reminder is prepended instead.
+   reminder is prepended instead. This reminder is not injected for blocked
+   runs.
 3. The follow-up message is appended, or the implicit continue message is
-   used if incomplete tasks remain.
+   used if runnable tasks remain.
+
+For blocked runs, the prompt sent on resume is the explicit follow-up message.
+No implicit continue message, task-list reminder, or task-list nudge is
+prepended.
 
 For ready-start (running a `ready` run with zero prior attempts), the
 stored `manifest.brief` is reused verbatim.

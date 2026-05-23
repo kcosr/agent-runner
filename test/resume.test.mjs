@@ -746,6 +746,21 @@ test("resume: blocked stopped runs require an explicit follow-up message", async
       /follow-up message/.test(err.message),
   );
 
+  await assert.rejects(
+    () =>
+      runIn(dir, {
+        backend: mockBackend(async () => {
+          throw new Error("backend should not be invoked with only an added task");
+        }),
+        overrides: { addedTasks: ["retry after dependency is fixed"] },
+        resume: target,
+      }),
+    (err) =>
+      err instanceof ResumeError &&
+      /blocked run/.test(err.message) &&
+      /follow-up message/.test(err.message),
+  );
+
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
       assert.equal(ctx.prompt, "dependency is available now");

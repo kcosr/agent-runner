@@ -5176,6 +5176,71 @@ describe("web app", () => {
     expect(list.scrollTop).toBe(80);
   });
 
+  it("does not re-pin selected-run Chat after the user scrolls away before deferred scrolls", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              prompt: "Prompt",
+              transcript: "Streaming answer",
+              notices: "",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+              provenance: { kind: "task_runner" },
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
+    const list = chat.querySelector(".chat-message-list");
+    if (!(list instanceof HTMLElement)) {
+      throw new Error("expected chat message list");
+    }
+
+    defineElementMetric(list, "clientHeight", 120);
+    defineElementMetric(list, "scrollHeight", 300);
+    defineElementMetric(list, "scrollTop", 180);
+    fireEvent.scroll(list);
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "agent_message_delta",
+        text: " live",
+      },
+    });
+    defineElementMetric(list, "scrollHeight", 360);
+    fireEvent.scroll(list);
+    defineElementMetric(list, "scrollTop", 80);
+    fireEvent.scroll(list);
+
+    expect(await within(chat).findByText("Streaming answer live")).toBeInTheDocument();
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+    expect(list.scrollTop).toBe(80);
+  });
+
   it("reloads selected-run Chat when backend sync invalidates a completed timeline", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     const timelineHistory: RunTimelineHistory = {

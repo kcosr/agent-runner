@@ -158,6 +158,11 @@ If tasks remain incomplete when an attempt ends or a run is resumed with
 unfinished work, agent-runner composes a prompt that points the worker
 back at the task CLI and identifies the incomplete tasks.
 
+Blocked runs require an explicit follow-up message before resume. For a
+blocked run, agent-runner sends that message as-is; it does not prepend the
+task CLI nudge or the implicit continue prompt. Blocked tasks also do not
+count as runnable work for message-less resume.
+
 If new tasks are added on resume (via `--add-task` or `task add`) and no
 explicit follow-up message is supplied, the implicit continue prompt tells
 the worker to check the task list before continuing.

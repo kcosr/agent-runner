@@ -318,8 +318,11 @@ export function RunChatView({
   }, []);
 
   const applyScrollToBottom = useCallback(
-    (element: HTMLElement) => {
+    (element: HTMLElement, options: { force?: boolean } = {}) => {
       if (listRef.current !== element) {
+        return;
+      }
+      if (!options.force && !stickToBottomRef.current) {
         return;
       }
       scrollElementToBottom(element);
@@ -332,9 +335,9 @@ export function RunChatView({
   );
 
   const scheduleScrollToBottom = useCallback(
-    (element: HTMLElement) => {
+    (element: HTMLElement, options: { forceImmediate?: boolean } = {}) => {
       cancelScheduledScrollToBottom();
-      applyScrollToBottom(element);
+      applyScrollToBottom(element, { force: options.forceImmediate });
       if (typeof window.requestAnimationFrame === "function") {
         scrollFrameRef.current = window.requestAnimationFrame(() => {
           scrollFrameRef.current = null;
@@ -435,7 +438,7 @@ export function RunChatView({
     if (!element) {
       return;
     }
-    scheduleScrollToBottom(element);
+    scheduleScrollToBottom(element, { forceImmediate: true });
   }
 
   async function submitDraft() {
