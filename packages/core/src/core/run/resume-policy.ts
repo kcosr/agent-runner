@@ -13,6 +13,25 @@ export function missingResumeInputMessage(): string {
   return "cannot resume a run with no runnable tasks without either a follow-up message or a newly added task";
 }
 
+export function missingBlockedResumeMessage(): string {
+  return "cannot resume a blocked run without a follow-up message";
+}
+
+export function resumeStatusRequiresExplicitMessage(status: ManifestStatus): boolean {
+  return status === "blocked";
+}
+
+export function canResumeWithoutMessage(input: {
+  finalTasks: Record<string, TaskSnapshot>;
+  hasAddedTasks: boolean;
+  status: ManifestStatus;
+}): boolean {
+  if (resumeStatusRequiresExplicitMessage(input.status)) {
+    return false;
+  }
+  return input.hasAddedTasks || hasRunnableTasks(input.finalTasks);
+}
+
 function isTerminalStatus(status: ManifestStatus): boolean {
   return (
     status === "success" ||
@@ -28,6 +47,9 @@ export function needsStoppedRunTaskReminder(input: {
   status: ManifestStatus;
   finalTasks: Record<string, TaskSnapshot>;
 }): boolean {
+  if (resumeStatusRequiresExplicitMessage(input.status)) {
+    return false;
+  }
   return (
     input.backend !== "passive" &&
     isTerminalStatus(input.status) &&

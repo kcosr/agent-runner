@@ -87,7 +87,8 @@ import {
 } from "./recursion-guard.js";
 import {
   IMPLICIT_RESUME_MESSAGE,
-  hasRunnableTasks,
+  canResumeWithoutMessage,
+  missingBlockedResumeMessage,
   missingResumeInputMessage,
   needsStoppedRunTaskReminder,
 } from "./resume-policy.js";
@@ -1718,9 +1719,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (isResume) {
     const hasMessage = Boolean(message && message.trim().length > 0);
     const hasAddedTasks = addedTitles.length > 0;
-    const canResumeImplicitly = hasRunnableTasks(resume?.manifest.finalTasks ?? {});
-    if (!hasMessage && !hasAddedTasks && !canResumeImplicitly) {
-      throw new ResumeError(missingResumeInputMessage());
+    if (
+      !hasMessage &&
+      !canResumeWithoutMessage({
+        finalTasks: resume?.manifest.finalTasks ?? {},
+        hasAddedTasks,
+        status: resume?.manifest.status ?? "error",
+      })
+    ) {
+      throw new ResumeError(
+        resume?.manifest.status === "blocked"
+          ? missingBlockedResumeMessage()
+          : missingResumeInputMessage(),
+      );
     }
     if (!resume?.manifest.backendSessionId) {
       throw new ResumeError(
@@ -2006,7 +2017,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume &&
     trimmedMessage.length === 0 &&
     !firstTimeTasksAppear &&
-    (addedTitles.length > 0 || hasRunnableTasks(resume?.manifest.finalTasks ?? {}));
+    canResumeWithoutMessage({
+      finalTasks: resume?.manifest.finalTasks ?? {},
+      hasAddedTasks: addedTitles.length > 0,
+      status: resume?.manifest.status ?? "error",
+    });
   const resumeNeedsStoppedRunTaskReminder =
     isResume &&
     resume !== undefined &&

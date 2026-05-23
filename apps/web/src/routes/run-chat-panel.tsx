@@ -4,6 +4,7 @@ import {
   type FormEvent,
   Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -41,6 +42,11 @@ type DownloadAttachmentHandler = (
 ) => Promise<void>;
 type OpenAttachmentPreviewHandler = (attachmentOwnerRunId: string, attachmentId: string) => void;
 type RunChatNonAssistantRow = Exclude<RunChatRow, RunChatAssistantRow>;
+type ChatScrollMetrics = {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop: number;
+};
 
 interface ArtifactActions {
   onDownloadAttachment: DownloadAttachmentHandler;
@@ -264,6 +270,9 @@ export function RunChatView({
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const resetRunIdRef = useRef(selectedRunId);
   const stickToBottomRef = useRef(true);
+  const scrollFrameRef = useRef<number | null>(null);
+  const scrollTimeoutRef = useRef<number | null>(null);
+  const scrollMetricsRef = useRef<ChatScrollMetrics | null>(null);
   const selectedRun = selectedRunQuery.data;
   const timelineHistory = timelineState.history;
   const timelineReady = timelineHistory !== null;
@@ -289,6 +298,60 @@ export function RunChatView({
   const submitLabel = queueMode ? "Queue" : "Send";
   const submitPendingLabel = queueMode ? "Queueing..." : "Sending...";
 
+  const rememberScrollMetrics = useCallback((element: HTMLElement) => {
+    scrollMetricsRef.current = {
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    };
+  }, []);
+
+  const cancelScheduledScrollToBottom = useCallback(() => {
+    if (scrollFrameRef.current !== null && typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+    if (scrollTimeoutRef.current !== null) {
+      window.clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollFrameRef.current = null;
+    scrollTimeoutRef.current = null;
+  }, []);
+
+  const applyScrollToBottom = useCallback(
+    (element: HTMLElement, options: { force?: boolean } = {}) => {
+      if (listRef.current !== element) {
+        return;
+      }
+      if (!options.force && !stickToBottomRef.current) {
+        return;
+      }
+      scrollElementToBottom(element);
+      rememberScrollMetrics(element);
+      stickToBottomRef.current = true;
+      setShowScrollToTop(!isScrolledToTop(element));
+      setShowScrollToBottom(false);
+    },
+    [rememberScrollMetrics],
+  );
+
+  const scheduleScrollToBottom = useCallback(
+    (element: HTMLElement, options: { forceImmediate?: boolean } = {}) => {
+      cancelScheduledScrollToBottom();
+      applyScrollToBottom(element, { force: options.forceImmediate });
+      if (typeof window.requestAnimationFrame === "function") {
+        scrollFrameRef.current = window.requestAnimationFrame(() => {
+          scrollFrameRef.current = null;
+          applyScrollToBottom(element);
+        });
+      }
+      scrollTimeoutRef.current = window.setTimeout(() => {
+        scrollTimeoutRef.current = null;
+        applyScrollToBottom(element);
+      }, 50);
+    },
+    [applyScrollToBottom, cancelScheduledScrollToBottom],
+  );
+
   useEffect(() => {
     if (resetRunIdRef.current === selectedRunId) {
       return;
@@ -297,12 +360,22 @@ export function RunChatView({
     setDraft("");
     setChatError(undefined);
     stickToBottomRef.current = true;
+    scrollMetricsRef.current = null;
+    cancelScheduledScrollToBottom();
     setShowScrollToTop(false);
     setShowScrollToBottom(false);
-  }, [selectedRunId]);
+  }, [cancelScheduledScrollToBottom, selectedRunId]);
+
+  useEffect(() => {
+    return () => {
+      cancelScheduledScrollToBottom();
+    };
+  }, [cancelScheduledScrollToBottom]);
 
   useEffect(() => {
     if (rows.length === 0) {
+      cancelScheduledScrollToBottom();
+      scrollMetricsRef.current = null;
       setShowScrollToTop(false);
       setShowScrollToBottom(false);
       return;
@@ -312,22 +385,37 @@ export function RunChatView({
       return;
     }
     if (stickToBottomRef.current) {
-      scrollElementToBottom(element);
-      setShowScrollToTop(!isScrolledToTop(element));
-      setShowScrollToBottom(false);
+      scheduleScrollToBottom(element);
       return;
     }
+    rememberScrollMetrics(element);
     setShowScrollToTop(!isScrolledToTop(element));
     setShowScrollToBottom(!isScrolledToBottom(element));
-  }, [rows]);
+  }, [cancelScheduledScrollToBottom, rememberScrollMetrics, rows, scheduleScrollToBottom]);
 
   function handleMessageListScroll() {
     const element = listRef.current;
     if (!element) {
       return;
     }
+    const previousMetrics = scrollMetricsRef.current;
     const atBottom = isScrolledToBottom(element);
+    const grewWhilePinned =
+      stickToBottomRef.current === true &&
+      previousMetrics !== null &&
+      element.clientHeight === previousMetrics.clientHeight &&
+      element.scrollHeight > previousMetrics.scrollHeight &&
+      element.scrollTop >= previousMetrics.scrollTop &&
+      !atBottom;
+    if (grewWhilePinned) {
+      scheduleScrollToBottom(element);
+      return;
+    }
+    if (!atBottom) {
+      cancelScheduledScrollToBottom();
+    }
     stickToBottomRef.current = atBottom;
+    rememberScrollMetrics(element);
     setShowScrollToTop(!isScrolledToTop(element));
     setShowScrollToBottom(!atBottom);
   }
@@ -337,8 +425,10 @@ export function RunChatView({
     if (!element) {
       return;
     }
+    cancelScheduledScrollToBottom();
     scrollElementToTop(element);
     stickToBottomRef.current = isScrolledToBottom(element);
+    rememberScrollMetrics(element);
     setShowScrollToTop(false);
     setShowScrollToBottom(!stickToBottomRef.current);
   }
@@ -348,10 +438,7 @@ export function RunChatView({
     if (!element) {
       return;
     }
-    scrollElementToBottom(element);
-    stickToBottomRef.current = true;
-    setShowScrollToTop(!isScrolledToTop(element));
-    setShowScrollToBottom(false);
+    scheduleScrollToBottom(element, { forceImmediate: true });
   }
 
   async function submitDraft() {

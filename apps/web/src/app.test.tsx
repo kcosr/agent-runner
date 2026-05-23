@@ -5096,6 +5096,151 @@ describe("web app", () => {
     expect(scrollBottomButton).toHaveAttribute("aria-hidden", "false");
   });
 
+  it("keeps selected-run Chat pinned while live transcript output grows", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              prompt: "Prompt",
+              transcript: "Streaming answer",
+              notices: "",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+              provenance: { kind: "task_runner" },
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
+    const list = chat.querySelector(".chat-message-list");
+    if (!(list instanceof HTMLElement)) {
+      throw new Error("expected chat message list");
+    }
+
+    defineElementMetric(list, "clientHeight", 120);
+    defineElementMetric(list, "scrollHeight", 300);
+    defineElementMetric(list, "scrollTop", 180);
+    fireEvent.scroll(list);
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "agent_message_delta",
+        text: " live",
+      },
+    });
+    defineElementMetric(list, "scrollHeight", 360);
+    fireEvent.scroll(list);
+
+    expect(await within(chat).findByText("Streaming answer live")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(list.scrollTop).toBe(240);
+    });
+
+    defineElementMetric(list, "scrollTop", 80);
+    fireEvent.scroll(list);
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "agent_message_delta",
+        text: " detached",
+      },
+    });
+    defineElementMetric(list, "scrollHeight", 420);
+    fireEvent.scroll(list);
+
+    expect(await within(chat).findByText("Streaming answer live detached")).toBeInTheDocument();
+    expect(list.scrollTop).toBe(80);
+  });
+
+  it("does not re-pin selected-run Chat after the user scrolls away before deferred scrolls", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              prompt: "Prompt",
+              transcript: "Streaming answer",
+              notices: "",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+              provenance: { kind: "task_runner" },
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
+    const list = chat.querySelector(".chat-message-list");
+    if (!(list instanceof HTMLElement)) {
+      throw new Error("expected chat message list");
+    }
+
+    defineElementMetric(list, "clientHeight", 120);
+    defineElementMetric(list, "scrollHeight", 300);
+    defineElementMetric(list, "scrollTop", 180);
+    fireEvent.scroll(list);
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "agent_message_delta",
+        text: " live",
+      },
+    });
+    defineElementMetric(list, "scrollHeight", 360);
+    fireEvent.scroll(list);
+    defineElementMetric(list, "scrollTop", 80);
+    fireEvent.scroll(list);
+
+    expect(await within(chat).findByText("Streaming answer live")).toBeInTheDocument();
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+    expect(list.scrollTop).toBe(80);
+  });
+
   it("reloads selected-run Chat when backend sync invalidates a completed timeline", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     const timelineHistory: RunTimelineHistory = {
@@ -14823,7 +14968,7 @@ describe("web app", () => {
     });
   });
 
-  it("treats blocked tasks as incomplete for the resume dialog flow", async () => {
+  it("requires a follow-up message when resuming a blocked run", async () => {
     installFetchMock({
       runs: [makeRun({ runId: "blocked-run", assignmentName: "Blocked run", status: "blocked" })],
       details: {
@@ -14868,9 +15013,12 @@ describe("web app", () => {
     await user.click(await screen.findByRole("button", { name: "Resume" }));
 
     const sendButton = await screen.findByRole("button", { name: "Send" });
-    const disclosureButton = screen.getByRole("button", { name: "Optional message" });
-    expect(disclosureButton).toHaveAttribute("aria-expanded", "false");
-    expect(sendButton).toBeEnabled();
+    expect(sendButton).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Optional message" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Send a follow-up message describing what the run should do next."),
+    ).toBeInTheDocument();
   });
 
   it("updates the selected run action label and flow from detail SSE state changes", async () => {

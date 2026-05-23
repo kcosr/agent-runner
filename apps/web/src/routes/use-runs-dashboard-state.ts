@@ -140,6 +140,14 @@ function useSettledDetailRunId(selectedRunId?: string) {
   };
 }
 
+function runHasRunnableTasks(run: RunDetail): boolean {
+  return run.tasks.some((task) => task.status === "pending" || task.status === "in_progress");
+}
+
+function runResumeRequiresMessage(run: RunDetail): boolean {
+  return run.status === "blocked" || !runHasRunnableTasks(run);
+}
+
 function matchesSearch(run: RunSummary, search: string): boolean {
   if (!search) {
     return true;
@@ -1154,10 +1162,9 @@ export function useRunsDashboardState() {
     selectedRunDetail === undefined ? null : getRunPrimaryAction(selectedRunDetail);
   const selectedRunPrimaryActionAvailable =
     selectedRunPrimaryAction !== null && actionPending === undefined;
-  const selectedRunHasIncompleteTasks =
-    selectedRunDetail?.tasks.some((task) => task.status !== "completed") ?? true;
   const selectedRunResumeRequiresMessage =
-    selectedRunPrimaryAction === "resume" && !selectedRunHasIncompleteTasks;
+    selectedRunPrimaryAction === "resume" &&
+    (selectedRunDetail === undefined || runResumeRequiresMessage(selectedRunDetail));
   const trimmedResumeMessage = resumeMessageDraft.trim();
 
   function resetResumeDialogState() {
@@ -1255,18 +1262,11 @@ export function useRunsDashboardState() {
     return runDetail;
   }
 
-  const runHasIncompleteTasks = useCallback((run: RunDetail) => {
-    return run.tasks.some((task) => task.status !== "completed");
+  const openLoadedResumeDialog = useCallback((run: RunDetail) => {
+    setResumeMessageDraft("");
+    setResumeMessageExpanded(runResumeRequiresMessage(run));
+    setResumeDialogOpen(true);
   }, []);
-
-  const openLoadedResumeDialog = useCallback(
-    (run: RunDetail) => {
-      setResumeMessageDraft("");
-      setResumeMessageExpanded(!runHasIncompleteTasks(run));
-      setResumeDialogOpen(true);
-    },
-    [runHasIncompleteTasks],
-  );
 
   function openResumeDialogForRun(run: RunDetail) {
     if (selectedRunId !== run.runId) {

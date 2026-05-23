@@ -67,6 +67,12 @@
 
 ### Fixed
 
+- Fixed selected-run Chat so live agent output stays pinned to the bottom while
+  streaming, unless the user has scrolled away from the latest message.
+  ([#164](https://github.com/kcosr/agent-runner/pull/164))
+- Fixed blocked-run resumes so they require an explicit follow-up message and
+  do not inject automatic task-list reminder prompts into that message.
+  ([#164](https://github.com/kcosr/agent-runner/pull/164))
 - Fixed daemon startup recovery so a second daemon process does not finalize a
   live `running` run owned by another still-alive daemon process, and records
   skipped live-owner decisions in the run audit history.
