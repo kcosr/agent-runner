@@ -2928,6 +2928,20 @@ export async function serveDaemon(
     return null;
   };
 
+  const resolveParentCompletionSessionIndex = (
+    childRunId: string,
+    eventSessionIndex: number | null,
+  ): number => {
+    if (eventSessionIndex !== null) {
+      return eventSessionIndex;
+    }
+    const latestSession = resolveManifestTarget(childRunId).manifest.sessions.at(-1);
+    if (!latestSession) {
+      throw new Error(`run ${childRunId} started without an identifiable session`);
+    }
+    return latestSession.sessionIndex;
+  };
+
   const deliverPendingParentCompletionNotification = async (
     childRunId: string,
     notificationId: string,
@@ -3452,7 +3466,6 @@ export async function serveDaemon(
         if (
           resolvedRunId &&
           event.type === "run_started" &&
-          event.sessionIndex !== null &&
           parentCompletionNotification &&
           !parentCompletionNotificationCreated
         ) {
@@ -3460,7 +3473,7 @@ export async function serveDaemon(
             {
               target: resolvedRunId,
               parentRunId: parentCompletionNotification.parentRunId,
-              sessionIndex: event.sessionIndex,
+              sessionIndex: resolveParentCompletionSessionIndex(resolvedRunId, event.sessionIndex),
               source: parentCompletionNotification.source,
             },
             mutationAuditContext,

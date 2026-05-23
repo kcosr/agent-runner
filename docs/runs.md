@@ -191,15 +191,20 @@ new run id. `--no-inherit-run-group` is mutually exclusive with
 `--group-id` and skips both ambient and parent group inheritance, so the
 new run's own id becomes its group id.
 
+Manifest schema v25 adds detached parent-completion notification state and
+session/queued-message source metadata. Existing v24 manifests must be
+migrated explicitly with `node scripts/migrate-manifests-v25.mjs --write`;
+older manifests are not upgraded by readers.
+
 Detached child runs started through a daemon also preserve parent callback
 lineage. Unless `--no-notify-parent-on-complete` is set, the child
 manifest stores a pending `parentCompletionNotifications[]` record after
 the child session is allocated. When that session reaches terminal state,
 daemon delivery either queues a sourced resume message on an active parent
 or starts a sourced resume session on an idle resumable parent. Reset
-restores `parentCompletionNotifications` to the frozen reset seed, and
-recurring clones start without stale delivery records from the completed
-source run.
+clears `parentCompletionNotifications`, since notifications are tied to
+specific sessions that no longer exist after reset. Recurring clones start
+without stale delivery records from the completed source run.
 
 ### Init, then execute later
 

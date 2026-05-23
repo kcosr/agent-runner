@@ -1195,7 +1195,17 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
 test("daemon RPC and HTTP queued resume message endpoints publish shared DTOs", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
-  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  writeAssignment(
+    dir,
+    "daemon-work",
+    `---
+schemaVersion: 1
+name: daemon-work
+maxRetries: 0
+---
+Zero-task daemon work.
+`,
+  );
   const run = await initRun(dir);
 
   const port = await freePort();
@@ -4498,6 +4508,139 @@ test("daemon parent completion delivery queues active parents once with compact 
       releaseParent?.();
       await client.close();
       await server.close();
+    }
+  });
+});
+
+test("daemon parent completion notification is created through the real fresh run path", async () => {
+  const dir = tempDir();
+  writeBackend(
+    dir,
+    "parent-child-test",
+    `export default {
+      id: "parent-child-test",
+      async invoke(ctx) {
+        const state = globalThis.__parentCompletionFreshRunState;
+        if (!state) {
+          throw new Error("missing fresh-run parent completion state");
+        }
+        const invocationIndex = state.prompts.length;
+        state.prompts.push(ctx.prompt);
+        if (invocationIndex === 0) {
+          await state.releaseParentPromise;
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            sessionId: "parent-session",
+            transcript: "parent done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        }
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          aborted: false,
+          sessionId: "child-session",
+          transcript: "real child transcript",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    };`,
+  );
+  writeAgent(
+    dir,
+    "parent-agent",
+    `---
+schemaVersion: 1
+name: parent-agent
+backend: parent-child-test
+---
+Parent agent.
+`,
+  );
+  writeAgent(
+    dir,
+    "child-agent",
+    `---
+schemaVersion: 1
+name: child-agent
+backend: parent-child-test
+---
+Child agent.
+`,
+  );
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let releaseParent;
+  globalThis.__parentCompletionFreshRunState = {
+    prompts: [],
+    releaseParentPromise: new Promise((resolve) => {
+      releaseParent = resolve;
+    }),
+  };
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const parent = await client.call("runs.start", {
+        agent: "parent-agent",
+        assignment: "daemon-work",
+        definitionCwd: dir,
+        callerCwd: dir,
+        cliVars: {},
+        overrides: {},
+      });
+      await waitForValue(
+        () =>
+          globalThis.__parentCompletionFreshRunState.prompts.some((prompt) =>
+            prompt.includes("Parent agent"),
+          )
+            ? true
+            : null,
+        "parent backend to start",
+      );
+
+      const child = await client.call("runs.start", {
+        agent: "child-agent",
+        assignment: "daemon-work",
+        definitionCwd: dir,
+        callerCwd: dir,
+        parentRunId: parent.runId,
+        parentCompletionNotification: {
+          source: "detached_invocation",
+          parentRunId: parent.runId,
+        },
+        cliVars: {},
+        overrides: {},
+      });
+
+      const childDetail = await waitForValue(async () => {
+        const detail = await httpJson(httpBaseUrl, `/api/runs/${child.runId}`);
+        assert.equal(detail.status, 200);
+        return detail.body.run;
+      }, "fresh child run detail");
+      const notification = await waitForValue(() => {
+        const record = readManifest(childDetail.workspaceDir).parentCompletionNotifications[0];
+        return record ?? null;
+      }, "fresh child notification to persist");
+      assert.ok(notification);
+      assert.equal(notification.sessionIndex, 0);
+      assert.equal(notification.parentRunId, parent.runId);
+      assert.ok(["pending", "delivered_queued"].includes(notification.status));
+    } finally {
+      releaseParent?.();
+      await client.close();
+      await server.close();
+      globalThis.__parentCompletionFreshRunState = undefined;
     }
   });
 });

@@ -2746,7 +2746,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     assignmentSourcePath: loadedAssignment?.sourcePath ?? null,
     name,
     cwd,
-    sessionIndex: isResume ? sessionIndex : null,
+    sessionIndex,
   });
 
   // Caller-instructions banner on fresh runs only. Resume and

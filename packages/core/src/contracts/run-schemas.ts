@@ -340,6 +340,7 @@ const runSessionSummarySchema: z.ZodType<RunSessionSummary> = z.object({
   maxAttemptsPerSession: z.number(),
   backendSessionIdAtStart: z.string().nullable(),
   backendSessionIdAtEnd: z.string().nullable(),
+  resumeSource: parentCompletionResumeSourceSchema,
 });
 
 export const attachmentListEntrySchema: z.ZodType<AttachmentListEntry> =

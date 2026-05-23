@@ -9,6 +9,7 @@ import {
   resolveDependents,
 } from "../core/run/dependencies.js";
 import type {
+  ParentCompletionResumeSource,
   QueuedResumeMessage,
   RunDependencyRef,
   RunExecution,
@@ -52,6 +53,7 @@ export interface RunSessionSummary {
   maxAttemptsPerSession: number;
   backendSessionIdAtStart: string | null;
   backendSessionIdAtEnd: string | null;
+  resumeSource: ParentCompletionResumeSource | null;
 }
 
 export interface RunSummary {
@@ -339,6 +341,7 @@ function toRunSessionSummaries(manifest: RunManifest): RunSessionSummary[] {
       maxAttemptsPerSession: session.maxAttemptsPerSession,
       backendSessionIdAtStart: session.backendSessionIdAtStart,
       backendSessionIdAtEnd: session.backendSessionIdAtEnd,
+      resumeSource: cloneParentCompletionResumeSource(session.resumeSource),
     }));
 }
 

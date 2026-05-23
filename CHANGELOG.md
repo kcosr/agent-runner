@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Bumped run manifest schema from v24 to v25 for detached parent-completion
+  notification metadata. Existing manifests must be migrated with
+  `node scripts/migrate-manifests-v25.mjs --write`; the daemon resume wire
+  contract no longer accepts `parentRunId` on `runs.resume`.
+
 ### Added
 
 - Added `--no-inherit-run-group` for fresh `run` and `init` commands so

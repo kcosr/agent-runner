@@ -327,6 +327,7 @@ function makeRun(
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     },
     lastSession: {
       sessionIndex: 0,
@@ -341,6 +342,7 @@ function makeRun(
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     },
     tasksCompleted: 1,
     tasksTotal: 4,
@@ -474,6 +476,7 @@ function makeDetail(
         maxAttemptsPerSession: 3,
         backendSessionIdAtStart: "thread-1",
         backendSessionIdAtEnd: null,
+        resumeSource: null,
       },
     ],
     currentSession: {
@@ -489,6 +492,7 @@ function makeDetail(
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     },
     lastSession: {
       sessionIndex: 0,
@@ -503,6 +507,7 @@ function makeDetail(
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     },
     tasksCompleted: 1,
     tasksTotal: 4,
@@ -6816,6 +6821,7 @@ describe("web app", () => {
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-1",
       backendSessionIdAtEnd: "thread-1",
+      resumeSource: null,
     } satisfies RunDetail["sessions"][number];
     const runningSession = {
       sessionIndex: 1,
@@ -6830,6 +6836,7 @@ describe("web app", () => {
       maxAttemptsPerSession: 3,
       backendSessionIdAtStart: "thread-2",
       backendSessionIdAtEnd: null,
+      resumeSource: null,
     } satisfies RunDetail["sessions"][number];
     const timelineHistory: RunTimelineHistory = {
       runId: "run-1",

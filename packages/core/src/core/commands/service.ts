@@ -1118,15 +1118,8 @@ export function markParentCompletionNotificationDelivered(
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     notification = findParentCompletionNotification(resolved.manifest, input.notificationId);
-    if (notification.status === input.status) {
-      return;
-    }
     if (notification.status !== "pending") {
-      throw new ParentCompletionNotificationMutationError(
-        resolved.manifest.runId,
-        notification.id,
-        notification.status,
-      );
+      return;
     }
     notification.status = input.status;
     notification.deliveredAt = new Date().toISOString();
@@ -1165,16 +1158,13 @@ export function markParentCompletionNotificationSkipped(
 ): ParentCompletionNotificationMutationResult {
   const resolved = resolveRun(input.target);
   let notification!: ParentCompletionNotification;
+  let changed = false;
 
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     notification = findParentCompletionNotification(resolved.manifest, input.notificationId);
     if (notification.status !== "pending") {
-      throw new ParentCompletionNotificationMutationError(
-        resolved.manifest.runId,
-        notification.id,
-        notification.status,
-      );
+      return;
     }
     notification.status = "skipped";
     notification.deliveredAt = new Date().toISOString();
@@ -1194,9 +1184,10 @@ export function markParentCompletionNotificationSkipped(
         deliveryReason: notification.deliveryReason,
       }),
     );
+    changed = true;
   });
 
-  return notificationMutationResult(resolved.manifest, notification, true);
+  return notificationMutationResult(resolved.manifest, notification, changed);
 }
 
 export function markParentCompletionNotificationFailed(
@@ -1212,16 +1203,13 @@ export function markParentCompletionNotificationFailed(
 ): ParentCompletionNotificationMutationResult {
   const resolved = resolveRun(input.target);
   let notification!: ParentCompletionNotification;
+  let changed = false;
 
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     notification = findParentCompletionNotification(resolved.manifest, input.notificationId);
     if (notification.status !== "pending") {
-      throw new ParentCompletionNotificationMutationError(
-        resolved.manifest.runId,
-        notification.id,
-        notification.status,
-      );
+      return;
     }
     notification.status = "failed";
     notification.deliveredAt = new Date().toISOString();
@@ -1242,9 +1230,10 @@ export function markParentCompletionNotificationFailed(
         failureReason: notification.failureReason,
       }),
     );
+    changed = true;
   });
 
-  return notificationMutationResult(resolved.manifest, notification, true);
+  return notificationMutationResult(resolved.manifest, notification, changed);
 }
 
 export function queueResumeMessage(
@@ -1254,16 +1243,29 @@ export function queueResumeMessage(
 ): QueueResumeMessageResult {
   const resolved = resolveRun(input.target);
   const text = normalizeQueuedResumeText(input.message);
+  const source = cloneParentCompletionResumeSource(input.source ?? null);
   let queuedResumeMessage!: RunManifest["queuedResumeMessages"][number];
 
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     requireQueuedResumeMessageAppendAllowed(resolved.manifest);
+    if (source !== null) {
+      const existing = resolved.manifest.queuedResumeMessages.find(
+        (message) =>
+          message.source?.kind === source.kind &&
+          message.source.childRunId === source.childRunId &&
+          message.source.notificationId === source.notificationId,
+      );
+      if (existing) {
+        queuedResumeMessage = existing;
+        return;
+      }
+    }
     queuedResumeMessage = {
       id: nextQueuedResumeMessageId(resolved.manifest),
       text,
       createdAt: new Date().toISOString(),
-      source: cloneParentCompletionResumeSource(input.source ?? null),
+      source,
     };
     resolved.manifest.queuedResumeMessages = [
       ...resolved.manifest.queuedResumeMessages,

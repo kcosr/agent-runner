@@ -1056,6 +1056,14 @@ test("command services: readStatus and timeline history resolve bare run ids acr
     ];
     manifest.totalSessionCount = 1;
   });
+  const resumeSource = {
+    kind: "parent_completion_notification",
+    childRunId: "child-run",
+    notificationId: "pcn-session",
+  };
+  patchManifest(relocatedWorkspaceDir, (manifest) => {
+    manifest.sessions[0].resumeSource = resumeSource;
+  });
   mkdirSync(join(relocatedWorkspaceDir, "attempts"), { recursive: true });
   writeFileSync(
     join(relocatedWorkspaceDir, "attempts", "01.json"),
@@ -1079,6 +1087,8 @@ test("command services: readStatus and timeline history resolve bare run ids acr
     assert.equal(status.runId, outcome.runId);
     assert.equal(status.repo, "assistant");
     assert.equal(status.workspaceDir, relocatedWorkspaceDir);
+    assert.deepEqual(status.sessions[0]?.resumeSource, resumeSource);
+    assert.deepEqual(status.lastSession?.resumeSource, resumeSource);
     assert.equal(history.runId, outcome.runId);
     assert.equal(history.attempts.length, 1);
     assert.equal(history.attempts[0]?.transcript, "First output");
@@ -1990,19 +2000,37 @@ test("command services: queued resume messages are live-only, ordered, removable
       target: target.runId,
       message: "second follow-up",
     });
+    const source = {
+      kind: "parent_completion_notification",
+      childRunId: "child-run",
+      notificationId: "pcn-dedupe",
+    };
+    const sourced = queueResumeMessage({
+      target: target.runId,
+      message: "parent completion",
+      source,
+    });
+    const duplicateSource = queueResumeMessage({
+      target: target.runId,
+      message: "duplicate parent completion",
+      source,
+    });
 
     assert.match(first.queuedResumeMessage.id, /^qmsg/);
     assert.equal(first.queuedResumeMessage.text, "first follow-up");
     assert.equal(first.queuedResumeMessage.source, null);
     assert.equal(typeof first.queuedResumeMessage.createdAt, "string");
     assert.equal(first.run.isLive, true);
+    assert.deepEqual(sourced.queuedResumeMessage.source, source);
+    assert.equal(duplicateSource.queuedResumeMessage.id, sourced.queuedResumeMessage.id);
+    assert.equal(duplicateSource.queuedResumeMessage.text, "parent completion");
     assert.deepEqual(
-      second.run.queuedResumeMessages.map((message) => message.text),
-      ["first follow-up", "second follow-up"],
+      duplicateSource.run.queuedResumeMessages.map((message) => message.text),
+      ["first follow-up", "second follow-up", "parent completion"],
     );
     assert.deepEqual(
       readStatus(target.runId).queuedResumeMessages.map((message) => message.text),
-      ["first follow-up", "second follow-up"],
+      ["first follow-up", "second follow-up", "parent completion"],
     );
 
     assert.throws(
@@ -2026,7 +2054,7 @@ test("command services: queued resume messages are live-only, ordered, removable
     assert.equal(removed.removedMessageId, first.queuedResumeMessage.id);
     assert.deepEqual(
       removed.run.queuedResumeMessages.map((message) => message.id),
-      [second.queuedResumeMessage.id],
+      [second.queuedResumeMessage.id, sourced.queuedResumeMessage.id],
     );
 
     const newer = queueResumeMessage({
@@ -2035,9 +2063,16 @@ test("command services: queued resume messages are live-only, ordered, removable
     });
     const drained = drainQueuedResumeMessages({
       target: target.runId,
-      messageIds: [second.queuedResumeMessage.id, "already-removed"],
+      messageIds: [
+        second.queuedResumeMessage.id,
+        sourced.queuedResumeMessage.id,
+        "already-removed",
+      ],
     });
-    assert.deepEqual(drained.removedMessageIds, [second.queuedResumeMessage.id]);
+    assert.deepEqual(drained.removedMessageIds, [
+      second.queuedResumeMessage.id,
+      sourced.queuedResumeMessage.id,
+    ]);
     assert.deepEqual(
       drained.run.queuedResumeMessages.map((message) => message.id),
       [newer.queuedResumeMessage.id],
@@ -2110,20 +2145,14 @@ test("command services: parent completion notifications create and mark under lo
     assert.equal(confirmed.changed, false);
     assert.deepEqual(confirmed.notification, delivered.notification);
 
-    assert.throws(
-      () =>
-        markParentCompletionNotificationSkipped({
-          target: target.runId,
-          notificationId: created.notification.id,
-          terminalStatus: "success",
-          deliveryReason: "parent_not_resumable",
-        }),
-      (err) =>
-        err instanceof CommandError &&
-        new RegExp(
-          `parent completion notification "${created.notification.id}" in run ${target.runId} is delivered_queued, not pending`,
-        ).test(err.message),
-    );
+    const skippedAfterDelivery = markParentCompletionNotificationSkipped({
+      target: target.runId,
+      notificationId: created.notification.id,
+      terminalStatus: "success",
+      deliveryReason: "parent_not_resumable",
+    });
+    assert.equal(skippedAfterDelivery.changed, false);
+    assert.deepEqual(skippedAfterDelivery.notification, delivered.notification);
 
     const skippedSource = createParentCompletionNotification({
       target: target.runId,
