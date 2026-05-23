@@ -209,9 +209,11 @@ The drawer surfaces:
   selected run. The browser includes hidden files and directories, while search
   skips dependency and VCS directories. Small regular files can be opened for a
   text preview attempt; Markdown paths render as Markdown or source, while other
-  valid UTF-8 files render as source. Selected text/source ranges can seed the
-  shared Create Task dialog, and the dialog shows the exact task body that will
-  be submitted. The header includes a Refresh workspace files button that
+  valid UTF-8 files render as source. Simple leading Markdown front matter
+  renders as a compact metadata table, while complex front matter falls back to
+  a YAML code block. Selected text/source ranges can seed the shared Create Task
+  dialog, and the dialog shows the exact task body that will be submitted. The
+  header includes a Refresh workspace files button that
   re-fetches the active listing, search, and preview. The surface rejects daemon
   file errors such as binary files, invalid UTF-8, oversized reads, missing
   files, and unsafe paths inline instead of falling back to raw filesystem
@@ -240,8 +242,9 @@ The drawer surfaces:
   runs in the group are read-only but still support preview and download.
   In-app preview is available for `text/markdown`, `text/plain`,
   `image/png`, `image/jpeg`, `image/gif`, `image/webp`, and
-  `image/svg+xml` attachments; fenced `mermaid` blocks render inline
-  (with an inline error if a diagram fails to load). See
+  `image/svg+xml` attachments; Markdown front matter uses the same metadata
+  table or YAML fallback as file previews, and fenced `mermaid` blocks render
+  inline (with an inline error if a diagram fails to load). See
   [attachments.md](attachments.md).
 - Dependencies tab: upstream and downstream run and group dependency
   details (`RunDependencyDetail` / `RunDependentDetail`).

@@ -40,6 +40,9 @@
 
 ### Changed
 
+- Markdown document previews now render simple leading front matter as a compact
+  metadata table, falling back to a YAML code block for nested or complex
+  front matter. ([#166](https://github.com/kcosr/agent-runner/pull/166))
 - Daemon instance ids now include the daemon process pid, for example
   `daemon-12345-abc123`, while retaining a random suffix for diagnostics.
   ([#161](https://github.com/kcosr/agent-runner/pull/161))
@@ -82,6 +85,12 @@
 
 ### Fixed
 
+- Fixed ready-run resumes in the dashboard so the follow-up message is
+  optional when the system can resume without user-provided text.
+  ([#166](https://github.com/kcosr/agent-runner/pull/166))
+- Fixed dashboard diff viewer source text so its monospace font size matches
+  the other source preview surfaces.
+  ([#166](https://github.com/kcosr/agent-runner/pull/166))
 - Fixed selected-run Chat so live agent output stays pinned to the bottom while
   streaming, unless the user has scrolled away from the latest message.
   ([#164](https://github.com/kcosr/agent-runner/pull/164))

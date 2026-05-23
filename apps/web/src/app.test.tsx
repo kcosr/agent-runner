@@ -14913,6 +14913,173 @@ describe("web app", () => {
     });
   });
 
+  it("starts never-run ready runs without a message", async () => {
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "ready-resume",
+            assignmentName: "Ready resume",
+            status: "ready",
+          }),
+        ],
+        details: {
+          "ready-resume": makeDetail({
+            runId: "ready-resume",
+            status: "ready",
+            assignment: {
+              name: "Ready resume",
+              sourcePath: "/tmp/ready.md",
+            },
+            tasks: [
+              {
+                id: "done",
+                title: "Done",
+                body: "Completed setup",
+                status: "completed",
+                notes: "done",
+              },
+            ],
+            tasksCompleted: 1,
+            tasksTotal: 1,
+            backendSessionId: null,
+            currentSession: null,
+            lastSession: null,
+            sessions: [],
+            totalAttemptCount: 0,
+            totalSessionCount: 0,
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: async (url, init) => {
+          if (url.endsWith("/api/runs/ready-resume/resume")) {
+            resumeBody =
+              typeof init?.body === "string"
+                ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+                : undefined;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Ready resume"));
+    await user.click(await screen.findByRole("button", { name: "Start" }));
+
+    await waitFor(() => {
+      expect(resumeBody).toEqual({ overrides: {} });
+    });
+  });
+
+  it("requires a resume message for ready runs with prior sessions and no runnable tasks", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "ready-retry",
+          assignmentName: "Ready retry",
+          status: "ready",
+        }),
+      ],
+      details: {
+        "ready-retry": makeDetail({
+          runId: "ready-retry",
+          status: "ready",
+          assignment: {
+            name: "Ready retry",
+            sourcePath: "/tmp/ready.md",
+          },
+          currentSession: null,
+          lastSession: {
+            sessionIndex: 0,
+            status: "success",
+            startedAt: "2026-04-13T05:00:00.000Z",
+            endedAt: "2026-04-13T05:01:00.000Z",
+            exitCode: 0,
+            message: null,
+            firstAttemptNumber: 1,
+            lastAttemptNumber: 1,
+            attemptCount: 1,
+            maxAttemptsPerSession: 3,
+            backendSessionIdAtStart: "thread-1",
+            backendSessionIdAtEnd: "thread-1",
+            resumeSource: null,
+          },
+          sessions: [
+            {
+              sessionIndex: 0,
+              status: "success",
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:01:00.000Z",
+              exitCode: 0,
+              message: null,
+              firstAttemptNumber: 1,
+              lastAttemptNumber: 1,
+              attemptCount: 1,
+              maxAttemptsPerSession: 3,
+              backendSessionIdAtStart: "thread-1",
+              backendSessionIdAtEnd: "thread-1",
+              resumeSource: null,
+            },
+          ],
+          tasks: [
+            {
+              id: "done",
+              title: "Done",
+              body: "Completed setup",
+              status: "completed",
+              notes: "done",
+            },
+          ],
+          tasksCompleted: 1,
+          tasksTotal: 1,
+          totalAttemptCount: 1,
+          totalSessionCount: 1,
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: true,
+            taskMutation: {
+              canAdd: false,
+              canEditPending: false,
+              canDeletePending: false,
+              canEditNotes: false,
+              canSetStatus: false,
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Ready retry"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    const sendButton = await screen.findByRole("button", { name: "Send" });
+    expect(screen.queryByRole("button", { name: "Optional message" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message" })).toBeInTheDocument();
+    expect(sendButton).toBeDisabled();
+    expect(
+      screen.getByText("Send a follow-up message describing what the run should do next."),
+    ).toBeInTheDocument();
+  });
+
   it("sends an optional resume message when the disclosure is expanded", async () => {
     let resumeBody: { overrides?: { message?: string } } | undefined;
     installFetchMock(
@@ -16430,12 +16597,11 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
-    const frontmatterCode = screen.getByText((_, element) => {
-      return (
-        element?.tagName === "CODE" && element.textContent === "title: Notes\nsource: attachment\n"
-      );
-    });
-    expect(frontmatterCode.closest("pre")).not.toBeNull();
+    const frontmatterTable = screen.getByLabelText("Front matter");
+    expect(frontmatterTable).toHaveTextContent("title");
+    expect(frontmatterTable).toHaveTextContent("Notes");
+    expect(frontmatterTable).toHaveTextContent("source");
+    expect(frontmatterTable).toHaveTextContent("attachment");
     expect(await screen.findByLabelText("Mermaid diagram")).toBeInTheDocument();
     expect(renderMermaid).toHaveBeenCalledWith(
       expect.stringMatching(/^mermaid-/),

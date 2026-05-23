@@ -10,6 +10,7 @@ import type {
   RunSummary,
 } from "@kcosr/agent-runner-core/contracts/runs.js";
 import { deriveDependencyStateFromDetails } from "@kcosr/agent-runner-core/core/run/dependencies.js";
+import { canResumeWithoutMessage } from "@kcosr/agent-runner-core/core/run/resume-policy.js";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -140,12 +141,15 @@ function useSettledDetailRunId(selectedRunId?: string) {
   };
 }
 
-function runHasRunnableTasks(run: RunDetail): boolean {
-  return run.tasks.some((task) => task.status === "pending" || task.status === "in_progress");
-}
-
 function runResumeRequiresMessage(run: RunDetail): boolean {
-  return run.status === "blocked" || !runHasRunnableTasks(run);
+  if (run.status === "ready" && run.sessions.length === 0) {
+    return false;
+  }
+  return !canResumeWithoutMessage({
+    finalTasks: Object.fromEntries(run.tasks.map((task) => [task.id, task])),
+    hasAddedTasks: false,
+    status: run.status,
+  });
 }
 
 function matchesSearch(run: RunSummary, search: string): boolean {

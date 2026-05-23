@@ -21,6 +21,7 @@ import {
 } from "@pierre/trees/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  type CSSProperties,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -70,6 +71,16 @@ interface RunDiffsSurfaceProps {
 const DEFAULT_BASE_REF = "main";
 const DEFAULT_HEAD_REF = "HEAD";
 const DEFAULT_RANGE = `${DEFAULT_BASE_REF}...${DEFAULT_HEAD_REF}`;
+const DIFF_CODE_FONT_SIZE = 12;
+const DIFF_CODE_GAP_BLOCK = 4;
+const DIFF_CODE_LINE_HEIGHT = 19.2;
+const DIFF_FILE_HEADER_HEIGHT = 32;
+const DIFF_CODE_VIEW_STYLE = {
+  "--diffs-font-family": "var(--mono)",
+  "--diffs-font-size": `${DIFF_CODE_FONT_SIZE}px`,
+  "--diffs-gap-block": `${DIFF_CODE_GAP_BLOCK}px`,
+  "--diffs-line-height": `${DIFF_CODE_LINE_HEIGHT}px`,
+} as CSSProperties;
 
 interface ParsedRangeInput {
   display: string;
@@ -1009,12 +1020,17 @@ export function RunDiffsSurface({
                   diffStyle: viewMode,
                   enableLineSelection: true,
                   hunkSeparators: "line-info-basic",
+                  itemMetrics: {
+                    diffHeaderHeight: DIFF_FILE_HEADER_HEIGHT,
+                    lineHeight: DIFF_CODE_LINE_HEIGHT,
+                  },
                   overflow: wordWrap ? "wrap" : "scroll",
                   stickyHeaders: true,
                   theme: { dark: "pierre-dark", light: "pierre-light" },
                   themeType,
                 }}
                 ref={codeViewRef}
+                style={DIFF_CODE_VIEW_STYLE}
                 renderHeaderPrefix={(item) => {
                   if (item.type !== "diff") {
                     return null;

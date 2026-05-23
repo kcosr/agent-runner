@@ -228,7 +228,7 @@ export function AttachmentPreviewPanel({
           aria-label="Attachment preview content"
           className="drawer-panel-card attachment-preview-content"
         >
-          <MarkdownContent renderFrontmatterAsCodeBlock text={textPreview?.text ?? ""} />
+          <MarkdownContent frontmatterMode="metadata-table" text={textPreview?.text ?? ""} />
         </div>
       );
     }

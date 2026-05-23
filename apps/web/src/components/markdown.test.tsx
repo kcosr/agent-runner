@@ -85,20 +85,67 @@ describe("MarkdownContent", () => {
     expect(wrapper?.firstElementChild).toBe(table);
   });
 
-  it("renders leading frontmatter as a fenced YAML code block when requested", () => {
+  it("renders simple leading front matter as a metadata table when requested", () => {
+    render(
+      <MarkdownContent
+        frontmatterMode="metadata-table"
+        text={"---\ntitle: Notes\nsource: attachment\n---\n# Body"}
+      />,
+    );
+
+    const frontmatterTable = screen.getByLabelText("Front matter");
+
+    expect(frontmatterTable).toHaveTextContent("title");
+    expect(frontmatterTable).toHaveTextContent("Notes");
+    expect(frontmatterTable).toHaveTextContent("source");
+    expect(frontmatterTable).toHaveTextContent("attachment");
+    expect(screen.getByRole("heading", { name: "Body" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "title: Notes" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to a fenced YAML code block for nested front matter", () => {
     const { container } = render(
       <MarkdownContent
-        renderFrontmatterAsCodeBlock
-        text={"---\ntitle: Notes\nsource: attachment\n---\n# Body"}
+        frontmatterMode="metadata-table"
+        text={"---\ntitle: Notes\ntags:\n  - attachment\n---\n# Body"}
       />,
     );
 
     const frontmatterCode = container.querySelector("pre code");
 
     expect(frontmatterCode).not.toBeNull();
-    expect(frontmatterCode?.textContent).toBe("title: Notes\nsource: attachment\n");
+    expect(frontmatterCode?.textContent).toBe("title: Notes\ntags:\n  - attachment\n");
+    expect(screen.queryByLabelText("Front matter")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Body" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "title: Notes" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to a fenced YAML code block for multiline scalar front matter", () => {
+    const { container } = render(
+      <MarkdownContent
+        frontmatterMode="metadata-table"
+        text={"---\ntitle: Notes\ndescription: |\n  line one\n  line two\n---\n# Body"}
+      />,
+    );
+
+    expect(container.querySelector("pre code")?.textContent).toBe(
+      "title: Notes\ndescription: |\n  line one\n  line two\n",
+    );
+    expect(screen.queryByLabelText("Front matter")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Body" })).toBeInTheDocument();
+  });
+
+  it("falls back to a fenced YAML code block for oversized front matter", () => {
+    const oversizedValue = "a".repeat(17_000);
+    const { container } = render(
+      <MarkdownContent
+        frontmatterMode="metadata-table"
+        text={`---\ntitle: ${oversizedValue}\n---\n# Body`}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Front matter")).not.toBeInTheDocument();
+    expect(container.querySelector("pre code")?.textContent).toContain(`title: ${oversizedValue}`);
+    expect(screen.getByRole("heading", { name: "Body" })).toBeInTheDocument();
   });
 
   it("copies non-Mermaid fenced code blocks", async () => {
@@ -181,7 +228,7 @@ describe("MarkdownContent", () => {
 
     render(
       <MarkdownContent
-        renderFrontmatterAsCodeBlock
+        frontmatterMode="code-block"
         text={"---\ntitle: Notes\nsource: attachment\n---\n# Body"}
       />,
     );

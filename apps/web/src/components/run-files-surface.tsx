@@ -735,7 +735,7 @@ export function RunFilesSurface({
                   onTouchEnd={captureRenderedSelection}
                   ref={previewRef}
                 >
-                  <MarkdownContent text={selectedFile.text} />
+                  <MarkdownContent frontmatterMode="metadata-table" text={selectedFile.text} />
                 </div>
               ) : (
                 <div
