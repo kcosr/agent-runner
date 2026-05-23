@@ -145,7 +145,7 @@ function runHasRunnableTasks(run: RunDetail): boolean {
 }
 
 function runResumeRequiresMessage(run: RunDetail): boolean {
-  return run.status === "blocked" || !runHasRunnableTasks(run);
+  return run.status === "blocked" || (run.status !== "ready" && !runHasRunnableTasks(run));
 }
 
 function matchesSearch(run: RunSummary, search: string): boolean {

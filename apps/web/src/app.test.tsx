@@ -14913,6 +14913,84 @@ describe("web app", () => {
     });
   });
 
+  it("shows an optional-message disclosure for ready resumes and can send without a message", async () => {
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "ready-resume",
+            assignmentName: "Ready resume",
+            status: "ready",
+          }),
+        ],
+        details: {
+          "ready-resume": makeDetail({
+            runId: "ready-resume",
+            status: "ready",
+            assignment: {
+              name: "Ready resume",
+              sourcePath: "/tmp/ready.md",
+            },
+            tasks: [
+              {
+                id: "done",
+                title: "Done",
+                body: "Completed setup",
+                status: "completed",
+                notes: "done",
+              },
+            ],
+            tasksCompleted: 1,
+            tasksTotal: 1,
+            totalAttemptCount: 1,
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditPending: false,
+                canDeletePending: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: async (url, init) => {
+          if (url.endsWith("/api/runs/ready-resume/resume")) {
+            resumeBody =
+              typeof init?.body === "string"
+                ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+                : undefined;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Ready resume"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    const sendButton = await screen.findByRole("button", { name: "Send" });
+    expect(screen.getByRole("button", { name: "Optional message" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(sendButton).toBeEnabled();
+
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(resumeBody).toEqual({ overrides: {} });
+    });
+  });
+
   it("sends an optional resume message when the disclosure is expanded", async () => {
     let resumeBody: { overrides?: { message?: string } } | undefined;
     installFetchMock(

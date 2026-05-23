@@ -82,6 +82,10 @@
 
 ### Fixed
 
+- Fixed ready-run resumes in the dashboard so the follow-up message is
+  optional when the system can resume without user-provided text.
+- Fixed dashboard diff viewer source text so its monospace font size matches
+  the other source preview surfaces.
 - Fixed selected-run Chat so live agent output stays pinned to the bottom while
   streaming, unless the user has scrolled away from the latest message.
   ([#164](https://github.com/kcosr/agent-runner/pull/164))
