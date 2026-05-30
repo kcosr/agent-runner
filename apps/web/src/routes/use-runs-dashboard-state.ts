@@ -47,6 +47,7 @@ import {
   useDashboardViewState,
 } from "../lib/settings.js";
 import { subscribeToRunDetailEvents } from "../lib/sse.js";
+import { useLazyRef } from "../lib/use-lazy-ref.js";
 
 export type DashboardNoticeTone = "warning" | "error" | "success";
 
@@ -433,7 +434,8 @@ export function useRunsDashboardState() {
     audit: false,
     timeline: false,
   });
-  const noticeTimersRef = useRef(new Map<string, number>());
+  const noticeTimersRef = useLazyRef(() => new Map<string, number>());
+  const noticeTimers = noticeTimersRef.current;
   const detailStreamStaleRef = useRef(detailStreamStale);
   const runGroupFilter = preferences.structuredFilters.runGroupId;
   const includeArchived = preferences.showArchived;
@@ -636,34 +638,34 @@ export function useRunsDashboardState() {
 
   useEffect(() => {
     for (const notice of notices) {
-      if (!notice.autoDismissMs || noticeTimersRef.current.has(notice.id)) {
+      if (!notice.autoDismissMs || noticeTimers.has(notice.id)) {
         continue;
       }
 
       const timeoutId = window.setTimeout(() => {
-        noticeTimersRef.current.delete(notice.id);
+        noticeTimers.delete(notice.id);
         setNotices((current) => current.filter((entry) => entry.id !== notice.id));
       }, notice.autoDismissMs);
-      noticeTimersRef.current.set(notice.id, timeoutId);
+      noticeTimers.set(notice.id, timeoutId);
     }
 
-    for (const [id, timeoutId] of noticeTimersRef.current) {
+    for (const [id, timeoutId] of noticeTimers) {
       if (notices.some((notice) => notice.id === id)) {
         continue;
       }
       window.clearTimeout(timeoutId);
-      noticeTimersRef.current.delete(id);
+      noticeTimers.delete(id);
     }
-  }, [notices]);
+  }, [noticeTimers, notices]);
 
   useEffect(
     () => () => {
-      for (const timeoutId of noticeTimersRef.current.values()) {
+      for (const timeoutId of noticeTimers.values()) {
         window.clearTimeout(timeoutId);
       }
-      noticeTimersRef.current.clear();
+      noticeTimers.clear();
     },
-    [],
+    [noticeTimers],
   );
 
   useEffect(() => {
@@ -1379,10 +1381,10 @@ export function useRunsDashboardState() {
       );
     },
     dismissNotice: (id: string) => {
-      const timeoutId = noticeTimersRef.current.get(id);
+      const timeoutId = noticeTimers.get(id);
       if (timeoutId !== undefined) {
         window.clearTimeout(timeoutId);
-        noticeTimersRef.current.delete(id);
+        noticeTimers.delete(id);
       }
       setNotices((current) => current.filter((notice) => notice.id !== id));
     },

@@ -237,7 +237,7 @@ function MermaidDiagram({ code }: { code: string }) {
         aria-label="Mermaid diagram loading"
         className="markdown-mermaid markdown-mermaid--loading"
       >
-        Rendering Mermaid diagram...
+        Rendering Mermaid diagram…
       </div>
     );
   }
@@ -371,8 +371,13 @@ function FrontmatterTable({ rows }: { rows: FrontmatterTableRow[] }) {
 }
 
 const components: Components = {
-  a({ node: _node, href, ...props }) {
-    return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
+  a({ children, node: _node, href, ...props }) {
+    const ariaLabel = props["aria-label"] ?? (children ? undefined : (href ?? "Open link"));
+    return (
+      <a {...props} aria-label={ariaLabel} href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
   },
   pre({ node: _node, children, ...props }) {
     const mermaidCode = readMermaidBlock(children);

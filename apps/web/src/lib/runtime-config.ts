@@ -3,7 +3,7 @@ import {
   appRuntimeConfigSchema,
   webPathPrefix,
 } from "@kcosr/agent-runner-core/contracts/app-config.js";
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 
 declare global {
   interface Window {
@@ -62,7 +62,7 @@ export async function loadRuntimeConfig(
 export const RuntimeConfigContext = createContext<AppRuntimeConfig | null>(null);
 
 export function useRuntimeConfig(): AppRuntimeConfig {
-  const config = useContext(RuntimeConfigContext);
+  const config = use(RuntimeConfigContext);
   if (!config) {
     throw new RuntimeConfigError("Runtime config is not available");
   }

@@ -332,6 +332,7 @@ export function RunDiffsSurface({
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
   const codeViewRef = useRef<CodeViewHandle<undefined> | null>(null);
+  const activeDiffVersionRef = useRef(0);
   const mobileCollapsedPathRef = useRef<string | null>(null);
   const searchRequestVersionRef = useRef(searchRequestVersion);
   const persistedSidebarWidth = viewState.diffsSidebarWidth;
@@ -415,12 +416,19 @@ export function RunDiffsSurface({
   });
   const selectedTreePaths = useFileTreeSelection(tree.model);
   const treeSearch = useFileTreeSearch(tree.model);
+  const filePathsRef = useRef(filePaths);
+  const treeModelRef = useRef(tree.model);
+  const treeSearchRef = useRef(treeSearch);
+  filePathsRef.current = filePaths;
+  treeModelRef.current = tree.model;
+  treeSearchRef.current = treeSearch;
   const parsedDiffItems = useMemo(() => (diff ? parseDiffItems(diff) : []), [diff]);
   const codeViewItems = useMemo(
     () => parsedDiffItems.map((entry) => entry.item),
     [parsedDiffItems],
   );
   const codeViewItemIds = useMemo(() => codeViewItems.map((item) => item.id), [codeViewItems]);
+  const codeViewItemIdSet = useMemo(() => new Set(codeViewItemIds), [codeViewItemIds]);
   const allDiffItemsCollapsed =
     codeViewItemIds.length > 0 && codeViewItemIds.every((id) => collapsedDiffItemIds.has(id));
   const codeViewContentVersionKey = diff ? `${diff.displayRange}\0${diff.patch}` : "";
@@ -428,13 +436,28 @@ export function RunDiffsSurface({
     () => hashCodeViewVersion(codeViewContentVersionKey),
     [codeViewContentVersionKey],
   );
-  useEffect(() => {
-    const validIds = new Set(codeViewItemIds);
-    setCollapsedDiffItemIds((current) => {
-      const next = new Set([...current].filter((id) => validIds.has(id)));
-      return next.size === current.size ? current : next;
-    });
-  }, [codeViewItemIds]);
+
+  if (collapsedDiffItemIds.size > 0) {
+    const validCollapsedIds = new Set(
+      Array.from(collapsedDiffItemIds).filter((id) => codeViewItemIdSet.has(id)),
+    );
+    if (validCollapsedIds.size !== collapsedDiffItemIds.size) {
+      setCollapsedDiffItemIds(validCollapsedIds);
+    }
+  }
+
+  if (activeDiffVersionRef.current !== codeViewContentVersion) {
+    activeDiffVersionRef.current = codeViewContentVersion;
+    setSelectedPath(
+      diff
+        ? selectedPath && filePathSet.has(selectedPath)
+          ? selectedPath
+          : firstSelectablePath(files)
+        : null,
+    );
+    setSelectedLines(null);
+  }
+
   const displayedCodeViewItems = useMemo(
     () =>
       codeViewItems.map(
@@ -494,18 +517,6 @@ export function RunDiffsSurface({
   }, [diff, files, parsedDiffItemById, selectedLines]);
 
   useEffect(() => {
-    if (!diff) {
-      setSelectedPath(null);
-      setSelectedLines(null);
-      return;
-    }
-    setSelectedPath((current) =>
-      current && filePathSet.has(current) ? current : firstSelectablePath(files),
-    );
-    setSelectedLines(null);
-  }, [diff, files, filePathSet]);
-
-  useEffect(() => {
     tree.model.resetPaths(filePaths);
     tree.model.setGitStatus(gitStatus);
   }, [filePaths, gitStatus, tree.model]);
@@ -552,59 +563,51 @@ export function RunDiffsSurface({
     focusTreeSearchInput();
   }, [searchRequestVersion]);
 
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) {
+  function treeSearchInputFromEvent(
+    event: ReactKeyboardEvent<HTMLElement>,
+  ): HTMLInputElement | null {
+    const target = event.target;
+    return target instanceof HTMLInputElement && target.matches("[data-file-tree-search-input]")
+      ? target
+      : null;
+  }
+
+  function handleTreeSearchKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.defaultPrevented) {
+      return;
+    }
+    const input = treeSearchInputFromEvent(event);
+    if (!input || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) {
       return;
     }
 
-    function treeSearchInputFromEvent(event: KeyboardEvent): HTMLInputElement | null {
-      const target = event
-        .composedPath()
-        .find(
-          (element) =>
-            element instanceof HTMLInputElement && element.matches("[data-file-tree-search-input]"),
-        );
-      return target instanceof HTMLInputElement ? target : null;
-    }
-
-    function handleTreeSearchKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented) {
-        return;
-      }
-      const input = treeSearchInputFromEvent(event);
-      if (!input || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      const hasSearch = treeSearch.value.trim().length > 0;
-      if (hasSearch && treeSearch.matchingPaths.length > 0) {
-        if (event.key === "ArrowDown") {
-          treeSearch.focusNextMatch();
-        } else {
-          treeSearch.focusPreviousMatch();
-        }
-        return;
-      }
-
+    event.preventDefault();
+    event.stopPropagation();
+    const currentTreeSearch = treeSearchRef.current;
+    const hasSearch = currentTreeSearch.value.trim().length > 0;
+    if (hasSearch && currentTreeSearch.matchingPaths.length > 0) {
       if (event.key === "ArrowDown") {
-        const firstPath = filePaths.at(0);
-        if (firstPath) {
-          tree.model.focusPath(firstPath);
-        }
+        currentTreeSearch.focusNextMatch();
       } else {
-        const lastPath = filePaths.at(-1);
-        if (lastPath) {
-          tree.model.focusPath(lastPath);
-        }
+        currentTreeSearch.focusPreviousMatch();
       }
+      return;
     }
 
-    root.addEventListener("keydown", handleTreeSearchKeyDown, { capture: true });
-    return () => root.removeEventListener("keydown", handleTreeSearchKeyDown, { capture: true });
-  }, [filePaths, tree.model, treeSearch]);
+    const currentFilePaths = filePathsRef.current;
+    const currentTreeModel = treeModelRef.current;
+    if (event.key === "ArrowDown") {
+      const firstPath = currentFilePaths.at(0);
+      if (firstPath) {
+        currentTreeModel.focusPath(firstPath);
+      }
+    } else {
+      const lastPath = currentFilePaths.at(-1);
+      if (lastPath) {
+        currentTreeModel.focusPath(lastPath);
+      }
+    }
+  }
 
   function applyRange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -793,7 +796,12 @@ export function RunDiffsSurface({
   );
 
   return (
-    <section aria-label="Diffs" className="drawer-panel drawer-panel--diffs" ref={rootRef}>
+    <section
+      aria-label="Diffs"
+      className="drawer-panel drawer-panel--diffs"
+      onKeyDownCapture={handleTreeSearchKeyDown}
+      ref={rootRef}
+    >
       <div className="diffs-range-controls">
         <div className="task-tabs" role="tablist" aria-label="Diff source">
           <button
@@ -854,7 +862,7 @@ export function RunDiffsSurface({
         <p className="diffs-notice">Patch output was truncated at {formatBytes(diff.maxBytes)}.</p>
       ) : null}
       {diffQuery.isError ? <p className="files-error">{diffQuery.error.message}</p> : null}
-      {loading ? <p className="task-empty">Loading diff...</p> : null}
+      {loading ? <p className="task-empty">Loading diff…</p> : null}
       {empty ? <p className="task-empty">No changes in this comparison.</p> : null}
 
       <div

@@ -2,16 +2,18 @@ import type { RunSchedule, RunScheduleState } from "@kcosr/agent-runner-core/con
 import type { RunScheduleMode } from "@kcosr/agent-runner-core/core/run/manifest.js";
 import { humanizeCronExpression } from "@kcosr/agent-runner-core/core/run/schedule.js";
 
+const TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+const RELATIVE_TIMESTAMP_FORMATTER = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
 export function formatTimestamp(value: string | null): string {
   if (!value) {
     return "Not available";
   }
 
-  const date = new Date(value);
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return TIMESTAMP_FORMATTER.format(new Date(value));
 }
 
 export function formatRelativeTimestamp(value: string | null): string {
@@ -21,18 +23,17 @@ export function formatRelativeTimestamp(value: string | null): string {
 
   const deltaMs = new Date(value).getTime() - Date.now();
   const deltaMinutes = Math.round(deltaMs / 60_000);
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 
   if (Math.abs(deltaMinutes) < 60) {
-    return formatter.format(deltaMinutes, "minute");
+    return RELATIVE_TIMESTAMP_FORMATTER.format(deltaMinutes, "minute");
   }
 
   const deltaHours = Math.round(deltaMinutes / 60);
   if (Math.abs(deltaHours) < 48) {
-    return formatter.format(deltaHours, "hour");
+    return RELATIVE_TIMESTAMP_FORMATTER.format(deltaHours, "hour");
   }
 
-  return formatter.format(Math.round(deltaHours / 24), "day");
+  return RELATIVE_TIMESTAMP_FORMATTER.format(Math.round(deltaHours / 24), "day");
 }
 
 export function formatTimestampWithRelative(value: string | null): string {

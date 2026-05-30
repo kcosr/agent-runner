@@ -678,7 +678,7 @@ export function RunDetailDrawer({
 }) {
   const drawerRef = useRef<HTMLElement | null>(null);
   const drawerBodyRef = useRef<HTMLDivElement | null>(null);
-  const sectionTabsRef = useRef<HTMLElement | null>(null);
+  const sectionTabsRef = useRef<HTMLDivElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineResponseAtBottomRef = useRef(false);
   const latestAttemptRef = useRef<number | null>(null);
@@ -846,10 +846,10 @@ export function RunDetailDrawer({
     }, new Map<number, typeof timelineAttempts>()),
     ([sessionIndex, attempts]) => ({
       sessionIndex,
-      attempts: [...attempts].sort((a, b) => a.attemptNumber - b.attemptNumber),
+      attempts: attempts.toSorted((a, b) => a.attemptNumber - b.attemptNumber),
       summary: run.sessions.find((session) => session.sessionIndex === sessionIndex) ?? null,
     }),
-  ).sort((a, b) => a.sessionIndex - b.sessionIndex);
+  ).toSorted((a, b) => a.sessionIndex - b.sessionIndex);
   const pendingAttemptAvailable =
     (run.status === "initialized" || run.status === "ready") &&
     run.totalAttemptCount === 0 &&
@@ -2293,11 +2293,17 @@ export function RunDetailDrawer({
             </div>
           ) : null}
 
-          <nav aria-label="Run sections" className="tabs tabs--scrollable" ref={sectionTabsRef}>
+          <div
+            aria-label="Run sections"
+            className="tabs tabs--scrollable"
+            ref={sectionTabsRef}
+            role="tablist"
+          >
             <button
               aria-selected={activeSection === "attachments"}
               className={activeSection === "attachments" ? "tab active" : "tab"}
               onClick={() => onSelectSection("attachments")}
+              role="tab"
               type="button"
             >
               Attachments
@@ -2310,6 +2316,7 @@ export function RunDetailDrawer({
                 aria-selected={activeSection === "events"}
                 className={activeSection === "events" ? "tab active" : "tab"}
                 onClick={() => onSelectSection("events")}
+                role="tab"
                 type="button"
               >
                 Attempts
@@ -2319,6 +2326,7 @@ export function RunDetailDrawer({
               aria-selected={activeSection === "audit"}
               className={activeSection === "audit" ? "tab active" : "tab"}
               onClick={() => onSelectSection("audit")}
+              role="tab"
               type="button"
             >
               Audit
@@ -2330,6 +2338,7 @@ export function RunDetailDrawer({
               aria-selected={activeSection === "data"}
               className={activeSection === "data" ? "tab active" : "tab"}
               onClick={() => onSelectSection("data")}
+              role="tab"
               type="button"
             >
               Data
@@ -2338,6 +2347,7 @@ export function RunDetailDrawer({
               aria-selected={activeSection === "dependencies"}
               className={activeSection === "dependencies" ? "tab active" : "tab"}
               onClick={() => onSelectSection("dependencies")}
+              role="tab"
               type="button"
             >
               Dependencies
@@ -2348,7 +2358,7 @@ export function RunDetailDrawer({
                 </span>
               ) : null}
             </button>
-          </nav>
+          </div>
 
           {activeSection === "attachments" ? (
             <section aria-label="Attachments" className="drawer-panel drawer-panel--attachments">
@@ -3209,7 +3219,7 @@ export function RunDetailDrawer({
                         )
                       ) : timelineTab === "response" ? (
                         selectedPendingAttempt ? (
-                          <p className="task-empty">No response yet — this run has not started.</p>
+                          <p className="task-empty">No response yet; this run has not started.</p>
                         ) : selectedAttemptResponse ? (
                           <section aria-label="Attempt response">
                             <MarkdownContent
@@ -3225,7 +3235,7 @@ export function RunDetailDrawer({
                           </p>
                         )
                       ) : selectedPendingAttempt ? (
-                        <p className="task-empty">No diagnostics yet — this run has not started.</p>
+                        <p className="task-empty">No diagnostics yet; this run has not started.</p>
                       ) : selectedAttemptDiagnostics ? (
                         <section aria-label="Attempt diagnostics">
                           <MarkdownContent

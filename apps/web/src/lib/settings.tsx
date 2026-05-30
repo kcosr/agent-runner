@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, use, useEffect, useMemo, useRef, useState } from "react";
 import {
   DAEMON_TOKEN_STORAGE_KEY,
   normalizeDaemonToken,
@@ -509,7 +509,7 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
 }
 
 export function useDashboardPreferences() {
-  const context = useContext(DashboardPreferencesContext);
+  const context = use(DashboardPreferencesContext);
   if (!context) {
     throw new Error("Dashboard preferences context is unavailable");
   }
@@ -517,7 +517,7 @@ export function useDashboardPreferences() {
 }
 
 export function useDashboardViewState() {
-  const context = useContext(DashboardViewStateContext);
+  const context = use(DashboardViewStateContext);
   if (!context) {
     throw new Error("Dashboard view state context is unavailable");
   }
@@ -525,7 +525,7 @@ export function useDashboardViewState() {
 }
 
 export function useDaemonAuthToken() {
-  const context = useContext(DaemonAuthTokenContext);
+  const context = use(DaemonAuthTokenContext);
   if (!context) {
     throw new Error("Daemon auth token context is unavailable");
   }

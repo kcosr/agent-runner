@@ -8,6 +8,7 @@ import { type BoardColumn, RunColumn } from "../components/run-column.js";
 import { isUnauthorizedError } from "../lib/api-client.js";
 import type { DashboardStructuredFilters } from "../lib/settings.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
+import { useLazyRef } from "../lib/use-lazy-ref.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 interface RunBoardPosition {
@@ -92,10 +93,18 @@ export function RunsBoardPanel({
 }) {
   const navigate = useNavigate();
   const boardRef = useRef<HTMLElement | null>(null);
-  const columnRefs = useRef(new Map<string, HTMLElement>());
-  const columnRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
-  const columnBodyRefs = useRef(new Map<string, HTMLElement>());
-  const columnBodyRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
+  const columnRefs = useLazyRef(() => new Map<string, HTMLElement>());
+  const columnRefCallbacks = useLazyRef(
+    () => new Map<string, (node: HTMLElement | null) => void>(),
+  );
+  const columnBodyRefs = useLazyRef(() => new Map<string, HTMLElement>());
+  const columnBodyRefCallbacks = useLazyRef(
+    () => new Map<string, (node: HTMLElement | null) => void>(),
+  );
+  const columnElements = columnRefs.current;
+  const columnElementCallbacks = columnRefCallbacks.current;
+  const columnBodyElements = columnBodyRefs.current;
+  const columnBodyElementCallbacks = columnBodyRefCallbacks.current;
   const pendingScrollColumnKeyRef = useRef<string | undefined>(undefined);
   const pendingRestoreColumnKeyRef = useRef<string | null>(activeBoardColumnKey);
   const suppressSelectedRunAutoScrollRef = useRef(false);
@@ -150,7 +159,7 @@ export function RunsBoardPanel({
       let bestDistance = Number.POSITIVE_INFINITY;
 
       for (const column of boardColumns) {
-        const element = columnRefs.current.get(column.key);
+        const element = columnElements.get(column.key);
         if (!element) {
           continue;
         }
@@ -170,13 +179,13 @@ export function RunsBoardPanel({
 
       return bestKey;
     },
-    [boardColumns],
+    [boardColumns, columnElements],
   );
 
   const scrollColumnIntoView = useCallback(
     (columnKey: string, behavior: ScrollBehavior = "smooth"): boolean => {
       const board = boardRef.current;
-      const column = columnRefs.current.get(columnKey);
+      const column = columnElements.get(columnKey);
       if (!board || !column || column.offsetWidth <= 0) {
         return false;
       }
@@ -193,7 +202,7 @@ export function RunsBoardPanel({
 
       return true;
     },
-    [],
+    [columnElements],
   );
 
   const bringColumnIntoView = useCallback(
@@ -316,8 +325,8 @@ export function RunsBoardPanel({
     }
 
     const board = boardRef.current;
-    const selectedColumn = columnRefs.current.get(selectedPosition.columnKey);
-    const selectedColumnBody = columnBodyRefs.current.get(selectedPosition.columnKey);
+    const selectedColumn = columnElements.get(selectedPosition.columnKey);
+    const selectedColumnBody = columnBodyElements.get(selectedPosition.columnKey);
     if (!board || !selectedColumn || !selectedColumnBody) {
       return;
     }
@@ -369,39 +378,39 @@ export function RunsBoardPanel({
         selectedColumnBody.scrollTop = nextScrollTop;
       }
     }
-  }, [bringColumnIntoView, runBoardPositions, selectedRunId]);
+  }, [bringColumnIntoView, columnBodyElements, columnElements, runBoardPositions, selectedRunId]);
 
   function columnRefFor(columnKey: string) {
-    const existing = columnRefCallbacks.current.get(columnKey);
+    const existing = columnElementCallbacks.get(columnKey);
     if (existing) {
       return existing;
     }
 
     const callback = (node: HTMLElement | null) => {
       if (node) {
-        columnRefs.current.set(columnKey, node);
+        columnElements.set(columnKey, node);
       } else {
-        columnRefs.current.delete(columnKey);
+        columnElements.delete(columnKey);
       }
     };
-    columnRefCallbacks.current.set(columnKey, callback);
+    columnElementCallbacks.set(columnKey, callback);
     return callback;
   }
 
   function columnBodyRefFor(columnKey: string) {
-    const existing = columnBodyRefCallbacks.current.get(columnKey);
+    const existing = columnBodyElementCallbacks.get(columnKey);
     if (existing) {
       return existing;
     }
 
     const callback = (node: HTMLElement | null) => {
       if (node) {
-        columnBodyRefs.current.set(columnKey, node);
+        columnBodyElements.set(columnKey, node);
       } else {
-        columnBodyRefs.current.delete(columnKey);
+        columnBodyElements.delete(columnKey);
       }
     };
-    columnBodyRefCallbacks.current.set(columnKey, callback);
+    columnBodyElementCallbacks.set(columnKey, callback);
     return callback;
   }
 

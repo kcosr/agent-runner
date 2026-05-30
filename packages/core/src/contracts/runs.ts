@@ -326,8 +326,8 @@ function toRunSessionSummaries(manifest: RunManifest): RunSessionSummary[] {
     );
   }
 
-  return [...manifest.sessions]
-    .sort((a, b) => a.sessionIndex - b.sessionIndex)
+  return manifest.sessions
+    .toSorted((a, b) => a.sessionIndex - b.sessionIndex)
     .map((session) => ({
       sessionIndex: session.sessionIndex,
       status: session.status,

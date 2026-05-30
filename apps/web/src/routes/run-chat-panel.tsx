@@ -34,6 +34,13 @@ import {
 import type { RunTimelineState } from "../lib/run-timeline.js";
 
 const CHAT_SCROLL_EDGE_THRESHOLD_PX = 32;
+const TURN_DIVIDER_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
 
 type DownloadAttachmentHandler = (
   runId: string,
@@ -73,19 +80,13 @@ function scrollElementToTop(element: HTMLElement) {
 }
 
 function formatTurnDividerTimestamp(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return TURN_DIVIDER_TIMESTAMP_FORMATTER.format(new Date(value));
 }
 
 function assistantEmptyText(emptyState: RunChatAssistantEmptyState | undefined) {
   switch (emptyState) {
     case "waiting_live_response":
-      return "Waiting for live response...";
+      return "Waiting for live response…";
     case "no_response_recorded":
       return "No response recorded.";
     case undefined:
@@ -268,7 +269,7 @@ export function RunChatView({
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const resetRunIdRef = useRef(selectedRunId);
+  const activeRunIdRef = useRef(selectedRunId);
   const stickToBottomRef = useRef(true);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollTimeoutRef = useRef<number | null>(null);
@@ -296,7 +297,7 @@ export function RunChatView({
     (!queueMode && selectedRun?.capabilities.canResume !== true);
   const composerActivityVisible = selectedRun?.isLive === true;
   const submitLabel = queueMode ? "Queue" : "Send";
-  const submitPendingLabel = queueMode ? "Queueing..." : "Sending...";
+  const submitPendingLabel = queueMode ? "Queueing…" : "Sending…";
 
   const rememberScrollMetrics = useCallback((element: HTMLElement) => {
     scrollMetricsRef.current = {
@@ -351,20 +352,6 @@ export function RunChatView({
     },
     [applyScrollToBottom, cancelScheduledScrollToBottom],
   );
-
-  useEffect(() => {
-    if (resetRunIdRef.current === selectedRunId) {
-      return;
-    }
-    resetRunIdRef.current = selectedRunId;
-    setDraft("");
-    setChatError(undefined);
-    stickToBottomRef.current = true;
-    scrollMetricsRef.current = null;
-    cancelScheduledScrollToBottom();
-    setShowScrollToTop(false);
-    setShowScrollToBottom(false);
-  }, [cancelScheduledScrollToBottom, selectedRunId]);
 
   useEffect(() => {
     return () => {
@@ -454,13 +441,13 @@ export function RunChatView({
       } else {
         await onSubmitResume(runId, trimmedDraft);
       }
-      if (resetRunIdRef.current !== runId) {
+      if (activeRunIdRef.current !== runId) {
         return;
       }
       setDraft("");
       stickToBottomRef.current = true;
     } catch (error) {
-      if (resetRunIdRef.current !== runId) {
+      if (activeRunIdRef.current !== runId) {
         return;
       }
       setChatError(
@@ -479,7 +466,7 @@ export function RunChatView({
       setChatError(undefined);
       await onRemoveQueuedMessage(runId, messageId);
     } catch (error) {
-      if (resetRunIdRef.current !== runId) {
+      if (activeRunIdRef.current !== runId) {
         return;
       }
       setChatError(error instanceof Error ? error.message : "Remove queued message failed.");
@@ -628,9 +615,9 @@ export function RunChatView({
         {renderBody()}
         <div className="chat-scroll-controls">
           <button
-            aria-hidden={showScrollToTop ? "false" : "true"}
             aria-label="Scroll to top"
             className={`chat-scroll-control chat-scroll-control--top${showScrollToTop ? " chat-scroll-control--visible" : ""}`}
+            disabled={!showScrollToTop}
             onClick={handleScrollToTop}
             tabIndex={showScrollToTop ? 0 : -1}
             type="button"
@@ -638,9 +625,9 @@ export function RunChatView({
             <ChevronIcon aria-hidden="true" />
           </button>
           <button
-            aria-hidden={showScrollToBottom ? "false" : "true"}
             aria-label="Scroll to bottom"
             className={`chat-scroll-control chat-scroll-control--bottom${showScrollToBottom ? " chat-scroll-control--visible" : ""}`}
+            disabled={!showScrollToBottom}
             onClick={handleScrollToBottom}
             tabIndex={showScrollToBottom ? 0 : -1}
             type="button"

@@ -123,6 +123,7 @@ export function RunFilesSurface({
   const [sourceSelection, setSourceSelection] = useState<SourceSelection | null>(null);
   const [renderedSelection, setRenderedSelection] = useState("");
   const [dialogReference, setDialogReference] = useState<TaskReference | null>(null);
+  const activeFilePathRef = useRef<string | null>(null);
   const rootRef = useRef<HTMLElement | null>(null);
   const entriesRef = useRef<WorkspaceFileEntry[]>([]);
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -196,16 +197,6 @@ export function RunFilesSurface({
     },
   });
 
-  useEffect(() => {
-    const file = fileQuery.data;
-    if (!file) {
-      return;
-    }
-    setViewMode(file.markdown ? "rendered-markdown" : "source");
-    setRenderedSelection("");
-    setSourceSelection(null);
-  }, [fileQuery.data]);
-
   const entries = searchActive
     ? (searchQuery.data?.matches ?? [])
     : (directoryQuery.data?.entries ?? []);
@@ -214,6 +205,15 @@ export function RunFilesSurface({
   const selectedFile = fileQuery.data;
   const workspaceRefreshPending =
     directoryQuery.isFetching || searchQuery.isFetching || fileQuery.isFetching;
+
+  if (selectedFile && activeFilePathRef.current !== selectedFile.path) {
+    activeFilePathRef.current = selectedFile.path;
+    setViewMode(selectedFile.markdown ? "rendered-markdown" : "source");
+    setRenderedSelection("");
+    setSourceSelection(null);
+  } else if (!selectedFile && activeFilePathRef.current !== null) {
+    activeFilePathRef.current = null;
+  }
 
   useEffect(() => {
     entriesRef.current = entries;
@@ -602,7 +602,7 @@ export function RunFilesSurface({
                 ) : null}
               </div>
               <div className="files-browser" aria-label="Workspace file browser">
-                {entriesPending ? <p className="task-empty">Loading files...</p> : null}
+                {entriesPending ? <p className="task-empty">Loading files…</p> : null}
                 {entriesError ? <p className="files-error">{entriesError.message}</p> : null}
                 {!entriesPending && !entriesError && entries.length === 0 ? (
                   <p className="task-empty">
@@ -664,7 +664,7 @@ export function RunFilesSurface({
         <div className="files-viewer" aria-label="File preview">
           {!selectedFilePath ? <p className="task-empty">Select a text or Markdown file.</p> : null}
           {selectedFilePath && fileQuery.isPending ? (
-            <p className="task-empty">Loading file...</p>
+            <p className="task-empty">Loading file…</p>
           ) : null}
           {fileQuery.isError ? <p className="files-error">{fileQuery.error.message}</p> : null}
           {selectedFile ? (

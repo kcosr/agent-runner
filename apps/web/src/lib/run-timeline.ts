@@ -215,7 +215,7 @@ export function useRunTimelineState({
         }
 
         let merged = fetched;
-        for (const envelope of [...bufferRef.current].sort(
+        for (const envelope of bufferRef.current.toSorted(
           (left, right) => left.cursor - right.cursor,
         )) {
           const result = applyEnvelope(merged, envelope);

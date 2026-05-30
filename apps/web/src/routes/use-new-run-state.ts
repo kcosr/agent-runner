@@ -9,6 +9,7 @@ import { createApiClient } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
+import { useLazyRef } from "../lib/use-lazy-ref.js";
 
 type FieldDraftValue = string;
 type FieldDrafts = Record<string, FieldDraftValue>;
@@ -154,7 +155,7 @@ export function useNewRunState() {
   const [drafts, setDrafts] = useState<FieldDrafts>({});
   const [submitError, setSubmitError] = useState<string>();
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
-  const fieldRefs = useRef(new Map<string, HTMLElement>());
+  const fieldRefs = useLazyRef(() => new Map<string, HTMLElement>());
   const submitErrorRef = useRef<HTMLDivElement | null>(null);
 
   const agentsQuery = useQuery({
