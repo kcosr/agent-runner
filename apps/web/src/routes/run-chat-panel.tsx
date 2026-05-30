@@ -269,7 +269,6 @@ export function RunChatView({
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const activeRunIdRef = useRef(selectedRunId);
   const stickToBottomRef = useRef(true);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollTimeoutRef = useRef<number | null>(null);
@@ -441,15 +440,9 @@ export function RunChatView({
       } else {
         await onSubmitResume(runId, trimmedDraft);
       }
-      if (activeRunIdRef.current !== runId) {
-        return;
-      }
       setDraft("");
       stickToBottomRef.current = true;
     } catch (error) {
-      if (activeRunIdRef.current !== runId) {
-        return;
-      }
       setChatError(
         error instanceof Error ? error.message : queueMode ? "Queue failed." : "Resume failed.",
       );
@@ -466,9 +459,6 @@ export function RunChatView({
       setChatError(undefined);
       await onRemoveQueuedMessage(runId, messageId);
     } catch (error) {
-      if (activeRunIdRef.current !== runId) {
-        return;
-      }
       setChatError(error instanceof Error ? error.message : "Remove queued message failed.");
     }
   }

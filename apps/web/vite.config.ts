@@ -47,6 +47,9 @@ export function devProxy() {
 
 export default defineConfig({
   base: webBasePath(),
+  build: {
+    target: "es2023",
+  },
   plugins: [react()],
   server: {
     port: 4174,
