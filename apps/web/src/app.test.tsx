@@ -17414,6 +17414,80 @@ describe("web app", () => {
     expect(screen.getByRole("heading", { name: "Execution" })).toBeInTheDocument();
   });
 
+  it("allows creating an ad hoc run without selecting an assignment", async () => {
+    const state = {
+      runs: [makeRun({ runId: "run-ad-hoc", name: "Ad hoc run", assignmentName: null })],
+      details: {
+        "run-ad-hoc": makeDetail({
+          runId: "run-ad-hoc",
+          name: "Ad hoc run",
+          assignment: null,
+        }),
+      },
+    };
+    const fetchMock = installFetchMock(state, {
+      handleRequest: async (url, init) => {
+        if (url === "/api/agents") {
+          return new Response(
+            JSON.stringify({ agents: makeDefinitionList("agent", ["planner"]) }),
+            {
+              status: 200,
+            },
+          );
+        }
+        if (url === "/api/assignments") {
+          return new Response(
+            JSON.stringify({ assignments: makeDefinitionList("assignment", ["plan-feature"]) }),
+            { status: 200 },
+          );
+        }
+        if (url === "/api/run-input-surface?agent=planner") {
+          return new Response(
+            JSON.stringify({
+              inputSurface: makeRunInputSurface({ assignmentInputs: [] }),
+            }),
+            {
+              status: 200,
+            },
+          );
+        }
+        if (url === "/api/runs/init" && init?.method === "POST") {
+          return new Response(JSON.stringify({ run: state.details["run-ad-hoc"] }), {
+            status: 200,
+          });
+        }
+        return undefined;
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/new");
+
+    await screen.findByRole("option", { name: "planner" });
+    expect(screen.getByLabelText("Assignment")).toHaveValue("");
+    await user.selectOptions(await screen.findByLabelText("Agent"), "planner");
+
+    expect(await screen.findByRole("heading", { name: "Execution" })).toBeInTheDocument();
+    const initializeButton = screen.getByRole("button", { name: "Initialize" });
+    expect(initializeButton).toBeEnabled();
+
+    await user.click(initializeButton);
+
+    const initRequest = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/runs/init" && init?.method === "POST",
+    )?.[1];
+    expect(initRequest).toBeDefined();
+    expect(JSON.parse((initRequest as RequestInit).body as string)).toMatchObject({
+      agent: "planner",
+      webVars: {},
+      overrides: {},
+    });
+    expect(JSON.parse((initRequest as RequestInit).body as string)).not.toHaveProperty(
+      "assignment",
+    );
+    expect((await screen.findAllByText("Ad hoc run")).length).toBeGreaterThan(0);
+  });
+
   it("shows an inline retryable resolver error and preserves entered values", async () => {
     let resolverAttempts = 0;
     installFetchMock(

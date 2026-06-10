@@ -3278,6 +3278,130 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
   assert.deepEqual(outcome.manifest.backendConfig, seenBackendConfig);
 });
 
+test("codex fresh runs freeze auth token env name without resolving token value", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let seenBackendConfig;
+  const { outcome } = await withEnv(
+    {
+      AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+      AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV: "CODEX_APP_SERVER_TOKEN",
+      CODEX_APP_SERVER_TOKEN: "literal-secret",
+    },
+    () =>
+      runWithMock(
+        dir,
+        async (ctx) => {
+          seenBackendConfig = ctx.backendConfig;
+          setTaskStatusesForPrompt(ctx.prompt, {
+            t1: "completed",
+            t2: "completed",
+            t3: "completed",
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {},
+        { agentName: "codex-agent", backendId: "codex" },
+      ),
+  );
+
+  assert.deepEqual(seenBackendConfig, {
+    transport: {
+      type: "ws",
+      url: "ws://127.0.0.1:4773/",
+    },
+    authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+  });
+  assert.deepEqual(outcome.manifest.backendConfig, seenBackendConfig);
+  assert.deepEqual(outcome.manifest.resetSeed.backendConfig, seenBackendConfig);
+  assert.equal(JSON.stringify(outcome.manifest).includes("literal-secret"), false);
+});
+
+test("codex auth token env precedence is authored, request override, then daemon env", async () => {
+  const dir = tempDir();
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeAgent(
+    dir,
+    "codex-auth-agent",
+    `---
+schemaVersion: 1
+name: codex-auth-agent
+backend: codex
+backendConfig:
+  codex:
+    authTokenEnv: AUTHORED_CODEX_TOKEN
+---
+Codex auth agent.
+`,
+  );
+
+  let seenBackendConfig;
+  const { outcome } = await withEnv(
+    {
+      AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+      AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV: "DAEMON_CODEX_TOKEN",
+    },
+    () =>
+      runWithMock(
+        dir,
+        async (ctx) => {
+          seenBackendConfig = ctx.backendConfig;
+          setTaskStatusesForPrompt(ctx.prompt, {
+            t1: "completed",
+            t2: "completed",
+            t3: "completed",
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {
+          backendConfig: {
+            codex: {
+              authTokenEnv: "OVERRIDE_CODEX_TOKEN",
+            },
+          },
+        },
+        {
+          agentName: "codex-auth-agent",
+          backendId: "codex",
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-test",
+            },
+          },
+        },
+      ),
+  );
+
+  assert.deepEqual(seenBackendConfig, {
+    transport: {
+      type: "ws",
+      url: "ws://127.0.0.1:4773/",
+    },
+    authTokenEnv: "AUTHORED_CODEX_TOKEN",
+  });
+  assert.deepEqual(outcome.manifest.backendConfig, seenBackendConfig);
+});
+
 test("codex daemon runs defer conflicting forwarded env until after authored transport precedence", async () => {
   const dir = tempDir();
   writeAgent(dir, "codex-stdio-agent", CODEX_STDIO_AGENT);

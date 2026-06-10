@@ -424,6 +424,85 @@ test("resume: codex runs reuse the frozen transport instead of current env", asy
   assert.deepEqual(second.manifest.resetSeed.backendConfig, initialTransport);
 });
 
+test("resume: codex runs reuse frozen auth token env name instead of current default env", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const initialConfig = {
+    transport: {
+      type: "ws",
+      url: "ws://initial.example/socket",
+    },
+    authTokenEnv: "INITIAL_CODEX_TOKEN",
+  };
+
+  const first = await withEnv(
+    {
+      AGENT_RUNNER_CODEX_WS_URL: initialConfig.transport.url,
+      AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV: initialConfig.authTokenEnv,
+      INITIAL_CODEX_TOKEN: "initial-secret",
+    },
+    () =>
+      runIn(dir, {
+        backend: codexMockBackend(async (ctx) => {
+          assert.deepEqual(ctx.backendConfig, initialConfig);
+          updateTasksForPrompt(ctx.prompt, {
+            t1: { status: "blocked", notes: "waiting on dependency" },
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "thr-codex-auth",
+            transcript: "blocked",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        }),
+      }),
+  );
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
+  const second = await withEnv(
+    {
+      AGENT_RUNNER_CODEX_WS_URL: "ws://changed.example/socket",
+      AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV: "CHANGED_CODEX_TOKEN",
+      INITIAL_CODEX_TOKEN: "rotated-secret",
+      CHANGED_CODEX_TOKEN: "changed-secret",
+    },
+    () =>
+      runIn(dir, {
+        backend: codexMockBackend(async (ctx) => {
+          assert.equal(ctx.resumeSessionId, "thr-codex-auth");
+          assert.deepEqual(ctx.backendConfig, initialConfig);
+          patchManifest(first.workspaceDir, (manifest) => {
+            manifest.finalTasks.t1.status = "completed";
+            manifest.finalTasks.t2.status = "completed";
+            manifest.finalTasks.t3.status = "completed";
+            manifest.tasksCompleted = 3;
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "thr-codex-auth",
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        }),
+        overrides: { message: "dependency is back" },
+        resume: target,
+      }),
+  );
+
+  assert.deepEqual(second.manifest.backendConfig, initialConfig);
+  assert.deepEqual(second.manifest.resetSeed.backendConfig, initialConfig);
+  assert.equal(JSON.stringify(second.manifest).includes("initial-secret"), false);
+  assert.equal(JSON.stringify(second.manifest).includes("changed-secret"), false);
+});
+
 test("resume: codex UDS runs reuse frozen transport and ignore env drift", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", CODEX_AGENT);

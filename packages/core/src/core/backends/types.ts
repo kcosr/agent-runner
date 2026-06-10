@@ -21,6 +21,11 @@ export type CodexTransportConfig =
   | { type: "ws"; url: string }
   | { type: "uds"; path: string };
 
+export interface CodexBackendConfig {
+  transport: CodexTransportConfig;
+  authTokenEnv?: string;
+}
+
 export interface BackendArgsEntry {
   extraArgs: string[];
 }

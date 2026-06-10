@@ -500,8 +500,8 @@ The resolved path is used to derive the `repo` bucket (via the enclosing
 
 ## Codex transport resolution
 
-When `backend: codex`, the resolved transport is frozen at fresh-run or
-init time and then reused on resume:
+When `backend: codex`, the resolved transport and auth token env var name
+are frozen at fresh-run or init time and then reused on resume:
 
 1. Agent frontmatter `backendConfig.codex.transport`
 2. Request override `overrides.backendConfig.codex.transport` when
@@ -516,7 +516,13 @@ with no higher-precedence transport, Agent Runner fails fast. Resume does
 not re-read these env vars because the transport is already frozen.
 
 Once frozen into the manifest, later env drift does not change the run's
-Codex transport.
+Codex transport or `authTokenEnv` name. For auth-protected Codex
+app-server WS/UDS transports, set `backendConfig.codex.authTokenEnv` to
+the name of an env var containing the bearer token. If no
+higher-precedence `authTokenEnv` was authored or requested,
+`AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV` supplies that env var name for fresh
+runs. Agent Runner resolves the token value each time it opens the
+connection and does not persist literal token values.
 
 ## Prompt composition
 

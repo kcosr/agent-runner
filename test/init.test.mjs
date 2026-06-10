@@ -186,6 +186,31 @@ test("init: freezes UDS codex transport into manifest and reset seed", async () 
   assert.deepEqual(outcome.manifest.resetSeed.backendConfig, outcome.manifest.backendConfig);
 });
 
+test("init: freezes Codex auth token env name without resolving token value", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "two", CODEX_AGENT);
+  writeAssignment(dir, "two-work", TWO_ASSIGNMENT);
+
+  const outcome = await withEnv(
+    {
+      AGENT_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+      AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV: "CODEX_APP_SERVER_TOKEN",
+      CODEX_APP_SERVER_TOKEN: "literal-secret",
+    },
+    () => initIn(dir, { backendId: "codex" }),
+  );
+
+  assert.deepEqual(outcome.manifest.backendConfig, {
+    transport: {
+      type: "ws",
+      url: "ws://127.0.0.1:4773/",
+    },
+    authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+  });
+  assert.deepEqual(outcome.manifest.resetSeed.backendConfig, outcome.manifest.backendConfig);
+  assert.equal(JSON.stringify(outcome.manifest).includes("literal-secret"), false);
+});
+
 test("init freezes config-time env interpolation into manifest state and runtime var coercion", async () => {
   const dir = tempDir();
   writeAgent(

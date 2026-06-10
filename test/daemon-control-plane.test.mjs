@@ -9549,6 +9549,14 @@ New run work.
     assert.equal(success.body.inputSurface.assignmentInputs[0].required, true);
     assert.equal(success.body.inputSurface.assignmentInputs[0].value, null);
 
+    const agentOnly = await httpJson(httpBaseUrl, "/api/run-input-surface?agent=daemon-agent");
+    assert.equal(agentOnly.status, 200);
+    assert.deepEqual(
+      agentOnly.body.inputSurface.runSettings.map((field) => field.key),
+      success.body.inputSurface.runSettings.map((field) => field.key),
+    );
+    assert.deepEqual(agentOnly.body.inputSurface.assignmentInputs, []);
+
     const directAgent = encodeURIComponent("./agents/daemon-agent/agent.md");
     const directAssignment = encodeURIComponent("./assignments/new-run-work/assignment.md");
     const directPath = await httpJson(

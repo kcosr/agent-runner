@@ -755,14 +755,16 @@ function runInputSurfacePath(
   config: AppRuntimeConfig,
   input: {
     agent: string;
-    assignment: string;
+    assignment?: string;
     cwd?: string;
   },
 ): string {
   const params = new URLSearchParams({
     agent: input.agent,
-    assignment: input.assignment,
   });
+  if (input.assignment !== undefined) {
+    params.set("assignment", input.assignment);
+  }
   if (input.cwd !== undefined) {
     params.set("cwd", input.cwd);
   }
@@ -857,7 +859,7 @@ export function createApiClient(config: AppRuntimeConfig, options: ApiClientOpti
     async getRunInputSurface(
       input: {
         agent: string;
-        assignment: string;
+        assignment?: string;
         cwd?: string;
       },
       options: RequestOptions = {},

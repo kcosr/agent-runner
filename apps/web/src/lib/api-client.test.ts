@@ -2445,6 +2445,36 @@ describe("api client", () => {
     );
   });
 
+  it("omits assignment from run input surface requests when unset", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            inputSurface: {
+              runSettings: [],
+              assignmentInputs: [],
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.getRunInputSurface({ agent: "planner" })).resolves.toEqual({
+      runSettings: [],
+      assignmentInputs: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/run-input-surface?agent=planner",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+
   it("keeps callerCwd explicit in initRun and startRun request bodies", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

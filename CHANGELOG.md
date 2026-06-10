@@ -12,6 +12,10 @@
 
 ### Added
 
+- Added Codex app-server auth token support for websocket and UDS
+  transports via `backendConfig.codex.authTokenEnv` and
+  `AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV`, with token values resolved at
+  connection time instead of persisted.
 - Added `--no-inherit-run-group` for fresh `run` and `init` commands so
   child runs can preserve `parentRunId` lineage while starting in their own
   run group. ([#165](https://github.com/kcosr/agent-runner/pull/165))

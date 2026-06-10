@@ -257,16 +257,18 @@ Connected-mode runtime selection stays explicit:
 - if the client passes `--group-id <group-id>` or has
   `AGENT_RUNNER_RUN_GROUP_ID` set, fresh `run` / new `init` requests
   synthesize structured `runGroupId`
-- caller-local `AGENT_RUNNER_CODEX_UDS_PATH` and
-  `AGENT_RUNNER_CODEX_WS_URL` are not forwarded; daemon-owned Codex runs
-  resolve transport from authored/request `backendConfig` and then the
-  daemon process env
+- caller-local `AGENT_RUNNER_CODEX_UDS_PATH`,
+  `AGENT_RUNNER_CODEX_WS_URL`, and
+  `AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV` are not forwarded; daemon-owned
+  Codex runs resolve transport and `authTokenEnv` from authored/request
+  `backendConfig` and then the daemon process env
 - agent-runner-owned lineage/runtime values such as
   `AGENT_RUNNER_PARENT_RUN_ID`, `AGENT_RUNNER_RUN_GROUP_ID`, and recursion
   guard depth are injected into Codex thread config for backend shell
   tools; this fixed allowlist is separate from caller-local env
   forwarding
-- resume requests reuse the frozen manifest `backendConfig`
+- resume requests reuse the frozen manifest `backendConfig`, including
+  Codex transport and `authTokenEnv` name
 - if the client passes `--launcher <name>`, the daemon resolves that
   named launcher against its own config root and freezes the result into
   the manifest

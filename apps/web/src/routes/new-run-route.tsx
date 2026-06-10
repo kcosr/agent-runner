@@ -184,8 +184,8 @@ export function NewRunRoute() {
               New Run
             </h1>
             <p className="new-run-header__copy">
-              Choose an agent and assignment, review the static run inputs, then initialize or start
-              the run.
+              Choose an agent, optionally attach an assignment, review the static run inputs, then
+              initialize or start the run.
             </p>
           </div>
 
@@ -217,7 +217,6 @@ export function NewRunRoute() {
               <label className="new-run-field">
                 <div className="new-run-field__header">
                   <span className="new-run-field__label">Assignment</span>
-                  <span className="new-run-field__required">Required</span>
                 </div>
                 <select
                   aria-label="Assignment"
@@ -225,7 +224,7 @@ export function NewRunRoute() {
                   onChange={(event) => state.setSelectedAssignment(event.target.value)}
                   value={state.selectedAssignment}
                 >
-                  <option value="">Select an assignment…</option>
+                  <option value="">No assignment</option>
                   {state.assignmentOptions.map((entry) => (
                     <option key={entry.name} value={entry.name}>
                       {entry.name}
@@ -270,7 +269,7 @@ export function NewRunRoute() {
 
           {state.isIdle ? (
             <div className="new-run-empty">
-              <h2>Choose an agent and assignment</h2>
+              <h2>Choose an agent</h2>
               <p>
                 The task and execution sections appear after the daemon resolves the static input
                 surface.
