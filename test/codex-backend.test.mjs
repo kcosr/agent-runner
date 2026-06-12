@@ -1060,6 +1060,23 @@ test("codexBackend rejects bearer auth over non-loopback plaintext websocket URL
   assert.doesNotMatch(result.rawStderr, /ws-secret/);
 });
 
+test("codexBackend allows bearer auth policy for IPv6 loopback plaintext websocket URLs", async () => {
+  const result = await codexBackend.invoke({
+    ...baseCtx,
+    env: {
+      CODEX_APP_SERVER_TOKEN: "ws-secret",
+    },
+    backendConfig: {
+      transport: { type: "ws", url: "ws://[::1]:9/socket" },
+      authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+    },
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.doesNotMatch(result.rawStderr, /auth token requires a wss:\/\/ or loopback ws:\/\//);
+  assert.doesNotMatch(result.rawStderr, /ws-secret/);
+});
+
 test("codexBackend detaches websocket turns without interrupting the remote turn", async () => {
   const codexServer = await startCodexRecoveryServer({ completeResume: false });
   const detachController = new AbortController();

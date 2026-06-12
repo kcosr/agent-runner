@@ -17511,6 +17511,11 @@ describe("web app", () => {
               { status: 200 },
             );
           }
+          if (url === "/api/run-input-surface?agent=planner") {
+            return new Response(JSON.stringify({ inputSurface: makeRunInputSurface() }), {
+              status: 200,
+            });
+          }
           if (url.includes("/api/run-input-surface")) {
             resolverAttempts += 1;
             if (resolverAttempts === 1) {

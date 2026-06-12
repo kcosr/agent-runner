@@ -2454,25 +2454,27 @@ test("daemon serve reads packaged web assets from the CLI dist layout", async ()
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
-  await withSeededFrontendDist(async ({ indexPath }) => {
-    const packagedIndex = readFileSync(indexPath, "utf8");
-    const server = await serveDaemon(listenUrl);
-    try {
-      const response = await fetch(new URL("/", httpBaseUrl));
-      const body = await response.text();
-      assert.equal(response.status, 200);
-      assert.equal(body, packagedIndex);
+  await withEnv({ AGENT_RUNNER_WEB_BASE_PATH: undefined }, async () => {
+    await withSeededFrontendDist(async ({ indexPath }) => {
+      const packagedIndex = readFileSync(indexPath, "utf8");
+      const server = await serveDaemon(listenUrl);
+      try {
+        const response = await fetch(new URL("/", httpBaseUrl));
+        const body = await response.text();
+        assert.equal(response.status, 200);
+        assert.equal(body, packagedIndex);
 
-      const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
-      assert.ok(assetPath, "expected built asset path in served index.html");
+        const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
+        assert.ok(assetPath, "expected built asset path in served index.html");
 
-      const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
-      const assetBody = await assetResponse.text();
-      assert.equal(assetResponse.status, 200);
-      assert.ok(assetBody.length > 0);
-    } finally {
-      await server.close();
-    }
+        const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
+        const assetBody = await assetResponse.text();
+        assert.equal(assetResponse.status, 200);
+        assert.ok(assetBody.length > 0);
+      } finally {
+        await server.close();
+      }
+    });
   });
 });
 
