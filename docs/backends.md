@@ -130,14 +130,25 @@ import and sync, trusted-code rules, and a minimal example.
   request `overrides.backendConfig.codex.transport` when supplied by the
   daemon/API caller → current process `AGENT_RUNNER_CODEX_UDS_PATH` or
   `AGENT_RUNNER_CODEX_WS_URL` → stdio default.
+- Auth-protected `ws` and `uds` app-server transports can set
+  `backendConfig.codex.authTokenEnv` to the name of an env var containing
+  the bearer token. Agent Runner freezes only that env var name into the
+  manifest, then resolves the current token value each time it opens a
+  WebSocket connection and sends `Authorization: Bearer <token>` during
+  the upgrade. For fresh runs, `AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV` is the
+  env default for this name when no higher-precedence `authTokenEnv` was
+  authored or requested.
+- Bearer auth is allowed for `wss://`, loopback `ws://`, and local UDS
+  transports. Agent Runner rejects auth for non-loopback plaintext
+  `ws://` URLs.
 - `AGENT_RUNNER_CODEX_UDS_PATH` and `AGENT_RUNNER_CODEX_WS_URL` are
   Codex-specific defaults, not generic daemon env passthrough. If both are
   set and no higher-precedence transport was authored or explicitly
   overridden, the
   run fails fast.
-- The connected CLI does not forward caller-local Codex transport env.
-  Daemon-owned runs resolve Codex env from the daemon process. Resume
-  reuses the frozen manifest transport.
+- The connected CLI does not forward caller-local Codex transport or auth
+  env. Daemon-owned runs resolve Codex env from the daemon process. Resume
+  reuses the frozen manifest transport and `authTokenEnv` name.
 - Codex `thread/start` and `thread/resume` also receive the fixed
   agent-runner runtime env overlay above through
   `shell_environment_policy.set.*` config overrides. This lets shell
@@ -171,9 +182,10 @@ import and sync, trusted-code rules, and a minimal example.
 - Session history import resolves the matching
   `~/.codex/sessions/**/rollout-*.jsonl` file by `session_meta` payload
   id and imports complete user/assistant turns in source order.
-- The resolved transport is frozen into the manifest and reset seed at
-  fresh-run/init time. Resume and ready-start reuse that frozen transport
-  even if later client or daemon env changes.
+- The resolved transport and `authTokenEnv` name are frozen into the
+  manifest and reset seed at fresh-run/init time. Resume and ready-start
+  reuse those frozen values even if later client or daemon env changes;
+  token values are never persisted.
 - Detects external interrupts when another client cancels the turn, and
   authentication failures via stderr markers.
 - Effort mapping: `minimal`, `low`, `medium`, `high`, `xhigh`; `max` →
@@ -367,6 +379,7 @@ through the task CLI.
 |--------------------------------|--------|
 | `AGENT_RUNNER_CLAUDE_BIN`       | Claude CLI binary (default `claude`) |
 | `AGENT_RUNNER_CODEX_BIN`        | Codex stdio binary (default `codex`) |
+| `AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV` | Fresh Codex runs use this env var's value as the name of the env var containing the app-server bearer token when no explicit `backendConfig.codex.authTokenEnv` was authored |
 | `AGENT_RUNNER_CODEX_UDS_PATH`   | Fresh Codex runs use this absolute socket path as the default WebSocket-over-UDS transport when no explicit `backendConfig.codex.transport` was authored |
 | `AGENT_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendConfig.codex.transport` was authored |
 | `AGENT_RUNNER_CURSOR_BIN`       | Cursor CLI binary (default `cursor-agent`) |

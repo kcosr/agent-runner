@@ -886,7 +886,7 @@ export function parseRunInputSurfaceQuery(search: string): RunInputSurfaceParams
   const entries = queryEntries(search);
   return {
     agent: requiredNonEmptyString(entries.get("agent"), "agent"),
-    assignment: requiredNonEmptyString(entries.get("assignment"), "assignment"),
+    assignment: optionalNonEmptyString(entries.get("assignment"), "assignment"),
     cwd: optionalNonEmptyString(entries.get("cwd"), "cwd"),
   };
 }

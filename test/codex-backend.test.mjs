@@ -253,6 +253,24 @@ test("resolveCodexTransportConfig: rejects missing frozen transport", () => {
   );
 });
 
+test("resolveCodexBackendConfig: normalizes explicit auth token env", () => {
+  assert.deepEqual(
+    resolveCodexBackendConfig({
+      backendName: "codex",
+      authoredConfig: {
+        transport: { type: "ws", url: "ws://127.0.0.1:4773" },
+        authTokenEnv: " CODEX_APP_SERVER_TOKEN ",
+      },
+      overrideConfig: undefined,
+      env: {},
+    }),
+    {
+      transport: { type: "ws", url: "ws://127.0.0.1:4773/" },
+      authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+    },
+  );
+});
+
 test("resolveCodexBackendConfig: authored config wins over override and env", () => {
   assert.deepEqual(
     resolveCodexBackendConfig({
@@ -269,6 +287,61 @@ test("resolveCodexBackendConfig: authored config wins over override and env", ()
     }),
     {
       transport: { type: "stdio" },
+    },
+  );
+});
+
+test("resolveCodexBackendConfig: resolves auth token env by authored, override, then env", () => {
+  assert.deepEqual(
+    resolveCodexBackendConfig({
+      backendName: "codex",
+      authoredConfig: {
+        authTokenEnv: "AUTHORED_CODEX_TOKEN",
+      },
+      overrideConfig: {
+        transport: { type: "ws", url: "ws://override.example/socket" },
+        authTokenEnv: "OVERRIDE_CODEX_TOKEN",
+      },
+      env: {
+        AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV: "ENV_CODEX_TOKEN",
+      },
+    }),
+    {
+      transport: { type: "ws", url: "ws://override.example/socket" },
+      authTokenEnv: "AUTHORED_CODEX_TOKEN",
+    },
+  );
+
+  assert.deepEqual(
+    resolveCodexBackendConfig({
+      backendName: "codex",
+      authoredConfig: undefined,
+      overrideConfig: {
+        transport: { type: "ws", url: "ws://override.example/socket" },
+        authTokenEnv: "OVERRIDE_CODEX_TOKEN",
+      },
+      env: {
+        AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV: "ENV_CODEX_TOKEN",
+      },
+    }),
+    {
+      transport: { type: "ws", url: "ws://override.example/socket" },
+      authTokenEnv: "OVERRIDE_CODEX_TOKEN",
+    },
+  );
+
+  assert.deepEqual(
+    resolveCodexBackendConfig({
+      backendName: "codex",
+      authoredConfig: undefined,
+      overrideConfig: undefined,
+      env: {
+        AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV: "ENV_CODEX_TOKEN",
+      },
+    }),
+    {
+      transport: { type: "stdio" },
+      authTokenEnv: "ENV_CODEX_TOKEN",
     },
   );
 });
@@ -346,6 +419,22 @@ test("resolveCodexBackendConfig: rejects malformed and conflicting env transport
         },
       }),
     /AGENT_RUNNER_CODEX_UDS_PATH and AGENT_RUNNER_CODEX_WS_URL cannot both be set/,
+  );
+});
+
+test("resolveCodexBackendConfig: rejects malformed auth token env names", () => {
+  assert.throws(
+    () =>
+      resolveCodexBackendConfig({
+        backendName: "codex",
+        authoredConfig: {
+          transport: { type: "stdio" },
+          authTokenEnv: " ",
+        },
+        overrideConfig: undefined,
+        env: {},
+      }),
+    /backendConfig\.codex\.authTokenEnv must be a non-empty string/,
   );
 });
 
@@ -631,6 +720,8 @@ async function startCodexRecoveryServer({
 } = {}) {
   const server = new WebSocketServer({ port: 0 });
   const calls = [];
+  const connectionHeaders = [];
+  const connectionUrls = [];
   const waiters = new Map();
   const threadId = "recovery-thread";
   const turnId = "recovery-turn";
@@ -642,7 +733,9 @@ async function startCodexRecoveryServer({
     waiters.delete(method);
   };
 
-  server.on("connection", (socket) => {
+  server.on("connection", (socket, request) => {
+    connectionHeaders.push(request.headers);
+    connectionUrls.push(request.url);
     const send = (message) => {
       socket.send(JSON.stringify(message));
     };
@@ -736,6 +829,8 @@ async function startCodexRecoveryServer({
   return {
     url: `ws://127.0.0.1:${address.port}/`,
     calls,
+    connectionHeaders,
+    connectionUrls,
     waitForMethod(method) {
       if (calls.some((call) => call.method === method)) {
         return Promise.resolve();
@@ -767,8 +862,12 @@ async function startCodexUdsServer(socketName = "codex.sock") {
   const wsServer = new WebSocketServer({ server });
   const threadId = "uds-thread";
   const turnId = "uds-turn";
+  const connectionHeaders = [];
+  const connectionUrls = [];
 
-  wsServer.on("connection", (socket) => {
+  wsServer.on("connection", (socket, request) => {
+    connectionHeaders.push(request.headers);
+    connectionUrls.push(request.url);
     const notify = (method, params) => {
       socket.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
     };
@@ -835,6 +934,8 @@ async function startCodexUdsServer(socketName = "codex.sock") {
 
   return {
     path: socketPath,
+    connectionHeaders,
+    connectionUrls,
     async close() {
       for (const client of wsServer.clients) {
         client.terminate();
@@ -889,6 +990,91 @@ test("readCodexThread reads active thread status without starting a turn", async
   } finally {
     await codexServer.close();
   }
+});
+
+test("readCodexThread sends bearer auth on websocket upgrade when authTokenEnv is configured", async () => {
+  const codexServer = await startCodexRecoveryServer();
+
+  try {
+    const result = await readCodexThread({
+      sessionId: "thread-active",
+      cwd: "/repo",
+      processCwd: "/repo",
+      env: {
+        CODEX_APP_SERVER_TOKEN: "ws-secret",
+      },
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
+        authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+      },
+      resolvedBackendArgs: [],
+    });
+
+    assert.equal(result.threadId, "thread-active");
+    assert.equal(codexServer.connectionHeaders[0].authorization, "Bearer ws-secret");
+    assert.equal(codexServer.connectionHeaders[0]["sec-websocket-extensions"], undefined);
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("codexBackend fails clearly when configured auth token env is missing", async () => {
+  const codexServer = await startCodexRecoveryServer();
+
+  try {
+    const result = await codexBackend.invoke({
+      ...baseCtx,
+      env: {},
+      backendConfig: {
+        transport: { type: "ws", url: codexServer.url },
+        authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+      },
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(
+      result.rawStderr,
+      /codex auth token env CODEX_APP_SERVER_TOKEN is configured but is not set or is empty/,
+    );
+    assert.doesNotMatch(result.rawStderr, /ws-secret/);
+    assert.equal(codexServer.connectionHeaders.length, 0);
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("codexBackend rejects bearer auth over non-loopback plaintext websocket URLs", async () => {
+  const result = await codexBackend.invoke({
+    ...baseCtx,
+    env: {
+      CODEX_APP_SERVER_TOKEN: "ws-secret",
+    },
+    backendConfig: {
+      transport: { type: "ws", url: "ws://example.com/socket" },
+      authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+    },
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.rawStderr, /auth token requires a wss:\/\/ or loopback ws:\/\//);
+  assert.doesNotMatch(result.rawStderr, /ws-secret/);
+});
+
+test("codexBackend allows bearer auth policy for IPv6 loopback plaintext websocket URLs", async () => {
+  const result = await codexBackend.invoke({
+    ...baseCtx,
+    env: {
+      CODEX_APP_SERVER_TOKEN: "ws-secret",
+    },
+    backendConfig: {
+      transport: { type: "ws", url: "ws://[::1]:9/socket" },
+      authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+    },
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.doesNotMatch(result.rawStderr, /auth token requires a wss:\/\/ or loopback ws:\/\//);
+  assert.doesNotMatch(result.rawStderr, /ws-secret/);
 });
 
 test("codexBackend detaches websocket turns without interrupting the remote turn", async () => {
@@ -1170,6 +1356,9 @@ test("codexBackend invokes Codex over a Unix domain socket WebSocket transport",
     assert.equal(result.sessionId, "uds-thread");
     assert.match(result.transcript, /UDS output/);
     assert.match(result.transcript, /UDS final/);
+    assert.equal(codexServer.connectionUrls[0], "/rpc");
+    assert.equal(codexServer.connectionHeaders[0].host, "localhost");
+    assert.equal(codexServer.connectionHeaders[0]["sec-websocket-extensions"], undefined);
     assert.equal(
       emitted
         .filter((event) => event.type === "agent_message_delta")
@@ -1177,6 +1366,28 @@ test("codexBackend invokes Codex over a Unix domain socket WebSocket transport",
         .join(""),
       "UDS output",
     );
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("codexBackend sends bearer auth on Unix domain socket WebSocket upgrade", async () => {
+  const codexServer = await startCodexUdsServer("codex-auth.sock");
+
+  try {
+    const result = await codexBackend.invoke({
+      ...baseCtx,
+      env: {
+        CODEX_APP_SERVER_TOKEN: "uds-secret",
+      },
+      backendConfig: {
+        transport: { type: "uds", path: codexServer.path },
+        authTokenEnv: "CODEX_APP_SERVER_TOKEN",
+      },
+    });
+
+    assert.equal(result.exitCode, 0, `${result.rawStderr}\n${result.rawStdout}`);
+    assert.equal(codexServer.connectionHeaders[0].authorization, "Bearer uds-secret");
   } finally {
     await codexServer.close();
   }

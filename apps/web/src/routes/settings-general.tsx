@@ -76,19 +76,23 @@ const DISPLAY_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
   },
 ];
 
+const PREFERENCE_ROWS: PreferenceRowDefinition[] = [
+  ...BOARD_PREFERENCE_ROWS,
+  ...DISPLAY_PREFERENCE_ROWS,
+];
+
 export function SettingsGeneralRoute() {
   const { preferences, resetPreference, resetPreferences, updatePreferences } =
     useDashboardPreferences();
   const { clearDaemonToken, daemonToken, saveDaemonToken } = useDaemonAuthToken();
   const [daemonTokenDraft, setDaemonTokenDraft] = useState(daemonToken ?? "");
-  const preferenceRows = [...BOARD_PREFERENCE_ROWS, ...DISPLAY_PREFERENCE_ROWS];
 
   useEffect(() => {
     setDaemonTokenDraft(daemonToken ?? "");
   }, [daemonToken]);
 
   const allDefaults =
-    preferenceRows.every(({ key }) => preferences[key] === DEFAULT_DASHBOARD_PREFERENCES[key]) &&
+    PREFERENCE_ROWS.every(({ key }) => preferences[key] === DEFAULT_DASHBOARD_PREFERENCES[key]) &&
     preferences.sortField === DEFAULT_DASHBOARD_PREFERENCES.sortField &&
     preferences.sortDirection === DEFAULT_DASHBOARD_PREFERENCES.sortDirection &&
     preferences.themeMode === DEFAULT_DASHBOARD_PREFERENCES.themeMode;

@@ -100,14 +100,11 @@ export function RunNoteEditor({
     () => setConfirmExitOpen(false),
   );
 
-  useEffect(() => {
-    if (noteRef.current === note) {
-      return;
-    }
+  if (noteRef.current !== note) {
     noteRef.current = note;
     setDraft(note ?? "");
     setMode(initialMode);
-  }, [initialMode, note]);
+  }
 
   useEffect(() => {
     if (

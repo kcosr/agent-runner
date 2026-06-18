@@ -15,6 +15,7 @@ import type {
   BackendSessionHistorySourceContext,
   BackendSessionHistorySourceResult,
   BackendSyncedTurn,
+  CodexBackendConfig,
   CodexTransportConfig,
   EffortLevel,
   ValidateSessionContext,
@@ -266,6 +267,8 @@ function openStdioTransport(
 // WebSocket transport
 // ─────────────────────────────────────────────────────────────────────────────
 
+const CODEX_MAX_WEBSOCKET_PAYLOAD_BYTES = 128 * 1024 * 1024;
+
 function openWebSocketTransport(args: {
   descriptor: string;
   createWebSocket: () => WebSocket;
@@ -353,25 +356,45 @@ function openWebSocketTransport(args: {
   });
 }
 
-function openWsTransport(url: string): Promise<Transport> {
+function openWsTransportWithAuth(url: string, authToken: string | undefined): Promise<Transport> {
   return openWebSocketTransport({
     descriptor: `ws:${url}`,
-    createWebSocket: () => new WebSocket(url),
+    createWebSocket: () => new WebSocket(url, codexWebSocketOptions(authToken)),
     reportErrorsToStderr: true,
   });
 }
 
-function openUdsTransport(path: string): Promise<Transport> {
+function openUdsTransport(path: string, authToken: string | undefined): Promise<Transport> {
   return openWebSocketTransport({
     descriptor: `uds:${path}`,
     createWebSocket: () =>
       new WebSocket("ws://localhost/rpc", {
+        ...codexWebSocketOptions(authToken),
         createConnection: () => createConnection({ path }),
       }),
     // UDS connection failures already surface through the invoke catch path
     // with the original socket error; avoid duplicating them as stderr frames.
     reportErrorsToStderr: false,
   });
+}
+
+function codexWebSocketOptions(authToken: string | undefined): WebSocket.ClientOptions {
+  return {
+    ...authHeaders(authToken),
+    maxPayload: CODEX_MAX_WEBSOCKET_PAYLOAD_BYTES,
+    perMessageDeflate: false,
+  };
+}
+
+function authHeaders(authToken: string | undefined): Pick<WebSocket.ClientOptions, "headers"> {
+  if (authToken === undefined) {
+    return {};
+  }
+  return {
+    headers: {
+      Authorization: `Bearer ${authToken}`,
+    },
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -827,6 +850,9 @@ const CODEX_AUTH_FAILURE_MARKERS = [
   "token expired",
 ] as const;
 
+type CodexAuthConfig = Pick<CodexBackendConfig, "authTokenEnv">;
+type PartialCodexBackendConfig = Partial<CodexBackendConfig>;
+
 function cloneCodexTransportConfig(transport: CodexTransportConfig): CodexTransportConfig {
   switch (transport.type) {
     case "stdio":
@@ -836,10 +862,6 @@ function cloneCodexTransportConfig(transport: CodexTransportConfig): CodexTransp
     case "uds":
       return { type: "uds", path: transport.path };
   }
-}
-
-export interface CodexBackendConfig {
-  transport: CodexTransportConfig;
 }
 
 export type CodexThreadStatus = "Active" | "Idle" | "SystemError" | "NotLoaded";
@@ -857,6 +879,24 @@ export function normalizeCodexWsUrl(url: string): string {
     );
   }
   return new URL(url).toString();
+}
+
+function codexWsUrlSupportsBearerAuth(url: string): boolean {
+  const parsed = new URL(url);
+  if (parsed.protocol === "wss:") {
+    return true;
+  }
+  if (parsed.protocol !== "ws:") {
+    return false;
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "[::1]" ||
+    hostname.startsWith("127.")
+  );
 }
 
 export function normalizeCodexUdsPath(path: string): string {
@@ -881,6 +921,32 @@ function normalizeCodexTransportConfig(transport: CodexTransportConfig): CodexTr
     };
   }
   return cloneCodexTransportConfig(transport);
+}
+
+function normalizeCodexAuthTokenEnv(value: string, sourceLabel: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error(`${sourceLabel}.authTokenEnv must be a non-empty string`);
+  }
+  return trimmed;
+}
+
+function normalizeCodexBackendConfig(config: CodexBackendConfig): CodexBackendConfig {
+  return {
+    transport: normalizeCodexTransportConfig(config.transport),
+    ...(config.authTokenEnv === undefined ? {} : { authTokenEnv: config.authTokenEnv }),
+  };
+}
+
+function normalizePartialCodexBackendConfig(
+  config: PartialCodexBackendConfig,
+): PartialCodexBackendConfig {
+  return {
+    ...(config.transport === undefined
+      ? {}
+      : { transport: normalizeCodexTransportConfig(config.transport) }),
+    ...(config.authTokenEnv === undefined ? {} : { authTokenEnv: config.authTokenEnv }),
+  };
 }
 
 function parseCodexTransport(value: unknown, sourceLabel: string): CodexTransportConfig {
@@ -927,7 +993,7 @@ function parseCodexBackendConfig(
   value: unknown,
   sourceLabel: string,
   requireTransport: boolean,
-): CodexBackendConfig | undefined {
+): PartialCodexBackendConfig | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -935,17 +1001,25 @@ function parseCodexBackendConfig(
     throw new Error(`${sourceLabel} must be an object`);
   }
   const keys = Object.keys(value);
-  if (keys.some((key) => key !== "transport")) {
-    throw new Error(`${sourceLabel} only accepts transport`);
+  if (keys.some((key) => key !== "transport" && key !== "authTokenEnv")) {
+    throw new Error(`${sourceLabel} only accepts transport and authTokenEnv`);
+  }
+  let authTokenEnv: string | undefined;
+  if (value.authTokenEnv !== undefined) {
+    if (typeof value.authTokenEnv !== "string") {
+      throw new Error(`${sourceLabel}.authTokenEnv must be a non-empty string`);
+    }
+    authTokenEnv = normalizeCodexAuthTokenEnv(value.authTokenEnv, sourceLabel);
   }
   if (value.transport === undefined) {
     if (requireTransport) {
       throw new Error(`${sourceLabel}.transport is required`);
     }
-    return undefined;
+    return authTokenEnv === undefined ? undefined : { authTokenEnv };
   }
   return {
     transport: parseCodexTransport(value.transport, sourceLabel),
+    ...(authTokenEnv === undefined ? {} : { authTokenEnv }),
   };
 }
 
@@ -970,48 +1044,90 @@ function codexTransportFromEnv(env: Record<string, string>): CodexTransportConfi
   };
 }
 
+function codexAuthTokenEnvFromEnv(env: Record<string, string>): string | undefined {
+  const authTokenEnv = env.AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV?.trim();
+  return authTokenEnv ? authTokenEnv : undefined;
+}
+
+function resolveCodexAuthTokenAtConnection(
+  auth: CodexAuthConfig,
+  transport: CodexTransportConfig,
+  env: Record<string, string>,
+): string | undefined {
+  if (auth.authTokenEnv === undefined) {
+    return undefined;
+  }
+  const token = env[auth.authTokenEnv]?.trim();
+  if (!token) {
+    throw new Error(
+      `codex auth token env ${auth.authTokenEnv} is configured but is not set or is empty`,
+    );
+  }
+  if (transport.type === "ws" && !codexWsUrlSupportsBearerAuth(transport.url)) {
+    throw new Error("codex auth token requires a wss:// or loopback ws:// websocket transport");
+  }
+  return token;
+}
+
 export function resolveCodexBackendConfig(ctx: BackendConfigResolutionContext): CodexBackendConfig {
   const authored = parseCodexBackendConfig(
     ctx.authoredConfig,
     `backendConfig.${ctx.backendName}`,
     false,
   );
-  if (authored) {
-    return authored;
-  }
-
   const override = parseCodexBackendConfig(
     ctx.overrideConfig,
     `overrides.backendConfig.${ctx.backendName}`,
     false,
   );
-  if (override) {
-    return override;
-  }
-
-  const envTransport = codexTransportFromEnv(ctx.env);
+  const normalizedAuthored =
+    authored === undefined ? undefined : normalizePartialCodexBackendConfig(authored);
+  const normalizedOverride =
+    override === undefined ? undefined : normalizePartialCodexBackendConfig(override);
+  const configuredTransport = normalizedAuthored?.transport ?? normalizedOverride?.transport;
+  const envTransport =
+    configuredTransport === undefined ? codexTransportFromEnv(ctx.env) : undefined;
+  const envAuthTokenEnv = codexAuthTokenEnvFromEnv(ctx.env);
+  const authTokenEnv =
+    normalizedAuthored?.authTokenEnv ?? normalizedOverride?.authTokenEnv ?? envAuthTokenEnv;
   return {
-    transport: envTransport ?? { type: "stdio" },
+    transport: configuredTransport ?? envTransport ?? { type: "stdio" },
+    ...(authTokenEnv === undefined ? {} : { authTokenEnv }),
   };
+}
+
+export function resolveCodexBackendConfigForInvocation(ctx: {
+  backendConfig?: unknown;
+}): CodexBackendConfig {
+  const config = parseCodexBackendConfig(ctx.backendConfig, "backendConfig.codex", true);
+  if (!config) {
+    throw new Error("codex backend requires backendConfig.codex.transport before invocation");
+  }
+  if (config.transport === undefined) {
+    throw new Error("codex backend requires backendConfig.codex.transport before invocation");
+  }
+  return normalizeCodexBackendConfig({
+    transport: config.transport,
+    ...(config.authTokenEnv === undefined ? {} : { authTokenEnv: config.authTokenEnv }),
+  });
 }
 
 export function resolveCodexTransportConfig(ctx: {
   backendConfig?: unknown;
 }): CodexTransportConfig {
-  const config = parseCodexBackendConfig(ctx.backendConfig, "backendConfig.codex", true);
-  if (!config) {
-    throw new Error("codex backend requires backendConfig.codex.transport before invocation");
-  }
-  return normalizeCodexTransportConfig(config.transport);
+  return resolveCodexBackendConfigForInvocation(ctx).transport;
 }
 
 async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
-  const transport = resolveCodexTransportConfig(ctx);
+  const config = resolveCodexBackendConfigForInvocation(ctx);
+  const transport = config.transport;
   if (transport.type === "ws") {
-    return openWsTransport(transport.url);
+    const authToken = resolveCodexAuthTokenAtConnection(config, transport, ctx.env);
+    return openWsTransportWithAuth(transport.url, authToken);
   }
   if (transport.type === "uds") {
-    return openUdsTransport(transport.path);
+    const authToken = resolveCodexAuthTokenAtConnection(config, transport, ctx.env);
+    return openUdsTransport(transport.path, authToken);
   }
   return openStdioTransport(
     ctx.processCwd ?? ctx.cwd,

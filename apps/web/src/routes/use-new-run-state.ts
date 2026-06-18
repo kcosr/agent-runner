@@ -9,6 +9,7 @@ import { createApiClient } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDaemonAuthToken } from "../lib/settings.js";
+import { useLazyRef } from "../lib/use-lazy-ref.js";
 
 type FieldDraftValue = string;
 type FieldDrafts = Record<string, FieldDraftValue>;
@@ -138,7 +139,7 @@ function buildStartPayload(
 
   return {
     agent: selectedAgent,
-    assignment: selectedAssignment,
+    ...(selectedAssignment.length > 0 ? { assignment: selectedAssignment } : {}),
     webVars,
     overrides,
   };
@@ -154,7 +155,7 @@ export function useNewRunState() {
   const [drafts, setDrafts] = useState<FieldDrafts>({});
   const [submitError, setSubmitError] = useState<string>();
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
-  const fieldRefs = useRef(new Map<string, HTMLElement>());
+  const fieldRefs = useLazyRef(() => new Map<string, HTMLElement>());
   const submitErrorRef = useRef<HTMLDivElement | null>(null);
 
   const agentsQuery = useQuery({
@@ -167,13 +168,16 @@ export function useNewRunState() {
   });
 
   const surfaceQuery = useQuery({
-    enabled: selectedAgent.length > 0 && selectedAssignment.length > 0,
-    queryKey: runQueryKeys.inputSurface(selectedAgent, selectedAssignment),
+    enabled: selectedAgent.length > 0,
+    queryKey: runQueryKeys.inputSurface(
+      selectedAgent,
+      selectedAssignment.length > 0 ? selectedAssignment : undefined,
+    ),
     queryFn: ({ signal }) =>
       api.getRunInputSurface(
         {
           agent: selectedAgent,
-          assignment: selectedAssignment,
+          ...(selectedAssignment.length > 0 ? { assignment: selectedAssignment } : {}),
         },
         { signal },
       ),
@@ -240,7 +244,6 @@ export function useNewRunState() {
   );
   const formReady =
     selectedAgent.length > 0 &&
-    selectedAssignment.length > 0 &&
     surface !== undefined &&
     !surfaceQuery.isFetching &&
     !surfaceQuery.isError &&
@@ -337,11 +340,7 @@ export function useNewRunState() {
     void navigate({ to: "/" });
   }
 
-  const loadingSurface =
-    selectedAgent.length > 0 &&
-    selectedAssignment.length > 0 &&
-    surfaceQuery.isFetching &&
-    !surface;
+  const loadingSurface = selectedAgent.length > 0 && surfaceQuery.isFetching && !surface;
 
   return {
     agentOptions: agentsQuery.data?.entries ?? [],
@@ -364,7 +363,7 @@ export function useNewRunState() {
       attemptedSubmit &&
       (missingFieldKeys.includes(field.key) || invalidFormatFieldKeys.includes(field.key)),
     isLoadingSurface: loadingSurface,
-    isIdle: selectedAgent.length === 0 || selectedAssignment.length === 0,
+    isIdle: selectedAgent.length === 0,
     isSurfaceError: surfaceQuery.isError,
     surfaceErrorMessage:
       surfaceQuery.error instanceof Error ? surfaceQuery.error.message : undefined,

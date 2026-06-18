@@ -3163,10 +3163,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
 
       const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
+      const invalidStatusCount = mergeInfo.invalidStatuses.length;
       emitEvent({
         type: "retrying",
         incompleteCount,
-        invalidStatusCount: mergeInfo.invalidStatuses.length,
+        invalidStatusCount,
       });
       emitAuditEnvelope(
         appendRunRetryingEvent({
@@ -3174,7 +3175,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           context: lifecycleContext,
           sessionIndex,
           incompleteCount,
-          invalidStatusCount: mergeInfo.invalidStatuses.length,
+          invalidStatusCount,
         }),
       );
 

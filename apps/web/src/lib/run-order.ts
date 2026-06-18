@@ -29,7 +29,7 @@ function compareRunsByStartedAtDesc(left: RunSummary, right: RunSummary): number
 }
 
 export function sortRunsByStartedAtDesc(runs: RunSummary[]): RunSummary[] {
-  return [...runs].sort(compareRunsByStartedAtDesc);
+  return runs.toSorted(compareRunsByStartedAtDesc);
 }
 
 function compareRunsByStartedAt(
@@ -117,5 +117,5 @@ export function sortRunsWithPinnedFirst(
   runs: RunSummary[],
   compare: (left: RunSummary, right: RunSummary) => number,
 ): RunSummary[] {
-  return [...runs].sort((left, right) => compareRunsByPinnedThen(left, right, compare));
+  return runs.toSorted((left, right) => compareRunsByPinnedThen(left, right, compare));
 }

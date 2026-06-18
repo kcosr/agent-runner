@@ -56,13 +56,6 @@ interface TaskEditDraft {
   title: string;
 }
 
-async function invalidateTaskRun(runId: string) {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
-    queryClient.invalidateQueries({ queryKey: runQueryKeys.lists() }),
-  ]);
-}
-
 export function RunTaskList({
   capabilities,
   runId,
@@ -91,7 +84,10 @@ export function RunTaskList({
     onSuccess: async () => {
       setDialogOpen(false);
       setMutationError(null);
-      await invalidateTaskRun(runId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
+        queryClient.invalidateQueries({ queryKey: runQueryKeys.lists() }),
+      ]);
     },
   });
   const updateTaskMutation = useMutation({
@@ -124,7 +120,10 @@ export function RunTaskList({
       ) {
         setEditingTaskId(null);
       }
-      await invalidateTaskRun(runId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
+        queryClient.invalidateQueries({ queryKey: runQueryKeys.lists() }),
+      ]);
     },
   });
   const deleteTaskMutation = useMutation({
@@ -133,7 +132,10 @@ export function RunTaskList({
     onSuccess: async () => {
       setDeleteDialogTask(null);
       setMutationError(null);
-      await invalidateTaskRun(runId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
+        queryClient.invalidateQueries({ queryKey: runQueryKeys.lists() }),
+      ]);
     },
   });
 
@@ -404,11 +406,12 @@ export function RunTaskList({
             </div>
             {isExpanded && hasDetails ? (
               <div className="task-details" id={detailsId}>
-                <nav aria-label="Task content sections" className="task-tabs">
+                <div aria-label="Task content sections" className="task-tabs" role="tablist">
                   <button
                     aria-selected={activeTab === "body"}
                     className={activeTab === "body" ? "task-tab active" : "task-tab"}
                     onClick={() => selectTab(task.id, "body")}
+                    role="tab"
                     type="button"
                   >
                     Instructions
@@ -418,11 +421,12 @@ export function RunTaskList({
                     aria-selected={activeTab === "notes"}
                     className={activeTab === "notes" ? "task-tab active" : "task-tab"}
                     onClick={() => selectTab(task.id, "notes")}
+                    role="tab"
                     type="button"
                   >
                     Notes
                   </button>
-                </nav>
+                </div>
                 {activeTab === "body" ? (
                   bodyEditing ? (
                     <div className="task-edit">

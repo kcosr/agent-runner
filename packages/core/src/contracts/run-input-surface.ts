@@ -43,7 +43,7 @@ export interface RunInputSurface {
 
 export interface RunInputSurfaceParams {
   agent: string;
-  assignment: string;
+  assignment?: string;
   cwd?: string;
 }
 

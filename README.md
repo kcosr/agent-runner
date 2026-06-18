@@ -396,6 +396,7 @@ The rest are focused topic pages:
 | `AGENT_RUNNER_CWD` | Active backend attempt cwd provided to backend wrapper processes |
 | `AGENT_RUNNER_CLAUDE_BIN` | Claude CLI binary |
 | `AGENT_RUNNER_CODEX_BIN` | Codex stdio binary |
+| `AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV` | Default env var name containing the Codex app-server bearer token for fresh Codex WS/UDS runs |
 | `AGENT_RUNNER_CODEX_UDS_PATH` | Default WebSocket-over-UDS transport socket path for fresh Codex runs when no explicit `backendConfig.codex.transport` was authored |
 | `AGENT_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendConfig.codex.transport` was authored |
 | `AGENT_RUNNER_CURSOR_BIN` | Cursor CLI binary |

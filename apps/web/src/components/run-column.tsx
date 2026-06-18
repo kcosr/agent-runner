@@ -75,9 +75,10 @@ export function RunColumn({
       className="column"
       data-collapsed={collapsed ? "true" : "false"}
       data-status={column.key}
-      onClick={handleColumnClick}
-      onKeyDown={handleColumnKeyDown}
+      onClick={collapsed ? handleColumnClick : undefined}
+      onKeyDown={collapsed ? handleColumnKeyDown : undefined}
       ref={columnRef}
+      role={collapsed ? "button" : undefined}
       tabIndex={collapsed ? 0 : undefined}
     >
       <header className="col-head">

@@ -45,18 +45,13 @@ export function useDrawerResize(): DrawerResize {
 
   const isFullscreen = viewState.drawerFullscreen;
   const storedWidth = viewState.drawerWidth;
-  const width = isFullscreen ? maxWidth : clamp(dragWidth ?? storedWidth);
+  const clampedDragWidth = dragWidth === null ? null : clamp(dragWidth);
+  const width = isFullscreen ? maxWidth : (clampedDragWidth ?? clamp(storedWidth));
   const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
 
   function clamp(value: number): number {
     return Math.min(maxWidth, Math.max(DRAWER_WIDTH_MIN, Math.round(value)));
   }
-
-  useEffect(() => {
-    if (dragWidth !== null && dragWidth > maxWidth) {
-      setDragWidth(maxWidth);
-    }
-  }, [dragWidth, maxWidth]);
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     if (isFullscreen) return;

@@ -507,7 +507,7 @@ async function workingTreeDiffFiles(
   appendPatch(patch, unstagedPatch.stdout.toString("utf8"));
   patch.truncated ||= stagedPatch.truncated || unstagedPatch.truncated;
   const untrackedFiles = await mapWithConcurrency(
-    untrackedPaths.sort((left, right) => left.localeCompare(right)),
+    untrackedPaths.toSorted((left, right) => left.localeCompare(right)),
     UNTRACKED_FILE_CONCURRENCY,
     (path) => readUntrackedFile(repoRoot, path),
   );
@@ -516,7 +516,9 @@ async function workingTreeDiffFiles(
     appendPatch(patch, untracked.patch);
   }
   return {
-    files: [...files.values()].sort((left, right) => left.path.localeCompare(right.path)),
+    files: Array.from(files.values()).toSorted((left, right) =>
+      left.path.localeCompare(right.path),
+    ),
     patch: patch.chunks.join(""),
     truncated: patch.truncated,
   };

@@ -316,9 +316,16 @@ function resolveLocalTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
+const timezoneFormatters = new Map<string, Intl.DateTimeFormat>();
+
 function validateTimezone(timezone: string): void {
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+    let formatter = timezoneFormatters.get(timezone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+      timezoneFormatters.set(timezone, formatter);
+    }
+    formatter.format(new Date());
   } catch {
     throw new ScheduleValidationError(`invalid schedule timezone "${timezone}"`);
   }

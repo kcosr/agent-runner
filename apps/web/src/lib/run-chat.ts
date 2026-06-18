@@ -128,7 +128,7 @@ function deriveArtifactsByAttempt(
       startedAt: Date.parse(attempt.startedAt),
       endedAt: attempt.endedAt === null ? null : Date.parse(attempt.endedAt),
     }))
-    .sort((left, right) => left.attemptNumber - right.attemptNumber);
+    .toSorted((left, right) => left.attemptNumber - right.attemptNumber);
 
   for (const attachment of attachments) {
     const attachmentAddedAt = Date.parse(attachment.addedAt);
@@ -195,7 +195,7 @@ export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): 
   const sessionIndexes = new Set<number>(attemptsBySession.keys());
 
   const rows: RunChatRow[] = [];
-  for (const sessionIndex of [...sessionIndexes].sort((left, right) => left - right)) {
+  for (const sessionIndex of Array.from(sessionIndexes).toSorted((left, right) => left - right)) {
     const session = sessionsByIndex.get(sessionIndex);
     const attempts = attemptsBySession.get(sessionIndex) ?? [];
     const hasBootstrapHistory = attempts.some(isBootstrapAttempt);

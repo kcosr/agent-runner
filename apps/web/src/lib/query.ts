@@ -32,7 +32,7 @@ export const runQueryKeys = {
           },
         ] as const)
       : ([...runQueryKeys.all, "workspace-diff", runId, { mode: input.mode }] as const),
-  inputSurface: (agent: string, assignment: string, cwd?: string) =>
+  inputSurface: (agent: string, assignment?: string, cwd?: string) =>
     [...runQueryKeys.all, "input-surface", { agent, assignment, cwd: cwd ?? null }] as const,
   definitions: ["definitions"] as const,
   agents: () => [...runQueryKeys.definitions, "agents"] as const,

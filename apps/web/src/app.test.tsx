@@ -157,10 +157,14 @@ vi.mock("@pierre/trees/react", () => {
       focusNextMatch: fileTreeTestApi.focusNextSearchMatch,
       focusPreviousMatch: fileTreeTestApi.focusPreviousSearchMatch,
       isOpen: false,
-      matchingPaths: fileTreeTestApi.searchMatchingPaths,
       open: () => {},
       setValue: () => {},
-      value: fileTreeTestApi.searchValue,
+      get matchingPaths() {
+        return fileTreeTestApi.searchMatchingPaths;
+      },
+      get value() {
+        return fileTreeTestApi.searchValue;
+      },
     }),
     useFileTreeSelection: () => [],
   };
@@ -1754,6 +1758,11 @@ async function findRunCard(name: string | RegExp) {
   );
 }
 
+async function findRunSectionTab(name: string | RegExp) {
+  const runSections = await screen.findByRole("tablist", { name: "Run sections" });
+  return await within(runSections).findByRole("tab", { name });
+}
+
 async function findRunRow(name: string | RegExp) {
   return await screen.findByRole(
     "button",
@@ -2856,7 +2865,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
 
@@ -2879,7 +2888,7 @@ describe("web app", () => {
       },
     });
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Deferred response while away",
     );
@@ -2887,7 +2896,7 @@ describe("web app", () => {
       expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
     });
 
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+    await user.click(screen.getByRole("tab", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
 
@@ -2916,7 +2925,7 @@ describe("web app", () => {
         },
       },
     });
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+    await user.click(screen.getByRole("tab", { name: /^Audit\b/ }));
     await waitFor(() => {
       expect(
         fetchCallCount(fetchMock, (url) => /\/api\/runs\/run-1\/audit(?:\?.*)?$/.test(url)),
@@ -4006,7 +4015,7 @@ describe("web app", () => {
     );
 
     await renderApp("/runs/run-1");
-    expect(await screen.findByText("Loading diff...")).toBeInTheDocument();
+    expect(await screen.findByText("Loading diff…")).toBeInTheDocument();
 
     await act(async () => {
       resolveDiff(
@@ -4146,8 +4155,8 @@ describe("web app", () => {
     expect(await screen.findByRole("tab", { name: "Files", selected: true })).toBeInTheDocument();
     const searchInput = screen.getByLabelText("Search workspace files");
     expect(searchInput).toBeInTheDocument();
-    expect(screen.getByText("Loading files...")).toBeInTheDocument();
-    expect(screen.queryByText("Loading file...")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading files…")).toBeInTheDocument();
+    expect(screen.queryByText("Loading file…")).not.toBeInTheDocument();
     searchInput.blur();
     fireEvent.keyDown(window, { key: "f" });
     await waitFor(() => expect(searchInput).toHaveFocus());
@@ -5016,7 +5025,7 @@ describe("web app", () => {
         name: "Info",
       }),
     );
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Streaming answer live",
     );
@@ -5074,32 +5083,32 @@ describe("web app", () => {
     if (!(scrollBottomButton instanceof HTMLButtonElement)) {
       throw new Error("expected Chat scroll-to-bottom button");
     }
-    expect(scrollTopButton).toHaveAttribute("aria-hidden", "true");
-    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollTopButton).toBeDisabled();
+    expect(scrollBottomButton).toBeDisabled();
 
     defineElementMetric(list, "clientHeight", 120);
     defineElementMetric(list, "scrollHeight", 360);
     defineElementMetric(list, "scrollTop", 80);
     fireEvent.scroll(list);
 
-    expect(scrollTopButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollTopButton).toBeEnabled();
     expect(scrollTopButton).toHaveClass("chat-scroll-control--visible");
-    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollBottomButton).toBeEnabled();
     expect(scrollBottomButton).toHaveClass("chat-scroll-control--visible");
 
     await user.click(scrollBottomButton);
 
     expect(list.scrollTop).toBe(240);
-    expect(scrollTopButton).toHaveAttribute("aria-hidden", "false");
-    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollTopButton).toBeEnabled();
+    expect(scrollBottomButton).toBeDisabled();
     expect(scrollBottomButton).not.toHaveClass("chat-scroll-control--visible");
 
     await user.click(scrollTopButton);
 
     expect(list.scrollTop).toBe(0);
-    expect(scrollTopButton).toHaveAttribute("aria-hidden", "true");
+    expect(scrollTopButton).toBeDisabled();
     expect(scrollTopButton).not.toHaveClass("chat-scroll-control--visible");
-    expect(scrollBottomButton).toHaveAttribute("aria-hidden", "false");
+    expect(scrollBottomButton).toBeEnabled();
   });
 
   it("keeps selected-run Chat pinned while live transcript output grows", async () => {
@@ -6591,12 +6600,12 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
 
-    expect(screen.getByRole("button", { name: "Attempts" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Attempts" })).toBeInTheDocument();
     const sessionTabs = await screen.findByRole("tablist", { name: "Sessions" });
     expect(within(sessionTabs).getByRole("tab", { name: "Session 1" })).toHaveTextContent("1");
     expect(within(sessionTabs).getByRole("tab", { name: "Session 2" })).toHaveAttribute(
@@ -6718,7 +6727,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
 
     expect(await screen.findByRole("tab", { name: "Pending" })).toBeInTheDocument();
     expect(screen.getByRole("tablist", { name: "Attempts" })).toBeInTheDocument();
@@ -6733,10 +6742,10 @@ describe("web app", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Prepared prompt" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Response" }));
-    expect(screen.getByText("No response yet — this run has not started.")).toBeInTheDocument();
+    expect(screen.getByText("No response yet; this run has not started.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Diagnostics" }));
-    expect(screen.getByText("No diagnostics yet — this run has not started.")).toBeInTheDocument();
+    expect(screen.getByText("No diagnostics yet; this run has not started.")).toBeInTheDocument();
 
     const detailSource = findEventSource("/api/runs/run-1/events/detail");
     detailSource.emitOpen();
@@ -6916,7 +6925,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Completed attempt",
     );
@@ -7061,7 +7070,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
@@ -7126,7 +7135,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
@@ -7177,7 +7186,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
@@ -7201,7 +7210,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
     await user.click(await screen.findByRole("tab", { name: "Info" }));
 
-    const runSections = await screen.findByRole("navigation", { name: "Run sections" });
+    const runSections = await screen.findByRole("tablist", { name: "Run sections" });
     expect(runSections).toHaveClass("tabs", "tabs--scrollable");
     expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(5);
     expect(
@@ -7226,16 +7235,16 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
     await user.click(await screen.findByRole("tab", { name: "Info" }));
 
-    const runSections = await screen.findByRole("navigation", { name: "Run sections" });
+    const runSections = await screen.findByRole("tablist", { name: "Run sections" });
     expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(4);
     expect(
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
     ).toEqual(["Attachments", "Audit", "Data", "Dependencies"]);
-    expect(within(runSections).getByRole("button", { name: "Audit" })).toBeInTheDocument();
-    expect(within(runSections).getByRole("button", { name: "Data" })).toBeInTheDocument();
-    expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
+    expect(within(runSections).getByRole("tab", { name: "Audit" })).toBeInTheDocument();
+    expect(within(runSections).getByRole("tab", { name: "Data" })).toBeInTheDocument();
+    expect(within(runSections).queryByRole("tab", { name: "Attempts" })).not.toBeInTheDocument();
   });
 
   it("toggles audit ordering globally and keeps audit appends at the top in newest-first mode for non-live runs", async () => {
@@ -7298,7 +7307,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+    await user.click(screen.getByRole("tab", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
 
@@ -7417,7 +7426,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+    await user.click(screen.getByRole("tab", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
 
@@ -7531,7 +7540,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+    await user.click(screen.getByRole("tab", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
 
@@ -7643,7 +7652,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+    await user.click(screen.getByRole("tab", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
 
@@ -7683,7 +7692,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: "Data" }));
+    await user.click(screen.getByRole("tab", { name: "Data" }));
 
     const dataPanel = screen.getByLabelText("Data");
     const dataTabs = within(dataPanel).getByRole("tablist", { name: "Data view" });
@@ -7776,7 +7785,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: "Data" }));
+    await user.click(screen.getByRole("tab", { name: "Data" }));
 
     const dataPanel = screen.getByLabelText("Data");
     await user.click(within(dataPanel).getByRole("button", { name: "Edit run vars" }));
@@ -7842,7 +7851,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: /^Attempts\b/ }));
+    await user.click(screen.getByRole("tab", { name: /^Attempts\b/ }));
 
     const attemptsPanel = screen.getByRole("region", { name: "Attempts" });
     expect(within(attemptsPanel).getByRole("button", { name: "Edit run message" })).toBeEnabled();
@@ -7913,7 +7922,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: "Data" }));
+    await user.click(screen.getByRole("tab", { name: "Data" }));
 
     const dataPanel = screen.getByLabelText("Data");
     await user.click(within(dataPanel).getByRole("button", { name: "Edit run vars" }));
@@ -7958,11 +7967,11 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: "Data" }));
+    await user.click(screen.getByRole("tab", { name: "Data" }));
 
     expect(screen.queryByRole("button", { name: "Edit run vars" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^Attempts\b/ }));
+    await user.click(screen.getByRole("tab", { name: /^Attempts\b/ }));
     expect(screen.queryByRole("button", { name: "Edit run message" })).not.toBeInTheDocument();
   });
 
@@ -7980,7 +7989,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: "Data" }));
+    await user.click(screen.getByRole("tab", { name: "Data" }));
 
     const dataPanel = screen.getByLabelText("Data");
     expect(within(dataPanel).getByText("No vars")).toBeInTheDocument();
@@ -8034,7 +8043,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
     await user.click(screen.getByRole("tab", { name: "Info" }));
-    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await user.click(screen.getByRole("tab", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
@@ -8619,11 +8628,11 @@ describe("web app", () => {
 
     expect(await screen.findByText("Ship the web UI")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /build ui/i, expanded: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Instructions" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Task notes" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Instructions" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Task notes" })).toBeInTheDocument();
 
     expect(screen.queryByText("working")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Task notes" }));
+    await user.click(screen.getByRole("tab", { name: "Task notes" }));
     expect(await screen.findByText("working")).toBeInTheDocument();
     expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
 
@@ -10386,7 +10395,7 @@ describe("web app", () => {
     expect(bulletOne).toBeInTheDocument();
     expect(bulletOne.tagName).toBe("LI");
 
-    await user.click(screen.getByRole("button", { name: "Task notes" }));
+    await user.click(screen.getByRole("tab", { name: "Task notes" }));
     expect(await screen.findByText("npm run check")).toBeInTheDocument();
     expect(screen.getByText("npm run check").tagName).toBe("CODE");
   });
@@ -10494,7 +10503,7 @@ describe("web app", () => {
     if (editedHeaderForNotes.getAttribute("aria-expanded") !== "true") {
       await user.click(editedHeaderForNotes);
     }
-    await user.click(await screen.findByRole("button", { name: "Task notes" }));
+    await user.click(await screen.findByRole("tab", { name: "Task notes" }));
     const editedArticle = editedHeaderForNotes.closest("article");
     if (!editedArticle) {
       throw new Error("Edited task article was not rendered");
@@ -15412,7 +15421,7 @@ describe("web app", () => {
       expect(detailWheel.defaultPrevented).toBe(true);
     });
 
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(await findRunSectionTab(/^Attachments\b/i));
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     await waitFor(() => {
       const previewWheel = dispatchHorizontalWheel(screen.getByLabelText("Attachment preview"));
@@ -16302,7 +16311,7 @@ describe("web app", () => {
     await findRunCard("Second run");
 
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(await findRunSectionTab(/^Attachments\b/i));
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
     expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
@@ -16443,7 +16452,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Current run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^Dependencies\b/i }));
+    await user.click(await findRunSectionTab(/^Dependencies\b/i));
     await user.type(screen.getByLabelText("Dependency run search"), "follow-up");
     await user.click(
       await screen.findByRole("button", {
@@ -16530,7 +16539,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Current run"));
-    await user.click(await screen.findByRole("button", { name: /^Dependencies\b/i }));
+    await user.click(await findRunSectionTab(/^Dependencies\b/i));
     await user.click(screen.getByRole("tab", { name: "Run group" }));
     await user.type(screen.getByLabelText("Dependency run group"), "shared-group");
     await user.click(screen.getByRole("button", { name: /add dependency/i }));
@@ -16542,7 +16551,7 @@ describe("web app", () => {
     expect(screen.getByText("1/2 successful")).toBeInTheDocument();
 
     await user.click(await findRunCard("Shared member"));
-    await user.click(await screen.findByRole("button", { name: /^Dependencies\b/i }));
+    await user.click(await findRunSectionTab(/^Dependencies\b/i));
     expect(screen.getByText("via group shared-group")).toBeInTheDocument();
   });
 
@@ -16592,8 +16601,8 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    expect(await screen.findByRole("button", { name: /^Attachments 2$/i })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /^Attachments 2$/i }));
+    expect(await findRunSectionTab(/^Attachments 2$/i)).toBeInTheDocument();
+    await user.click(await findRunSectionTab(/^Attachments 2$/i));
 
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
@@ -16677,7 +16686,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(await findRunSectionTab(/^Attachments\b/i));
 
     expect(screen.queryByRole("button", { name: /^Preview report\.pdf$/ })).not.toBeInTheDocument();
 
@@ -16734,7 +16743,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(await findRunSectionTab(/^Attachments\b/i));
     await user.click(screen.getByText("text/plain; charset=utf-8"));
 
     const preview = await screen.findByLabelText("Attachment preview content");
@@ -16803,7 +16812,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(await findRunSectionTab(/^Attachments\b/i));
     await user.click(screen.getByRole("button", { name: /^Preview alpha\.txt$/ }));
 
     expect(await screen.findByText("alpha body")).toBeInTheDocument();
@@ -16944,7 +16953,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(await findRunSectionTab(/^Attachments\b/i));
     await user.click(screen.getByRole("button", { name: /^Preview photo\.png$/ }));
 
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
@@ -17060,7 +17069,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(await findRunSectionTab(/^Attachments\b/i));
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
 
     expect(await screen.findByLabelText("Attachment preview loading")).toBeInTheDocument();
@@ -17346,7 +17355,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(await findRunSectionTab(/^Attachments\b/i));
     await user.click(screen.getByRole("button", { name: "Open source run run-2" }));
 
     expect(await screen.findByText("Peer run")).toBeInTheDocument();
@@ -17405,6 +17414,80 @@ describe("web app", () => {
     expect(screen.getByRole("heading", { name: "Execution" })).toBeInTheDocument();
   });
 
+  it("allows creating an ad hoc run without selecting an assignment", async () => {
+    const state = {
+      runs: [makeRun({ runId: "run-ad-hoc", name: "Ad hoc run", assignmentName: null })],
+      details: {
+        "run-ad-hoc": makeDetail({
+          runId: "run-ad-hoc",
+          name: "Ad hoc run",
+          assignment: null,
+        }),
+      },
+    };
+    const fetchMock = installFetchMock(state, {
+      handleRequest: async (url, init) => {
+        if (url === "/api/agents") {
+          return new Response(
+            JSON.stringify({ agents: makeDefinitionList("agent", ["planner"]) }),
+            {
+              status: 200,
+            },
+          );
+        }
+        if (url === "/api/assignments") {
+          return new Response(
+            JSON.stringify({ assignments: makeDefinitionList("assignment", ["plan-feature"]) }),
+            { status: 200 },
+          );
+        }
+        if (url === "/api/run-input-surface?agent=planner") {
+          return new Response(
+            JSON.stringify({
+              inputSurface: makeRunInputSurface({ assignmentInputs: [] }),
+            }),
+            {
+              status: 200,
+            },
+          );
+        }
+        if (url === "/api/runs/init" && init?.method === "POST") {
+          return new Response(JSON.stringify({ run: state.details["run-ad-hoc"] }), {
+            status: 200,
+          });
+        }
+        return undefined;
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/new");
+
+    await screen.findByRole("option", { name: "planner" });
+    expect(screen.getByLabelText("Assignment")).toHaveValue("");
+    await user.selectOptions(await screen.findByLabelText("Agent"), "planner");
+
+    expect(await screen.findByRole("heading", { name: "Execution" })).toBeInTheDocument();
+    const initializeButton = screen.getByRole("button", { name: "Initialize" });
+    expect(initializeButton).toBeEnabled();
+
+    await user.click(initializeButton);
+
+    const initRequest = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/runs/init" && init?.method === "POST",
+    )?.[1];
+    expect(initRequest).toBeDefined();
+    expect(JSON.parse((initRequest as RequestInit).body as string)).toMatchObject({
+      agent: "planner",
+      webVars: {},
+      overrides: {},
+    });
+    expect(JSON.parse((initRequest as RequestInit).body as string)).not.toHaveProperty(
+      "assignment",
+    );
+    expect((await screen.findAllByText("Ad hoc run")).length).toBeGreaterThan(0);
+  });
+
   it("shows an inline retryable resolver error and preserves entered values", async () => {
     let resolverAttempts = 0;
     installFetchMock(
@@ -17427,6 +17510,11 @@ describe("web app", () => {
               JSON.stringify({ assignments: makeDefinitionList("assignment", ["plan-feature"]) }),
               { status: 200 },
             );
+          }
+          if (url === "/api/run-input-surface?agent=planner") {
+            return new Response(JSON.stringify({ inputSurface: makeRunInputSurface() }), {
+              status: 200,
+            });
           }
           if (url.includes("/api/run-input-surface")) {
             resolverAttempts += 1;

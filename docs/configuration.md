@@ -213,6 +213,7 @@ traffic.
 |----------|--------|
 | `AGENT_RUNNER_CLAUDE_BIN` | Claude CLI binary (default `claude`) |
 | `AGENT_RUNNER_CODEX_BIN` | Codex stdio binary (default `codex`) |
+| `AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV` | Fresh Codex runs use this value as the name of the env var containing the app-server bearer token when no explicit `backendConfig.codex.authTokenEnv` was authored |
 | `AGENT_RUNNER_CODEX_UDS_PATH` | Fresh Codex runs use this absolute socket path for WebSocket-over-UDS when no explicit `backendConfig.codex.transport` was authored |
 | `AGENT_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendConfig.codex.transport` was authored |
 | `AGENT_RUNNER_CURSOR_BIN` | Cursor CLI binary (default `cursor-agent`) |
@@ -233,22 +234,28 @@ or dependency changes require a daemon restart. Install custom backend
 dependencies from the config directory so normal Node/jiti resolution can
 find them.
 
-`AGENT_RUNNER_CODEX_UDS_PATH` and `AGENT_RUNNER_CODEX_WS_URL` are not
-generic daemon env passthrough knobs. Only Codex reads them, and only
-during fresh-run transport resolution by the process that owns the run.
-Connected CLI calls do not forward caller-local Codex transport env; the
-daemon resolves from its own env after authored/request `backendConfig`.
-Resume reuses the frozen manifest transport. Malformed UDS values are
-rejected unless they are absolute socket paths; malformed websocket values
-are rejected unless they are absolute `ws://` or `wss://` URLs. If both
-env vars are set and no higher-precedence transport is authored or
-explicitly overridden, Agent Runner fails fast instead of guessing.
+`AGENT_RUNNER_CODEX_UDS_PATH`, `AGENT_RUNNER_CODEX_WS_URL`, and
+`AGENT_RUNNER_CODEX_AUTH_TOKEN_ENV` are not generic daemon env
+passthrough knobs. Only Codex reads them, and only during fresh-run
+Codex config resolution by the process that owns the run. Connected CLI
+calls do not forward caller-local Codex transport or auth env; the daemon
+resolves from its own env after authored/request `backendConfig`. Resume
+reuses the frozen manifest transport and `authTokenEnv` name. Malformed
+UDS values are rejected unless they are absolute socket paths; malformed
+websocket values are rejected unless they are absolute `ws://` or
+`wss://` URLs. If both transport env vars are set and no
+higher-precedence transport is authored or explicitly overridden, Agent
+Runner fails fast instead of guessing.
 
 The authored Codex transport union is exactly `{ type: "stdio" }`,
 `{ type: "ws", url: "<absolute ws:// or wss:// URL>" }`, or
 `{ type: "uds", path: "/absolute/socket/path" }`. UDS uses the Codex
 app-server WebSocket protocol over the Unix-domain socket rather than raw
 UDS bytes.
+Set `backendConfig.codex.authTokenEnv` to the name of an env var
+containing the app-server bearer token. Agent Runner persists the env var
+name, resolves the token value at connection time, and never stores
+literal token values in manifests.
 
 `AGENT_RUNNER_CAPTURE_BACKEND_STDOUT=1` is an opt-in local debugging
 knob. It writes raw backend stdout to `attempts/NN.stdout.log` sidecars

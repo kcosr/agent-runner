@@ -2454,25 +2454,27 @@ test("daemon serve reads packaged web assets from the CLI dist layout", async ()
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
-  await withSeededFrontendDist(async ({ indexPath }) => {
-    const packagedIndex = readFileSync(indexPath, "utf8");
-    const server = await serveDaemon(listenUrl);
-    try {
-      const response = await fetch(new URL("/", httpBaseUrl));
-      const body = await response.text();
-      assert.equal(response.status, 200);
-      assert.equal(body, packagedIndex);
+  await withEnv({ AGENT_RUNNER_WEB_BASE_PATH: undefined }, async () => {
+    await withSeededFrontendDist(async ({ indexPath }) => {
+      const packagedIndex = readFileSync(indexPath, "utf8");
+      const server = await serveDaemon(listenUrl);
+      try {
+        const response = await fetch(new URL("/", httpBaseUrl));
+        const body = await response.text();
+        assert.equal(response.status, 200);
+        assert.equal(body, packagedIndex);
 
-      const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
-      assert.ok(assetPath, "expected built asset path in served index.html");
+        const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
+        assert.ok(assetPath, "expected built asset path in served index.html");
 
-      const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
-      const assetBody = await assetResponse.text();
-      assert.equal(assetResponse.status, 200);
-      assert.ok(assetBody.length > 0);
-    } finally {
-      await server.close();
-    }
+        const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
+        const assetBody = await assetResponse.text();
+        assert.equal(assetResponse.status, 200);
+        assert.ok(assetBody.length > 0);
+      } finally {
+        await server.close();
+      }
+    });
   });
 });
 
@@ -9548,6 +9550,14 @@ New run work.
     assert.equal(success.body.inputSurface.assignmentInputs[0].section, "task");
     assert.equal(success.body.inputSurface.assignmentInputs[0].required, true);
     assert.equal(success.body.inputSurface.assignmentInputs[0].value, null);
+
+    const agentOnly = await httpJson(httpBaseUrl, "/api/run-input-surface?agent=daemon-agent");
+    assert.equal(agentOnly.status, 200);
+    assert.deepEqual(
+      agentOnly.body.inputSurface.runSettings.map((field) => field.key),
+      success.body.inputSurface.runSettings.map((field) => field.key),
+    );
+    assert.deepEqual(agentOnly.body.inputSurface.assignmentInputs, []);
 
     const directAgent = encodeURIComponent("./agents/daemon-agent/agent.md");
     const directAssignment = encodeURIComponent("./assignments/new-run-work/assignment.md");

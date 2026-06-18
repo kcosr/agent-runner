@@ -545,7 +545,9 @@ export function getDefinition(
 export function getRunInputSurface(params: RunInputSurfaceParams): RunInputSurface {
   return resolveStaticInputSurface(
     loadAgentConfig(params.agent, params.cwd),
-    loadAssignmentConfig(params.assignment, params.cwd),
+    params.assignment === undefined
+      ? undefined
+      : loadAssignmentConfig(params.assignment, params.cwd),
   );
 }
 
